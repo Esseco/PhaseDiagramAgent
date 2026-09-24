@@ -10,7 +10,7 @@ python -m run.open_webui_api
 
 复制 `open_webui_runtime.example.json` 为 `open_webui_runtime.json` 后填写本地路径；
 仍可用 `--handler-factory package.module:function` 覆盖。入口把 Open WebUI 的真实 user 消息接入现有 `run_workflow`，每次最多推进
-一个 action；聊天本身不能批准，批准只在本机认证审批页完成，并仍经过项目
+一个 action；普通建议可在核对后直接回复“同意”批准或“拒绝”，敏感操作仍需在本机认证审批页确认，并仍经过项目
 Execution Policy。启动参数、运行时工厂和
 Open WebUI 配置见 [Open WebUI 集成说明](OPEN_WEBUI.md)。
 

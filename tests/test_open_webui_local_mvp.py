@@ -83,7 +83,7 @@ class OpenWebUILocalMVPTest(unittest.TestCase):
             self.assertEqual(blocked["status"], "rejected")
             self.assertIn("tool_not_allowed", blocked["validation"]["errors"])
 
-    def test_chat_approval_is_blocked_and_page_approval_checks_state_version(self):
+    def test_simple_chat_agreement_approves_and_repeat_page_decision_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
             proposal = {"recommended_action": "pause_search", "raw_action": {"tool": "pause_search"}}
@@ -98,15 +98,16 @@ class OpenWebUILocalMVPTest(unittest.TestCase):
                 write_json(path, updated)
                 return {"status": "completed", "state": updated}
             handler = RunWorkflowChatHandler({"state_path": str(path)}, workflow=workflow)
-            reply = handler([{"role": "user", "content": "同意"}], conversation_id="chat")
-            self.assertIn("审批页", reply); self.assertEqual(calls, [])
             version = build_status_summary(state, config_version="c1")["summary_id"]
             with self.assertRaisesRegex(OpenWebUIRequestError, "stale"):
                 handler.review_pending("P1", "approve", expected_state_version="old",
                                        expected_proposal_hash=proposal_hash(proposal))
+            reply = handler([{"role": "user", "content": "同意"}], conversation_id="chat")
+            self.assertIn("completed", reply)
+            self.assertEqual(len(calls), 1)
             result = handler.review_pending("P1", "approve", expected_state_version=version,
                                             expected_proposal_hash=proposal_hash(proposal))
-            self.assertEqual(result["status"], "completed"); self.assertEqual(len(calls), 1)
+            self.assertEqual(result["status"], "already_processed")
             repeated = handler.review_pending("P1", "approve", expected_state_version=version,
                                               expected_proposal_hash=proposal_hash(proposal))
             self.assertEqual(repeated["status"], "already_processed")

@@ -40,7 +40,7 @@ class RunWorkflowChatHandler:
     """
 
     def __init__(self, workflow_kwargs: dict, *, workflow=None, history_prompt=False,
-                 new_run_factory=None):
+                 new_run_factory=None, deepseek_model_switcher=None):
         if not isinstance(workflow_kwargs, dict) or not workflow_kwargs.get("state_path"):
             raise ValueError("workflow_kwargs must include a persistent state_path")
         self.workflow_kwargs = dict(workflow_kwargs)
@@ -50,6 +50,7 @@ class RunWorkflowChatHandler:
         self.history_prompt = bool(history_prompt)
         self.history_decision = None if history_prompt else "continue"
         self.new_run_factory = new_run_factory
+        self.deepseek_model_switcher = deepseek_model_switcher
         self.conversation_id = None
 
     def __call__(self, messages, *, conversation_id=None):
@@ -61,6 +62,17 @@ class RunWorkflowChatHandler:
                     "此本地运行时已绑定另一个 Open WebUI 会话。当前审批状态是进程级单用户状态；"
                     "请使用原会话，或为另一用户启动独立服务和 state。"
                 )
+            from run.resolve_deepseek_model_request import resolve_deepseek_model_request
+            requested_model = resolve_deepseek_model_request(user_message)
+            if requested_model:
+                if not callable(self.deepseek_model_switcher):
+                    return "此运行时未配置 DeepSeek 模型切换接口；未修改任何设置。"
+                try:
+                    selected_model, client = self.deepseek_model_switcher(requested_model)
+                except (OSError, TypeError, ValueError) as error:
+                    return f"DeepSeek 模型切换失败：{type(error).__name__}: {error}。运行时设置未更改。"
+                self.workflow_kwargs["agent_client"] = client
+                return _deepseek_switch_reply(selected_model)
             if self.history_decision is None:
                 self.conversation_id = conversation_id
                 decision = _classify_history_decision(user_message)
@@ -71,6 +83,8 @@ class RunWorkflowChatHandler:
                     if not callable(self.new_run_factory):
                         raise OpenWebUIRequestError("运行时未配置安全的新建运行目录工厂。")
                     replacement = self.new_run_factory()
+                    if "agent_client" in self.workflow_kwargs:
+                        replacement["agent_client"] = self.workflow_kwargs["agent_client"]
                     self.workflow_kwargs = dict(replacement)
                     self.state_path = Path(replacement["state_path"])
                     state = {}
@@ -99,7 +113,25 @@ class RunWorkflowChatHandler:
                 invocation_id = next(iter(pending))
                 stored_proposal = pending[invocation_id].get("agent_proposal") or {}
                 decision = classify_user_decision(user_message)
-                if decision in {"approve", "reject"} or _is_sensitive_confirmation(user_message):
+                if decision in {"approve", "reject"}:
+                    if decision == "approve" and _is_sensitive_proposal(stored_proposal):
+                        return (
+                            "该建议属于敏感操作。请在本机审批页确认具体影响后批准："
+                            "http://127.0.0.1:8765/phase/approval"
+                        )
+                    from execution_layer.policy.file_approval import proposal_hash
+                    state_version = build_status_summary(
+                        state, config_version=state.get("confirmed_config_version")
+                    )["summary_id"]
+                    outcome = self.review_pending(
+                        invocation_id,
+                        decision,
+                        expected_state_version=state_version,
+                        expected_proposal_hash=proposal_hash(stored_proposal),
+                        comment=user_message,
+                    )
+                    return format_workflow_reply(outcome.get("result") or {}, self.state_path)
+                if _is_sensitive_confirmation(user_message):
                     return ("聊天消息不能批准或拒绝动作。请打开本地审批页核对计划、路径、版本和影响："
                             "http://127.0.0.1:8765/phase/approval")
                 feedback = {"decision": decision, "comment": user_message}
@@ -357,7 +389,7 @@ def format_workflow_reply(result: dict, state_path) -> str:
     )
     if result.get("status") == "awaiting_approval" and proposal:
         cost = proposal.get("estimated_cost") or {}
-        return "\n".join([
+        lines = [
             "## Agent action proposal",
             f"状态分析：{_display(proposal.get('current_state_analysis'))}",
             f"建议 action：`{proposal.get('recommended_action')}`",
@@ -366,10 +398,14 @@ def format_workflow_reply(result: dict, state_path) -> str:
             f"下一轮计算量：`{_display(proposal.get('calculation_plan'))}`",
             f"预计成本：`{_display(cost)}`",
             f"预期目的：{proposal.get('expected_purpose') or '未提供'}",
-            "", "直接写修改意见可要求 Agent 重新分析并生成新 proposal。",
-            "聊天文字不会执行或拒绝动作。请在本机审批页核对并决定：",
-            "http://127.0.0.1:8765/phase/approval",
-        ])
+            "", "核对无误后回复“同意”批准本轮；回复“拒绝”拒绝；直接写修改意见可要求 Agent 重新分析。",
+        ]
+        if _is_sensitive_proposal(proposal):
+            lines.extend([
+                "该建议涉及敏感操作，仍需在本机审批页确认具体影响：",
+                "http://127.0.0.1:8765/phase/approval",
+            ])
+        return "\n".join(lines)
     state = read_json(state_path, {}) or {}
     summary = build_status_summary(state, config_version=result.get("config_version"))
     fields = ("status", "config_version", "human_feedback", "final_action", "execution_result",
@@ -624,21 +660,71 @@ def create_open_webui_runtime(config_path=None):
         save_config_session(session, resolved_session)
 
     if session.get("status") != "confirmed":
-        from run.configuration_chat import BOOTSTRAP_HINTS, CONFIG_AGENT_SYSTEM_PROMPT, ConfigurationChatHandler
+        from run.configuration_chat import (
+            BOOTSTRAP_HINTS, CONFIG_AGENT_SYSTEM_PROMPT, ConfigurationChatHandler,
+            normalize_workspace_path, safe_config_filename,
+        )
         editable_path_setting = settings.get("editable_config_draft_path") or "search_config.draft.json"
-        editable_config_filename = Path(editable_path_setting).name or "search_config.draft.json"
-        saved_draft_path = session.get("editable_config_json_path")
+        editable_config_filename = safe_config_filename(Path(editable_path_setting).name)
         setup_stage = session.get("setup_stage")
-        if saved_draft_path:
-            editable_config_path = _resolve_path(saved_draft_path, base)
-        elif setup_stage in {"awaiting_storage_path", "awaiting_storage_confirmation"}:
+        if setup_stage == "json_ready":
+            storage = (session.get("config") or {}).get("storage") or {}
+            try:
+                workspace_root = normalize_workspace_path(
+                    storage.get("workspace_root"), base_directory=base,
+                )
+                saved_path = session.get("editable_config_json_path")
+                if saved_path:
+                    draft_candidate = normalize_workspace_path(saved_path, base_directory=base)
+                else:
+                    draft_candidate = workspace_root / editable_config_filename
+                if (not draft_candidate.is_relative_to(workspace_root)
+                        or draft_candidate.suffix.lower() != ".json"):
+                    raise ValueError("设置 JSON 必须位于已确认工作区内")
+            except (TypeError, ValueError, OSError):
+                # Recover sessions written by older versions that accepted arbitrary
+                # multi-line input as a path. Keep unrelated draft fields and files.
+                session.pop("editable_config_json_path", None)
+                session.pop("pending_workspace_root", None)
+                session["setup_stage"] = "awaiting_storage_path"
+                session.setdefault("config", {}).pop("storage", None)
+                session.setdefault("default_parameter_prompt", {})["status"] = "skipped"
+                session.setdefault("dialogue", []).append({
+                    "type": "workspace_path_recovery",
+                    "role": "assistant",
+                    "message": (
+                        "检测到上次保存的工作区路径格式无效，已清除该路径并恢复到路径选择。"
+                        "没有删除或覆盖任何文件；请重新发送一行本地工作区目录路径。"
+                    ),
+                })
+                from config_layer.session.save_config_session import save_config_session
+                save_config_session(session, resolved_session)
+                setup_stage = "awaiting_storage_path"
+
+        elif setup_stage == "awaiting_storage_confirmation":
+            pending_root = session.get("pending_workspace_root")
+            try:
+                if not pending_root:
+                    raise ValueError("缺少待确认工作区")
+                normalize_workspace_path(pending_root, base_directory=base)
+            except (TypeError, ValueError, OSError):
+                session.pop("pending_workspace_root", None)
+                session.pop("editable_config_json_path", None)
+                session["setup_stage"] = "awaiting_storage_path"
+                from config_layer.session.save_config_session import save_config_session
+                save_config_session(session, resolved_session)
+                setup_stage = "awaiting_storage_path"
+
+        saved_draft_path = session.get("editable_config_json_path")
+        if setup_stage in {"awaiting_storage_path", "awaiting_storage_confirmation"}:
             editable_config_path = None
         elif setup_stage == "json_ready":
-            storage = (session.get("config") or {}).get("storage") or {}
-            workspace_root = Path(storage.get("workspace_root", workspace_root))
-            if not workspace_root.is_absolute():
-                workspace_root = base / workspace_root
-            editable_config_path = workspace_root.resolve() / editable_config_filename
+            editable_config_path = draft_candidate
+        elif saved_draft_path:
+            try:
+                editable_config_path = normalize_workspace_path(saved_draft_path, base_directory=base)
+            except (TypeError, ValueError, OSError):
+                editable_config_path = None
         elif not setup_stage:
             if "storage" in (session.get("config") or {}) and settings.get("editable_config_draft_path"):
                 editable_config_path = _resolve_path(settings["editable_config_draft_path"], base)
@@ -652,11 +738,29 @@ def create_open_webui_runtime(config_path=None):
         if session.get("status") == "draft" and editable_config_path is not None:
             from config_layer.session.create_editable_config_json import create_editable_config_json
             # Create the template once. A user-edited file is never overwritten on restart.
-            create_editable_config_json(
-                editable_config_path, session.get("config") or {},
-                bootstrap_hints=session.get("bootstrap_hints") or BOOTSTRAP_HINTS,
-                workspace_defaults=workspace_defaults,
-            )
+            try:
+                create_editable_config_json(
+                    editable_config_path, session.get("config") or {},
+                    bootstrap_hints=session.get("bootstrap_hints") or BOOTSTRAP_HINTS,
+                    workspace_defaults=workspace_defaults,
+                )
+            except (OSError, TypeError, ValueError):
+                session.pop("editable_config_json_path", None)
+                session.pop("pending_workspace_root", None)
+                session["setup_stage"] = "awaiting_storage_path"
+                session.setdefault("config", {}).pop("storage", None)
+                session.setdefault("default_parameter_prompt", {})["status"] = "skipped"
+                session.setdefault("dialogue", []).append({
+                    "type": "workspace_path_recovery",
+                    "role": "assistant",
+                    "message": (
+                        "上次工作区不可写，已恢复到路径选择。没有删除已有文件；"
+                        "请重新发送一行可写的本地工作区目录路径。"
+                    ),
+                })
+                from config_layer.session.save_config_session import save_config_session
+                save_config_session(session, resolved_session)
+                editable_config_path = None
         deepseek = settings.get("deepseek") or {}
         try:
             agent_client = create_deepseek_client(
@@ -669,6 +773,10 @@ def create_open_webui_runtime(config_path=None):
             )
         except ValueError:
             agent_client = None
+        model_switcher = _make_deepseek_model_switcher(
+            config_file, deepseek, system_prompt=CONFIG_AGENT_SYSTEM_PROMPT,
+            thinking=deepseek.get("configuration_thinking", "disabled"),
+        )
         workflow_kwargs = {
             "state_path": str(state_path), "config_session": session,
             "config_session_path": str(resolved_session),
@@ -680,6 +788,8 @@ def create_open_webui_runtime(config_path=None):
                 workspace_root_default=workspace_root,
             agent_client=agent_client,
             runtime_factory=lambda: create_open_webui_runtime(config_file),
+            current_deepseek_model=deepseek.get("model", "deepseek-v4-pro"),
+            deepseek_model_switcher=model_switcher,
         )
 
     snapshot = session.get("confirmed_snapshot") or {}
@@ -758,6 +868,9 @@ def create_open_webui_runtime(config_path=None):
         max_tokens=int(deepseek.get("max_tokens", 800)), timeout=int(deepseek.get("timeout", 60)),
         thinking=deepseek.get("thinking"),
     )
+    model_switcher = _make_deepseek_model_switcher(
+        config_file, deepseek, system_prompt=None, thinking=deepseek.get("thinking"),
+    )
     kwargs = {"manager": manager, "phase_references": phase_references,
               "run_config": runtime_config, "config_session": session,
               "state_path": str(state_path), "agent_client": agent_client}
@@ -813,8 +926,39 @@ def create_open_webui_runtime(config_path=None):
         fresh_kwargs.update(manager=fresh, run_config=fresh_config, state_path=str(new_state))
         return fresh_kwargs
 
-    return RunWorkflowChatHandler(kwargs, history_prompt=_has_history(state, manager),
-                                  new_run_factory=new_run)
+    return RunWorkflowChatHandler(
+        kwargs, history_prompt=_has_history(state, manager),
+        new_run_factory=new_run, deepseek_model_switcher=model_switcher,
+    )
+
+
+def _make_deepseek_model_switcher(runtime_config_path, settings, *, system_prompt, thinking):
+    """Create a local-only switcher that persists the selected model and replaces the client."""
+    from decision_layer.agent.create_deepseek_client import create_deepseek_client
+    from run.set_deepseek_runtime_model import set_deepseek_runtime_model
+
+    def switch(model):
+        client = create_deepseek_client(
+            model=model,
+            base_url=settings.get("base_url", "https://api.deepseek.com"),
+            max_tokens=int(settings.get("max_tokens", 800)),
+            timeout=int(settings.get("timeout", 60)),
+            system_prompt=system_prompt,
+            thinking=thinking,
+        )
+        selected = set_deepseek_runtime_model(runtime_config_path, model)
+        settings["model"] = selected
+        return selected, client
+
+    return switch
+
+
+def _deepseek_switch_reply(model):
+    label = "DeepSeek V4.1 Flash" if model == "deepseek-flash" else "DeepSeek V4 Pro"
+    return (
+        f"已将本地 Agent 切换为 {label}（`{model}`），并保存到本地 Open WebUI 运行时配置；"
+        "从下一条消息起生效。搜索配置、API Key 和计算任务未修改；未调用计算后端。"
+    )
 
 
 def _error(error_type, message):

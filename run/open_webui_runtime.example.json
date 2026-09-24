@@ -9,7 +9,7 @@
   "approval_directory": "../local/current/approvals",
   "local_action_directory": "../local/current/approved_batches",
   "deepseek": {
-    "model": "deepseek-v4-pro",
+    "model": "deepseek-flash",
     "base_url": "https://api.deepseek.com",
     "max_tokens": 800,
     "timeout": 60,

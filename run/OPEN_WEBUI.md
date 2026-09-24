@@ -15,6 +15,16 @@ paths. Relative paths are resolved from the JSON file. The built-in factory
 loads the confirmed config session, state, `PhaseDataManager` ledger, phase
 references and DeepSeek client. It never scans scientific data directories.
 
+On first setup, the assistant asks for the local workspace root and Agent model
+version. The user can provide both in one message or separately. It previews
+only those choices and the settings JSON path, then waits for “确认”. That
+confirmation creates the annotated JSON and lists the fields to complete. The
+user edits it and sends “读取配置 JSON”; the Agent reviews it and the program
+validates its fields. If both pass, the user replies “同意” to save the config
+snapshot and enter the search workflow. No scientific calculation is dispatched
+by setup or config approval. The LLM model is local runtime configuration, not a
+material/search parameter.
+
 The JSON may contain these non-secret settings:
 
 - required `state_path` and `ledger_path`;
@@ -28,6 +38,12 @@ The JSON may contain these non-secret settings:
   first-run JSON replies) and `thinking` (API default when omitted, normally
   enabled) settings. Configuration dialogue and search decisions can therefore
   use different reasoning modes.
+- `deepseek.model` selects the local Agent's DeepSeek model. Supported IDs are
+  `deepseek-flash` (V4.1 Flash) and `deepseek-v4-pro`. During first setup, select
+  the version alongside the workspace path (or omit it to keep the current
+  version); both are committed only after “确认”. This updates the
+  local runtime JSON, not the scientific search config or cluster files. API
+  keys remain environment-only.
 - optional `manual_upload`. When enabled, it uses the built-in portable batch
   exporter, writes `manifest.json`, per-task JSON, `submit.sbatch`, immutable
   snapshots, `SHA256SUMS`, and `UPLOAD_AND_SUBMIT.md`, but never calls `sbatch`.
@@ -141,7 +157,7 @@ chat history.
 
 ## First-run configuration dialogue
 
-On a clean first start, the service creates only a small resumable dialogue session at `config_session_path` and asks for the local workspace root. It does not create the workspace, editable settings JSON, scientific backend, ledger, or jobs yet. The user enters a path; the service previews the settings file and all derived output destinations. Only after the user replies “确认存储路径” does it create the workspace and annotated settings JSON. The user can then edit/import the JSON and have the Agent review missing or conflicting fields. Only a later, separate “确认配置” creates a versioned snapshot; neither confirmation starts a calculation.
+On a clean first start, the service creates only a small resumable dialogue session at `config_session_path`. It asks for the local workspace root and Agent model version (V4.1 Flash or V4 Pro), together or separately. It previews those two choices and the JSON path. Reply “确认” to create the annotated JSON and receive the required-field list. After editing the file, send “读取配置 JSON”: the Agent reviews its contents and the program checks required fields and paths. If both pass, reply “同意” to save the immutable config snapshot and enter the search Agent. This does not submit scientific tasks.
 
 After confirming the workspace root, the service creates `<workspace_root>/search_config.draft.json` (or the filename configured by `editable_config_draft_path`; it is always placed under the selected root). Open that file in an editor and change values directly instead of typing every parameter into chat. Keep the outer `_format`, `_instructions`, `_section_help`, and `config` keys; edit values inside `config`. The file accepts JSONC `//` and `/* ... */` comments, but not trailing commas. `system.boundary.P` and `TM_ratio` are prefilled from the current layered-oxide defaults for review; fill the per-phase `H` matrix lists. The mother-structure directory is a single `system.phase_reference_directory`; on import, the project resolves each phase to `<directory>/<phase>.vasp` (for example, `O3.vasp`). You can still use `system.phase_references` to override individual files. Use JSON `null` for unknown values; do not delete fields or put API keys and passwords in the file. The import checks syntax, field shape, and secret-like keys.
 
@@ -149,7 +165,7 @@ The same JSON includes `config.storage`: the selected `workspace_root` and relat
 
 The dialogue session remains at the bootstrap path selected by `config_session_path`, so the local service can resume setup before the chosen workspace is loaded. The editable JSON and immutable confirmed config copy are stored under the selected workspace root; snapshots go to `workspace_root/config_snapshots/` by default. Runtime setting `editable_config_draft_path` controls only the JSON filename, not its directory.
 
-After saving the file, send the exact chat message `读取配置 JSON`. The service imports it into the unconfirmed session, records a revision/change audit, and asks the Agent to review missing items and conflicts. Agent suggestions are not applied to the JSON or draft automatically; edit the file and import it again. Importing does not confirm the snapshot or launch work. Only after the Agent reports the draft ready, send `确认配置`. This writes an immutable `config_snapshots/<config_version>.json` under the selected workspace root and prints every resolved output path; it does not submit or start calculations. Runtime startup creates the JSON template only when absent, so it will never overwrite your edits.
+After saving the file, send `读取配置 JSON`. The local service loads it and sends its contents to the Agent for review; missing fields, conflicts, and invalid paths block progress. Agent suggestions are not silently applied—edit the JSON and read it again. When both Agent review and program validation pass, reply `同意`. This saves `config_snapshots/<config_version>.json` and immediately enters the search Agent, which proposes the next action; it does not itself submit calculations. For ordinary round proposals, reply `同意` to approve or `拒绝` to decline. Sensitive operations still require the local approval page. Runtime startup creates the JSON template only when absent and never overwrites your edits.
 
 The first-run draft includes candidate setup hints from the project owner: local mother structures under E:/0-FM-PhaseDiagram/InitFile/Struct and the mh-1 model at /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model on the supercomputer. These are checkable suggestions, not silently confirmed values. The local dialogue must keep the cluster model path as remote metadata; it must never try to load that file on the local computer. Boundary, phase-to-file mapping, budget, convergence criteria, and stage settings still require explicit review. Empty DFT parameters are accepted only when parameter_source is explicitly atomate_defaults.
 
