@@ -1,0 +1,16 @@
+[
+  {
+    "array_index": 0,
+    "batch_id": "remote-000001",
+    "config_version": "dry-config",
+    "input_file_version": "task-json-v1",
+    "input_path": "00000-DRY-T1\\task.json",
+    "model_version": "dry-model",
+    "protocol_version": 1,
+    "result_path": "00000-DRY-T1\\result.json",
+    "stage": "deep_search",
+    "task_checksum": "f23133a98a4ab4257ba4ce9d41e303840e673940bb046ad3db5c85c519a56519",
+    "task_id": "DRY-T1",
+    "task_key": "DRY-K1"
+  }
+]

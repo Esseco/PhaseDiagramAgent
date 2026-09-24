@@ -1,0 +1,10 @@
+{
+  "batch_id": "remote-000001",
+  "config_version": "dry-config",
+  "manifest_checksum": "724ec7dfa9597a2835e3cc62a9e8279d58dac4ced1577d86bf267f5101532497",
+  "model_version": "dry-model",
+  "protocol_version": 1,
+  "task_ids": [
+    "DRY-T1"
+  ]
+}

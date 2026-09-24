@@ -1,0 +1,679 @@
+{
+  "_format": "phase-search-config-draft-v1",
+  "_instructions": {
+    "json": "JSONC is supported: // line comments and /* block comments */ are allowed. Keep double-quoted strings and do not use trailing commas.",
+    "purpose": "Edit config values, then tell phase-search-agent: 读取配置 JSON. This only updates the unconfirmed draft; it never confirms or starts calculations.",
+    "secrets": "Never put API keys, passwords, access tokens, private keys, or credentials in this file.",
+    "unknown_values": "Use null for unknown scalar values. Do not delete fields or invent values."
+  },
+  "_section_help": {
+    "budgets": "Total and per-round limits. Keep units explicit and consistent; null means not decided, not zero.",
+    "calculation": "MLIP version, MC allocator, and calculation-stage settings. model_path belongs under mlip and is remote metadata; the local computer must not load a cluster model.",
+    "convergence": "Human-approved convergence requirements. Energy MAE is eV/atom; hull change uses the configured hull normalization. Coverage can be evidence without being a hard condition.",
+    "dft": "DFT settings. Put user_incar_settings for single-point and relaxation tasks here when supplied. Do not assume generic atomate defaults unless explicitly selected.",
+    "frozen_parameters": "Parameters that generation and search actions must never change.",
+    "generation_actions": "Enabled branch-generation actions and any adjustable quotas. Do not add unregistered action names.",
+    "mc_policy": "MC fidelity tiers, maximum actual MC steps, patience_steps, min_improvement and random exploration. Patience is not an MC step limit.",
+    "mlip": "Remote MLIP model metadata and training/validation settings. Keep cluster paths here; do not put model files or credentials in this JSON.",
+    "supercomputer": "Remote paths and optional scheduler metadata. Leave unavailable submit/query/cancel commands unset; the agent must not guess them.",
+    "system": "boundary.P and boundary.TM_ratio are prefilled from the current layered-oxide defaults for review; fill boundary.H with each phase's allowed integer supercell matrices. Set phase_reference_directory once when all mother structures are stored together as <phase>.vasp; the file map is derived on import. Explicit phase_references entries can override individual files."
+  },
+  "config": {
+    "agent": {
+      "allowed_tools": [
+        "generate_branches",
+        "select_candidates",
+        "prepare_dedup_batch",
+        "prepare_local_batch_files",
+        "run_calculation_stage",
+        "allocate_mc_bohb",
+        "select_dft_candidates",
+        "update_mlip",
+        "reevaluate_candidates",
+        "check_convergence",
+        "pause_search",
+        "restart_failed_task",
+        "adjust_strategy"
+      ],
+      "enabled": true,
+      "rule_fallback": true
+    },
+    "bohb": {
+      "bohb_selection_interface_enabled": false,
+      "budget_levels": [
+        10,
+        30,
+        90
+      ],
+      "eta": 3,
+      "good_fraction": 0.25,
+      "kernel_bandwidth": 1.0,
+      "method": "agent_relax_hull_tiered_mc",
+      "minimum_model_observations": 6,
+      "new_candidates_per_iteration": 9,
+      "objective": {
+        "group_key": "composition_group",
+        "lower_is_better": true,
+        "name": "group_normalized_min_energy",
+        "reference_key": "group_reference_energy_per_atom",
+        "scale_key": "group_energy_scale",
+        "value_key": "minimum_energy_per_atom"
+      },
+      "random_fraction": 0.25,
+      "relax_structures_per_branch": 3,
+      "scope": {
+        "candidate_set_version": null,
+        "hull_reference_version": null,
+        "mlip_version": null
+      },
+      "selection_policy": "relax_hull_uncertainty",
+      "uncertainty_weight": 0.25
+    },
+    "branch_partition_suggestions": {
+      "group_by": [
+        "P",
+        "H",
+        "x"
+      ],
+      "status": "suggestion"
+    },
+    // 总预算与分阶段限额。relative_cost 是项目内部估算单位，不等于 GPU 小时。
+    "budgets": {
+      "cost_model": {
+        "atom_exponent": 1.0,
+        "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+        "reference_atoms": 40.0,
+        "reference_mc_steps": 1.0,
+        "scale": 1.0,
+        "stage_exponents": {
+          "deep_search": 1.2,
+          "dft_relax": 3.0,
+          "dft_single_point": 3.0,
+          "relax_and_feature": 1.2
+        }
+      },
+      "cost_unit": "relative_cost",
+      "llm_limits": {
+        "max_calls": 100,
+        "max_calls_per_iteration": 1,
+        "max_cost": null,
+        "max_input_tokens": 200000,
+        "max_output_tokens": 20000
+      },
+      "minimum_independent_dft_audit_fraction": 0.05,
+      "minimum_random_exploration_fraction": 0.1,
+      "stage_limits": {
+        "deep_search": {
+          "max_cost": 4000.0,
+          "max_tasks": 100,
+          "task_cost": 1.0
+        },
+        "dft_relax": {
+          "max_cost": 15000.0,
+          "max_tasks": 2,
+          "task_cost": 900.0
+        },
+        "dft_single_point": {
+          "max_cost": 6000.0,
+          "max_tasks": 100,
+          "task_cost": 30.0
+        },
+        "relax_and_feature": {
+          "max_cost": 500.0,
+          "max_tasks": 500,
+          "task_cost": 1.0
+        },
+        "simple_check": {
+          "max_cost": 20.0,
+          "max_tasks": null,
+          "task_cost": 0.05
+        }
+      },
+      "structure_limits": {
+        "max_atoms": 500,
+        "max_det_H": 64,
+        "max_proxy_cost_per_task": null
+      },
+      "total_relative_cost": 20000.0
+    },
+    // 计算阶段启用项及本轮使用的 MLIP 标识。
+    "calculation": {
+      "bohb_optional": true,
+      "enabled_stages": [
+        "simple_check",
+        "relax_and_feature",
+        "deep_search",
+        "dft_single_point",
+        "dft_relax"
+      ],
+      "mc_allocator": "agent_tools",
+      "mlip_version": null
+    },
+    // 人工确认的收敛阈值；能量误差单位为 eV/atom。
+    "convergence": {
+      "coverage_is_hard_condition": false,
+      "final_energy_mae_tolerance": 0.003,
+      "hull_change_tolerance": 0.003,
+      "minimum_recent_dft_checks": 1,
+      "stable_model_update_epochs": 2
+    },
+    "dedup": {
+      "budget_limit": 10.0,
+      "debug_requires_approval": true,
+      "resource_limit": {
+        "max_concurrency": 4,
+        "max_tasks": 100
+      }
+    },
+    // DFT 设置入口：single_point/relax 可填写 user_incar_settings。
+    "dft": {
+      "backend": "atomate",
+      "independent_audit_fraction": 0.05,
+      "parameter_source": "atomate_defaults",
+      "parameters": {},
+      "selection": {
+        "agent_threshold_adjustment": {
+          "maximum": 0.2,
+          "minimum": 0.05
+        },
+        "max_relax_fraction": 0.1,
+        "near_hull_ev_per_atom": 0.1,
+        "single_point_first": true
+      }
+    },
+    "frozen_parameters": [
+      "system.constraints",
+      "system.branch_schema",
+      "budgets.total_relative_cost",
+      "dft.parameters",
+      "convergence.final_energy_mae_tolerance",
+      "convergence.hull_change_tolerance"
+    ],
+    "generation_actions": {
+      "enabled": [
+        "coverage",
+        "composition",
+        "competing_phase",
+        "tm_ordering",
+        "periodic_extension"
+      ],
+      "quotas": {}
+    },
+    "initial_mlip_health_check": {
+      "max_energy_error_ev_per_atom": null,
+      "max_failure_fraction": 0.5,
+      "required_before_large_scale_search": true,
+      "required_phase_roles": [
+        "endpoint",
+        "intermediate"
+      ]
+    },
+    // MC 的 max_mc_steps 是实际步数上限；patience_steps 是无改善观察窗口。
+    "mc_policy": {
+      "agent_adjustable": {
+        "dft_near_hull_ev_per_atom": [
+          0.05,
+          0.2
+        ],
+        "random_exploration_fraction": [
+          0.1,
+          0.3
+        ]
+      },
+      "high_ehull_defer_threshold": 0.3,
+      "max_cumulative_cost_per_branch": 90.0,
+      "max_segments_per_branch": 3,
+      "near_hull_retry_threshold": 0.1,
+      "random_exploration_fraction": 0.1,
+      "tiers": [
+        {
+          "max_mc_steps": 10,
+          "min_improvement": 0.001,
+          "name": "small",
+          "patience_steps": 3
+        },
+        {
+          "max_mc_steps": 30,
+          "min_improvement": 0.001,
+          "name": "medium",
+          "patience_steps": 6
+        },
+        {
+          "max_mc_steps": 90,
+          "min_improvement": 0.0005,
+          "name": "large",
+          "patience_steps": 12
+        }
+      ]
+    },
+    // 模型路径位于超算端，仅作为元数据；本地 Agent 不加载模型文件。
+    "mlip": {
+      "device": "cuda",
+      "main_model_index": 0,
+      "mc_parameters": {
+        "save_relax_traj": false
+      },
+      "model_path": null,
+      "model_paths": [],
+      "name": "mace-mh-1"
+    },
+    "mlip_finetune": {
+      "activation": {
+        "pause_on_refresh_anomaly": true,
+        "requires_separate_approval": true
+      },
+      "committee": [
+        {
+          "bootstrap_seed": 2026,
+          "energy_weight": 10,
+          "forces_weight": 10,
+          "loss": "huber",
+          "lr": 0.001,
+          "seed": 2026,
+          "stress_weight": 1
+        },
+        {
+          "bootstrap_seed": 2027,
+          "energy_weight": 1,
+          "forces_weight": 10,
+          "loss": "stress",
+          "lr": 0.00075,
+          "seed": 2027,
+          "stress_weight": 1
+        },
+        {
+          "bootstrap_seed": 2028,
+          "energy_weight": 10,
+          "forces_weight": 3,
+          "loss": "universal",
+          "lr": 0.0005,
+          "seed": 2028,
+          "stress_weight": 1
+        },
+        {
+          "bootstrap_seed": 2029,
+          "energy_weight": 5,
+          "forces_weight": 5,
+          "loss": "l1l2energyforces",
+          "lr": 0.00125,
+          "seed": 2029,
+          "stress_weight": 0
+        }
+      ],
+      "enabled": false,
+      "group_keys": [
+        "branch_id",
+        "framework_id"
+      ],
+      "labels": {
+        "config_type": "Default",
+        "energy_key": "REF_energy",
+        "forces_key": "REF_forces",
+        "include_stress": true,
+        "stress_key": "REF_stress",
+        "stress_unit": "kbar"
+      },
+      "main_model_index": 0,
+      "output_directory": "outputs/mace_committee",
+      "qbc_member_count": 4,
+      "refresh_validation": {
+        "max_energy_mae_ev_per_atom": null,
+        "max_failure_fraction": null,
+        "max_near_hull_ranking_reversals": null
+      },
+      "seed": 2026,
+      "split": {
+        "test": 0.1,
+        "train": 0.8,
+        "valid": 0.1
+      },
+      "training": {
+        "E0s": "estimated",
+        "batch_size": 4,
+        "clip_grad": 1.0,
+        "default_dtype": "float64",
+        "device": "cuda",
+        "ema": true,
+        "ema_decay": 0.999,
+        "foundation_model": null,
+        "max_num_epochs": 200,
+        "minimum_new_dft_records": 10,
+        "multiheads_finetuning": false,
+        "patience": 20,
+        "weight_decay": 0.0
+      },
+      "validation": {
+        "max_critical_failure_fraction": null,
+        "max_energy_mae": null,
+        "max_energy_mae_increase": null,
+        "max_force_rmse": null,
+        "max_force_rmse_increase": null,
+        "max_near_hull_ranking_reversals": null,
+        "minimum_distinguishable_energy_mae_gain": 0.0
+      }
+    },
+    "qbc": {
+      "action_costs": {
+        "DEFER": 0.0,
+        "DFT_RELAX": 900.0,
+        "DFT_SINGLE_POINT": 30.0,
+        "REJECT": 0.0
+      },
+      "allowed_actions": [
+        "DFT_SINGLE_POINT",
+        "DFT_RELAX",
+        "DEFER",
+        "REJECT"
+      ],
+      "budget_limits": {
+        "cost_model": {
+          "atom_exponent": 1.0,
+          "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+          "reference_atoms": 40.0,
+          "reference_mc_steps": 1.0,
+          "scale": 1.0,
+          "stage_exponents": {
+            "deep_search": 1.2,
+            "dft_relax": 3.0,
+            "dft_single_point": 3.0,
+            "relax_and_feature": 1.2
+          }
+        },
+        "cost_unit": "relative_cost",
+        "llm_limits": {
+          "max_calls": 100,
+          "max_calls_per_iteration": 1,
+          "max_cost": null,
+          "max_input_tokens": 200000,
+          "max_output_tokens": 20000
+        },
+        "minimum_independent_dft_audit_fraction": 0.05,
+        "minimum_random_exploration_fraction": 0.1,
+        "stage_limits": {
+          "deep_search": {
+            "max_cost": 4000.0,
+            "max_tasks": 100,
+            "task_cost": 1.0
+          },
+          "dft_relax": {
+            "max_cost": 15000.0,
+            "max_tasks": 2,
+            "task_cost": 900.0
+          },
+          "dft_single_point": {
+            "max_cost": 6000.0,
+            "max_tasks": 100,
+            "task_cost": 30.0
+          },
+          "relax_and_feature": {
+            "max_cost": 500.0,
+            "max_tasks": 500,
+            "task_cost": 1.0
+          },
+          "simple_check": {
+            "max_cost": 20.0,
+            "max_tasks": null,
+            "task_cost": 0.05
+          }
+        },
+        "structure_limits": {
+          "max_atoms": 500,
+          "max_det_H": 64,
+          "max_proxy_cost_per_task": null
+        },
+        "total_relative_cost": 20000.0
+      },
+      "cost_model": {
+        "atom_exponent": 1.0,
+        "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+        "reference_atoms": 40.0,
+        "reference_mc_steps": 1.0,
+        "scale": 1.0,
+        "stage_exponents": {
+          "deep_search": 1.2,
+          "dft_relax": 3.0,
+          "dft_single_point": 3.0,
+          "relax_and_feature": 1.2
+        }
+      },
+      "extreme_uncertainty": {
+        "energy_std": null,
+        "f_std_max": null,
+        "hard_action": "DFT_SINGLE_POINT"
+      },
+      "fixed": {
+        "audit_fraction": 0.1,
+        "batch_size": 10,
+        "seed": 0,
+        "weights": null
+      },
+      "mode": "agent",
+      "near_hull_threshold": 0.1,
+      "retrain": {
+        "minimum_new_dft_records": 10
+      }
+    },
+    "reliability": {
+      "model_update_requires_validation": true,
+      "require_dft_validation": true
+    },
+    "round_strategy": {
+      "allowed_generation_strategies": [
+        "coverage",
+        "composition",
+        "competing_phase",
+        "tm_ordering",
+        "periodic_extension",
+        "random_exploration"
+      ],
+      "generation_quota_total": 20,
+      "maximum_dft_budget": 5000,
+      "maximum_mc_budget": 1000,
+      "minimum_exploration_fraction": 0.1,
+      "rule_default": {
+        "dft_budget": 600,
+        "focus_regions": [],
+        "generation_quotas": {
+          "coverage": 10,
+          "random_exploration": 2
+        },
+        "mc_budget": 300,
+        "reason": "rule fallback"
+      }
+    },
+    "run": {
+      "batch_size": 8,
+      "initial_states_per_branch": 4,
+      "seed": 42,
+      "total_quota": 20
+    },
+    // 超算连接设置；submit/query/cancel 留空表示未配置，不要猜命令。
+    "supercomputer": {
+      "batch_sizes": {
+        "deep_search": 20,
+        "dft_relax": 1,
+        "dft_single_point": 1,
+        "relax_and_feature": 100,
+        "simple_check": 100
+      },
+      "node_roles": {
+        "advise": "login",
+        "confirm": "login",
+        "prepare": "compute",
+        "recover": "compute",
+        "status": "login_or_compute",
+        "submit": "login"
+      },
+      "path_mappings": [],
+      "paths": {
+        "batches": "outputs/jobs",
+        "plans": "outputs/exchange/plans",
+        "state": "outputs/search_state.json",
+        "summary": "outputs/exchange/status_summary.json"
+      },
+      "scheduler": {
+        "cancel_command": null,
+        "query_command": null,
+        "submit_command": null
+      },
+      "worker": {
+        "action_executor": null,
+        "command": [
+          "python3",
+          "-m",
+          "execution_layer.slurm.run_slurm_array_task",
+          "--executor",
+          "scientific_layer.mlip.slurm_executor:execute_mlip_task"
+        ]
+      }
+    },
+    // 体系与母结构。目录下按相名寻找 O3.vasp、O1.vasp 等结构文件。
+    "system": {
+      // 单一母结构目录；此值来自你之前提供的信息，导入前仍可修改。
+      "phase_reference_directory": "E:\\0-FM-PhaseDiagram\\InitFile\\Struct",
+      // P 和 TM_ratio 根据当前层氧默认值预填，请核对；填写每相 H 矩阵列表，不填 min/max。
+      "boundary": {
+        "P": [
+          "O3",
+          "O1",
+          "P3",
+          "OP2"
+        ],
+        "H": {},
+        "TM_ratio": {
+          "Fe": 1,
+          "Mn": 1
+        }
+      },
+      "branch_schema": {
+        "fields": [
+          "P",
+          "H",
+          "x",
+          "T"
+        ],
+        "internal_search_variables": [
+          "V"
+        ]
+      },
+      "calculation_workflow": {
+        "active_statuses": [
+          "pending",
+          "running"
+        ],
+        "stages": [
+          {
+            "enabled": true,
+            "label": "简单检查",
+            "max_retries": 1,
+            "name": "simple_check"
+          },
+          {
+            "enabled": true,
+            "label": "弛豫+特征识别",
+            "max_retries": 1,
+            "name": "relax_and_feature"
+          },
+          {
+            "enabled": true,
+            "label": "深度搜索",
+            "max_retries": 1,
+            "name": "deep_search"
+          },
+          {
+            "enabled": true,
+            "label": "DFT 单点能",
+            "max_retries": 1,
+            "name": "dft_single_point"
+          },
+          {
+            "enabled": true,
+            "label": "DFT 弛豫",
+            "max_retries": 1,
+            "name": "dft_relax"
+          }
+        ],
+        "terminal_statuses": [
+          "completed",
+          "failed",
+          "paused",
+          "not_configured",
+          "cancelled"
+        ]
+      },
+      "constraints": {
+        "TM_ratio": {
+          "Fe": 1,
+          "Mn": 1
+        },
+        "phases": [
+          "O3",
+          "O1",
+          "P3",
+          "OP2"
+        ]
+      },
+      "generation": {
+        "enabled_strategies": [
+          "coverage",
+          "composition",
+          "competing_phase",
+          "tm_ordering",
+          "periodic_extension"
+        ],
+        "strategy_seed_offsets": {
+          "competing_phase": 20000,
+          "composition": 10000,
+          "coverage": 0,
+          "periodic_extension": 40000,
+          "tm_ordering": 30000
+        }
+      },
+      "occupancy_rules": {
+        "integer_occupancy": true,
+        "mobile_sites": "Na/vacancy",
+        "substitutional_sites": "Fe/Mn"
+      },
+      // 留空时，导入时按 boundary.P 和 <相名>.vasp 从上方目录生成路径；可逐相覆盖。
+      "phase_references": {},
+      "species": {
+        "framework": [
+          "O"
+        ],
+        "mobile": [
+          "Na"
+        ],
+        "substitutional": [
+          "Fe",
+          "Mn"
+        ]
+      },
+      "system_id": "layered_na_tm_oxide"
+    },
+    // 统一本地保存位置。改工作区根目录即可整体迁移新输出；逐项路径可调整。已有文件不会自动搬动。
+    "storage": {
+      // 默认沿用当前项目的 local 目录。
+      "workspace_root": "E:/jupyter notebook/1-AL_for_PhaseDiagram/Process_PhaseDiagram/local",
+      "paths": {
+        // 每次确认生成的不可变配置快照目录。
+        "config_snapshots": "config_snapshots",
+        // 当前运行状态与主数据台账。
+        "state": "current/state.json",
+        "ledger": "current/phase_data.json",
+        // MLIP 版本隔离的 Branch 能量池台账。
+        "branch_energy_pool_ledger": "current/branch_energy_pools.json",
+        // 候选结构文件、相图文件和 QBC 数值结果。
+        "structures": "current/candidate_structures",
+        "phase_diagrams": "current/phase_diagrams",
+        "qbc_results": "current/qbc/qbc_results.json",
+        // 中间任务目录、审批记录、已批准批次及待上传超算任务。
+        "work": "current/work",
+        "approvals": "current/approvals",
+        "approved_batches": "current/approved_batches",
+        "upload_batches": "upload_batches",
+        // 通过“新建运行”建立的独立运行目录。
+        "new_runs": "open_webui_runs"
+      }
+    }
+  }
+}
