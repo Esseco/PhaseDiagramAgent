@@ -70,14 +70,57 @@ def _qbc_from_summary(best: dict, member_count: int) -> dict:
 
 
 def run_mace_worker(job: dict) -> dict:
-    from Process_AL_MC import LayeredOxide_MCOrderingClass
-
     output = Path(job["output_directory"])
     output.mkdir(parents=True, exist_ok=True)
     parameters = dict(job.get("parameters") or {})
-    parameters.setdefault("save_relax_traj", False)
     operation = job["operation"]
-    mode = "Relax" if operation == "relax" else parameters.pop("mode", "Na_MC_input")
+    if operation == "relax":
+        model_paths = [str(path) for path in (job.get("model_paths") or [])]
+        if model_paths:
+            main_index = int(parameters.pop("main_model_index", 0))
+            if not 0 <= main_index < len(model_paths):
+                raise ValueError("main_model_index out of range")
+            model_path = model_paths[main_index]
+        else:
+            model_path = job.get("model_path")
+        if not model_path:
+            raise ValueError("Relax task requires model_path or model_paths")
+        from Process_AL_MC.relax import relax_structure_mace
+        mace_head = parameters.pop("mace_head", None)
+        if mace_head is None:
+            identity = " ".join(str(value or "") for value in
+                                 (job.get("model_version"), model_path)).lower()
+            if "mace-mh-1" in identity or "mh-1" in identity or "mh_1" in identity:
+                mace_head = "omat_pbe"
+        structure_path = output / "initial_relaxed.vasp"
+        result = relax_structure_mace(
+            job["structure_path"], model_path, output_path=structure_path,
+            device=parameters.pop("device", "cuda"), head=mace_head,
+            default_dtype=parameters.pop("mace_default_dtype", "float64"),
+            fmax=parameters.pop("fmax", 0.05),
+            steps=parameters.pop("relax_steps", 150),
+            relax_cell=parameters.pop("relax_cell", True),
+        )
+        from pymatgen.core import Structure
+        final = Structure.from_file(structure_path)
+        from execution_layer.remote.integrity import file_checksum
+        result.update({
+            "status": "completed", "structure_path": str(structure_path),
+            "structure_checksum": file_checksum(structure_path),
+            "composition": final.composition.as_dict(),
+            "atom_count": len(final), "mlip_name": "MACE",
+            "mlip_version": job.get("model_version"),
+            "qbc": {"status": "not_available_single_model", "member_count": 1},
+        })
+        return result
+
+    if operation != "mc":
+        raise ValueError(f"unsupported MLIP operation: {operation}")
+
+    from Process_AL_MC import LayeredOxide_MCOrderingClass
+
+    parameters.setdefault("save_relax_traj", False)
+    mode = parameters.pop("mode", "Na_MC_input")
     full_na = parameters.pop("full_na_structure", None)
     if isinstance(full_na, (str, Path)):
         full_na_path = Path(full_na)

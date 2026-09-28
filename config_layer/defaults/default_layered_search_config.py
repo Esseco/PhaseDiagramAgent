@@ -21,6 +21,8 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
         "budgets": default_budget_rules(),
         "mlip": {"name": "mace-mh-1", "mace_head": "omat_pbe", "model_path": "/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model", "model_paths": [],
                  "device": "cuda", "main_model_index": 0,
+                 "relax_parameters": {"fmax": 0.05, "relax_steps": 150, "relax_cell": True,
+                                      "mace_default_dtype": "float64"},
                  "mc_parameters": {"save_relax_traj": False}},
         "mlip_finetune": default_mace_committee_config(),
         "initial_mlip_health_check": {"required_phase_roles": ["endpoint", "intermediate"],

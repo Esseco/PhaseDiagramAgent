@@ -54,6 +54,7 @@ def create_mlip_task_preparer(manager, phase_references, config):
                 "model_version": model.get("version") or model.get("name"),
                 "output_directory": current.get("calculation_directory"),
                 "parameters": {**base_parameters,
+                    **(deepcopy(model.get("relax_parameters") or {}) if current["stage"] == "relax_and_feature" else {}),
                     **(deepcopy(model.get('mc_parameters') or {}) if current['stage'] == 'deep_search' else {}),
                     **deepcopy(current.get("parameters") or {})},
                 "segment_budget": int(segment_budget) if segment_budget is not None else None,

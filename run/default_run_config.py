@@ -33,6 +33,8 @@ def default_run_config() -> dict[str, Any]:
             "model_paths": [],
             "device": "cuda",
             "main_model_index": 0,
+            "relax_parameters": {"fmax": 0.05, "relax_steps": 150, "relax_cell": True,
+                                 "mace_default_dtype": "float64"},
             "mc_parameters": {"save_relax_traj": False},
         },
         "mlip_finetune": default_mace_committee_config(),
