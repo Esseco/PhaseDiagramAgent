@@ -76,8 +76,8 @@ class RemoteBatchRunner:
                      "config_version": task.get("config_version"), "model_version": task.get("model_version"),
                      "protocol_version": task.get("protocol_version"),
                      "input_file_version": task.get("input_file_version"),
-                     "task_checksum": checksum, "input_path": str(task_path.relative_to(directory)),
-                     "result_path": str((task_dir / "result.json").relative_to(directory))}
+                     "task_checksum": checksum, "input_path": task_path.relative_to(directory).as_posix(),
+                     "result_path": (task_dir / "result.json").relative_to(directory).as_posix()}
             manifest.append(entry)
             source.update({"slurm_batch_id": batch_id, "slurm_array_index": index, "batch_id": batch_id,
                            "config_version": entry["config_version"], "model_version": entry["model_version"],
@@ -85,7 +85,8 @@ class RemoteBatchRunner:
                            "result_path": str(task_dir / "result.json")})
         _write(directory / "manifest.json", manifest); checksum = payload_checksum(manifest)
         stage = selected[0].get("stage")
-        (directory / "submit.sbatch").write_text(self._script(batch_id, len(manifest), stage), encoding="utf-8")
+        from execution_layer.remote.write_unix_shell_script import write_unix_shell_script
+        write_unix_shell_script(directory / "submit.sbatch", self._script(batch_id, len(manifest), stage))
         snapshot = {"batch_id": batch_id, "config_version": manifest[0]["config_version"],
                     "model_version": manifest[0]["model_version"], "task_ids": [r["task_id"] for r in manifest],
                     "manifest_checksum": checksum, "protocol_version": PROTOCOL_VERSION}

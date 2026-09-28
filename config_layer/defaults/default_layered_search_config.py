@@ -19,7 +19,7 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
         "generation_actions": {"enabled": ["coverage", "composition", "competing_phase", "tm_ordering", "periodic_extension"], "quotas": {}},
         "calculation": {"enabled_stages": ["simple_check", "relax_and_feature", "deep_search", "dft_single_point", "dft_relax"], "mc_allocator": "agent_tools", "bohb_optional": True, "mlip_version": "mace-mh-1"},
         "budgets": default_budget_rules(),
-        "mlip": {"name": "mace-mh-1", "model_path": "/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model", "model_paths": [],
+        "mlip": {"name": "mace-mh-1", "mace_head": "omat_pbe", "model_path": "/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model", "model_paths": [],
                  "device": "cuda", "main_model_index": 0,
                  "mc_parameters": {"save_relax_traj": False}},
         "mlip_finetune": default_mace_committee_config(),

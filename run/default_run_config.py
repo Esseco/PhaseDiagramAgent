@@ -27,6 +27,7 @@ def default_run_config() -> dict[str, Any]:
         "seed": 42,
         "mlip": {
             "name": "mace-mh-1",
+            "mace_head": "omat_pbe",
             "environment": "py-mace",
             "model_path": None,
             "model_paths": [],

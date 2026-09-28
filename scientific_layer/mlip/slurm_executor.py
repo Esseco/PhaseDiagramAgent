@@ -29,7 +29,7 @@ def create_mlip_task_preparer(manager, phase_references, config):
         model_paths = [str(path) for path in (model.get("model_paths") or [])]
         base_parameters = {
             "device": model.get("device", "cuda"),
-            "mace_head": model.get("mace_head"),
+            "mace_head": _resolve_mace_head(model),
             "main_model_index": int(model.get("main_model_index", 0)),
             "save_relax_traj": False,
         }
@@ -66,6 +66,16 @@ def create_mlip_task_preparer(manager, phase_references, config):
         return current
 
     return prepare
+
+
+def _resolve_mace_head(model):
+    configured = model.get("mace_head")
+    if configured:
+        return configured
+    identity = " ".join(str(model.get(key) or "") for key in ("name", "version", "model_path")).lower()
+    if "mace-mh-1" in identity or "mh-1" in identity or "mh_1" in identity:
+        return "omat_pbe"
+    return None
 
 
 def _materialize_full_na_template(manager, branch, record, phase_references, config):

@@ -55,6 +55,21 @@ def test_mlip_mc_task_is_self_contained_and_uses_incremental_budget(tmp_path):
     assert result["outputs"]["mlip_version"] == "m1"
 
 
+def test_mh1_tasks_default_to_omat_pbe_head_but_allow_override(tmp_path):
+    structure_path = tmp_path / "input.vasp"; structure_path.write_text("mock")
+    manager = PhaseDataManager({"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}})
+    branch = manager.add_branch(P="O3", H=H, x=1, T=["Fe"], composition={"Fe": 1})
+    structure_id = manager.add_structure(branch_id=branch, arrangement={"a": 1}, source_path=structure_path)
+    base = {"model_path": "/models/mace-mh-1.model", "name": "mace-mh-1"}
+    task = {"task_id": "R-head", "task_key": "K-head", "structure_id": structure_id,
+            "stage": "relax_and_feature", "status": "pending"}
+    default_job = create_mlip_task_preparer(manager, {}, {"mlip": base})(task)["worker_job"]
+    assert default_job["parameters"]["mace_head"] == "omat_pbe"
+    selected_job = create_mlip_task_preparer(manager, {}, {"mlip": {**base,
+        "mace_head": "matpes_r2scan"}})(task)["worker_job"]
+    assert selected_job["parameters"]["mace_head"] == "matpes_r2scan"
+
+
 def test_mlip_relax_uses_same_gpu_worker(tmp_path):
     structure_path = tmp_path / "input.vasp"; structure_path.write_text("mock")
     manager = PhaseDataManager({"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}})

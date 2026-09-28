@@ -12,7 +12,10 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
     entries = json.loads(manifest.read_text(encoding="utf-8"))
     failures = []
     for entry in entries:
-        task_dir = (manifest.parent / entry["input_path"]).parent
+        # Batch manifests may have been generated on Windows and uploaded as-is.
+        # Treat both slash styles as portable separators on the Linux worker.
+        input_path = str(entry["input_path"]).replace("\\", "/")
+        task_dir = (manifest.parent / input_path).parent
         marker = task_dir / "task.finished.json"
         if marker.is_file() and (task_dir / "result.json").is_file():
             try:

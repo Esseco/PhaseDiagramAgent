@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from execution_layer.remote.batch_runner import RemoteBatchRunner, _compatibility
+from execution_layer.remote.write_unix_shell_script import write_unix_shell_script
 
 
 class ManualUploadBatchRunner(RemoteBatchRunner):
@@ -72,7 +73,7 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 if missing:
                     raise RuntimeError(f"atomate 未在 DFT 任务目录生成输入文件：{missing}")
             if not mlip_batch:
-                (task_directory / "GPU.sh").write_bytes(template.read_bytes())
+                write_unix_shell_script(task_directory / "GPU.sh", template.read_bytes())
         if mlip_batch:
             executor = _executor_reference(self.worker_command)
             (directory / "run_mlip_batch.py").write_text(
@@ -87,10 +88,8 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
             command = "python3 run_mlip_task.py"
             if template.count(command) != 1:
                 raise ValueError("MLIP GPU 模板必须恰有一处单任务入口")
-            (directory / "GPU.sh").write_text(
-                template.replace(command, "python3 run_mlip_batch.py"),
-                encoding="utf-8",
-            )
+            write_unix_shell_script(
+                directory / "GPU.sh", template.replace(command, "python3 run_mlip_batch.py"))
         # The parent runner creates an array script; manual mode never exposes it.
         (directory / "submit.sbatch").unlink()
         checksums = []

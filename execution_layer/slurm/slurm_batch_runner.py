@@ -91,10 +91,9 @@ class SlurmBatchRunner:
         _write_json(manifest_path, manifest)
         is_dft_batch = selected[0].get("stage") in DFT_STAGES
         script_path = batch_directory / "submit.sbatch"
-        script_path.write_text(
-            self._script(batch_id, manifest_path, len(manifest), selected[0].get("stage")),
-            encoding="utf-8",
-        )
+        from execution_layer.remote.write_unix_shell_script import write_unix_shell_script
+        write_unix_shell_script(
+            script_path, self._script(batch_id, manifest_path, len(manifest), selected[0].get("stage")))
         script_path.chmod(0o750)
         batch = {
             "batch_id": batch_id,

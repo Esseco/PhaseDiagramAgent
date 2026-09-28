@@ -95,9 +95,15 @@ def run_mace_worker(job: dict) -> dict:
         parameters["patience"] = parameters.pop("patience_steps")
 
     model_paths = job.get("model_paths")
+    mace_head = parameters.pop("mace_head", None)
+    if not mace_head:
+        identity = " ".join(str(job.get(key) or "") for key in
+                             ("model_version", "model_path", "model_paths")).lower()
+        if "mace-mh-1" in identity or "mh-1" in identity or "mh_1" in identity:
+            mace_head = "omat_pbe"
     constructor = {"model_path": None if model_paths else job.get("model_path"), "model_type": "mace",
                    "device": parameters.pop("device", "cuda"),
-                   "mace_head": parameters.pop("mace_head", None), "out_dir": output,
+                   "mace_head": mace_head, "out_dir": output,
                    "full_na_structure": full_na, "max_steps": max_steps, **parameters}
     if model_paths:
         constructor["model_paths"] = model_paths
