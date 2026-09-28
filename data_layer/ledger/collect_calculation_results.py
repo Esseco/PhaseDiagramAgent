@@ -90,6 +90,9 @@ def collect_calculation_results(
                 "actual_cost": result.get("actual_cost"),
                 "features": outputs.get("features"),
                 "branch_score": outputs.get("branch_score"),
+                "source_phase": outputs.get("source_phase"),
+                "actual_phase": outputs.get("actual_phase"),
+                "phase_identification": outputs.get("phase_identification"),
             },
         )
         phase_record = _phase_record(manager, structure_id, result_id, stage, result)
@@ -123,7 +126,9 @@ def _phase_record(manager, structure_id, result_id, stage, result):
         return None
     structure = manager.data["structures"][structure_id]
     branch = manager.data["branches"][structure["branch_id"]]
-    composition = structure.get("composition") or branch.get("composition")
+    if stage == "deep_search" and not outputs.get("actual_phase"):
+        return None
+    composition = outputs.get("composition") or structure.get("composition") or branch.get("composition")
     if not composition:
         return None
     source_version = (
@@ -134,6 +139,8 @@ def _phase_record(manager, structure_id, result_id, stage, result):
     return {
         "record_id": result_id,
         "structure_id": structure_id,
+        "structure_path": outputs.get("structure_path") or outputs.get("final_structure_path"),
+        "phase": outputs.get("actual_phase") if stage == "deep_search" else branch.get("P"),
         "composition": composition,
         "energy": float(energy),
         "energy_unit": unit,

@@ -10,11 +10,11 @@ from config_layer.session.create_editable_config_json import FORMAT_ID
 
 _SECRET_KEYS = {"api_key", "token", "password", "secret", "private_key", "access_key"}
 _OPTIONAL_FIELDS = {
-    "config.system": {"boundary", "phase_reference_directory"},
+    "config.system": {"boundary", "phase_reference_directory", "H_generation"},
     "config": {"storage"},
 }
 _DYNAMIC_OBJECT_PATHS = {
-    "config.system.phase_references", "config.system.boundary.H",
+    "config.system.phase_references", "config.system.boundary.H", "config.system.boundary.P",
     "config.generation_actions.quotas", "config.dft.parameters",
     "config.storage.paths",
 }
@@ -33,6 +33,9 @@ def load_editable_config_json(path, current_config: dict, *, default_storage=Non
         raise ValueError(f"JSON 格式错误：第 {error.lineno} 行第 {error.colno} 列。") from error
     except OSError as error:
         raise ValueError(f"无法读取配置文件：{error}") from error
+    from config_layer.session.project_config_json import FORMAT_ID as PROJECT_FORMAT_ID, expand_project_config
+    if isinstance(document, dict) and document.get("_format") == PROJECT_FORMAT_ID:
+        return expand_project_config(document, source=source)
     if not isinstance(document, dict) or document.get("_format") != FORMAT_ID:
         raise ValueError(f"文件格式标识无效；应为 {FORMAT_ID}。")
     config = document.get("config")

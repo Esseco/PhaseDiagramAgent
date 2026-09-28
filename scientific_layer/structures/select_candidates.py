@@ -6,7 +6,7 @@ import copy
 import random
 from typing import Any
 
-from scientific_layer.structures.boundary_utils import compact_json, normalize_H, normalize_fraction
+from scientific_layer.structures.boundary_utils import compact_json, det_H, normalize_H, normalize_fraction
 
 
 def select_candidates(
@@ -15,7 +15,7 @@ def select_candidates(
     manager: Any | None = None,
     batch_size: int | None = None,
     cost_budget: float | None = None,
-    max_per_framework: int = 4,
+    max_per_framework: int = 8,
     max_per_parent_branch: int = 2,
     random_fraction: float = 0.2,
     seed: int = 0,
@@ -43,24 +43,31 @@ def select_candidates(
         if not (item.get("deduplication") or {}).get("configuration_duplicate", False)
     ]
     coverage = _historical_coverage(manager)
+    phase_counts = _historical_phase_coverage(manager)
+    phase_x_counts = _historical_phase_x_coverage(manager)
     rng = random.Random(seed)
     rng.shuffle(pool)
     random_count = round((batch_size or len(pool)) * random_fraction)
     exploration = pool[:random_count]
     exploration_ids = {id(item) for item in exploration}
     remaining = pool[random_count:]
-    remaining.sort(
-        key=lambda item: (
-            coverage.get(_region_key(item), 0),
-            compact_json([item.get("P"), item.get("H"), item.get("x"), item.get("T")]),
-        )
-    )
 
     selected, rejected = [], []
     framework_counts: dict[str, int] = {}
     parent_counts: dict[str, int] = {}
     total_cost = 0.0
-    for candidate in [*exploration, *remaining]:
+    while exploration or remaining:
+        if exploration:
+            candidate = exploration.pop(0)
+        else:
+            index = min(
+                range(len(remaining)),
+                key=lambda index: _selection_key(
+                    remaining[index], phase_counts, phase_x_counts, coverage,
+                    cost_budget is not None,
+                ),
+            )
+            candidate = remaining.pop(index)
         framework = _framework_key(candidate)
         parent = candidate.get("parent_branch_id")
         cost = _cost(candidate, cost_budget is not None)
@@ -90,6 +97,9 @@ def select_candidates(
         if parent is not None:
             parent_counts[parent] = parent_counts.get(parent, 0) + 1
         coverage[_region_key(candidate)] = coverage.get(_region_key(candidate), 0) + 1
+        phase_counts[candidate["P"]] = phase_counts.get(candidate["P"], 0) + 1
+        phase_x = (candidate["P"], normalize_fraction(candidate["x"]))
+        phase_x_counts[phase_x] = phase_x_counts.get(phase_x, 0) + 1
 
     return {
         "selected_candidates": selected,
@@ -114,6 +124,32 @@ def _historical_coverage(manager):
         key = _region_key(branch)
         counts[key] = counts.get(key, 0) + len(branch.get("structure_ids", []))
     return counts
+
+
+def _historical_phase_coverage(manager):
+    counts = {}
+    for branch in (manager.data.get("branches", {}).values() if manager else []):
+        counts[branch["P"]] = counts.get(branch["P"], 0) + 1
+    return counts
+
+
+def _historical_phase_x_coverage(manager):
+    counts = {}
+    for branch in (manager.data.get("branches", {}).values() if manager else []):
+        key = (branch["P"], normalize_fraction(branch["x"]))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _selection_key(item, phase_counts, phase_x_counts, coverage, cost_required):
+    return (
+        phase_counts.get(item["P"], 0),
+        phase_x_counts.get((item["P"], normalize_fraction(item["x"])), 0),
+        coverage.get(_region_key(item), 0),
+        _cost(item, cost_required),
+        det_H(item["H"]),
+        compact_json([item.get("P"), item.get("H"), item.get("x"), item.get("T")]),
+    )
 
 
 def _region_key(item):

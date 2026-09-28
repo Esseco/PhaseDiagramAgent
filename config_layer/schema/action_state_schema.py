@@ -18,7 +18,8 @@ def normalize_action(action: dict) -> dict:
     normalized["expected_cost"] = deepcopy(
         normalized.get("expected_cost", normalized.get("budget", 0.0))
     )
-    normalized.setdefault("budget", _numeric_cost(normalized["expected_cost"]))
+    supplied_budget = normalized.get("budget", normalized["expected_cost"])
+    normalized["budget"] = _numeric_cost(supplied_budget)
     return normalized
 
 
@@ -55,7 +56,8 @@ def _numeric_cost(value):
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
     if isinstance(value, dict):
-        for key in ("value", "relative_cost", "total"):
+        for key in ("value", "relative_cost", "total", "requested_budget",
+                    "estimated_total_cost", "reserved_cost"):
             candidate = value.get(key)
             if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
                 return float(candidate)

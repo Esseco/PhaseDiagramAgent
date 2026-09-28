@@ -9,6 +9,7 @@ from pymatgen.core import Element
 
 from scientific_layer.structures.boundary_utils import (
     allowed_phases,
+    allowed_phases_at_x,
     allowed_supercells,
     det_H,
     load_structure,
@@ -48,7 +49,10 @@ def enumerate_legal_frameworks(
                 Fraction(2 * count, oxygen)
                 for count in range(sodium + 1)
                 if oxygen and Fraction(2 * count, oxygen) <= 1
+                and phase in allowed_phases_at_x(boundary["P"], Fraction(2 * count, oxygen))
             }
+            if not x_values:
+                continue
             frameworks.append(
                 {
                     "P": phase,

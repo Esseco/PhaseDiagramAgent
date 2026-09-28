@@ -6,6 +6,8 @@ from pathlib import Path
 
 from execution_layer.state.reconcile_task_results import reconcile_task_results
 from execution_layer.workflows.run_tool_step import run_tool_step
+from execution_layer.workflows.compact_action_history import compact_action_history
+from execution_layer.step_runner.file_protocol import write_json
 from execution_layer.policy.file_approval import read_approval_decision, write_approval_request
 from data_layer.memory.decision_memory import update_long_term_advice
 from execution_layer.state.state_manager import update_state_snapshot
@@ -14,7 +16,7 @@ from execution_layer.state.state_manager import update_state_snapshot
 STOP_STATUSES = {
     "awaiting_approval", "rejected_by_user", "rejected", "failed",
     "not_configured", "paused", "converged", "budget_exhausted",
-    "pending", "running",
+    "pending", "running", "configuration_revision_required", "configuration_version_mismatch",
 }
 
 
@@ -78,7 +80,7 @@ def run_event_loop(
             replay_record=replay_record if offset == 0 else None,
         )
         current = response["state"]
-        event = {key: deepcopy(value) for key, value in response.items() if key != "state"}
+        event = compact_action_history(response)
         current.setdefault("event_history", []).append(event)
         current["event_index"] = int(current.get("event_index", 0)) + (0 if response.get("idempotent_replay") else 1)
         current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
@@ -117,11 +119,4 @@ def _load_state(state):
 def _save_state(state, path):
     if path is None:
         return
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(f"{output.name}.tmp")
-    temporary.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(output)
+    write_json(path, state)

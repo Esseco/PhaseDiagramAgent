@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from scientific_layer.structures.boundary_utils import det_H
 from scientific_layer.structures.identify_branch import identify_branch_parameters
 from scientific_layer.structures.generate_branch_structure import generate_branch_structure
 
@@ -16,9 +17,10 @@ def generate_coverage_branches(
     quota: int,
     seed: int,
     oxidation_states: dict[str, int | float] | None = None,
+    preserve_reference_tm: bool = False,
 ) -> list[dict[str, Any]]:
     """按当前 P/H/x branch 数升序生成候选。"""
-    regions = []
+    regions_by_phase = {}
     for framework in frameworks:
         for x in framework["allowed_x"]:
             count = sum(
@@ -27,11 +29,24 @@ def generate_coverage_branches(
                 and branch["x"] == x
                 for branch in manager.data["branches"].values()
             )
-            regions.append((count, framework["P"], str(framework["H"]), x, framework))
-    regions.sort(key=lambda item: item[:4])
+            regions_by_phase.setdefault(framework["P"], []).append(
+                (count, framework.get("det_H", det_H(framework["H"])),
+                 framework.get("atom_count_full", 0), x,
+                 str(framework["H"]), framework)
+            )
+    for regions in regions_by_phase.values():
+        regions.sort(key=lambda item: item[:5])
 
+    # Cover every allowed phase early; within a phase, prefer smaller cells.
     candidates = []
-    for offset, (_, _, _, x, framework) in enumerate(regions[:quota]):
+    offset = 0
+    while len(candidates) < quota and any(regions_by_phase.values()):
+        # Keep covering sparse regions, then revisit them with a new TM seed.
+        # A fixed-T system has no additional branch at the same P/H/x.
+        phase = min((name for name, rows in regions_by_phase.items() if rows),
+                    key=lambda name: (regions_by_phase[name][0][0],
+                                      sum(item[0] for item in regions_by_phase[name]), name))
+        count, size, atoms, x, matrix_key, framework = regions_by_phase[phase].pop(0)
         current_seed = seed + offset
         structure = generate_branch_structure(
             manager.boundary,
@@ -40,16 +55,22 @@ def generate_coverage_branches(
             x=x,
             phase_references=phase_references,
             oxidation_states=oxidation_states,
+            preserve_reference_tm=preserve_reference_tm,
             seed=current_seed,
         )
         parameters = identify_branch_parameters(
-            structure, manager.boundary, phase_references=phase_references
+            structure, manager.boundary, phase_references=phase_references,
+            phase_hint=framework["P"],
         )
         candidates.append(
             _candidate(
                 parameters, structure, "coverage", None, current_seed, "generated"
             )
         )
+        if not preserve_reference_tm:
+            regions_by_phase[phase].append((count + 1, size, atoms, x, matrix_key, framework))
+            regions_by_phase[phase].sort(key=lambda item: item[:5])
+        offset += 1
     return candidates
 
 

@@ -30,6 +30,13 @@ def reconcile_task_results(state: dict | None, recovered_results=None) -> dict:
         if existing_index is None:
             tasks.append(result)
         else:
+            prior = tasks[existing_index]
+            if status == "completed" and prior.get("stage") == "deep_search":
+                initial = prior.get("input_energy_per_atom")
+                final = (result.get("outputs") or {}).get("energy_per_atom")
+                if isinstance(initial, (int, float)) and isinstance(final, (int, float)):
+                    result["energy_improvement"] = float(initial) - float(final)
+                    result["energy_improvement_unit"] = "eV/atom"
             tasks[existing_index] = {**tasks[existing_index], **result}
         effective = current.setdefault("effective_decisions", {}).setdefault(task_key, {})
         effective["status"] = status

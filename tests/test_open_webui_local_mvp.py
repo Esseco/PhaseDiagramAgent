@@ -19,9 +19,20 @@ from execution_layer.step_runner.build_status_summary import build_status_summar
 from execution_layer.step_runner.file_protocol import write_json
 from run.local_agent_control import LocalAgentControl
 from run.open_webui_api import OpenWebUIRequestError, RunWorkflowChatHandler
+from run.open_webui_api import format_workflow_reply
 
 
 class OpenWebUILocalMVPTest(unittest.TestCase):
+    def test_not_configured_reply_shows_nested_handler_reason(self):
+        reply = format_workflow_reply({
+            "status": "not_configured",
+            "action": "prepare_local_batch_files",
+            "execution": {"result": {"status": "not_configured",
+                                      "reason": "remote_mlip_model_missing"}},
+        }, Path("state.json"))
+        self.assertIn("已确认的远端 MACE 模型路径", reply)
+        self.assertNotIn("执行接口未配置", reply)
+
     def test_windows_linux_mapping_and_missing_or_conflicting_path(self):
         rows = validate_path_mappings([{"windows_local": r"E:\project\batches",
                                         "linux_remote": "/scratch/me/batches"}])

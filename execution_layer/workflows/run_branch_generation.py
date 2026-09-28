@@ -33,6 +33,7 @@ def run_branch_generation(
     system_config: dict[str, Any] | None = None,
     strategy_options: dict[str, Any] | None = None,
     framework_enumerator: Any | None = None,
+    max_det_H: int | None = None,
 ) -> dict[str, Any]:
     """调度完整流程；不运行 MLIP 或 DFT。"""
     proposed = propose_branches(
@@ -47,6 +48,7 @@ def run_branch_generation(
         system_config=system_config,
         strategy_options=strategy_options,
         framework_enumerator=framework_enumerator,
+        max_det_H=max_det_H,
     )
     branch_dedup = deduplicate_candidates(
         proposed,
@@ -56,7 +58,7 @@ def run_branch_generation(
     )
     branches = []
     for candidate in branch_dedup["unique_candidates"]:
-        candidate["initial_state_count"] = initial_states_per_branch
+        candidate["initial_state_count"] = min(initial_states_per_branch, 3)
         branches.append(candidate)
     costed = estimate_candidate_cost(branches, config=cost_config)
     options = dict(selection_config or {})
@@ -68,13 +70,24 @@ def run_branch_generation(
         seed=seed,
         **options,
     )
-    initialized = initialize_branch_structures(
-        selected["selected_candidates"],
-        manager.boundary,
-        phase_references,
-        initial_states_per_branch=initial_states_per_branch,
-        seed=seed + 50_000,
-    )
+    initialized = []
+    initialization_failures = []
+    preserve_tm = ((system_config or manager.data.get("system_config") or {})
+                   .get("configuration_space") or {}).get("roles", {}).get("T") == "fixed"
+    for index, branch in enumerate(selected["selected_candidates"]):
+        try:
+            initialized.extend(initialize_branch_structures(
+                [branch], manager.boundary, phase_references,
+                initial_states_per_branch=initial_states_per_branch,
+                seed=seed + 50_000 + index,
+                preserve_reference_tm=preserve_tm,
+            ))
+        except Exception as error:
+            initialization_failures.append({
+                "candidate_id": branch.get("candidate_id"),
+                "P": branch.get("P"), "H": branch.get("H"), "x": branch.get("x"),
+                "reason": f"{type(error).__name__}: {error}",
+            })
     structure_dedup = deduplicate_candidates(
         initialized,
         manager=manager,
@@ -87,14 +100,42 @@ def run_branch_generation(
         structure_directory=structure_directory,
         ledger_path=ledger_path,
     )
+    from collections import Counter
+    rejected_by_reason = Counter(row["reason"] for row in selected["rejected_candidates"])
+    failed_by_reason = Counter(row["reason"] for row in initialization_failures)
     return {
         "proposed_branches": proposed,
         "branch_deduplication": branch_dedup,
         "selection": selected,
         "initialized_structures": initialized,
+        "initialization_failures": initialization_failures,
         "structure_deduplication": structure_dedup,
         "registered": registered,
         "coverage": _coverage(manager),
+        "summary": {**_summary(proposed, branch_dedup, selected, initialized,
+                               structure_dedup, registered), "max_det_H": max_det_H,
+                    "initialization_failed_branches": len(initialization_failures),
+                    "selection_rejections": dict(rejected_by_reason),
+                    "initialization_failure_reasons": dict(failed_by_reason)},
+    }
+
+
+def _summary(proposed, branch_dedup, selected, initialized, structure_dedup, registered):
+    chosen = selected["selected_candidates"]
+    phases = {}
+    for item in chosen:
+        phases[item["P"]] = phases.get(item["P"], 0) + 1
+    return {
+        "proposed_branches": len(proposed),
+        "unique_branches": len(branch_dedup["unique_candidates"]),
+        "selected_branches": len(chosen),
+        "phase_counts": phases,
+        "det_H_range": ([min(item["det_H"] for item in chosen),
+                         max(item["det_H"] for item in chosen)] if chosen else None),
+        "initialized_structures": len(initialized),
+        "unique_structures": len(structure_dedup["unique_candidates"]),
+        "registered_structures": len(registered),
+        "registered_branches": len({item["branch_id"] for item in registered}),
     }
 
 

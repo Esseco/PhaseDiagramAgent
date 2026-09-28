@@ -1,5 +1,11 @@
 # run
 
+配置确认后，如需修改持久参数，可在 Agent 对话中明确说“把配置文件的 `system.H_generation.first_round_max_det_H` 改为 12 并写入”。程序只写可编辑的 `search_config.project.json`，校验源文件未被其他编辑改动；然后发送“读取配置 JSON”审核并确认新快照。旧快照与正在运行任务不会被覆盖。`size_max` 控制 H 枚举范围，`first_round_max_det_H` 控制首轮生成动作；两者不是同一个值。单轮限制也可说“H 首轮上限设为 12，重新生成 branch”，此值只作用于该次生成，不改持久配置。审批时请核对实际动作参数 `max_det_H`；结果会分别显示本轮设定上限与入选 H 的实际范围。
+
+工作区根目录与 Agent 模型可同一行输入，但会分别解析；例如 `E:\0-FM-PhaseDiagram agent：V4.1flash` 不会成为一个目录名。若已确认配置中的根路径与期望路径不同，搜索对话不会把“输出目录”误提交为科学 action，也不会擅自迁移台账；应在正确目录建立新项目，或备份并核对旧运行数据后进行迁移，再确认配置版本。启动时发现路径混有模型文字会明确报错。
+
+人工意见导致 Agent 修订科学 action 时，程序会校验工具名，并为缺少内部编号的正式动作生成稳定 `task_key`；无效动作不会显示为可批准建议。输出目录请求只核对已确认配置，不触发去重、Relax 等科学任务。
+
 ## Open WebUI 对话入口
 
 项目提供 OpenAI-compatible 本地聊天服务。默认读取项目内本地运行时配置：
@@ -7,6 +13,9 @@
 ```bash
 python -m run.open_webui_api
 ```
+
+本地 DeepSeek API Key 可在浏览器打开 `http://127.0.0.1:8765/phase/setup` 后输入；
+测试成功后保存在当前 Windows 用户的凭据管理器，并立即启用 Agent，无需重启。
 
 复制 `open_webui_runtime.example.json` 为 `open_webui_runtime.json` 后填写本地路径；
 仍可用 `--handler-factory package.module:function` 覆盖。入口把 Open WebUI 的真实 user 消息接入现有 `run_workflow`，每次最多推进
@@ -96,3 +105,8 @@ result = run_workflow(
 - `default_run_config.py`：运行时默认值；科学后端仍通过 adapter/dispatcher 注入。
 
 这些模块用于测试和内部组合，不是额外的正式启动入口。正式入口中的每个 action 均经过 Agent proposal → Execution Policy → validation → Tool Registry → handler；机器相关计算通过 `dispatcher` 或 runtime adapter 注入，`handlers` 仅用于替换或扩展默认行为。
+Local Windows start: double-click `start_phase_agent.cmd` at the project root;
+the project picker keeps workspaces and Agent decision memory separate. When
+Open WebUI is unavailable, it opens the built-in chat at `/phase/chat` so a new
+or replaced project can still be configured and used. Details:
+[`OPEN_WEBUI.md`](OPEN_WEBUI.md).

@@ -79,6 +79,12 @@ def run_mace_worker(job: dict) -> dict:
     operation = job["operation"]
     mode = "Relax" if operation == "relax" else parameters.pop("mode", "Na_MC_input")
     full_na = parameters.pop("full_na_structure", None)
+    if isinstance(full_na, (str, Path)):
+        full_na_path = Path(full_na)
+        if not full_na_path.is_file():
+            raise FileNotFoundError(f"full Na structure missing: {full_na_path}")
+        from pymatgen.core import Structure
+        full_na = Structure.from_file(full_na_path)
     requested_steps = job.get("segment_budget")
     configured_steps = parameters.pop("max_steps", 30)
     max_steps = int(requested_steps if operation == "mc" and requested_steps is not None else configured_steps)
@@ -129,6 +135,10 @@ def run_mace_worker(job: dict) -> dict:
     member_count = len(model_paths) if model_paths else 1
     qbc = _qbc_from_summary(best, member_count)
     normal_stop = bool(summary and structure_path.is_file())
+    structure_checksum = None
+    if structure_path.is_file():
+        from execution_layer.remote.integrity import file_checksum
+        structure_checksum = file_checksum(structure_path)
     compressed_status = Path(f"{status_path}.gz")
     actual_mc_steps = _actual_mc_steps(output) if operation == "mc" else None
     reported_stop = status.get("stop_reason") if isinstance(status, dict) else None
@@ -137,6 +147,7 @@ def run_mace_worker(job: dict) -> dict:
     return {
         "status": "completed" if normal_stop else "failed",
         "structure_path": str(structure_path),
+        "structure_checksum": structure_checksum,
         "checkpoint": str(compressed_status if compressed_status.exists() else status_path)
         if compressed_status.exists() or status_path.exists() else None,
         "segment_complete": normal_stop, "relax_stopped_normally": normal_stop,

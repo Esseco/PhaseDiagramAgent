@@ -11,6 +11,8 @@ from execution_layer.workflows.run_event_loop import run_event_loop
 from execution_layer.workflows.apply_scientific_feedback import apply_scientific_feedback
 from execution_layer.state.reconcile_task_results import reconcile_task_results
 from config_layer.runtime.authorize_budget_extension import authorize_budget_extension
+from execution_layer.step_runner.file_protocol import write_json
+from execution_layer.workflows.compact_action_history import compact_state_history
 
 
 def run_workflow(
@@ -23,7 +25,7 @@ def run_workflow(
     handlers=None,
     registry=None,
     agent_client=None,
-    execution_mode="autonomous",
+    execution_mode="interactive",
     human_feedback=None,
     replay_record=None,
     recovered_results=None,
@@ -34,6 +36,7 @@ def run_workflow(
     initial_long_term_advice=None,
     dispatcher=None,
     task_runner=None,
+    result_collector=None,
     approve_budget_extension=False,
     **runtime_adapters,
 ):
@@ -58,7 +61,9 @@ def run_workflow(
         **runtime_adapters,
     }
     automatic_results = []
-    loaded_state = _read_state_for_runner(state, state_path or effective_config.get("state_path"))
+    loaded_state = compact_state_history(
+        _read_state_for_runner(state, state_path or effective_config.get("state_path"))
+    )
     migration = authorize_budget_extension(
         loaded_state, snapshot, user_approved=approve_budget_extension
     )
@@ -66,9 +71,14 @@ def run_workflow(
         return {"status": "rejected", "reason": migration["status"], "submitted": False,
                 "config_version": snapshot["config_version"], "state": loaded_state}
     loaded_state = migration["state"]
-    if task_runner is not None:
-        automatic_results = task_runner.collect_results(loaded_state)
+    from execution_layer.state.restore_generation_gate import restore_generation_gate
+    loaded_state = restore_generation_gate(loaded_state, manager)
+    collector = task_runner or result_collector
+    if collector is not None:
+        automatic_results = collector.collect_results(loaded_state)
     combined_results = [*(recovered_results or []), *automatic_results]
+    from analysis_layer.phase.identify_mc_result_phase import identify_mc_result_phase
+    combined_results = [identify_mc_result_phase(row, manager) for row in combined_results]
     pre_reconciled = reconcile_task_results(loaded_state, combined_results)
     feedback = apply_scientific_feedback(
         pre_reconciled["state"], combined_results, manager=manager,
@@ -76,6 +86,10 @@ def run_workflow(
         phase_diagram_directory=effective_config.get("phase_diagram_directory"),
         final_frame_mlip_evaluator=runtime_adapters.get("final_frame_mlip_evaluator"),
     )
+    from analysis_layer.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
+    feedback["state"] = update_local_mlip_hull_pool(
+        feedback["state"], config=effective_config,
+        path=effective_config.get("branch_energy_pool_ledger_path"))
     feedback["state"]["budget_limits"] = deepcopy(effective_config.get("budgets") or {})
     feedback["state"]["branch_candidates"] = _branch_candidates_for_agent(manager)
     total_limit = (effective_config.get("budgets") or {}).get("total_relative_cost")
@@ -83,6 +97,25 @@ def run_workflow(
         used = float((feedback["state"].get("budget_usage") or {}).get("total_relative_cost", 0) or 0)
         reserved = float(feedback["state"].get("reserved_relative_cost", 0) or 0)
         feedback["state"]["budget_remaining"] = max(0.0, float(total_limit) - used - reserved)
+    recovered_count = _count_newly_recovered(pre_reconciled["reconciled"])
+    from execution_layer.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
+    manual_wait = (summarize_manual_upload_wait(feedback["state"], recovered_count=recovered_count)
+                   if execution_mode == "interactive" else None)
+    from execution_layer.local.rebuild_relax_inputs import is_relax_rebuild_request
+    rebuilding = is_relax_rebuild_request(runtime_adapters.get("user_message")) or any(
+        (((row.get("agent_proposal") or {}).get("raw_action") or {}).get("parameters") or {}).get("rebuild_inputs")
+        for row in feedback["state"].get("pending_execution_policies", {}).values())
+    if manual_wait and not rebuilding:
+        wait_state = feedback["state"]
+        _save_runner_state(wait_state, state_path or effective_config.get("state_path"))
+        return {
+            "status": "awaiting_manual_submission", "state": wait_state,
+            "manual_wait": manual_wait, "recovered_count": recovered_count,
+            "scientific_feedback": {key: value for key, value in feedback.items() if key != "state"},
+            "reconciled": pre_reconciled["reconciled"], "steps_executed": 0,
+            "submitted": False, "config_version": snapshot["config_version"],
+            "effective_config": effective_config,
+        }
     result = run_event_loop(
         feedback["state"],
         config_session,
@@ -110,13 +143,24 @@ def run_workflow(
         if batch_result["status"] in {"prepared", "submitted"}:
             result["status"] = f"tasks_{batch_result['status']}"
         _save_runner_state(result["state"], state_path or effective_config.get("state_path"))
+    manual_wait = (summarize_manual_upload_wait(result["state"], recovered_count=recovered_count)
+                   if execution_mode == "interactive" else None)
+    if manual_wait:
+        result["status"] = "awaiting_manual_submission"
+        result["manual_wait"] = manual_wait
+    result["recovered_count"] = recovered_count
     _save_runner_state(result["state"], state_path or effective_config.get("state_path"))
     result.update({
-        "submitted": result["status"] not in {"rejected", "rejected_by_user"},
+        "submitted": result["status"] not in {"rejected", "rejected_by_user", "awaiting_manual_submission"},
         "config_version": snapshot["config_version"],
         "effective_config": effective_config,
     })
     return result
+
+
+def _count_newly_recovered(reconciled):
+    return sum(row.get("status") in {"settled", "already_settled"}
+               for row in (reconciled or []))
 
 
 def _branch_candidates_for_agent(manager):
@@ -147,11 +191,4 @@ def _read_state_for_runner(state, state_path):
 def _save_runner_state(state, state_path):
     if state_path is None:
         return
-    output = Path(state_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(f"{output.name}.tmp")
-    temporary.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(output)
+    write_json(state_path, state)

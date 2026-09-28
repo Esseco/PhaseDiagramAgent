@@ -53,10 +53,10 @@ def rank_relaxed_branches(candidates, pool, *, uncertainty_weight=1.0):
         reference = hull_energy_per_atom(pool, best['composition'])
         relaxed_energies = [float(row['energy']) / Composition(row['composition']).num_atoms
                             for row in rows]
-        uncertainty = statistics.pstdev(relaxed_energies) if len(relaxed_energies) >= 2 else None
+        uncertainty = statistics.pstdev(relaxed_energies) if len(relaxed_energies) >= 3 else None
         gap = energy - reference if reference is not None else None
         allocation = (gap - uncertainty_weight * float(uncertainty)
-                      if gap is not None and uncertainty is not None else None)
+                      if gap is not None and uncertainty is not None else gap)
         ranked.append({**branch, 'structure_id': best['structure_id'],
                        'structure_path': best['structure_path'],
                        'atom_count': Composition(best['composition']).num_atoms,
@@ -64,6 +64,7 @@ def rank_relaxed_branches(candidates, pool, *, uncertainty_weight=1.0):
                        'relaxed_ehull': gap,
                        'branch_relax_sample_count': len(relaxed_energies),
                        'branch_energy_std_per_atom': (float(uncertainty) if uncertainty is not None else None),
-                       'relax_evidence_status': ('complete' if allocation is not None else 'unknown'),
+                       'relax_evidence_status': ('unknown' if gap is None else
+                           'complete' if uncertainty is not None else 'energy_only'),
                        'allocation_score': allocation})
     return ranked, missing

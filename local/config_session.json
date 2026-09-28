@@ -1,0 +1,1555 @@
+{
+  "bootstrap_hints": {
+    "expected_phase_files": [
+      "O3.vasp",
+      "O1.vasp",
+      "P3.vasp",
+      "OP2.vasp"
+    ],
+    "local_initial_structure_directory": "E:\\0-FM-PhaseDiagram\\InitFile\\Struct",
+    "notes": [
+      "以上是待用户在 Agent 对话中核对的候选值，不会自动写入或确认配置。",
+      "母结构位于本地电脑；MACE 模型路径属于超算，只能记录为远端元数据。"
+    ],
+    "remote_only_mlip_model_path": "/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model"
+  },
+  "config": {
+    "agent": {
+      "allowed_tools": [
+        "generate_branches",
+        "select_candidates",
+        "prepare_dedup_batch",
+        "prepare_local_batch_files",
+        "run_calculation_stage",
+        "allocate_mc_bohb",
+        "select_dft_candidates",
+        "update_mlip",
+        "reevaluate_candidates",
+        "check_convergence",
+        "pause_search",
+        "restart_failed_task",
+        "adjust_strategy"
+      ],
+      "enabled": true,
+      "rule_fallback": true
+    },
+    "bohb": {
+      "bohb_selection_interface_enabled": false,
+      "budget_levels": [
+        10,
+        30,
+        90
+      ],
+      "eta": 3,
+      "good_fraction": 0.25,
+      "kernel_bandwidth": 1.0,
+      "method": "agent_relax_hull_tiered_mc",
+      "minimum_model_observations": 6,
+      "new_candidates_per_iteration": 9,
+      "objective": {
+        "group_key": "composition_group",
+        "lower_is_better": true,
+        "name": "group_normalized_min_energy",
+        "reference_key": "group_reference_energy_per_atom",
+        "scale_key": "group_energy_scale",
+        "value_key": "minimum_energy_per_atom"
+      },
+      "random_fraction": 0.25,
+      "relax_structures_per_branch": 3,
+      "scope": {
+        "candidate_set_version": null,
+        "hull_reference_version": null,
+        "mlip_version": "mace-mh-1"
+      },
+      "selection_policy": "relax_hull_uncertainty",
+      "uncertainty_weight": 0.25
+    },
+    "branch_partition_suggestions": {
+      "group_by": [
+        "P",
+        "H",
+        "x"
+      ],
+      "status": "suggestion"
+    },
+    "budgets": {
+      "cost_model": {
+        "atom_exponent": 1.0,
+        "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+        "reference_atoms": 40.0,
+        "reference_mc_steps": 1.0,
+        "scale": 1.0,
+        "stage_exponents": {
+          "deep_search": 1.2,
+          "dft_relax": 3.0,
+          "dft_single_point": 3.0,
+          "relax_and_feature": 1.2
+        }
+      },
+      "cost_unit": "relative_cost",
+      "llm_limits": {
+        "max_calls": 100,
+        "max_calls_per_iteration": 1,
+        "max_cost": null,
+        "max_input_tokens": 200000,
+        "max_output_tokens": 20000
+      },
+      "minimum_independent_dft_audit_fraction": 0.05,
+      "minimum_random_exploration_fraction": 0.1,
+      "stage_limits": {
+        "deep_search": {
+          "max_cost": 4000.0,
+          "max_tasks": 100,
+          "task_cost": 1.0
+        },
+        "dft_relax": {
+          "max_cost": 15000.0,
+          "max_tasks": 2,
+          "task_cost": 900.0
+        },
+        "dft_single_point": {
+          "max_cost": 6000.0,
+          "max_tasks": 100,
+          "task_cost": 30.0
+        },
+        "relax_and_feature": {
+          "max_cost": 500.0,
+          "max_tasks": 500,
+          "task_cost": 1.0
+        },
+        "simple_check": {
+          "max_cost": 20.0,
+          "max_tasks": null,
+          "task_cost": 0.05
+        }
+      },
+      "structure_limits": {
+        "max_atoms": 500,
+        "max_det_H": 64,
+        "max_proxy_cost_per_task": null
+      },
+      "total_relative_cost": 20000.0
+    },
+    "calculation": {
+      "bohb_optional": true,
+      "enabled_stages": [
+        "simple_check",
+        "relax_and_feature",
+        "deep_search",
+        "dft_single_point",
+        "dft_relax"
+      ],
+      "mc_allocator": "agent_tools",
+      "mlip_version": "mace-mh-1"
+    },
+    "convergence": {
+      "coverage_is_hard_condition": false,
+      "final_energy_mae_tolerance": 0.003,
+      "hull_change_tolerance": 0.003,
+      "minimum_recent_dft_checks": 1,
+      "stable_model_update_epochs": 2
+    },
+    "dedup": {
+      "budget_limit": 10.0,
+      "debug_requires_approval": true,
+      "resource_limit": {
+        "max_concurrency": 4,
+        "max_tasks": 100
+      }
+    },
+    "dft": {
+      "backend": "atomate",
+      "independent_audit_fraction": 0.05,
+      "parameter_source": "atomate_defaults",
+      "parameters": {},
+      "selection": {
+        "agent_threshold_adjustment": {
+          "maximum": 0.2,
+          "minimum": 0.05
+        },
+        "max_relax_fraction": 0.1,
+        "near_hull_ev_per_atom": 0.1,
+        "single_point_first": true
+      }
+    },
+    "frozen_parameters": [
+      "system.constraints",
+      "system.branch_schema",
+      "budgets.total_relative_cost",
+      "dft.parameters",
+      "convergence.final_energy_mae_tolerance",
+      "convergence.hull_change_tolerance"
+    ],
+    "generation_actions": {
+      "enabled": [
+        "coverage",
+        "composition",
+        "competing_phase",
+        "tm_ordering",
+        "periodic_extension"
+      ],
+      "quotas": {}
+    },
+    "initial_mlip_health_check": {
+      "max_energy_error_ev_per_atom": null,
+      "max_failure_fraction": 0.5,
+      "required_before_large_scale_search": true,
+      "required_phase_roles": [
+        "endpoint",
+        "intermediate"
+      ]
+    },
+    "mc_policy": {
+      "agent_adjustable": {
+        "dft_near_hull_ev_per_atom": [
+          0.05,
+          0.2
+        ],
+        "random_exploration_fraction": [
+          0.1,
+          0.3
+        ]
+      },
+      "high_ehull_defer_threshold": 0.3,
+      "max_cumulative_cost_per_branch": 90.0,
+      "max_segments_per_branch": 3,
+      "near_hull_retry_threshold": 0.1,
+      "random_exploration_fraction": 0.1,
+      "tiers": [
+        {
+          "max_mc_steps": 10,
+          "min_improvement": 0.001,
+          "name": "small",
+          "patience_steps": 3
+        },
+        {
+          "max_mc_steps": 30,
+          "min_improvement": 0.001,
+          "name": "medium",
+          "patience_steps": 6
+        },
+        {
+          "max_mc_steps": 90,
+          "min_improvement": 0.0005,
+          "name": "large",
+          "patience_steps": 12
+        }
+      ]
+    },
+    "mlip": {
+      "device": "cuda",
+      "main_model_index": 0,
+      "mc_parameters": {
+        "save_relax_traj": false
+      },
+      "model_path": null,
+      "model_paths": [],
+      "name": "mace-mh-1"
+    },
+    "mlip_finetune": {
+      "activation": {
+        "pause_on_refresh_anomaly": true,
+        "requires_separate_approval": true
+      },
+      "committee": [
+        {
+          "bootstrap_seed": 2026,
+          "energy_weight": 10,
+          "forces_weight": 10,
+          "loss": "huber",
+          "lr": 0.001,
+          "seed": 2026,
+          "stress_weight": 1
+        },
+        {
+          "bootstrap_seed": 2027,
+          "energy_weight": 1,
+          "forces_weight": 10,
+          "loss": "stress",
+          "lr": 0.00075,
+          "seed": 2027,
+          "stress_weight": 1
+        },
+        {
+          "bootstrap_seed": 2028,
+          "energy_weight": 10,
+          "forces_weight": 3,
+          "loss": "universal",
+          "lr": 0.0005,
+          "seed": 2028,
+          "stress_weight": 1
+        },
+        {
+          "bootstrap_seed": 2029,
+          "energy_weight": 5,
+          "forces_weight": 5,
+          "loss": "l1l2energyforces",
+          "lr": 0.00125,
+          "seed": 2029,
+          "stress_weight": 0
+        }
+      ],
+      "enabled": false,
+      "group_keys": [
+        "branch_id",
+        "framework_id"
+      ],
+      "labels": {
+        "config_type": "Default",
+        "energy_key": "REF_energy",
+        "forces_key": "REF_forces",
+        "include_stress": true,
+        "stress_key": "REF_stress",
+        "stress_unit": "kbar"
+      },
+      "main_model_index": 0,
+      "output_directory": "outputs/mace_committee",
+      "qbc_member_count": 4,
+      "refresh_validation": {
+        "max_energy_mae_ev_per_atom": null,
+        "max_failure_fraction": null,
+        "max_near_hull_ranking_reversals": null
+      },
+      "seed": 2026,
+      "split": {
+        "test": 0.1,
+        "train": 0.8,
+        "valid": 0.1
+      },
+      "training": {
+        "E0s": "estimated",
+        "batch_size": 4,
+        "clip_grad": 1.0,
+        "default_dtype": "float64",
+        "device": "cuda",
+        "ema": true,
+        "ema_decay": 0.999,
+        "foundation_model": null,
+        "max_num_epochs": 200,
+        "minimum_new_dft_records": 10,
+        "multiheads_finetuning": false,
+        "patience": 20,
+        "weight_decay": 0.0
+      },
+      "validation": {
+        "max_critical_failure_fraction": null,
+        "max_energy_mae": null,
+        "max_energy_mae_increase": null,
+        "max_force_rmse": null,
+        "max_force_rmse_increase": null,
+        "max_near_hull_ranking_reversals": null,
+        "minimum_distinguishable_energy_mae_gain": 0.0
+      }
+    },
+    "qbc": {
+      "action_costs": {
+        "DEFER": 0.0,
+        "DFT_RELAX": 900.0,
+        "DFT_SINGLE_POINT": 30.0,
+        "REJECT": 0.0
+      },
+      "allowed_actions": [
+        "DFT_SINGLE_POINT",
+        "DFT_RELAX",
+        "DEFER",
+        "REJECT"
+      ],
+      "budget_limits": {
+        "cost_model": {
+          "atom_exponent": 1.0,
+          "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+          "reference_atoms": 40.0,
+          "reference_mc_steps": 1.0,
+          "scale": 1.0,
+          "stage_exponents": {
+            "deep_search": 1.2,
+            "dft_relax": 3.0,
+            "dft_single_point": 3.0,
+            "relax_and_feature": 1.2
+          }
+        },
+        "cost_unit": "relative_cost",
+        "llm_limits": {
+          "max_calls": 100,
+          "max_calls_per_iteration": 1,
+          "max_cost": null,
+          "max_input_tokens": 200000,
+          "max_output_tokens": 20000
+        },
+        "minimum_independent_dft_audit_fraction": 0.05,
+        "minimum_random_exploration_fraction": 0.1,
+        "stage_limits": {
+          "deep_search": {
+            "max_cost": 4000.0,
+            "max_tasks": 100,
+            "task_cost": 1.0
+          },
+          "dft_relax": {
+            "max_cost": 15000.0,
+            "max_tasks": 2,
+            "task_cost": 900.0
+          },
+          "dft_single_point": {
+            "max_cost": 6000.0,
+            "max_tasks": 100,
+            "task_cost": 30.0
+          },
+          "relax_and_feature": {
+            "max_cost": 500.0,
+            "max_tasks": 500,
+            "task_cost": 1.0
+          },
+          "simple_check": {
+            "max_cost": 20.0,
+            "max_tasks": null,
+            "task_cost": 0.05
+          }
+        },
+        "structure_limits": {
+          "max_atoms": 500,
+          "max_det_H": 64,
+          "max_proxy_cost_per_task": null
+        },
+        "total_relative_cost": 20000.0
+      },
+      "cost_model": {
+        "atom_exponent": 1.0,
+        "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+        "reference_atoms": 40.0,
+        "reference_mc_steps": 1.0,
+        "scale": 1.0,
+        "stage_exponents": {
+          "deep_search": 1.2,
+          "dft_relax": 3.0,
+          "dft_single_point": 3.0,
+          "relax_and_feature": 1.2
+        }
+      },
+      "extreme_uncertainty": {
+        "energy_std": null,
+        "f_std_max": null,
+        "hard_action": "DFT_SINGLE_POINT"
+      },
+      "fixed": {
+        "audit_fraction": 0.1,
+        "batch_size": 10,
+        "seed": 0,
+        "weights": null
+      },
+      "mode": "agent",
+      "near_hull_threshold": 0.1,
+      "retrain": {
+        "minimum_new_dft_records": 10
+      }
+    },
+    "reliability": {
+      "model_update_requires_validation": true,
+      "require_dft_validation": true
+    },
+    "round_strategy": {
+      "allowed_generation_strategies": [
+        "coverage",
+        "composition",
+        "competing_phase",
+        "tm_ordering",
+        "periodic_extension",
+        "random_exploration"
+      ],
+      "generation_quota_total": 20,
+      "maximum_dft_budget": 5000,
+      "maximum_mc_budget": 1000,
+      "minimum_exploration_fraction": 0.1,
+      "rule_default": {
+        "dft_budget": 600,
+        "focus_regions": [],
+        "generation_quotas": {
+          "coverage": 10,
+          "random_exploration": 2
+        },
+        "mc_budget": 300,
+        "reason": "rule fallback"
+      }
+    },
+    "run": {
+      "batch_size": 8,
+      "initial_states_per_branch": 4,
+      "seed": 42,
+      "total_quota": 20
+    },
+    "storage": {
+      "paths": {
+        "approvals": "current/approvals",
+        "approved_batches": "current/approved_batches",
+        "branch_energy_pool_ledger": "current/branch_energy_pools.json",
+        "config_snapshots": "config_snapshots",
+        "ledger": "current/phase_data.json",
+        "new_runs": "open_webui_runs",
+        "phase_diagrams": "current/phase_diagrams",
+        "qbc_results": "current/qbc/qbc_results.json",
+        "state": "current/state.json",
+        "structures": "current/candidate_structures",
+        "upload_batches": "upload_batches",
+        "work": "current/work"
+      },
+      "workspace_root": "E:\\0-FM-PhaseDiagram"
+    },
+    "supercomputer": {
+      "batch_sizes": {
+        "deep_search": 20,
+        "dft_relax": 1,
+        "dft_single_point": 1,
+        "relax_and_feature": 100,
+        "simple_check": 100
+      },
+      "node_roles": {
+        "advise": "login",
+        "confirm": "login",
+        "prepare": "compute",
+        "recover": "compute",
+        "status": "login_or_compute",
+        "submit": "login"
+      },
+      "path_mappings": [],
+      "paths": {
+        "batches": "outputs/jobs",
+        "plans": "outputs/exchange/plans",
+        "state": "outputs/search_state.json",
+        "summary": "outputs/exchange/status_summary.json"
+      },
+      "scheduler": {
+        "cancel_command": null,
+        "query_command": null,
+        "submit_command": null
+      },
+      "worker": {
+        "action_executor": null,
+        "command": [
+          "python3",
+          "-m",
+          "execution_layer.slurm.run_slurm_array_task",
+          "--executor",
+          "scientific_layer.mlip.slurm_executor:execute_mlip_task"
+        ]
+      }
+    },
+    "system": {
+      "branch_schema": {
+        "fields": [
+          "P",
+          "H",
+          "x",
+          "T"
+        ],
+        "internal_search_variables": [
+          "V"
+        ]
+      },
+      "calculation_workflow": {
+        "active_statuses": [
+          "pending",
+          "running"
+        ],
+        "stages": [
+          {
+            "enabled": true,
+            "label": "简单检查",
+            "max_retries": 1,
+            "name": "simple_check"
+          },
+          {
+            "enabled": true,
+            "label": "弛豫+特征识别",
+            "max_retries": 1,
+            "name": "relax_and_feature"
+          },
+          {
+            "enabled": true,
+            "label": "深度搜索",
+            "max_retries": 1,
+            "name": "deep_search"
+          },
+          {
+            "enabled": true,
+            "label": "DFT 单点能",
+            "max_retries": 1,
+            "name": "dft_single_point"
+          },
+          {
+            "enabled": true,
+            "label": "DFT 弛豫",
+            "max_retries": 1,
+            "name": "dft_relax"
+          }
+        ],
+        "terminal_statuses": [
+          "completed",
+          "failed",
+          "paused",
+          "not_configured",
+          "cancelled"
+        ]
+      },
+      "constraints": {
+        "TM_ratio": {
+          "Fe": 1,
+          "Mn": 1
+        },
+        "phases": [
+          "O3",
+          "O1",
+          "P3",
+          "OP2"
+        ]
+      },
+      "generation": {
+        "enabled_strategies": [
+          "coverage",
+          "composition",
+          "competing_phase",
+          "tm_ordering",
+          "periodic_extension"
+        ],
+        "strategy_seed_offsets": {
+          "competing_phase": 20000,
+          "composition": 10000,
+          "coverage": 0,
+          "periodic_extension": 40000,
+          "tm_ordering": 30000
+        }
+      },
+      "occupancy_rules": {
+        "integer_occupancy": true,
+        "mobile_sites": "Na/vacancy",
+        "substitutional_sites": "Fe/Mn"
+      },
+      "phase_references": {},
+      "species": {
+        "framework": [
+          "O"
+        ],
+        "mobile": [
+          "Na"
+        ],
+        "substitutional": [
+          "Fe",
+          "Mn"
+        ]
+      },
+      "system_id": "layered_na_tm_oxide"
+    }
+  },
+  "confirmed_snapshot": null,
+  "created_at": "2026-09-24T11:14:11.607785+00:00",
+  "default_parameter_prompt": {
+    "default_parameters": {
+      "agent": {
+        "allowed_tools": [
+          "generate_branches",
+          "select_candidates",
+          "prepare_dedup_batch",
+          "prepare_local_batch_files",
+          "run_calculation_stage",
+          "allocate_mc_bohb",
+          "select_dft_candidates",
+          "update_mlip",
+          "reevaluate_candidates",
+          "check_convergence",
+          "pause_search",
+          "restart_failed_task",
+          "adjust_strategy"
+        ],
+        "enabled": true,
+        "rule_fallback": true
+      },
+      "bohb": {
+        "bohb_selection_interface_enabled": false,
+        "budget_levels": [
+          10,
+          30,
+          90
+        ],
+        "eta": 3,
+        "good_fraction": 0.25,
+        "kernel_bandwidth": 1.0,
+        "method": "agent_relax_hull_tiered_mc",
+        "minimum_model_observations": 6,
+        "new_candidates_per_iteration": 9,
+        "objective": {
+          "group_key": "composition_group",
+          "lower_is_better": true,
+          "name": "group_normalized_min_energy",
+          "reference_key": "group_reference_energy_per_atom",
+          "scale_key": "group_energy_scale",
+          "value_key": "minimum_energy_per_atom"
+        },
+        "random_fraction": 0.25,
+        "relax_structures_per_branch": 3,
+        "scope": {
+          "candidate_set_version": null,
+          "hull_reference_version": null,
+          "mlip_version": null
+        },
+        "selection_policy": "relax_hull_uncertainty",
+        "uncertainty_weight": 0.25
+      },
+      "branch_partition_suggestions": {
+        "group_by": [
+          "P",
+          "H",
+          "x"
+        ],
+        "status": "suggestion"
+      },
+      "budgets": {
+        "cost_model": {
+          "atom_exponent": 1.0,
+          "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+          "reference_atoms": 40.0,
+          "reference_mc_steps": 1.0,
+          "scale": 1.0,
+          "stage_exponents": {
+            "deep_search": 1.2,
+            "dft_relax": 3.0,
+            "dft_single_point": 3.0,
+            "relax_and_feature": 1.2
+          }
+        },
+        "cost_unit": "relative_cost",
+        "llm_limits": {
+          "max_calls": 100,
+          "max_calls_per_iteration": 1,
+          "max_cost": null,
+          "max_input_tokens": 200000,
+          "max_output_tokens": 20000
+        },
+        "minimum_independent_dft_audit_fraction": 0.05,
+        "minimum_random_exploration_fraction": 0.1,
+        "stage_limits": {
+          "deep_search": {
+            "max_cost": 4000.0,
+            "max_tasks": 100,
+            "task_cost": 1.0
+          },
+          "dft_relax": {
+            "max_cost": 15000.0,
+            "max_tasks": 2,
+            "task_cost": 900.0
+          },
+          "dft_single_point": {
+            "max_cost": 6000.0,
+            "max_tasks": 100,
+            "task_cost": 30.0
+          },
+          "relax_and_feature": {
+            "max_cost": 500.0,
+            "max_tasks": 500,
+            "task_cost": 1.0
+          },
+          "simple_check": {
+            "max_cost": 20.0,
+            "max_tasks": null,
+            "task_cost": 0.05
+          }
+        },
+        "structure_limits": {
+          "max_atoms": 500,
+          "max_det_H": 64,
+          "max_proxy_cost_per_task": null
+        },
+        "total_relative_cost": 20000.0
+      },
+      "calculation": {
+        "bohb_optional": true,
+        "enabled_stages": [
+          "simple_check",
+          "relax_and_feature",
+          "deep_search",
+          "dft_single_point",
+          "dft_relax"
+        ],
+        "mc_allocator": "agent_tools",
+        "mlip_version": null
+      },
+      "convergence": {
+        "coverage_is_hard_condition": false,
+        "final_energy_mae_tolerance": 0.003,
+        "hull_change_tolerance": 0.003,
+        "minimum_recent_dft_checks": 1,
+        "stable_model_update_epochs": 2
+      },
+      "dedup": {
+        "budget_limit": 10.0,
+        "debug_requires_approval": true,
+        "resource_limit": {
+          "max_concurrency": 4,
+          "max_tasks": 100
+        }
+      },
+      "dft": {
+        "backend": "atomate",
+        "independent_audit_fraction": 0.05,
+        "parameter_source": "atomate_defaults",
+        "parameters": {},
+        "selection": {
+          "agent_threshold_adjustment": {
+            "maximum": 0.2,
+            "minimum": 0.05
+          },
+          "max_relax_fraction": 0.1,
+          "near_hull_ev_per_atom": 0.1,
+          "single_point_first": true
+        }
+      },
+      "frozen_parameters": [
+        "system.constraints",
+        "system.branch_schema",
+        "budgets.total_relative_cost",
+        "dft.parameters",
+        "convergence.final_energy_mae_tolerance",
+        "convergence.hull_change_tolerance"
+      ],
+      "generation_actions": {
+        "enabled": [
+          "coverage",
+          "composition",
+          "competing_phase",
+          "tm_ordering",
+          "periodic_extension"
+        ],
+        "quotas": {}
+      },
+      "initial_mlip_health_check": {
+        "max_energy_error_ev_per_atom": null,
+        "max_failure_fraction": 0.5,
+        "required_before_large_scale_search": true,
+        "required_phase_roles": [
+          "endpoint",
+          "intermediate"
+        ]
+      },
+      "mc_policy": {
+        "agent_adjustable": {
+          "dft_near_hull_ev_per_atom": [
+            0.05,
+            0.2
+          ],
+          "random_exploration_fraction": [
+            0.1,
+            0.3
+          ]
+        },
+        "high_ehull_defer_threshold": 0.3,
+        "max_cumulative_cost_per_branch": 90.0,
+        "max_segments_per_branch": 3,
+        "near_hull_retry_threshold": 0.1,
+        "random_exploration_fraction": 0.1,
+        "tiers": [
+          {
+            "max_mc_steps": 10,
+            "min_improvement": 0.001,
+            "name": "small",
+            "patience_steps": 3
+          },
+          {
+            "max_mc_steps": 30,
+            "min_improvement": 0.001,
+            "name": "medium",
+            "patience_steps": 6
+          },
+          {
+            "max_mc_steps": 90,
+            "min_improvement": 0.0005,
+            "name": "large",
+            "patience_steps": 12
+          }
+        ]
+      },
+      "mlip": {
+        "device": "cuda",
+        "main_model_index": 0,
+        "mc_parameters": {
+          "save_relax_traj": false
+        },
+        "model_path": null,
+        "model_paths": [],
+        "name": "mace-mh-1"
+      },
+      "mlip_finetune": {
+        "activation": {
+          "pause_on_refresh_anomaly": true,
+          "requires_separate_approval": true
+        },
+        "committee": [
+          {
+            "bootstrap_seed": 2026,
+            "energy_weight": 10,
+            "forces_weight": 10,
+            "loss": "huber",
+            "lr": 0.001,
+            "seed": 2026,
+            "stress_weight": 1
+          },
+          {
+            "bootstrap_seed": 2027,
+            "energy_weight": 1,
+            "forces_weight": 10,
+            "loss": "stress",
+            "lr": 0.00075,
+            "seed": 2027,
+            "stress_weight": 1
+          },
+          {
+            "bootstrap_seed": 2028,
+            "energy_weight": 10,
+            "forces_weight": 3,
+            "loss": "universal",
+            "lr": 0.0005,
+            "seed": 2028,
+            "stress_weight": 1
+          },
+          {
+            "bootstrap_seed": 2029,
+            "energy_weight": 5,
+            "forces_weight": 5,
+            "loss": "l1l2energyforces",
+            "lr": 0.00125,
+            "seed": 2029,
+            "stress_weight": 0
+          }
+        ],
+        "enabled": false,
+        "group_keys": [
+          "branch_id",
+          "framework_id"
+        ],
+        "labels": {
+          "config_type": "Default",
+          "energy_key": "REF_energy",
+          "forces_key": "REF_forces",
+          "include_stress": true,
+          "stress_key": "REF_stress",
+          "stress_unit": "kbar"
+        },
+        "main_model_index": 0,
+        "output_directory": "outputs/mace_committee",
+        "qbc_member_count": 4,
+        "refresh_validation": {
+          "max_energy_mae_ev_per_atom": null,
+          "max_failure_fraction": null,
+          "max_near_hull_ranking_reversals": null
+        },
+        "seed": 2026,
+        "split": {
+          "test": 0.1,
+          "train": 0.8,
+          "valid": 0.1
+        },
+        "training": {
+          "E0s": "estimated",
+          "batch_size": 4,
+          "clip_grad": 1.0,
+          "default_dtype": "float64",
+          "device": "cuda",
+          "ema": true,
+          "ema_decay": 0.999,
+          "foundation_model": null,
+          "max_num_epochs": 200,
+          "minimum_new_dft_records": 10,
+          "multiheads_finetuning": false,
+          "patience": 20,
+          "weight_decay": 0.0
+        },
+        "validation": {
+          "max_critical_failure_fraction": null,
+          "max_energy_mae": null,
+          "max_energy_mae_increase": null,
+          "max_force_rmse": null,
+          "max_force_rmse_increase": null,
+          "max_near_hull_ranking_reversals": null,
+          "minimum_distinguishable_energy_mae_gain": 0.0
+        }
+      },
+      "qbc": {
+        "action_costs": {
+          "DEFER": 0.0,
+          "DFT_RELAX": 900.0,
+          "DFT_SINGLE_POINT": 30.0,
+          "REJECT": 0.0
+        },
+        "allowed_actions": [
+          "DFT_SINGLE_POINT",
+          "DFT_RELAX",
+          "DEFER",
+          "REJECT"
+        ],
+        "budget_limits": {
+          "cost_model": {
+            "atom_exponent": 1.0,
+            "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+            "reference_atoms": 40.0,
+            "reference_mc_steps": 1.0,
+            "scale": 1.0,
+            "stage_exponents": {
+              "deep_search": 1.2,
+              "dft_relax": 3.0,
+              "dft_single_point": 3.0,
+              "relax_and_feature": 1.2
+            }
+          },
+          "cost_unit": "relative_cost",
+          "llm_limits": {
+            "max_calls": 100,
+            "max_calls_per_iteration": 1,
+            "max_cost": null,
+            "max_input_tokens": 200000,
+            "max_output_tokens": 20000
+          },
+          "minimum_independent_dft_audit_fraction": 0.05,
+          "minimum_random_exploration_fraction": 0.1,
+          "stage_limits": {
+            "deep_search": {
+              "max_cost": 4000.0,
+              "max_tasks": 100,
+              "task_cost": 1.0
+            },
+            "dft_relax": {
+              "max_cost": 15000.0,
+              "max_tasks": 2,
+              "task_cost": 900.0
+            },
+            "dft_single_point": {
+              "max_cost": 6000.0,
+              "max_tasks": 100,
+              "task_cost": 30.0
+            },
+            "relax_and_feature": {
+              "max_cost": 500.0,
+              "max_tasks": 500,
+              "task_cost": 1.0
+            },
+            "simple_check": {
+              "max_cost": 20.0,
+              "max_tasks": null,
+              "task_cost": 0.05
+            }
+          },
+          "structure_limits": {
+            "max_atoms": 500,
+            "max_det_H": 64,
+            "max_proxy_cost_per_task": null
+          },
+          "total_relative_cost": 20000.0
+        },
+        "cost_model": {
+          "atom_exponent": 1.0,
+          "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step",
+          "reference_atoms": 40.0,
+          "reference_mc_steps": 1.0,
+          "scale": 1.0,
+          "stage_exponents": {
+            "deep_search": 1.2,
+            "dft_relax": 3.0,
+            "dft_single_point": 3.0,
+            "relax_and_feature": 1.2
+          }
+        },
+        "extreme_uncertainty": {
+          "energy_std": null,
+          "f_std_max": null,
+          "hard_action": "DFT_SINGLE_POINT"
+        },
+        "fixed": {
+          "audit_fraction": 0.1,
+          "batch_size": 10,
+          "seed": 0,
+          "weights": null
+        },
+        "mode": "agent",
+        "near_hull_threshold": 0.1,
+        "retrain": {
+          "minimum_new_dft_records": 10
+        }
+      },
+      "reliability": {
+        "model_update_requires_validation": true,
+        "require_dft_validation": true
+      },
+      "round_strategy": {
+        "allowed_generation_strategies": [
+          "coverage",
+          "composition",
+          "competing_phase",
+          "tm_ordering",
+          "periodic_extension",
+          "random_exploration"
+        ],
+        "generation_quota_total": 20,
+        "maximum_dft_budget": 5000,
+        "maximum_mc_budget": 1000,
+        "minimum_exploration_fraction": 0.1,
+        "rule_default": {
+          "dft_budget": 600,
+          "focus_regions": [],
+          "generation_quotas": {
+            "coverage": 10,
+            "random_exploration": 2
+          },
+          "mc_budget": 300,
+          "reason": "rule fallback"
+        }
+      },
+      "run": {
+        "batch_size": 8,
+        "initial_states_per_branch": 4,
+        "seed": 42,
+        "total_quota": 20
+      },
+      "storage": {
+        "paths": {
+          "approvals": "current/approvals",
+          "approved_batches": "current/approved_batches",
+          "branch_energy_pool_ledger": "current/branch_energy_pools.json",
+          "config_snapshots": "config_snapshots",
+          "ledger": "current/phase_data.json",
+          "new_runs": "open_webui_runs",
+          "phase_diagrams": "current/phase_diagrams",
+          "qbc_results": "current/qbc/qbc_results.json",
+          "state": "current/state.json",
+          "structures": "current/candidate_structures",
+          "upload_batches": "upload_batches",
+          "work": "current/work"
+        },
+        "workspace_root": "E:\\0-FM-PhaseDiagram"
+      },
+      "supercomputer": {
+        "batch_sizes": {
+          "deep_search": 20,
+          "dft_relax": 1,
+          "dft_single_point": 1,
+          "relax_and_feature": 100,
+          "simple_check": 100
+        },
+        "node_roles": {
+          "advise": "login",
+          "confirm": "login",
+          "prepare": "compute",
+          "recover": "compute",
+          "status": "login_or_compute",
+          "submit": "login"
+        },
+        "path_mappings": [],
+        "paths": {
+          "batches": "outputs/jobs",
+          "plans": "outputs/exchange/plans",
+          "state": "outputs/search_state.json",
+          "summary": "outputs/exchange/status_summary.json"
+        },
+        "scheduler": {
+          "cancel_command": null,
+          "query_command": null,
+          "submit_command": null
+        },
+        "worker": {
+          "action_executor": null,
+          "command": [
+            "python3",
+            "-m",
+            "execution_layer.slurm.run_slurm_array_task",
+            "--executor",
+            "scientific_layer.mlip.slurm_executor:execute_mlip_task"
+          ]
+        }
+      },
+      "system": {
+        "branch_schema": {
+          "fields": [
+            "P",
+            "H",
+            "x",
+            "T"
+          ],
+          "internal_search_variables": [
+            "V"
+          ]
+        },
+        "calculation_workflow": {
+          "active_statuses": [
+            "pending",
+            "running"
+          ],
+          "stages": [
+            {
+              "enabled": true,
+              "label": "简单检查",
+              "max_retries": 1,
+              "name": "simple_check"
+            },
+            {
+              "enabled": true,
+              "label": "弛豫+特征识别",
+              "max_retries": 1,
+              "name": "relax_and_feature"
+            },
+            {
+              "enabled": true,
+              "label": "深度搜索",
+              "max_retries": 1,
+              "name": "deep_search"
+            },
+            {
+              "enabled": true,
+              "label": "DFT 单点能",
+              "max_retries": 1,
+              "name": "dft_single_point"
+            },
+            {
+              "enabled": true,
+              "label": "DFT 弛豫",
+              "max_retries": 1,
+              "name": "dft_relax"
+            }
+          ],
+          "terminal_statuses": [
+            "completed",
+            "failed",
+            "paused",
+            "not_configured",
+            "cancelled"
+          ]
+        },
+        "constraints": {
+          "TM_ratio": {
+            "Fe": 1,
+            "Mn": 1
+          },
+          "phases": [
+            "O3",
+            "O1",
+            "P3",
+            "OP2"
+          ]
+        },
+        "generation": {
+          "enabled_strategies": [
+            "coverage",
+            "composition",
+            "competing_phase",
+            "tm_ordering",
+            "periodic_extension"
+          ],
+          "strategy_seed_offsets": {
+            "competing_phase": 20000,
+            "composition": 10000,
+            "coverage": 0,
+            "periodic_extension": 40000,
+            "tm_ordering": 30000
+          }
+        },
+        "occupancy_rules": {
+          "integer_occupancy": true,
+          "mobile_sites": "Na/vacancy",
+          "substitutional_sites": "Fe/Mn"
+        },
+        "phase_references": {},
+        "species": {
+          "framework": [
+            "O"
+          ],
+          "mobile": [
+            "Na"
+          ],
+          "substitutional": [
+            "Fe",
+            "Mn"
+          ]
+        },
+        "system_id": "layered_na_tm_oxide"
+      }
+    },
+    "question": "开始配置前，请先发送本地工作区根目录的绝对路径。我会先展示配置文件及各类结果的保存位置；你回复“确认存储路径”后，才会在该目录生成带注释的设置 JSON。",
+    "status": "skipped"
+  },
+  "dialogue": [
+    {
+      "message": "开始配置前，请先发送本地工作区根目录的绝对路径。我会先展示配置文件及各类结果的保存位置；你回复“确认存储路径”后，才会在该目录生成带注释的设置 JSON。",
+      "role": "assistant",
+      "type": "workspace_path_question"
+    },
+    {
+      "message": "### Task:\nGenerate a concise title summarizing the chat history.\n### Guidelines:\n- The title should clearly represent the main theme or subject of the conversation.\n- Keep it short: 2-4 words is best.\n- Do not use emojis, quotation marks, or special formatting.\n- Write the title in the chat's primary language; default to English if multilingual.\n- Prioritize accuracy over creativity.\n- Your entire response must consist solely of the JSON object, without any introductory or concluding text.\n- The output must be a single, raw JSON object, without any markdown code fences or other encapsulating text.\n- Ensure no conversational text, affirmations, or explanations precede or follow the raw JSON output, as this will cause direct parsing failure.\n### Output:\nJSON format: { \"title\": \"your concise title here\" }\n### Examples:\n- { \"title\": \"Stock Trends\" },\n- { \"title\": \"Chocolate Chip Cookies\" },\n- { \"title\": \"Music Streaming\" },\n- { \"title\": \"Remote Work\" }\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: \n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "开始",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: 首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nGenerate 1-3 broad tags categorizing the main themes of the chat history, along with 1-3 more specific subtopic tags.\n\n### Guidelines:\n- Start with high-level domains (e.g. Science, Technology, Philosophy, Arts, Politics, Business, Health, Sports, Entertainment, Education)\n- Consider including relevant subfields/subdomains if they are strongly represented throughout the conversation\n- If content is too short (less than 3 messages) or too diverse, use only [\"General\"]\n- Use the chat's primary language; default to English if multilingual\n- Prioritize accuracy over specificity\n\n### Output:\nJSON format: { \"tags\": [\"tag1\", \"tag2\", \"tag3\"] }\n\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: 首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "工作区路径：E:\\0-FM-PhaseDiagram agent: flash",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "工作区根目录：E:\\0-FM-PhaseDiagram agent: flash\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n设置 JSON：E:\\0-FM-PhaseDiagram agent: flash\\search_config.draft.json\n确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: 首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。\nUSER: 工作区路径：E:\\0-FM-PhaseDiagram agent: flash\nASSISTANT: 工作区根目录：E:\\0-FM-PhaseDiagram agent: flash\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n设置 JSON：E:\\0-FM-PhaseDiagram agent: flash\\search_config.draft.json\n确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "确认",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "设置 JSON 写入失败：NotADirectoryError: [WinError 267] 目录名称无效。: 'E:\\\\0-FM-PhaseDiagram agent: flash'。未确认或保存该工作区设置，也没有启动计算。请检查目录权限后重新确认，或发送“重新选择”改用其他目录。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: 首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。\nUSER: 工作区路径：E:\\0-FM-PhaseDiagram agent: flash\nASSISTANT: 工作区根目录：E:\\0-FM-PhaseDiagram agent: flash\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n设置 JSON：E:\\0-FM-PhaseDiagram agent: flash\\search_config.draft.json\n确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。\nUSER: 确认\nASSISTANT: 设置 JSON 写入失败：NotADirectoryError: [WinError 267] 目录名称无效。: 'E:\\\\0-FM-PhaseDiagram agent: flash'。未确认或保存该工作区设置，也没有启动计算。请检查目录权限后重新确认，或发送“重新选择”改用其他目录。\n\n当前配置检查：\n- 缺项：calculation.mlip_version；mlip.model_path (超算端 MACE 模型路径)；storage.workspace_root (需要先选择并确认本地工作区目录)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "工作区根目录：E:\\0-FM-PhaseDiagram",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "工作区根目录：E:\\0-FM-PhaseDiagram\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json\n确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 工作区路径：E:\\0-FM-PhaseDiagram agent: flash\nASSISTANT: 工作区根目录：E:\\0-FM-PhaseDiagram agent: flash\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n设置 JSON：E:\\0-FM-PhaseDiagram agent: flash\\search_config.draft.json\n确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。\nUSER: 确认\nASSISTANT: 设置 JSON 写入失败：NotADirectoryError: [WinError 267] 目录名称无效。: 'E:\\\\0-FM-PhaseDiagram agent: flash'。未确认或保存该工作区设置，也没有启动计算。请检查目录权限后重新确认，或发送“重新选择”改用其他目录。\n\n当前配置检查：\n- 缺项：calculation.mlip_version；mlip.model_path (超算端 MACE 模型路径)；storage.workspace_root (需要先选择并确认本地工作区目录)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\nUSER: 工作区根目录：E:\\0-FM-PhaseDiagram\nASSISTANT: 工作区根目录：E:\\0-FM-PhaseDiagram\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json\n确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "首次只需提供两项：工作区根路径，以及 Agent 模型版本。请按两行发送，例如：`工作区根路径：E:\\PhaseSearch`、`Agent版本：V4.1 Flash`。模型可选 V4.1 Flash（`deepseek-flash`）或 V4 Pro（`deepseek-v4-pro`）；不写模型则沿用当前版本 DeepSeek V4.1 Flash。收到后我会只回显路径和版本供你确认。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "author": "user_confirmed_storage_path",
+      "changes": [
+        {
+          "constraint_type": "unclassified",
+          "new": {
+            "paths": {
+              "approvals": "current/approvals",
+              "approved_batches": "current/approved_batches",
+              "branch_energy_pool_ledger": "current/branch_energy_pools.json",
+              "config_snapshots": "config_snapshots",
+              "ledger": "current/phase_data.json",
+              "new_runs": "open_webui_runs",
+              "phase_diagrams": "current/phase_diagrams",
+              "qbc_results": "current/qbc/qbc_results.json",
+              "state": "current/state.json",
+              "structures": "current/candidate_structures",
+              "upload_batches": "upload_batches",
+              "work": "current/work"
+            },
+            "workspace_root": "E:\\0-FM-PhaseDiagram"
+          },
+          "old": null,
+          "path": "storage",
+          "reason": "用户明确确认了本地工作区及其派生保存目录。"
+        }
+      ],
+      "revision": 2,
+      "type": "config_revision"
+    },
+    {
+      "message": "确认",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "已确认工作区：E:\\0-FM-PhaseDiagram\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n已在确认的工作区生成带注释的设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json。\n请按 JSON 注释填写或核对体系边界、母结构、MLIP 路径、预算、DFT 参数和收敛标准。\n\n需要补齐：\n- calculation.mlip_version\n- mlip.model_path (超算端 MACE 模型路径)\n- system.boundary (需要 P、H、TM_ratio)\n- system.phase_references (各相母结构文件)\n\n完成后发送“读取配置 JSON”，由 Agent 审核；Agent 通过后你回复“同意”即可开始搜索流程。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 确认\nASSISTANT: 设置 JSON 写入失败：NotADirectoryError: [WinError 267] 目录名称无效。: 'E:\\\\0-FM-PhaseDiagram agent: flash'。未确认或保存该工作区设置，也没有启动计算。请检查目录权限后重新确认，或发送“重新选择”改用其他目录。\n\n当前配置检查：\n- 缺项：calculation.mlip_version；mlip.model_path (超算端 MACE 模型路径)；storage.workspace_root (需要先选择并确认本地工作区目录)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\nUSER: 工作区根目录：E:\\0-FM-PhaseDiagram\nASSISTANT: 工作区根目录：E:\\0-FM-PhaseDiagram\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json\n确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。\nUSER: 确认\nASSISTANT: 已确认工作区：E:\\0-FM-PhaseDiagram\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n已在确认的工作区生成带注释的设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json。\n请按 JSON 注释填写或核对体系边界、母结构、MLIP 路径、预算、DFT 参数和收敛标准。\n\n需要补齐：\n- calculation.mlip_version\n- mlip.model_path (超算端 MACE 模型路径)\n- system.boundary (需要 P、H、TM_ratio)\n- system.phase_references (各相母结构文件)\n\n完成后发送“读取配置 JSON”，由 Agent 审核；Agent 通过后你回复“同意”即可开始搜索流程。\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "当前处于配置草稿阶段，尚未确认或启动任何计算。请先补齐以下缺项后再发送“读取配置 JSON”进行审核：\n\n1. calculation.mlip_version：请填写 MLIP 版本标识（例如 mace-mh-1 对应的版本号）。\n2. mlip.model_path：超算端 MACE 模型路径（仅作为远端元数据记录，本地不会加载）。草稿提示候选值为 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认是否采用。\n3. system.boundary：需要 P、H、TM_ratio 三项边界值。\n4. system.phase_references：各相母结构文件。草稿提示本地目录为 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，预期文件 O3.vasp、O1.vasp、P3.vasp、OP2.vasp，请确认。\n\n注意：以上候选值仅为建议，未写入草稿，需你确认后才会更新。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "calculation.mlip_version 是什么",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "`calculation.mlip_version` 是本次搜索所使用的机器学习势（MLIP）的版本标识，用来锁定“用哪一版模型做弛豫/特征识别/深度搜索”，并作为缓存与结果归属的版本键。\n\n在当前草稿里它有两处相关位置：\n- `calculation.mlip_version`：当前为 `null`，属于必填缺项（readiness.missing 已列出）。\n- `bohb.scope.mlip_version`：同样为 `null`，用于限定 BOHB 优化作用域；通常应与 `calculation.mlip_version` 保持一致。\n\n需要区分两点：\n1. 它只是“版本标签/元数据”，不是模型文件路径。模型文件路径是 `mlip.model_path`（超算端 MACE 模型路径，目前也为 `null`）。\n2. 它属于科学搜索配置，与本地 Open WebUI 的对话模型（DeepSeek V4.1 Flash / V4 Pro）无关，不要混用。\n\n建议取值方式（供你确认，不擅自填写）：\n- 若沿用草稿中 `mlip.name = \"mace-mh-1\"`，可把版本写成与之一致的标识，例如 `mace-mh-1`；\n- 若超算上实际模型有更明确的版本号（如带日期或 commit），请以实际为准。\n\n请确认：`calculation.mlip_version` 与 `bohb.scope.mlip_version` 是否都填 `mace-mh-1`，还是使用你超算上模型的真实版本号？",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 工作区根目录：E:\\0-FM-PhaseDiagram\nASSISTANT: 工作区根目录：E:\\0-FM-PhaseDiagram\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json\n确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。\nUSER: 确认\nASSISTANT: 已确认工作区：E:\\0-FM-PhaseDiagram\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n已在确认的工作区生成带注释的设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json。\n请按 JSON 注释填写或核对体系边界、母结构、MLIP 路径、预算、DFT 参数和收敛标准。\n\n需要补齐：\n- calculation.mlip_version\n- mlip.model_path (超算端 MACE 模型路径)\n- system.boundary (需要 P、H、TM_ratio)\n- system.phase_references (各相母结构文件)\n\n完成后发送“读取配置 JSON”，由 Agent 审核；Agent 通过后你回复“同意”即可开始搜索流程。\nUSER: calculation.mlip_version 是什么\nASSISTANT: `calculation.mlip_version` 是本次搜索所使用的机器学习势（MLIP）的版本标识，用来锁定“用哪一版模型做弛豫/特征识别/深度搜索”，并作为缓存与结果归属的版本键。\n\n在当前草稿里它有两处相关位置：\n- `calculation.mlip_version`：当前为 `null`，属于必填缺项（readiness.missing 已列出）。\n- `bohb.scope.mlip_version`：同样为 `null`，用于限定 BOHB 优化作用域；通常应与 `calculation.mlip_version` 保持一致。\n\n需要区分两点：\n1. 它只是“版本标签/元数据”，不是模型文件路径。模型文件路径是 `mlip.model_path`（超算端 MACE 模型路径，目前也为 `null`）。\n2. 它属于科学搜索配置，与本地 Open WebUI 的对话模型（DeepSeek V4.1 Flash / V4 Pro）无关，不要混用。\n\n建议取值方式（供你确认，不擅自填写）：\n- 若沿用草稿中 `mlip.name = \"mace-mh-1\"`，可把版本写成与之一致的标识，例如 `mace-mh-1`；\n- 若超算上实际模型有更明确的版本号（如带日期或 commit），请以实际为准。\n\n请确认：`calculation.mlip_version` 与 `bohb.scope.mlip_version` 是否都填 `mace-mh-1`，还是使用你超算上模型的真实版本号？\n\n待回答：\n- calculation.mlip_version 与 bohb.scope.mlip_version 是否都填 mace-mh-1？还是使用超算上 MACE 模型的真实版本号（如带日期/commit）？\n\n当前配置检查：\n- 缺项：calculation.mlip_version；mlip.model_path (超算端 MACE 模型路径)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\n\n工作区：E:\\0-FM-PhaseDiagram\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "已将本地 Agent 切换为 DeepSeek V4.1 Flash（`deepseek-flash`），并保存到本地 Open WebUI 运行时配置；从下一条消息起生效。搜索配置、API Key 和计算任务未修改。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "是的",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "收到你的“是的”。不过按首次配置流程，我需要先和你确认两项基础信息，才能展示设置 JSON 路径并等待你回复“确认”：\n\n1) 工作区根路径：草稿里目前是 E:\\0-FM-PhaseDiagram，请确认是否就用这个路径（或给出新路径）。\n2) Agent 模型版本：请选择 DeepSeek V4.1 Flash 或 V4 Pro（这是本地 Open WebUI 运行时模型，不会写入科学搜索配置）。\n\n另外说明：草稿中的 bootstrap_hints（本地母结构目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct、期望相文件 O3/O1/P3/OP2.vasp、超算 MACE 模型路径 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model）目前只是候选建议值，尚未写入或确认，需要你逐项核对。超算上的 MACE 模型路径仅作为远端配置元数据记录，本地不会尝试打开或加载它。\n\n在你回复“确认”之前，我不会创建设置 JSON、工作区目录，也不会修改运行时模型。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 确认\nASSISTANT: 已确认工作区：E:\\0-FM-PhaseDiagram\nAgent 模型版本：DeepSeek V4.1 Flash（`deepseek-flash`）\n已在确认的工作区生成带注释的设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json。\n请按 JSON 注释填写或核对体系边界、母结构、MLIP 路径、预算、DFT 参数和收敛标准。\n\n需要补齐：\n- calculation.mlip_version\n- mlip.model_path (超算端 MACE 模型路径)\n- system.boundary (需要 P、H、TM_ratio)\n- system.phase_references (各相母结构文件)\n\n完成后发送“读取配置 JSON”，由 Agent 审核；Agent 通过后你回复“同意”即可开始搜索流程。\nUSER: calculation.mlip_version 是什么\nASSISTANT: `calculation.mlip_version` 是本次搜索所使用的机器学习势（MLIP）的版本标识，用来锁定“用哪一版模型做弛豫/特征识别/深度搜索”，并作为缓存与结果归属的版本键。\n\n在当前草稿里它有两处相关位置：\n- `calculation.mlip_version`：当前为 `null`，属于必填缺项（readiness.missing 已列出）。\n- `bohb.scope.mlip_version`：同样为 `null`，用于限定 BOHB 优化作用域；通常应与 `calculation.mlip_version` 保持一致。\n\n需要区分两点：\n1. 它只是“版本标签/元数据”，不是模型文件路径。模型文件路径是 `mlip.model_path`（超算端 MACE 模型路径，目前也为 `null`）。\n2. 它属于科学搜索配置，与本地 Open WebUI 的对话模型（DeepSeek V4.1 Flash / V4 Pro）无关，不要混用。\n\n建议取值方式（供你确认，不擅自填写）：\n- 若沿用草稿中 `mlip.name = \"mace-mh-1\"`，可把版本写成与之一致的标识，例如 `mace-mh-1`；\n- 若超算上实际模型有更明确的版本号（如带日期或 commit），请以实际为准。\n\n请确认：`calculation.mlip_version` 与 `bohb.scope.mlip_version` 是否都填 `mace-mh-1`，还是使用你超算上模型的真实版本号？\n\n待回答：\n- calculation.mlip_version 与 bohb.scope.mlip_version 是否都填 mace-mh-1？还是使用超算上 MACE 模型的真实版本号（如带日期/commit）？\n\n当前配置检查：\n- 缺项：calculation.mlip_version；mlip.model_path (超算端 MACE 模型路径)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\n\n工作区：E:\\0-FM-PhaseDiagram\nUSER: 是的\nASSISTANT: 收到你的“是的”。不过按首次配置流程，我需要先和你确认两项基础信息，才能展示设置 JSON 路径并等待你回复“确认”：\n\n1) 工作区根路径：草稿里目前是 E:\\0-FM-PhaseDiagram，请确认是否就用这个路径（或给出新路径）。\n2) Agent 模型版本：请选择 DeepSeek V4.1 Flash 或 V4 Pro（这是本地 Open WebUI 运行时模型，不会写入科学搜索配置）。\n\n另外说明：草稿中的 bootstrap_hints（本地母结构目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct、期望相文件 O3/O1/P3/OP2.vasp、超算 MACE 模型路径 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model）目前只是候选建议值，尚未写入或确认，需要你逐项核对。超算上的 MACE 模型路径仅作为远端配置元数据记录，本地不会尝试打开或加载它。\n\n在你回复“确认”之前，我不会创建设置 JSON、工作区目录，也不会修改运行时模型。\n\n待回答：\n- 请确认工作区根路径是否为 E:\\0-FM-PhaseDiagram，或提供新的路径。\n- 请选择 Agent 模型版本：DeepSeek V4.1 Flash 还是 V4 Pro？\n- 请核对候选建议值：本地母结构目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct 及相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp 是否正确？\n- 请核对超算端 MACE 模型路径 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model 是否正确（仅作远端元数据）？\n\n当前配置检查：\n- 缺项：calculation.mlip_version；mlip.model_path (超算端 MACE 模型路径)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\n\n工作区：E:\\0-FM-PhaseDiagram\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "已将本地 Agent 切换为 DeepSeek V4.1 Flash（`deepseek-flash`），并保存到本地 Open WebUI 运行时配置；从下一条消息起生效。搜索配置、API Key 和计算任务未修改。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "开始",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "author": "agent_draft_suggestion",
+      "changes": [
+        {
+          "constraint_type": "unclassified",
+          "new": "mace-mh-1",
+          "old": null,
+          "path": "bohb.scope.mlip_version",
+          "reason": "用户确认 calculation.mlip_version 与 bohb.scope.mlip_version 均使用 mace-mh-1，与 mlip.name 保持一致。"
+        },
+        {
+          "constraint_type": "unclassified",
+          "new": "mace-mh-1",
+          "old": null,
+          "path": "calculation.mlip_version",
+          "reason": "用户确认 calculation.mlip_version 与 bohb.scope.mlip_version 均使用 mace-mh-1，与 mlip.name 保持一致。"
+        }
+      ],
+      "revision": 3,
+      "type": "config_revision"
+    },
+    {
+      "message": "已记录：`calculation.mlip_version` 与 `bohb.scope.mlip_version` 均记为 `mace-mh-1`（与 `mlip.name` 一致）。工作区 E:\\0-FM-PhaseDiagram 已确认锁定，不再重复询问。\n\n设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json\n工作区根目录：E:\\0-FM-PhaseDiagram\n主要文件位置：\n- 候选结构：E:\\0-FM-PhaseDiagram\\current\\candidate_structures\n- 相图输出：E:\\0-FM-PhaseDiagram\\current\\phase_diagrams\n- 状态/台账：E:\\0-FM-PhaseDiagram\\current\\state.json、E:\\0-FM-PhaseDiagram\\current\\phase_data.json\n- 配置快照：E:\\0-FM-PhaseDiagram\\config_snapshots\n（以上 storage.paths 你可自行调整。）\n\n仍需你填写/核对的内容：\n1) mlip.model_path：超算端 MACE 模型路径（仅作远端元数据，本地不会加载）。候选建议值 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}，请确认边界取值）。\n3) system.phase_references：各相母结构文件。候选建议：本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n说明：以上候选值仅为建议，尚未写入草稿，需你确认后我再更新。填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: 已记录：`calculation.mlip_version` 与 `bohb.scope.mlip_version` 均记为 `mace-mh-1`（与 `mlip.name` 一致）。工作区 E:\\0-FM-PhaseDiagram 已确认锁定，不再重复询问。\n\n设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json\n工作区根目录：E:\\0-FM-PhaseDiagram\n主要文件位置：\n- 候选结构：E:\\0-FM-PhaseDiagram\\current\\candidate_structures\n- 相图输出：E:\\0-FM-PhaseDiagram\\current\\phase_diagrams\n- 状态/台账：E:\\0-FM-PhaseDiagram\\current\\state.json、E:\\0-FM-PhaseDiagram\\current\\phase_data.json\n- 配置快照：E:\\0-FM-PhaseDiagram\\config_snapshots\n（以上 storage.paths 你可自行调整。）\n\n仍需你填写/核对的内容：\n1) mlip.model_path：超算端 MACE 模型路径（仅作远端元数据，本地不会加载）。候选建议值 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}，请确认边界取值）。\n3) system.phase_references：各相母结构文件。候选建议：本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n说明：以上候选值仅为建议，尚未写入草稿，需你确认后我再更新。填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。\n\n草稿修改（仅草稿，尚未确认）：\n- bohb.scope.mlip_version [unclassified]: \"mace-mh-1\"；原因：用户确认 calculation.mlip_version 与 bohb.scope.mlip_version 均使用 mace-mh-1，与 mlip.name 保持一致。\n- calculation.mlip_version [unclassified]: \"mace-mh-1\"；原因：用户确认 calculation.mlip_version 与 bohb.scope.mlip_version 均使用 mace-mh-1，与 mlip.name 保持一致。\n\n待回答：\n- 请确认超算端 MACE 模型路径 mlip.model_path（候选：/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model）。\n- 请提供 system.boundary 的 P、H、TM_ratio 取值。\n- 请核对 system.phase_references：本地母结构目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct 及相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp 是否正确？\n\n当前配置检查：\n- 缺项：mlip.model_path (超算端 MACE 模型路径)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\n\n工作区：E:\\0-FM-PhaseDiagram\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "我已检查当前草稿。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nGenerate 1-3 broad tags categorizing the main themes of the chat history, along with 1-3 more specific subtopic tags.\n\n### Guidelines:\n- Start with high-level domains (e.g. Science, Technology, Philosophy, Arts, Politics, Business, Health, Sports, Entertainment, Education)\n- Consider including relevant subfields/subdomains if they are strongly represented throughout the conversation\n- If content is too short (less than 3 messages) or too diverse, use only [\"General\"]\n- Use the chat's primary language; default to English if multilingual\n- Prioritize accuracy over specificity\n\n### Output:\nJSON format: { \"tags\": [\"tag1\", \"tag2\", \"tag3\"] }\n\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: 已记录：`calculation.mlip_version` 与 `bohb.scope.mlip_version` 均记为 `mace-mh-1`（与 `mlip.name` 一致）。工作区 E:\\0-FM-PhaseDiagram 已确认锁定，不再重复询问。\n\n设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json\n工作区根目录：E:\\0-FM-PhaseDiagram\n主要文件位置：\n- 候选结构：E:\\0-FM-PhaseDiagram\\current\\candidate_structures\n- 相图输出：E:\\0-FM-PhaseDiagram\\current\\phase_diagrams\n- 状态/台账：E:\\0-FM-PhaseDiagram\\current\\state.json、E:\\0-FM-PhaseDiagram\\current\\phase_data.json\n- 配置快照：E:\\0-FM-PhaseDiagram\\config_snapshots\n（以上 storage.paths 你可自行调整。）\n\n仍需你填写/核对的内容：\n1) mlip.model_path：超算端 MACE 模型路径（仅作远端元数据，本地不会加载）。候选建议值 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}，请确认边界取值）。\n3) system.phase_references：各相母结构文件。候选建议：本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n说明：以上候选值仅为建议，尚未写入草稿，需你确认后我再更新。填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。\n\n草稿修改（仅草稿，尚未确认）：\n- bohb.scope.mlip_version [unclassified]: \"mace-mh-1\"；原因：用户确认 calculation.mlip_version 与 bohb.scope.mlip_version 均使用 mace-mh-1，与 mlip.name 保持一致。\n- calculation.mlip_version [unclassified]: \"mace-mh-1\"；原因：用户确认 calculation.mlip_version 与 bohb.scope.mlip_version 均使用 mace-mh-1，与 mlip.name 保持一致。\n\n待回答：\n- 请确认超算端 MACE 模型路径 mlip.model_path（候选：/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model）。\n- 请提供 system.boundary 的 P、H、TM_ratio 取值。\n- 请核对 system.phase_references：本地母结构目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct 及相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp 是否正确？\n\n当前配置检查：\n- 缺项：mlip.model_path (超算端 MACE 模型路径)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\n\n工作区：E:\\0-FM-PhaseDiagram\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "当前草稿已检查，工作区 E:\\0-FM-PhaseDiagram 已锁定，`calculation.mlip_version` 与 `bohb.scope.mlip_version` 已记为 `mace-mh-1`。设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json。\n\n仍有三项阻止开始搜索的缺项，需你确认后我再更新草稿（候选值仅为建议，尚未写入）：\n1) mlip.model_path：超算端 MACE 模型路径（仅远端元数据，本地不会加载）。候选 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio 的边界取值（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}）。\n3) system.phase_references：各相母结构文件。候选本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "开始",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "当前草稿已检查，工作区 E:\\0-FM-PhaseDiagram 已锁定，`calculation.mlip_version` 与 `bohb.scope.mlip_version` 已记为 `mace-mh-1`。设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json。\n\n仍有三项阻止开始搜索的缺项，需你确认后我再更新草稿（候选值仅为建议，尚未写入）：\n1) mlip.model_path：超算端 MACE 模型路径（仅远端元数据，本地不会加载）。候选 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio 的边界取值（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}）。\n3) system.phase_references：各相母结构文件。候选本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON object with a \"follow_ups\" key containing an array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: 当前草稿已检查，工作区 E:\\0-FM-PhaseDiagram 已锁定，`calculation.mlip_version` 与 `bohb.scope.mlip_version` 已记为 `mace-mh-1`。设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json。\n\n仍有三项阻止开始搜索的缺项，需你确认后我再更新草稿（候选值仅为建议，尚未写入）：\n1) mlip.model_path：超算端 MACE 模型路径（仅远端元数据，本地不会加载）。候选 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio 的边界取值（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}）。\n3) system.phase_references：各相母结构文件。候选本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。\n\n待回答：\n- 请确认超算端 MACE 模型路径 mlip.model_path（候选：/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model）。\n- 请提供 system.boundary 的 P、H、TM_ratio 取值。\n- 请核对 system.phase_references：本地母结构目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct 及相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp 是否正确？\n\n当前配置检查：\n- 缺项：mlip.model_path (超算端 MACE 模型路径)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\n\n工作区：E:\\0-FM-PhaseDiagram\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "当前草稿仍有三项阻止开始搜索的缺项，需你确认后我再更新草稿（候选值仅为建议，尚未写入）：\n1) mlip.model_path：超算端 MACE 模型路径（仅远端元数据，本地不会加载）。候选 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio 的边界取值（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}）。\n3) system.phase_references：各相母结构文件。候选本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。",
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "message": "### Task:\nGenerate 1-3 broad tags categorizing the main themes of the chat history, along with 1-3 more specific subtopic tags.\n\n### Guidelines:\n- Start with high-level domains (e.g. Science, Technology, Philosophy, Arts, Politics, Business, Health, Sports, Entertainment, Education)\n- Consider including relevant subfields/subdomains if they are strongly represented throughout the conversation\n- If content is too short (less than 3 messages) or too diverse, use only [\"General\"]\n- Use the chat's primary language; default to English if multilingual\n- Prioritize accuracy over specificity\n\n### Output:\nJSON format: { \"tags\": [\"tag1\", \"tag2\", \"tag3\"] }\n\n### Chat History:\n<chat_history>\nUSER: 开始\nASSISTANT: 当前草稿已检查，工作区 E:\\0-FM-PhaseDiagram 已锁定，`calculation.mlip_version` 与 `bohb.scope.mlip_version` 已记为 `mace-mh-1`。设置 JSON：E:\\0-FM-PhaseDiagram\\search_config.draft.json。\n\n仍有三项阻止开始搜索的缺项，需你确认后我再更新草稿（候选值仅为建议，尚未写入）：\n1) mlip.model_path：超算端 MACE 模型路径（仅远端元数据，本地不会加载）。候选 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio 的边界取值（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}）。\n3) system.phase_references：各相母结构文件。候选本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。\n\n待回答：\n- 请确认超算端 MACE 模型路径 mlip.model_path（候选：/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model）。\n- 请提供 system.boundary 的 P、H、TM_ratio 取值。\n- 请核对 system.phase_references：本地母结构目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct 及相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp 是否正确？\n\n当前配置检查：\n- 缺项：mlip.model_path (超算端 MACE 模型路径)；system.boundary (需要 P、H、TM_ratio)；system.phase_references (各相母结构文件)\n\n工作区：E:\\0-FM-PhaseDiagram\n</chat_history>",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "message": "当前草稿仍有三项阻止开始搜索的缺项，需你确认后我再更新草稿（候选值仅为建议，尚未写入）：\n1) mlip.model_path：超算端 MACE 模型路径（仅远端元数据，本地不会加载）。候选 /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model，请确认或给出正确路径。\n2) system.boundary：需要 P、H、TM_ratio 的边界取值（当前草稿仅有 system.constraints.TM_ratio = {Fe:1, Mn:1}）。\n3) system.phase_references：各相母结构文件。候选本地目录 E:\\0-FM-PhaseDiagram\\InitFile\\Struct，相文件 O3.vasp/O1.vasp/P3.vasp/OP2.vasp，请逐项核对。\n\n填写完成后发送“读取配置 JSON”，由 Agent 审核；Agent 与程序检查均通过后，你回复“同意”才开始搜索流程。",
+      "role": "assistant",
+      "type": "message"
+    }
+  ],
+  "draft_revision": 3,
+  "editable_config_json_path": "E:\\0-FM-PhaseDiagram\\search_config.draft.json",
+  "session_id": "config-5ac61269e3d2",
+  "setup_stage": "json_ready",
+  "status": "draft"
+}

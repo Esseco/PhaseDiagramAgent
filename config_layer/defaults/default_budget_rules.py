@@ -12,11 +12,12 @@ def default_budget_rules() -> dict:
                        "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step"},
         "structure_limits": {"max_atoms": 500, "max_det_H": 64, "max_proxy_cost_per_task": None},
         "stage_limits": {
-            "simple_check": {"max_tasks": None, "max_cost": 20.0, "task_cost": 0.05},
-            "relax_and_feature": {"max_tasks": 500, "max_cost": 500.0, "task_cost": 1.0},
-            "deep_search": {"max_tasks": 100, "max_cost": 4000.0, "task_cost": 1.0},
+            # Overall priority: MLIP exploration > DFT single-point > DFT relaxation.
+            "simple_check": {"max_tasks": None, "max_cost": 100.0, "task_cost": 0.05},
+            "relax_and_feature": {"max_tasks": 500, "max_cost": 3000.0, "task_cost": 1.0},
+            "deep_search": {"max_tasks": 100, "max_cost": 9000.0, "task_cost": 1.0},
             "dft_single_point": {"max_tasks": 100, "max_cost": 6000.0, "task_cost": 30.0},
-            "dft_relax": {"max_tasks": 2, "max_cost": 15000.0, "task_cost": 900.0},
+            "dft_relax": {"max_tasks": 2, "max_cost": 1900.0, "task_cost": 900.0},
         },
         "llm_limits": {
             "max_calls": 100,

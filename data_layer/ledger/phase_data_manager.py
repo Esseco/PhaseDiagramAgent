@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from copy import deepcopy
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, ClassVar
@@ -39,6 +40,12 @@ class PhaseDataManager:
     }
 
     def __init__(self, boundary: dict[str, Any], system_config: dict[str, Any] | None = None) -> None:
+        system_config = deepcopy(system_config) if system_config is not None else None
+        space = (system_config or {}).get("configuration_space") or {}
+        if (space.get("roles") or {}).get("T") == "fixed":
+            schema = (system_config.get("branch_schema") or {}).get("fields")
+            if schema == ["P", "H", "x", "T"]:
+                system_config["branch_schema"]["fields"] = ["P", "H", "x"]
         workflow = (system_config or {}).get("calculation_workflow", {})
         stage_specs = workflow.get("stages") or [
             {"name": name, "label": self.STAGE_LABELS[name]} for name in self.STAGES
@@ -87,6 +94,8 @@ class PhaseDataManager:
             branches[branch_id] = {
                 "branch_id": branch_id,
                 **key,
+                **({"T": json_safe(parameters["T"])}
+                   if "T" in parameters and "T" not in key else {}),
                 "det_H": det_H(key["H"]) if "H" in key else None,
                 "composition": json_safe(composition),
                 "structure_ids": [],
@@ -95,6 +104,12 @@ class PhaseDataManager:
             existing = {name: branches[branch_id][name] for name in schema}
             if existing != key:
                 raise RuntimeError(f"branch 编号冲突：{branch_id}")
+            if "T" in parameters and "T" not in schema:
+                old_T = branches[branch_id].get("T")
+                new_T = json_safe(parameters["T"])
+                if old_T is not None and old_T != new_T:
+                    raise ValueError("固定 T 与已有 branch 的母结构占位不一致")
+                branches[branch_id].setdefault("T", new_T)
             _fill_if_missing(branches[branch_id], "composition", composition)
         return branch_id
 

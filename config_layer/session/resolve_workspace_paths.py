@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from config_layer.session.validate_workspace_root import validate_workspace_root
 
 
 DEFAULT_WORKSPACE_PATHS = {
@@ -24,7 +25,7 @@ DEFAULT_WORKSPACE_PATHS = {
 
 def default_workspace_storage(workspace_root, *, path_overrides=None, base_directory=None) -> dict:
     """Return the editable storage section; paths are relative to one root."""
-    root = Path(workspace_root).resolve()
+    root = Path(validate_workspace_root(str(workspace_root))).resolve()
     paths = deepcopy(DEFAULT_WORKSPACE_PATHS)
     for key, configured in (path_overrides or {}).items():
         if key not in paths or not configured:
@@ -54,7 +55,7 @@ def resolve_workspace_paths(config: dict, *, base_directory) -> dict[str, Path]:
     root_value = storage.get("workspace_root")
     if not isinstance(root_value, str) or not root_value.strip():
         raise ValueError("storage.workspace_root 必须是非空路径")
-    root = Path(root_value).expanduser()
+    root = Path(validate_workspace_root(root_value)).expanduser()
     if not root.is_absolute():
         root = Path(base_directory) / root
     root = root.resolve()

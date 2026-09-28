@@ -12,6 +12,7 @@ from pymatgen.core import Element, Structure
 
 from scientific_layer.structures.boundary_utils import (
     allowed_phases,
+    allowed_phases_at_x,
     allowed_supercells,
     load_structure,
     normalize_H,
@@ -28,12 +29,16 @@ def generate_branch_structure(
     phase_references: dict[str, Structure | str | Path],
     element_ratio: dict[str, int | float] | None = None,
     T: list[str] | None = None,
+    preserve_reference_tm: bool = False,
     oxidation_states: dict[str, int | float] | None = None,
     seed: int | None = None,
+    enforce_phase_composition: bool = True,
 ) -> Structure:
     phase = phase.upper()
     if phase not in allowed_phases(boundary["P"]):
         raise ValueError(f"相 {phase!r} 不在 boundary['P'] 中")
+    if enforce_phase_composition and phase not in allowed_phases_at_x(boundary["P"], x):
+        raise ValueError(f"相 {phase!r} 不允许在 x={x} 生成")
     references = {str(key).upper(): value for key, value in phase_references.items()}
     if phase not in references:
         raise ValueError(f"缺少相 {phase!r} 的母结构")
@@ -43,7 +48,13 @@ def generate_branch_structure(
 
     structure = load_structure(references[phase])
     structure.make_supercell(matrix)
-    _assign_tm(structure, element_ratio or boundary["TM_ratio"], seed, T)
+    if preserve_reference_tm:
+        if T is not None:
+            raise ValueError("固定 T 时不能同时传入重新排列的 T")
+        from scientific_layer.structures.identify_branch import extract_T
+        extract_T(structure, element_ratio or boundary["TM_ratio"])
+    else:
+        _assign_tm(structure, element_ratio or boundary["TM_ratio"], seed, T)
     structure = _assign_na(structure, x, oxidation_states)
     structure.sort()
     return structure
@@ -125,7 +136,10 @@ def _assign_na(
     for index in indices:
         structure.replace(index, {"Na": occupancy})
     if oxidation_states is None:
-        structure.add_oxidation_state_by_guess()
+        try:
+            structure.add_oxidation_state_by_guess()
+        except ValueError as error:
+            _assign_charge_balanced_average_tm_valence(structure, fraction, error)
     else:
         structure.add_oxidation_state_by_element(oxidation_states)
     from Process_Vasp.structure import gen_ESGS_structure
@@ -136,3 +150,32 @@ def _assign_na(
     ordered = generated[0]
     ordered.remove_oxidation_states()
     return ordered
+
+
+def _assign_charge_balanced_average_tm_valence(structure, x, cause):
+    """Fallback for fractional occupancy: neutral average TM valence for Ewald ranking."""
+    composition = structure.composition.get_el_amt_dict()
+    oxygen_count = float(composition.get("O", 0))
+    alkali = {symbol for symbol in composition if symbol in {"Li", "Na", "K", "Rb", "Cs"}}
+    alkali_count = sum(float(composition[symbol]) for symbol in alkali)
+    tm_symbols = sorted(
+        symbol for symbol in composition
+        if Element(symbol).is_transition_metal and symbol not in alkali
+    )
+    tm_count = sum(float(composition[symbol]) for symbol in tm_symbols)
+    other = sorted(set(composition) - set(tm_symbols) - alkali - {"O"})
+    if oxygen_count <= 0 or tm_count <= 0 or other:
+        raise ValueError(
+            f"x={x} 无法自动生成电中性静电排序电荷；未知元素={other}。"
+            "请在生成配置中显式提供 oxidation_states。"
+        ) from cause
+    average_tm_charge = (2.0 * oxygen_count - alkali_count) / tm_count
+    states = {symbol: 1.0 for symbol in alkali}
+    states["O"] = -2.0
+    states.update({symbol: average_tm_charge for symbol in tm_symbols})
+    try:
+        structure.add_oxidation_state_by_element(states)
+    except (ValueError, KeyError) as error:
+        raise ValueError(
+            f"x={x} 按电中性计算平均 TM 氧化态失败；请显式提供 oxidation_states。"
+        ) from error

@@ -1,11 +1,13 @@
 """统一相对成本估算；基准参数需用实际同后端任务校准。"""
 
 import math
-from config_layer.defaults.default_budget_rules import default_budget_rules
 
 
 def estimate_stage_cost(stage, *, atom_count=None, initial_state_count=1, mc_steps=None, budgets=None):
-    rules = default_budget_rules() if budgets is None else budgets
+    if budgets is None:
+        from config_layer.defaults.default_budget_rules import default_budget_rules
+        budgets = default_budget_rules()
+    rules = budgets
     model = rules.get("cost_model", {})
     reference = float(model.get("reference_atoms", 40))
     atoms = reference if atom_count is None else float(atom_count)

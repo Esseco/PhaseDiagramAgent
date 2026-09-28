@@ -13,8 +13,18 @@
 候选结构可先进入独立 `offline_check_dedup` 批次，只有本地校验去重结果后，正式 Relax/MC
 任务才可越过去重门。不同 `periodic_search_space_id` 的结构禁止自动合并。
 
-第一版可人工上传下载；`ManualUploadBatchRunner` 写出 manifest、快照、SHA256SUMS 和操作
-说明。自动同步继续复用同一协议。自动模式只通过有有效期、总预算、单批成本、并发限制和
+第一版可人工上传下载；`ManualUploadBatchRunner` 将兼容 Relax task 最多 100 个、MC task
+最多 20 个放在一个上传批次目录，写出 manifest、快照、SHA256SUMS 和操作说明。
+MLIP 批次只提交根目录 `GPU.sh` 一次；批内 task 仍各有独立目录、日志、结果和完成标记。
+`RELAX_UPLOAD_PLAN.json` 按 branch 列出所有待上传批次与任务，一个批次可覆盖多个 branch。
+MLIP Relax/MC 每个批次根目录有一个 `run_mlip_batch.py` 和一个 `GPU.sh`；
+每个 task 子目录仅保存输入、独立结果与日志。Relax 正常停止即可入池，不要求额外的
+`converged` 标志；最终 `.vasp` 必须下载并通过存在性/可用时的校验值检查后才入账。
+MC 输入使用该已下载的最低能 Relax 结构，同时打包原始满 Na 模板。MC 预算分配后
+先生成可上传输入并经人工审批，不能仅凭创建 task 就声称已提交。大轨迹不回传。
+DFT 必须先由 atomate 在同目录生成 POSCAR、INCAR、KPOINTS、POTCAR，且每个 DFT task
+独立提交其目录中的 `GPU.sh`。人工模式不生成数组提交脚本，也不执行提交。
+自动同步继续复用同一协议。自动模式只通过有有效期、总预算、单批成本、并发限制和
 允许动作集合的确认快照执行一个有界步骤；DFT Relax、模型激活和硬约束变更永远退出到
 单独人工确认。操作异常或提交结果不确定时暂停，必须先查询，不能盲目重提。调用
 `disable_automatic_mode` 可随时退回调试模式。

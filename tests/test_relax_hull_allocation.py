@@ -35,13 +35,30 @@ def test_uncertainty_affects_allocation_with_exploration():
     assert any(c['branch_id'] == '2' for c in result['selected'])
 
 
+def test_fewer_than_three_relaxed_structures_use_minimum_without_sigma():
+    records = [row('a', {'Na': 1}, -2), row('a', {'Na': 1}, -1),
+               row('b', {'Fe': 1}, -1)]
+    pool = build_relax_hull(records, model_version='m1')
+    ranked, missing = rank_relaxed_branches([{'branch_id': 'a'}, {'branch_id': 'b'}], pool)
+    assert not missing
+    assert ranked[0]['relaxed_energy_per_atom'] == -2
+    assert ranked[0]['branch_relax_sample_count'] == 2
+    assert ranked[0]['branch_energy_std_per_atom'] is None
+    assert ranked[0]['allocation_score'] == ranked[0]['relaxed_ehull']
+    assert ranked[1]['branch_relax_sample_count'] == 1
+    assert ranked[1]['branch_energy_std_per_atom'] is None
+    assert ranked[1]['allocation_score'] == ranked[1]['relaxed_ehull']
+
+
 def test_screening_reserves_relax_before_any_mc_and_reuses_results(tmp_path):
     h = [[1,0,0],[0,1,0],[0,0,1]]
     manager = PhaseDataManager({'P':['O3'], 'H':{'O3':[h]}, 'TM_ratio':{'Fe':1}})
     bid = manager.add_branch(P='O3', H=h, x=1, T=['Fe'], composition={'Fe':1})
     path = tmp_path/'initial.vasp'
     Structure(Lattice.cubic(3), ['Fe'], [[0,0,0]]).to(filename=str(path), fmt='poscar')
-    for i in range(3): manager.add_structure(branch_id=bid, arrangement={'i':i}, source_path=path)
+    for i in range(3):
+        manager.add_structure(branch_id=bid, arrangement={'i':i}, source_path=path,
+                              metadata={'initialization_method': 'electrostatic_top10_random3_layer_occupied'})
     config = {'bohb':{'relax_structures_per_branch':3}, 'mlip':{'version':'m1'}, 'budgets':default_budget_rules()}
     context = {'manager':manager, 'phase_references':{}, 'effective_config':config, 'config_version':'v1'}
     candidates = [manager.data['branches'][bid]]
@@ -69,7 +86,8 @@ def test_agent_branch_batch_is_filtered_before_relax(tmp_path):
     Structure(Lattice.cubic(3), ['Fe'], [[0,0,0]]).to(filename=str(path), fmt='poscar')
     for branch_id in (selected, excluded):
         for i in range(3):
-            manager.add_structure(branch_id=branch_id, arrangement={'i':i}, source_path=path)
+            manager.add_structure(branch_id=branch_id, arrangement={'i':i}, source_path=path,
+                                  metadata={'initialization_method': 'electrostatic_top10_random3_layer_occupied'})
     config = {'bohb': default_bohb_config(), 'mlip': {'version':'m1'},
               'budgets': default_budget_rules(), 'seed': 42,
               'structure_directory': str(tmp_path/'structures'),

@@ -9,6 +9,10 @@ def validate_system_config(config: dict) -> dict:
     fields = config["branch_schema"].get("fields", [])
     if not fields or len(fields) != len(set(fields)):
         raise ValueError("branch_schema.fields 必须非空且不能重复")
+    from config_layer.schema.validate_configuration_space import validate_configuration_space
+    roles = validate_configuration_space(config)
+    if not roles["valid"]:
+        raise ValueError("；".join(roles["errors"]))
     stages = config["calculation_workflow"].get("stages", [])
     names = [item.get("name") for item in stages]
     if not names or None in names or len(names) != len(set(names)):

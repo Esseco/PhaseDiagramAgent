@@ -11,6 +11,9 @@ from typing import Any
 from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
 from pymatgen.core import Composition
 
+from analysis_layer.phase.check_na_layer_uniformity import check_na_layer_uniformity
+from analysis_layer.phase.export_phase_diagram_csv import export_phase_diagram_csv
+
 
 def update_phase_diagram(
     records: list[dict[str, Any]],
@@ -60,6 +63,9 @@ def update_phase_diagram(
         if output_directory is not None:
             directory = Path(output_directory)
             directory.mkdir(parents=True, exist_ok=True)
+            csv_path = directory / f"phase_diagram_{method}_{snapshot['version']}.csv"
+            export_phase_diagram_csv(snapshot, csv_path)
+            snapshot["csv_path"] = str(csv_path)
             path = directory / f"phase_diagram_{method}_{snapshot['version']}.json"
             path.write_text(
                 json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True)
@@ -118,10 +124,14 @@ def _build_snapshot(method, records, rejected, basis, parent):
         ]
         diagram = PhaseDiagram(entries)
         for item, entry in zip(records, entries, strict=True):
+            na_check = check_na_layer_uniformity(
+                item.get("structure_path"), item["composition"])
             snapshot["entries"].append(
                 {
                     "record_id": item.get("record_id"),
                     "structure_id": item.get("structure_id"),
+                    "structure_path": item.get("structure_path"),
+                    "phase": item.get("phase"),
                     "composition": item["composition"],
                     "original_energy": item["original_energy"],
                     "normalized_total_energy": item["normalized_total_energy"],
@@ -129,6 +139,9 @@ def _build_snapshot(method, records, rejected, basis, parent):
                     "ehull_unit": "eV/atom",
                     "is_stable": entry in diagram.stable_entries,
                     "source_version": item.get("source_version"),
+                    "na_layer_uniform": na_check["uniform"],
+                    "na_layer_status": na_check["status"],
+                    "na_layer_rule": na_check["rule"],
                 }
             )
     except Exception as error:

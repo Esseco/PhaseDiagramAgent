@@ -7,6 +7,7 @@ RUNTIME_KEYS = {
     "structure_directory", "state_path", "ledger_path", "branch_energy_pool_ledger_path",
     "phase_diagram_directory", "work_directory", "task_versions",
     "mlip", "deepseek", "approval_directory", "local_action_directory",
+    "upload_batches_directory",
 }
 
 
@@ -20,7 +21,19 @@ def build_effective_run_config(config_session: dict, runtime_config: dict | None
     effective = deepcopy(confirmed)
     for key, value in supplied.items():
         if key in RUNTIME_KEYS:
-            effective[key] = value
+            if key == "mlip" and isinstance(value, dict):
+                # Runtime defaults contain empty model paths. Do not let those
+                # defaults erase the confirmed remote model path or parameters.
+                merged_mlip = deepcopy(effective.get("mlip") or {})
+                for model_key, model_value in value.items():
+                    if model_value is None or model_value == "":
+                        continue
+                    if isinstance(model_value, (dict, list, tuple)) and not model_value:
+                        continue
+                    merged_mlip[model_key] = deepcopy(model_value)
+                effective[key] = merged_mlip
+            else:
+                effective[key] = value
     if "system" in confirmed:
         effective["system_config"] = deepcopy(confirmed["system"])
     for key in ("budgets", "dft", "convergence", "agent", "frozen_parameters"):

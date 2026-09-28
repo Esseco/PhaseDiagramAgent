@@ -1,6 +1,6 @@
 {
   "config_session_path": "../local/config_session.json",
-  "editable_config_draft_path": "search_config.draft.json",
+  "editable_config_draft_path": "search_config.project.json",
   "state_path": "../local/current/state.json",
   "ledger_path": "../local/current/phase_data.json",
   "phase_references_path": "../local/phase_references.json",

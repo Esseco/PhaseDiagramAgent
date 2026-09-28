@@ -19,6 +19,7 @@ from pymatgen.core import Element, Structure
 
 from scientific_layer.structures.boundary_utils import (
     allowed_phases,
+    allowed_phases_at_x,
     allowed_supercells,
     det_H,
     load_structure,
@@ -35,6 +36,7 @@ def identify_branch_parameters(
     ambiguity_tolerance: float = 1e-6,
     layer_tolerance: float = 0.08,
     use_coordination_phase: bool = True,
+    phase_hint: str | None = None,
 ) -> dict[str, Any]:
     present = load_structure(structure)
     references = {
@@ -45,8 +47,12 @@ def identify_branch_parameters(
         raise ValueError("phase_references 不能为空")
 
     diagnostic = {"phase": None, "method": "coordination_disabled"}
-    phase_hint = None
-    if use_coordination_phase:
+    if phase_hint is not None:
+        phase_hint = str(phase_hint).upper()
+        if phase_hint not in references:
+            raise ValueError(f"phase_hint {phase_hint!r} 没有对应母结构")
+        diagnostic = {"phase": phase_hint, "method": "explicit_generation_label"}
+    elif use_coordination_phase:
         try:
             diagnostic = identify_phase(present, layer_tolerance=layer_tolerance)
             phase_hint = None if diagnostic["phase"] == "X" else diagnostic["phase"]
@@ -66,6 +72,8 @@ def identify_branch_parameters(
         ambiguity_tolerance=ambiguity_tolerance,
     )
     x = calculate_x(present)
+    if phase not in allowed_phases_at_x(boundary["P"], x):
+        raise ValueError(f"识别出相 {phase!r}、x={x}，但不符合 boundary.P 的组分规则")
     T, site_order = extract_T(present, boundary["TM_ratio"])
     composition = {
         element: _clean_number(amount)

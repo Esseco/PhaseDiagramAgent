@@ -18,6 +18,7 @@ def generate_composition_branches(
     quota: int,
     seed: int,
     oxidation_states: dict[str, int | float] | None = None,
+    preserve_reference_tm: bool = False,
 ) -> list[dict[str, Any]]:
     rng = random.Random(seed)
     tasks = []
@@ -37,13 +38,15 @@ def generate_composition_branches(
             phase=parent["P"],
             H=parent["H"],
             x=x,
-            T=parent["T"],
+            T=None if preserve_reference_tm else parent["T"],
+            preserve_reference_tm=preserve_reference_tm,
             phase_references=phase_references,
             oxidation_states=oxidation_states,
             seed=current_seed,
         )
         parameters = identify_branch_parameters(
-            structure, manager.boundary, phase_references=phase_references
+            structure, manager.boundary, phase_references=phase_references,
+            phase_hint=parent["P"],
         )
         candidates.append(
             _candidate(parameters, structure, "composition", parent_id, current_seed)

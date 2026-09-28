@@ -8,6 +8,9 @@ def estimate_proposal_cost(action, state):
     stages = []
     if tool == "allocate_mc_bohb":
         stages.append({"stage": "deep_search", "tasks": "BOHB-selected", "mc_steps": int(params.get("mc_budget", 0)), "initial_cost": float(action.get("budget", 0) or params.get("mc_budget", 0))})
+    elif tool == "prepare_local_batch_files" and params.get("mode") == "relax_inputs":
+        stages.append({"stage": "relax_and_feature", "tasks": "existing legal structures",
+                       "initial_cost": float(action.get("budget", 0) or 0)})
     elif tool == "select_dft_candidates":
         decisions = params.get("decisions") or []
         for name, stage in (("DFT_SINGLE_POINT", "dft_single_point"), ("DFT_RELAX", "dft_relax")):

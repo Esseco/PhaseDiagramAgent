@@ -3,6 +3,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import shlex
+import shutil
 from execution_layer.remote.integrity import payload_checksum, verify_result
 
 DFT_STAGES = {"dft_single_point", "dft_relax"}
@@ -35,13 +36,41 @@ class RemoteBatchRunner:
             relative_dir = Path(f"{index:05d}-{task['task_id']}"); task_dir = directory / relative_dir; task_dir.mkdir()
             task.update({"calculation_directory": str(relative_dir), "result_path": str(relative_dir / "result.json")})
             if task.get("stage") not in DFT_STAGES and self.task_preparer: task = self.task_preparer(task)
+            worker_job = task.get("worker_job") or {}
+            if task.get("stage") in {"relax_and_feature", "deep_search"} and worker_job:
+                original = Path(worker_job.get("structure_path") or "")
+                if not original.is_file():
+                    raise FileNotFoundError(f"Relax input structure missing: {original}")
+                staged = task_dir / "initial.vasp"
+                shutil.copy2(original, staged)
+                worker_job["structure_path"] = staged.name
+                worker_job["phase_references"] = {}
+                full_na = (worker_job.get("parameters") or {}).get("full_na_structure")
+                if full_na:
+                    source_full_na = Path(full_na)
+                    if not source_full_na.is_file():
+                        raise FileNotFoundError(f"full Na structure missing: {source_full_na}")
+                    staged_full_na = task_dir / "full_na_structure.vasp"
+                    shutil.copy2(source_full_na, staged_full_na)
+                    worker_job["parameters"]["full_na_structure"] = staged_full_na.name
+                checkpoint = worker_job.get("checkpoint")
+                if checkpoint:
+                    source_checkpoint = Path(checkpoint)
+                    if not source_checkpoint.is_file():
+                        raise FileNotFoundError(f"MC checkpoint missing: {source_checkpoint}")
+                    staged_checkpoint = task_dir / source_checkpoint.name
+                    shutil.copy2(source_checkpoint, staged_checkpoint)
+                    worker_job["checkpoint"] = staged_checkpoint.name
             if task.get("stage") in DFT_STAGES:
                 if self.dispatcher is None: raise ValueError("remote DFT task requires atomate dispatcher")
                 generated = self.dispatcher({**task, "work_directory": str(task_dir)})
                 output = generated.get("outputs") or generated.get("result") or generated
                 if output.get("generator") != "atomate": raise RuntimeError("DFT inputs must come from atomate")
                 task["atomate"] = output
-            task_path = task_dir / "task.json"; _write(task_path, task); checksum = payload_checksum(task)
+            task_path = task_dir / "task.json"
+            checksum = payload_checksum(task)
+            task["task_checksum"] = checksum
+            _write(task_path, task)
             entry = {"array_index": index, "batch_id": batch_id, "task_id": task["task_id"],
                      "task_key": task["task_key"], "stage": task.get("stage"),
                      "config_version": task.get("config_version"), "model_version": task.get("model_version"),
@@ -74,7 +103,13 @@ class RemoteBatchRunner:
             if task.get("task_id") in processed or not task.get("result_path"): continue
             result = Path(task["result_path"]); checked = verify_result(result, result.with_name("task.finished.json"), task)
             if checked["valid"] and checked["result"].get("status") in {"completed", "failed", "timeout", "cancelled"}:
-                recovered.append(checked["result"])
+                payload = checked["result"]
+                if task.get("stage") in {"relax_and_feature", "deep_search"} and payload.get("status") == "completed":
+                    from execution_layer.remote.resolve_local_relax_structure import resolve_local_relax_structure
+                    payload = resolve_local_relax_structure(payload, result.parent)
+                    if payload is None:
+                        continue
+                recovered.append(payload)
         return recovered
 
     def _select(self, state, tasks):

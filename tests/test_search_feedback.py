@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 import tempfile
+import csv
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,29 @@ from analysis_layer.phase.update_phase_diagram import update_phase_diagram
 
 
 class SearchFeedbackTest(unittest.TestCase):
+    def test_versioned_phase_csv_keeps_unknown_na_check(self):
+        records = [
+            {"record_id": "na", "energy_method": "mlip", "composition": {"Na": 1},
+             "energy": 0.0, "energy_unit": "eV", "source_version": "m1"},
+            {"record_id": "o", "energy_method": "mlip", "composition": {"O": 1},
+             "energy": 0.0, "energy_unit": "eV", "source_version": "m1"},
+            {"record_id": "oxide", "energy_method": "mlip",
+             "composition": {"Na": 2, "O": 1}, "energy": -3.0,
+             "energy_unit": "eV", "source_version": "m1"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            result = update_phase_diagram(records, output_directory=directory)
+            snapshot = result["diagrams"]["mlip"]
+            csv_path = Path(snapshot["csv_path"])
+            self.assertTrue(csv_path.is_file())
+            self.assertIn(snapshot["version"], csv_path.name)
+            with csv_path.open(encoding="utf-8-sig", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(len(rows), 3)
+            oxide = next(row for row in rows if row["record_id"] == "oxide")
+            self.assertEqual(oxide["na_layer_status"], "missing_final_structure")
+            self.assertEqual(oxide["x_Na_per_O2"], "4")
+
     def test_phase_diagrams_are_separate_and_reward_is_idempotent(self):
         records = []
         for method in ("mlip", "dft"):

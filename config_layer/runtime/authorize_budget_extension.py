@@ -11,6 +11,13 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
         current["confirmed_config_version"] = new_version
         current.setdefault("confirmed_config", deepcopy(confirmed_snapshot["config"]))
         return {"status": "unchanged", "state": current}
+    if _scientifically_empty(current):
+        current["confirmed_config_version"] = new_version
+        current["confirmed_config"] = deepcopy(confirmed_snapshot["config"])
+        current.setdefault("config_migrations", []).append({
+            "type": "empty_run_rebind", "from": old_version, "to": new_version,
+        })
+        return {"status": "empty_run_rebound", "state": current}
     if not user_approved:
         return {"status": "approval_required", "state": current}
     old = current.get("confirmed_config")
@@ -39,3 +46,17 @@ def _non_decreasing(old, new):
         elif replacement != value:
             return False
     return True
+
+
+def _scientifically_empty(state):
+    """A rejected/debug-only state may adopt a new confirmed snapshot safely."""
+    if state.get("tasks") or state.get("branch_candidates"):
+        return False
+    reservations = (state.get("budget_reservations") or {}).values()
+    if any(item.get("status") in {"reserved", "submitted", "running", "completed"}
+           for item in reservations):
+        return False
+    usage = state.get("budget_usage") or {}
+    if float(usage.get("total_relative_cost") or 0.0) > 0:
+        return False
+    return not (usage.get("stages") or {})

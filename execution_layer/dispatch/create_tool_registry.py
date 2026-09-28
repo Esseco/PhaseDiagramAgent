@@ -12,7 +12,7 @@ def create_tool_registry(handlers=None) -> dict:
         "prepare_local_batch_files": "execution_layer.local",
     }
     child_reservations = {"select_dft_candidates", "allocate_mc_bohb", "prepare_dedup_batch",
-                          "restart_failed_task"}
+                          "prepare_local_batch_files", "restart_failed_task"}
     return {
         name: {
             "name": name,

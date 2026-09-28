@@ -10,14 +10,14 @@ from pathlib import Path
 FORMAT_ID = "phase-search-config-draft-v1"
 
 INSTRUCTIONS = {
-    "purpose": "Edit config values, then tell phase-search-agent: 读取配置 JSON. This only updates the unconfirmed draft; it never confirms or starts calculations.",
+    "purpose": "Edit config values, then tell phase-search-agent: 读取配置 JSON. This reviews the unconfirmed draft only. To conditionally confirm and enter search-agent advice after both Agent and program checks pass, say: 读取配置 JSON 并继续. This never submits or starts scientific calculations.",
     "unknown_values": "Use null for unknown scalar values. Do not delete fields or invent values.",
     "secrets": "Never put API keys, passwords, access tokens, private keys, or credentials in this file.",
     "json": "JSONC is supported: // line comments and /* block comments */ are allowed. Keep double-quoted strings and do not use trailing commas.",
 }
 
 SECTION_HELP = {
-    "system": "Material definition. boundary.P and boundary.TM_ratio are prefilled from the current layered-oxide defaults for review; fill boundary.H with each phase's allowed integer supercell matrices. Set phase_reference_directory once when all mother structures are stored together as <phase>.vasp; the file map is derived on import. Explicit phase_references entries can override individual files.",
+    "system": "First define C=(H,P,x,T,N) and each variable's role. For fixed T, supply ordered TM-containing phase references; then set configuration_space.roles.T=fixed and fixed_T_source=phase_reference. Set boundary.P and H_generation separately.",
     "frozen_parameters": "Parameters that generation and search actions must never change.",
     "generation_actions": "Enabled branch-generation actions and any adjustable quotas. Do not add unregistered action names.",
     "calculation": "MLIP version, MC allocator, and calculation-stage settings. model_path belongs under mlip and is remote metadata; the local computer must not load a cluster model.",
@@ -32,13 +32,15 @@ SECTION_HELP = {
 
 FIELD_COMMENTS = {
     "config.system": "体系、相空间及母结构来源。此处的目录/边界修改仍需审核和确认。",
-    "config.system.boundary": "P 和 TM_ratio 根据现有层氧配置预填，请核对；H 填每相允许的超胞整数矩阵列表。不要填 min/max，填写明确允许集合。",
+    "config.system.configuration_space": "先定义 C=(H,P,x,T,N) 的角色。默认 H/P/x/T 为 branch、N 为 branch 内搜索；固定 T 时设 roles.T=fixed、fixed_T_source=phase_reference，母结构必须含实际 TM 排列。",
+    "config.system.boundary": "P 的 at_x 指定端点相，intermediate 指定 0<x<1 允许相；H 由下方 H_generation 自动展开。旧式 P 列表和显式 H 仍可用。",
+    "config.system.H_generation": "层氧超胞生成：修改尺寸上下限和步长、最小周期距离；从推荐包含矩阵选索引 0/1，或填写自定义矩阵。多个矩阵须同时满足。",
     "config.system.phase_reference_directory": "母结构公共目录。按相名自动匹配 O3.vasp、O1.vasp 等；该目录来自已提供的信息，导入前请核对。",
     "config.system.phase_references": "可选的逐相文件路径；为空时根据 phase_reference_directory 和边界相名生成。",
     "config.storage": "本地工作区和结果保存位置。先在配置对话中选择并确认 workspace_root，之后才生成本设置文件；所有相对路径都在此根目录内，可按需调整。不会搬动已有文件。",
     "config.storage.workspace_root": "唯一工作区根目录。其他保存路径相对于此目录解析。改根目录不会自动迁移旧状态或结果。",
     "config.storage.paths": "自动展示且可逐项修改的配置快照、状态、台账、结构、相图、QBC、审批和任务目录。均须为工作区内的相对路径。",
-    "config.calculation.mlip_version": "本轮使用的 MLIP 标识/版本，例如 mace-mh-1；应与远端模型文件一致。",
+    "config.calculation.mlip_version": "默认已设为 mace-mh-1；仅当你明确更换 MLIP 时才修改，并与超算端模型文件一致。",
     "config.mlip.model_path": "超算端模型文件路径，仅作为元数据；本地 Agent 不加载该文件。",
     "config.budgets": "计算预算与限额。注意 relative_cost 是项目内部预算单位，不等同 GPU 小时。",
     "config.budgets.total_relative_cost": "本轮/运行总预算上限，单位见 cost_unit。",
@@ -66,7 +68,7 @@ def create_editable_config_json(path, config: dict, *, bootstrap_hints=None,
     if isinstance(system, dict):
         constraints = system.get("constraints") or {}
         boundary_template = {
-            "P": deepcopy(constraints.get("phases") or []),
+            "P": {"at_x": {"0": ["P3"], "1": ["O3"]}, "intermediate": ["O3", "P3", "OP2"]},
             "H": {},
             "TM_ratio": deepcopy(constraints.get("TM_ratio") or {}),
         }
@@ -76,6 +78,15 @@ def create_editable_config_json(path, config: dict, *, bootstrap_hints=None,
         else:
             for key, value in boundary_template.items():
                 boundary.setdefault(key, value)
+        if system.get("system_id") == "layered_na_tm_oxide" and not (isinstance(boundary, dict) and boundary.get("H")):
+            from scientific_layer.structures.enumerate_layered_oxide_supercells import LAYERED_OXIDE_P_SMALL_RECOMMENDATIONS
+            system.setdefault("H_generation", {
+                "enabled": True, "size_min": 4, "size_max": 16, "size_step": 2,
+                "min_distance_angstrom": 2.0,
+                "recommended_containment_matrices": [[list(row) for row in matrix] for matrix in LAYERED_OXIDE_P_SMALL_RECOMMENDATIONS],
+                "selected_recommendation_indices": [],
+                "additional_containment_matrices": [],
+            })
         hints = bootstrap_hints or {}
         system.setdefault(
             "phase_reference_directory",

@@ -10,6 +10,8 @@ def validate_search_config(config: dict) -> dict:
         missing.append("system.constraints")
     if not system.get("branch_schema"):
         missing.append("system.branch_schema")
+    from config_layer.schema.validate_configuration_space import validate_configuration_space
+    conflicts.extend(validate_configuration_space(system)["errors"])
     calculation = config.get("calculation") or {}
     if not calculation.get("mlip_version"):
         missing.append("calculation.mlip_version")

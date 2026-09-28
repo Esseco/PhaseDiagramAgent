@@ -6,6 +6,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from decision_layer.agent.prepare_llm_request import prepare_llm_request, needs_deep_reasoning
 
 
 class DeepSeekResponseError(RuntimeError):
@@ -20,6 +21,7 @@ class DeepSeekResponseError(RuntimeError):
 def create_deepseek_client(
     *, api_key=None, model="deepseek-v4-pro", base_url="https://api.deepseek.com",
     max_tokens=800, timeout=60, system_prompt=None, thinking=None,
+    routine_max_tokens=1600, reasoning_max_tokens=8192,
 ):
     key = api_key or os.environ.get("DEEPSEEK_API_KEY")
     if not key:
@@ -28,6 +30,8 @@ def create_deepseek_client(
         raise ValueError("thinking 必须是 enabled、disabled 或 None")
 
     def call(payload: dict) -> dict:
+        important = needs_deep_reasoning(payload)
+        payload = prepare_llm_request(payload)
         messages = [
             {
                 "role": "system",
@@ -38,7 +42,11 @@ def create_deepseek_client(
             },
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ]
-        max_tokens_this_try = int(max_tokens)
+        thinking_this_try = "enabled" if important and thinking != "disabled" else "disabled"
+        token_ceiling = (max(int(max_tokens), int(reasoning_max_tokens))
+                         if thinking_this_try == "enabled" else int(routine_max_tokens))
+        max_tokens_this_try = (token_ceiling if thinking_this_try == "enabled"
+                               else min(int(max_tokens), token_ceiling))
         input_tokens = output_tokens = 0
         last_error = None
 
@@ -52,8 +60,8 @@ def create_deepseek_client(
                 "max_tokens": max_tokens_this_try,
                 "temperature": 0.0,
             }
-            if thinking is not None:
-                body["thinking"] = {"type": thinking}
+            if thinking_this_try is not None:
+                body["thinking"] = {"type": thinking_this_try}
             request = urllib.request.Request(
                 f"{base_url.rstrip('/')}/chat/completions",
                 data=json.dumps(body).encode("utf-8"),
@@ -68,7 +76,7 @@ def create_deepseek_client(
                     raw_response = response.read()
             except urllib.error.HTTPError as error:
                 if error.code in {401, 403}:
-                    message = "DeepSeek API 鉴权失败，请检查本机 DEEPSEEK_API_KEY。"
+                    message = "DeepSeek API Key 鉴权失败，请检查密钥是否有效。"
                 elif error.code in {402, 429}:
                     message = f"DeepSeek API 返回 HTTP {error.code}，请检查账户额度或请求频率。"
                 else:
@@ -113,7 +121,10 @@ def create_deepseek_client(
                     f"输出 token={int(usage.get('completion_tokens') or 0)}）。",
                 )
                 if finish_reason == "length":
-                    max_tokens_this_try = min(max(max_tokens_this_try * 2, 1200), 4096)
+                    if reasoning_content:
+                        thinking_this_try = "disabled"
+                    token_ceiling = int(routine_max_tokens) if thinking_this_try == "disabled" else token_ceiling
+                    max_tokens_this_try = min(max(max_tokens_this_try * 2, 1200), token_ceiling)
                 elif finish_reason in {"content_filter", "insufficient_system_resource", "aborted"}:
                     break
                 continue
@@ -127,7 +138,8 @@ def create_deepseek_client(
                     f"（结束原因={finish_reason or '未知'}，字符数={len(content)}）。",
                 )
                 if finish_reason == "length":
-                    max_tokens_this_try = min(max(max_tokens_this_try * 2, 1200), 4096)
+                    thinking_this_try = "disabled"
+                    max_tokens_this_try = int(routine_max_tokens)
                 elif finish_reason in {"content_filter", "insufficient_system_resource", "aborted"}:
                     break
                 continue
@@ -147,9 +159,10 @@ def create_deepseek_client(
             }
             return action
 
-        raise last_error or DeepSeekResponseError(
-            "invalid_response", "DeepSeek 未能返回可解析的 JSON。"
-        )
+        error = last_error or DeepSeekResponseError("invalid_response", "DeepSeek 未能返回可解析的 JSON。")
+        error.llm_usage = {"calls": attempt + 1, "input_tokens": input_tokens,
+                           "output_tokens": output_tokens, "cost": None, "model": model}
+        raise error
 
     return call
 

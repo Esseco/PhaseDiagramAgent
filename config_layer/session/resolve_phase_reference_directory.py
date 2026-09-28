@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from pathlib import Path
+from scientific_layer.structures.boundary_utils import allowed_phases
 
 
 def resolve_phase_reference_directory(config: dict, *, base_directory=None) -> dict:
@@ -27,8 +28,9 @@ def resolve_phase_reference_directory(config: dict, *, base_directory=None) -> d
     phases = boundary.get("P") if isinstance(boundary, dict) else None
     if not phases:
         phases = (system.get("constraints") or {}).get("phases") or []
-    if not isinstance(phases, list) or any(not isinstance(phase, str) or not phase.strip() for phase in phases):
-        raise ValueError("相列表必须是非空字符串列表，才能从公共目录推导母结构文件")
+    phases = sorted(allowed_phases(phases)) if phases else []
+    if not phases or any(not phase.strip() for phase in phases):
+        raise ValueError("boundary.P 必须包含相名，才能从公共目录推导母结构文件")
 
     explicit = system.get("phase_references") or {}
     if not isinstance(explicit, dict):

@@ -1,6 +1,6 @@
 {
   "config_session_path": "../local/config_session.json",
-  "editable_config_draft_path": "search_config.draft.json",
+  "editable_config_draft_path": "search_config.project.json",
   "state_path": "../local/current/state.json",
   "ledger_path": "../local/current/phase_data.json",
   "phase_references_path": "../local/phase_references.json",
@@ -8,10 +8,11 @@
   "phase_diagram_directory": "../local/current/phase_diagrams",
   "approval_directory": "../local/current/approvals",
   "local_action_directory": "../local/current/approved_batches",
+  "execution_mode": "debug",
   "deepseek": {
     "model": "deepseek-flash",
     "base_url": "https://api.deepseek.com",
-    "max_tokens": 800,
+    "max_tokens": 2400,
     "timeout": 60,
     "configuration_thinking": "disabled",
     "thinking": "enabled"

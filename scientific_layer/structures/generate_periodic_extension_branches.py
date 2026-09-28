@@ -19,6 +19,7 @@ def generate_periodic_extension_branches(
     seed: int,
     site_mappings: dict[tuple[str, str], list[int]] | None = None,
     oxidation_states: dict[str, int | float] | None = None,
+    preserve_reference_tm: bool = False,
 ) -> list[dict[str, Any]]:
     mappings = site_mappings or {}
     tasks = []
@@ -39,7 +40,9 @@ def generate_periodic_extension_branches(
         current_seed = seed + offset
         target_key = _framework_key(target["P"], target["H"])
         mapping = mappings.get((source_key, target_key))
-        if mapping is None:
+        if preserve_reference_tm:
+            T, inheritance = None, "fixed_phase_reference_tm"
+        elif mapping is None:
             T, inheritance = None, "regenerated_no_mapping"
         else:
             if any(index < 0 or index >= len(parent["T"]) for index in mapping):
@@ -52,12 +55,14 @@ def generate_periodic_extension_branches(
             H=target["H"],
             x=parent["x"],
             T=T,
+            preserve_reference_tm=preserve_reference_tm,
             phase_references=phase_references,
             oxidation_states=oxidation_states,
             seed=current_seed,
         )
         parameters = identify_branch_parameters(
-            structure, manager.boundary, phase_references=phase_references
+            structure, manager.boundary, phase_references=phase_references,
+            phase_hint=target["P"],
         )
         candidates.append(
             {

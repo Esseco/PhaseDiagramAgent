@@ -3,7 +3,6 @@
 from copy import deepcopy
 import hashlib
 import json
-import random
 
 from scientific_layer.structures.initialize_branch_structures import initialize_branch_structures
 from data_layer.ledger.register_candidate_batch import register_candidate_batch
@@ -35,7 +34,11 @@ def prepare_branch_relaxation(candidates, state, context):
             current.setdefault('branch_hull_batches', {}).setdefault(saved_pool['version'], saved_pool)
     records = []
     for branch in candidates:
-        if len(branch.get('structure_ids') or []) < count:
+        existing_ids = branch.get('structure_ids') or []
+        screened_ids = [sid for sid in existing_ids
+                        if manager.data['structures'][sid].get('metadata', {}).get('initialization_method')
+                        == 'electrostatic_top10_random3_layer_occupied']
+        if not screened_ids:
             initialized = initialize_branch_structures([branch], manager.boundary, context['phase_references'],
                 initial_states_per_branch=count, seed=config.get('seed', 42))
             register_candidate_batch(manager, initialized, structure_directory=config['structure_directory'],
@@ -79,7 +82,7 @@ def prepare_branch_relaxation(candidates, state, context):
                     'branch_id': branch['branch_id'], 'stage': 'relax_and_feature', 'status': 'pending',
                     'model_version': version, 'config_version': context['config_version'],
                     'planned_relative_cost': cost, 'parameters': relax_settings,
-                    'screening_basis': 'legal_electrostatic_top10_fixed_seed'}
+                    'screening_basis': 'electrostatic_top10_random3_layer_occupied'}
             current.setdefault('tasks', []).append(task)
             current.setdefault('pending_tasks', []).append(task); pending.append(task)
     if pending or unavailable:
@@ -98,19 +101,18 @@ def prepare_branch_relaxation(candidates, state, context):
 
 
 def _screen_structure_ids(manager, branch_id, *, count, seed):
-    """Sample without replacement from the ten lowest known electrostatic energies."""
-    rows = []
+    """Reuse saved random picks from the electrostatic top-ten pool."""
+    ids = []
     for structure_id in manager.data['branches'][branch_id].get('structure_ids') or []:
         record = manager.data['structures'][structure_id]
         metadata = record.get('metadata') or {}
         if metadata.get('legal') is False or metadata.get('legality') in {'illegal', 'rejected'}:
             continue
-        energy = metadata.get('electrostatic_energy')
-        known = isinstance(energy, (int, float))
-        rows.append((0 if known else 1, float(energy) if known else 0.0, structure_id))
-    top = [row[2] for row in sorted(rows)[:10]]
-    if len(top) <= count:
-        return top
-    digest = int(hashlib.sha256(branch_id.encode()).hexdigest()[:8], 16)
-    rng = random.Random(seed + digest)
-    return sorted(rng.sample(top, count))
+        if metadata.get('initialization_method') == 'electrostatic_top10_random3_layer_occupied':
+            ids.append(structure_id)
+    if not ids:
+        raise RuntimeError(f'{branch_id}: no saved random picks from the legal electrostatic top-ten pool')
+    first_seed = (manager.data['structures'][ids[0]].get('metadata') or {}).get('initialization_seed')
+    same_batch = [sid for sid in ids
+                  if (manager.data['structures'][sid].get('metadata') or {}).get('initialization_seed') == first_seed]
+    return same_batch[:count]

@@ -5,7 +5,10 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from decision_layer.agent.propose_tool_action import propose_agent_tool_action
+from decision_layer.agent.propose_tool_action import (
+    _apply_generation_defaults,
+    propose_agent_tool_action,
+)
 from decision_layer.agent.revise_tool_proposal import revise_tool_proposal
 from data_layer.memory.decision_memory import update_long_term_advice, update_long_term_memory
 from execution_layer.dispatch.execute_tool_action import execute_tool_action
@@ -15,6 +18,7 @@ from execution_layer.budget.record_budget_usage import record_budget_usage
 from execution_layer.state.reconcile_task_results import reconcile_task_results
 from execution_layer.policy.validate_tool_action import validate_tool_action
 from execution_layer.state.state_manager import agent_state_summary, update_state_snapshot
+from execution_layer.workflows.compact_action_history import compact_action_history
 
 
 def run_tool_step(
@@ -60,9 +64,26 @@ def run_tool_step(
         else session.get("config", {})
     )
     if session.get("status") == "confirmed":
-        current.setdefault("confirmed_config_version", session["confirmed_snapshot"]["config_version"])
+        snapshot = session["confirmed_snapshot"]
+        snapshot_version = snapshot["config_version"]
+        bound_version = current.get("confirmed_config_version")
+        if bound_version is None or (
+            bound_version != snapshot_version and _can_rebind_empty_run(current)
+        ):
+            # A config can be confirmed after an empty/debug run has already
+            # created state.json.  Rebind only before any scientific work or
+            # reservation exists; populated runs must never mix versions.
+            current["confirmed_config_version"] = snapshot_version
+            current["confirmed_config"] = deepcopy(snapshot["config"])
+        elif bound_version != snapshot_version:
+            return {"status": "configuration_version_mismatch", "execution_mode": mode,
+                    "reason": f"当前运行绑定 {bound_version}，新配置为 {snapshot_version}；已有任务或预算记录，不能直接混用。",
+                    "agent_proposal": None, "final_action": None, "action": None,
+                    "validation": None, "execution": None, "execution_result": None,
+                    "state": current, "idempotent_replay": False}
     current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
     decision_state = agent_state_summary(current)
+    decision_state["user_message"] = str((context or {}).get("user_message") or "")
 
     pending_key = invocation_id or "__single_interactive_action__"
     stored = current["pending_execution_policies"].get(pending_key)
@@ -91,8 +112,37 @@ def run_tool_step(
         proposal = build_agent_proposal(replay_action, decision_state)
         record_id = _record_id(current, invocation_id)
     else:
-        allowed = list((config.get("agent") or {}).get("allowed_tools") or [])
-        action = propose_agent_tool_action(decision_state, agent_client=agent_client, allowed_tools=allowed)
+        allowed = [name for name in (config.get("agent") or {}).get("allowed_tools") or []
+                   if callable((registry.get(name) or {}).get("handler"))]
+        from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
+        mc_files_pending = any(row.get("stage") == "deep_search" and row.get("status") == "pending"
+                               and not row.get("slurm_batch_id") for row in current.get("tasks") or [])
+        safe_next = (choose_debug_next_action(
+            current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
+            allowed_tools=allowed, user_message=(context or {}).get("user_message"),
+        ) if mode == "interactive" and (mc_files_pending or not callable(agent_client) or
+             str((context or {}).get("user_message") or "").strip() in {"继续", "下一步", "然后呢"}) else None)
+        action = safe_next or propose_agent_tool_action(
+            decision_state, agent_client=agent_client, allowed_tools=allowed, config=config
+        )
+        if mode == "interactive" and action.get("decision_source") == "rule":
+            recovery = choose_debug_next_action(
+                current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
+                allowed_tools=allowed, user_message=(context or {}).get("user_message"),
+            )
+            if recovery:
+                recovery["_llm_usage"] = action.get("_llm_usage")
+                recovery["fallback_reason"] = action.get("fallback_reason")
+                action = recovery
+        if mode == "interactive":
+            original_usage = action.get("_llm_usage")
+            original_evidence = action.get("evidence_refs")
+            action = _prepare_debug_relax_screen_action(
+                action, current, context, config, allowed, invocation_id=invocation_id)
+            if original_usage:
+                action["_llm_usage"] = original_usage
+            if original_evidence:
+                action["evidence_refs"] = original_evidence
         if action.get("_llm_usage"):
             current = record_budget_usage(
                 current, {"llm_usage": action["_llm_usage"], "iteration": current.get("iteration", 0)}
@@ -104,8 +154,48 @@ def run_tool_step(
     if advice_changed:
         opinion = str(human_feedback.get("comment") or "") + "\n请根据更新后的人工长期建议重新分析，生成供人工审批的新 proposal。"
     if opinion is not None:
-        allowed = list((config.get("agent") or {}).get("allowed_tools") or [])
-        revision = revise_tool_proposal(proposal, opinion, state=decision_state, allowed_tools=allowed, agent_client=agent_client)
+        from decision_layer.agent.resolve_explicit_generation_request import _requested_branch_batch_size
+        requested_batch = _requested_branch_batch_size(opinion)
+        if requested_batch is not None and (proposal.get("raw_action") or {}).get("tool") == "generate_branches":
+            run = config.get("run") or {}
+            strategy = config.get("round_strategy") or {}
+            quota_limit = max(int(run.get("total_quota", 0)),
+                              int(strategy.get("generation_quota_total", 0)))
+            if requested_batch > quota_limit:
+                current["pending_execution_policies"].pop(pending_key, None)
+                current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
+                return {"status": "configuration_revision_required", "execution_mode": mode,
+                        "reason": f"要求入选 {requested_batch} 个 branch，但当前已确认生成配额上限为 {quota_limit}；旧建议已取消。请先修订并确认配置。",
+                        "agent_proposal": None, "final_action": None, "action": None,
+                        "validation": None, "execution": None, "execution_result": None,
+                        "record_id": record_id, "state": current, "idempotent_replay": False}
+        allowed = [name for name in (config.get("agent") or {}).get("allowed_tools") or []
+                   if callable((registry.get(name) or {}).get("handler"))]
+        from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
+        original_action = proposal.get("raw_action") or {}
+        safe_next = (choose_debug_next_action(
+            current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
+            allowed_tools=allowed, user_message=opinion,
+            target_branch_ids=original_action.get("target_ids"),
+        ) if mode == "interactive" and original_action.get("tool") == "run_calculation_stage" else None)
+        revision = ({"action": safe_next, "analysis": safe_next["reason"],
+                     "revision_status": "debug_preparation_required"} if safe_next else
+                    revise_tool_proposal(proposal, opinion, state=decision_state,
+                                         allowed_tools=allowed, agent_client=agent_client))
+        if (revision.get("action") or {}).get("tool") == "generate_branches":
+            revision["action"] = _apply_generation_defaults(revision["action"], decision_state, config)
+        if mode == "interactive":
+            candidate_action = revision.get("action") or {}
+            revised_action = _prepare_debug_relax_screen_action(
+                candidate_action, current, context, config, allowed, invocation_id=invocation_id)
+            if revised_action.get("tool") != candidate_action.get("tool"):
+                revision["action"] = revised_action
+                revision["analysis"] = revised_action.get("reason", "先准备 Relax 输入文件。")
+                revision["revision_status"] = "debug_preparation_required"
+        revision_usage = revision.get("llm_usage") or (revision.get("action") or {}).get("_llm_usage")
+        if revision_usage:
+            current = record_budget_usage(current, {"llm_usage": revision_usage,
+                                                   "iteration": current.get("iteration", 0)})
         proposal = build_agent_proposal(revision["action"], decision_state)
         history = deepcopy(stored.get("feedback_history") or [])
         history.append({"comment": opinion, "revision_status": revision["revision_status"], "analysis": revision["analysis"]})
@@ -172,6 +262,10 @@ def run_tool_step(
     should_execute = policy["execute"] if explicit_mode else bool(execute)
     if not validation["valid"]:
         status, execution = "rejected", None
+    elif mode == "interactive" and action.get("tool") == "run_calculation_stage":
+        validation["valid"] = False
+        validation.setdefault("errors", []).append("debug_mode_requires_remote_preparation")
+        status, execution = "rejected", None
     elif not should_execute:
         status, execution = "planned_only", None
     else:
@@ -210,7 +304,7 @@ def run_tool_step(
         _audit_record(record_id, mode, proposal, policy["human_feedback"], action, execution, status, deepcopy((stored or {}).get("feedback_history") or [])),
     )
     current.setdefault("decisions", []).append(
-        {"config_version": validation.get("config_version"), **deepcopy(response)}
+        {"config_version": validation.get("config_version"), **compact_action_history(response)}
     )
     _store_completed(current, invocation_id, response)
     current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
@@ -219,6 +313,53 @@ def run_tool_step(
 
 def _record_id(state, invocation_id):
     return invocation_id or f"action-{len(state.get('action_records', [])) + 1:06d}"
+
+
+def _prepare_debug_relax_screen_action(action, state, context, config, allowed_tools, *, invocation_id=None):
+    """Turn a proposed Relax calculation into portable input-file preparation."""
+    parameters = action.get("parameters") or {}
+    if action.get("tool") == "prepare_local_batch_files" and parameters.get("rebuild_inputs"):
+        return action
+    is_relax_input = (action.get("tool") == "prepare_local_batch_files"
+                      and parameters.get("mode") == "relax_inputs")
+    if action.get("tool") != "run_calculation_stage" and not is_relax_input:
+        return action
+    stage = action.get("stage") or parameters.get("stage")
+    if not is_relax_input and stage not in {"relax_screen", "relax_and_feature"}:
+        return action
+    if "prepare_local_batch_files" not in allowed_tools:
+        return action
+    from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
+    preparation = choose_debug_next_action(
+        state, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
+        allowed_tools=allowed_tools,
+    )
+    if preparation is None:
+        return action if is_relax_input else {
+            **action, "tool": "prepare_local_batch_files",
+            "parameters": {"mode": "relax_inputs", "selection_scope": "all_registered"},
+            "reason": "先准备或复用所有已入库结构的 Relax 输入文件。",
+            "decision_source": "debug_relax_preparation_guard",
+        }
+    suffix = invocation_id or preparation.get("task_key") or "missing-invocation"
+    preparation["task_key"] = f"prepare-relax-inputs:{suffix}"
+    preparation["parameters"] = {"mode": "relax_inputs", "selection_scope": "all_registered"}
+    return preparation
+
+
+def _can_rebind_empty_run(state):
+    """Allow a newly confirmed config to replace only a scientifically empty run."""
+    if state.get("tasks") or state.get("branch_candidates"):
+        return False
+    if any(
+        item.get("status") in {"reserved", "submitted", "running", "completed"}
+        for item in (state.get("budget_reservations") or {}).values()
+    ):
+        return False
+    usage = state.get("budget_usage") or {}
+    if float(usage.get("total_relative_cost") or 0.0) > 0:
+        return False
+    return not (usage.get("stages") or {})
 
 
 def _extract_opinion(feedback):
@@ -243,7 +384,7 @@ def _audit_record(record_id, mode, proposal, feedback, final_action, result, sta
         "agent_proposal": deepcopy(proposal),
         "human_feedback": deepcopy(feedback),
         "final_action": deepcopy(final_action),
-        "execution_result": deepcopy(result),
+        "execution_result": compact_action_history(result),
         "feedback_history": deepcopy(feedback_history or []),
     }
 
@@ -259,7 +400,7 @@ def _upsert_record(state, record):
 
 def _store_completed(state, invocation_id, response):
     if invocation_id:
-        state.setdefault("invocations", {})[invocation_id] = deepcopy(response)
+        state.setdefault("invocations", {})[invocation_id] = compact_action_history(response)
 
 
 def _policy_rejection(record_id, mode, proposal, policy):
@@ -284,6 +425,9 @@ def _apply_execution_result(current, action, execution, *, record_id, formal):
     if isinstance(payload.get("state"), dict):
         merged = deepcopy(current)
         merged.update(deepcopy(payload["state"]))
+        # A handler receives the state from before this approval was consumed.
+        # Its returned scientific state must not restore that pending approval.
+        merged["pending_execution_policies"] = deepcopy(current.get("pending_execution_policies") or {})
         current = merged
     payload_status = payload.get("status")
     if not formal:

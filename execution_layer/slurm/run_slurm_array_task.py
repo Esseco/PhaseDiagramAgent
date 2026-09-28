@@ -25,9 +25,19 @@ def run_slurm_array_task(
         entry = next(row for row in manifest if int(row["array_index"]) == int(array_index))
     except StopIteration as error:
         raise IndexError(f"manifest 中不存在 array index {array_index}") from error
+    root = Path(manifest_path).resolve().parent
     input_path = Path(entry["input_path"])
     result_path = Path(entry["result_path"])
+    if not input_path.is_absolute():
+        input_path = root / input_path
+    if not result_path.is_absolute():
+        result_path = root / result_path
     task = json.loads(input_path.read_text(encoding="utf-8"))
+    task["result_path"] = str(result_path)
+    if task.get("calculation_directory"):
+        calculation_directory = Path(task["calculation_directory"])
+        if not calculation_directory.is_absolute():
+            task["calculation_directory"] = str(root / calculation_directory)
     try:
         result = executor(task)
         if not isinstance(result, dict):
@@ -45,11 +55,17 @@ def run_slurm_array_task(
             "error": f"{type(error).__name__}: {error}",
             "traceback": traceback.format_exc(),
         }
+    for key in ("batch_id", "config_version", "model_version", "task_checksum",
+                "protocol_version", "input_file_version"):
+        if key in entry:
+            payload[key] = entry[key]
     _write_json(result_path, payload)
-    _write_json(result_path.with_name("task.finished.json"), {
-        "task_id": entry["task_id"], "task_key": entry["task_key"],
-        "status": payload["status"], "result_file": result_path.name,
-    })
+    from execution_layer.remote.integrity import file_checksum
+    marker = {key: payload.get(key) for key in ("task_id", "task_key", "batch_id",
+              "config_version", "model_version", "task_checksum", "protocol_version",
+              "input_file_version", "status")}
+    marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})
+    _write_json(result_path.with_name("task.finished.json"), marker)
     return payload
 
 

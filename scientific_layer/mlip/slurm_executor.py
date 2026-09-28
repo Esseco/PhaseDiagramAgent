@@ -33,6 +33,15 @@ def create_mlip_task_preparer(manager, phase_references, config):
             "main_model_index": int(model.get("main_model_index", 0)),
             "save_relax_traj": False,
         }
+        if current["stage"] == "deep_search":
+            full_na_path = (current.get("full_na_structure_path")
+                            or record.get("full_na_structure_path")
+                            or branch.get("full_na_structure_path"))
+            if not full_na_path or not Path(full_na_path).is_file():
+                full_na_path = _materialize_full_na_template(
+                    manager, branch, record, phase_references, config
+                )
+            base_parameters["full_na_structure"] = str(full_na_path)
         current.update({
             "structure_id": structure_id,
             "object_id": structure_id,
@@ -59,12 +68,43 @@ def create_mlip_task_preparer(manager, phase_references, config):
     return prepare
 
 
+def _materialize_full_na_template(manager, branch, record, phase_references, config):
+    from fractions import Fraction
+    from scientific_layer.structures.boundary_utils import normalize_fraction
+    from scientific_layer.structures.build_mc_full_na_template import build_mc_full_na_template
+
+    if Fraction(normalize_fraction(branch["x"])) == 0:
+        raise ValueError(f"branch {branch.get('branch_id')} 为 Na0，不需要也不能执行 Na/V MC")
+    structure = build_mc_full_na_template(
+        branch, manager.boundary, phase_references, config=config)
+    source = Path(record.get("source_path") or "")
+    if not source.parent.is_dir():
+        raise ValueError(f"structure {record.get('structure_id')} 缺少可写的本地结构目录")
+    path = source.parent / "full_na_structure.vasp"
+    if not path.exists():
+        structure.to(filename=path, fmt="poscar")
+    branch["full_na_structure_path"] = str(path)
+    record["full_na_structure_path"] = str(path)
+    return path
+
+
 def execute_mlip_task(task):
     """Executor reference for ``run_slurm_array_task --executor``."""
     job = deepcopy(task.get("worker_job") or {})
     if not job:
         raise ValueError("MLIP task 缺少 worker_job")
     job["output_directory"] = str(Path(task["result_path"]).parent)
+    structure_path = Path(job.get("structure_path") or "")
+    if not structure_path.is_absolute():
+        job["structure_path"] = str(Path(task["result_path"]).parent / structure_path)
+    checkpoint = job.get("checkpoint")
+    if checkpoint and not Path(checkpoint).is_absolute():
+        job["checkpoint"] = str(Path(task["result_path"]).parent / checkpoint)
+    full_na = (job.get("parameters") or {}).get("full_na_structure")
+    if full_na and not Path(full_na).is_absolute():
+        job["parameters"]["full_na_structure"] = str(
+            Path(task["result_path"]).parent / full_na
+        )
     if not job.get("model_path") and not job.get("model_paths"):
         raise ValueError("MLIP task 缺少 model_path/model_paths")
     result = run_mace_worker(job)
@@ -75,7 +115,9 @@ def execute_mlip_task(task):
         "status": result.get("status", "completed"),
         "stage": task["stage"],
         "structure_id": task["structure_id"],
-        "converged": result.get("converged"),
+        "converged": (result.get("relax_stopped_normally") is True
+                      if task["stage"] in {"relax_and_feature", "deep_search"}
+                      else result.get("converged")),
         "relax_stopped_normally": result.get("relax_stopped_normally"),
         "checkpoint": result.get("checkpoint"),
         "result_path": result.get("structure_path") or str(Path(task["result_path"]).parent),

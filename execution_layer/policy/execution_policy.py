@@ -28,6 +28,8 @@ def build_agent_proposal(action: dict[str, Any], state: dict[str, Any]) -> dict[
             "decision_source": action.get("decision_source"),
         }
     cost_plan = estimate_proposal_cost(action, state)
+    raw_action = deepcopy(action)
+    raw_action.pop("decision_context", None)
     return {
         "current_state_analysis": deepcopy(analysis),
         "recommended_action": action.get("action_type"),
@@ -36,7 +38,7 @@ def build_agent_proposal(action: dict[str, Any], state: dict[str, Any]) -> dict[
         "estimated_cost": cost_plan,
         "calculation_plan": deepcopy(cost_plan["workload"]),
         "expected_purpose": action.get("expected_purpose") or action.get("purpose") or action.get("reason"),
-        "raw_action": deepcopy(action),
+        "raw_action": raw_action,
         "decision_context": deepcopy(action.get("decision_context") or {}),
         "evidence_refs": deepcopy(action.get("evidence_refs") or []),
     }
@@ -53,6 +55,9 @@ def apply_execution_policy(
     if execution_mode not in EXECUTION_MODES:
         raise ValueError(f"未知 execution_mode：{execution_mode}")
     original = deepcopy(agent_proposal["raw_action"])
+    if (original.get("parameters") or {}).get("rebuild_inputs") and execution_mode in {"autonomous", "replay"}:
+        return {"status": "awaiting_approval", "decision": None, "human_feedback": None,
+                "final_action": None, "execute": False}
     if execution_mode == "autonomous":
         return {"status": "approved", "decision": "approve", "human_feedback": None, "final_action": original, "execute": True}
     if execution_mode == "dry_run":

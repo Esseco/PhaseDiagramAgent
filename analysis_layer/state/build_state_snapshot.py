@@ -14,7 +14,7 @@ def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=Non
     uncertainty = [row for row in uncertainty if row]
     actions = state.get("action_records") or state.get("decisions") or []
     rewards = state.get("rewards") or []
-    failed = [item for item in tasks if item.get("status") in {"failed", "unknown", "not_configured"}]
+    failed = [item for item in tasks if item.get("status") in {"failed", "timeout", "unknown", "not_configured"}]
     available = state.get("budget_remaining", state.get("remaining_budget"))
     snapshot = {
         "schema_version": 1,

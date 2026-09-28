@@ -1,15 +1,11 @@
-"""First-run, config-only Open WebUI dialogue.
-
-This handler can only revise an unconfirmed JSON draft. It never calls the
-scientific workflow. An exact user confirmation creates the versioned snapshot;
-the next chat turn then switches to the regular workflow handler.
-"""
+"""Open WebUI configuration dialogue and versioned draft revisions."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import re
+from copy import deepcopy
 from pathlib import Path
 
 from config_layer.schema.validate_search_config import validate_search_config
@@ -21,17 +17,24 @@ from config_layer.session.resolve_workspace_paths import (
     default_workspace_storage, resolve_workspace_paths,
 )
 from config_layer.session.save_config_session import save_config_session
+from scientific_layer.structures.boundary_utils import allowed_phases
 
 
 CONFIG_AGENT_SYSTEM_PROMPT = """你是材料相图搜索项目的首次配置助手，不是计算执行器。
+Relax每个提交作业最多100个结构，MC每个提交作业最多20个模拟，DFT一个作业一个结构；这是supercomputer.batch_sizes或运行时stage_batch_sizes的分组限制，超出就拆分作业。budgets.stage_limits.max_tasks是独立的累计预算限制，不能把它解释为每个作业上限，也不能因入选branch增加自动建议增改它。用户说每个作业/每个任务弛豫数量时，应修改分组大小。generation_actions.max_det_H不存在，不得新增该字段。
+只修改当前用户明确指定的参数，其他参数原值保留。不要为满足数量而擅自调整候选配额、预算、策略、相边界或全局结构限制；关联调整只能提出建议。没有“候选/生成量/总配额”等限定时，“300个branch”按入选上限run.batch_size理解，不是run.total_quota。本轮det(H)上限属于生成动作max_det_H，不得写入budgets.structure_limits.max_det_H；只有明确首轮配置才用system.H_generation.first_round_max_det_H，明确全局边界才改全局字段。读取配置不能恢复旧默认覆盖用户已确认值。
+editable_field_catalog 是程序提供的真实配置字段目录。用户只需说中文含义和目标值，你负责从目录定位字段，不得要求用户提供内部字段路径。目录包含被精简摘要省略的参数；摘要未展示不等于字段不存在。初态数量对应 run.initial_states_per_branch，入选上限对应 run.batch_size，候选生成量对应 run.total_quota；初态规则不属于DFT。用户明确要求修改且值明确时直接返回patch和write_requested=true。确有多个不同语义字段时只集中问一个必要问题。不得声称已写入，写入是否成功由程序返回。
 只讨论并检查配置草稿。不得提交任务、调用科学计算、创建结构、运行命令或声称计算已完成。
 仅当用户明确提供或确认信息时，才返回对应配置修改；不确定时提出问题，不猜测边界矩阵、预算、DFT 设置或超算命令。
-只返回 JSON：{"reply":"给用户的中文答复","patch":{"点分配置路径": JSON值},"reasons":{"点分配置路径":"修改原因"},"questions":["待用户回答的问题"],"ready_for_search":false}。
-patch 只修改草稿，不会确认配置或启动运行；每项 patch 都会向用户展示。区分硬约束与可调整建议。
-当 mode 为 configuration_json_review 时，只检查并解释用户刚导入的 JSON 配置，patch 必须为空；列出重要缺项、冲突、歧义和需要用户确认的内容，不要擅自填值。只有在没有阻止开始搜索的缺项、冲突或歧义时才令 ready_for_search=true，否则为 false。
-本项目初次配置的重点是本地母结构路径、体系 boundary、远端 MACE 模型路径、预算、DFT/atomate 参数和收敛标准。
-首次配置先收集工作区根路径和 Agent 模型版本（DeepSeek V4.1 Flash 或 V4 Pro）；允许同一条消息或分别提供。只展示这两项和设置 JSON 路径，等待用户回复“确认”。确认前不得创建设置 JSON/工作区目录或修改运行时模型。确认后更新本地运行时模型（若用户选择切换）、生成带注释的 JSON，并直接列出需要填写的内容。用户编辑 JSON 后发送“读取配置 JSON”，由 Agent 审核；程序检查也通过后，等待用户回复“同意”，再保存配置快照并进入搜索 run。不得在此之前派发科学计算。DeepSeek 模型属于本地 Open WebUI 运行时，不写入科学搜索配置。
-配置 JSON 输出后说明工作区和主要文件位置，并列出用户需要填写的字段；用户可调整 storage.paths。Agent 审核、程序检查与用户“同意”均完成后才开始搜索流程；不会因此自动提交计算。
+只返回 JSON：{"reply":"给用户的中文答复","patch":{"点分配置路径": JSON值},"reasons":{"点分配置路径":"修改原因"},"questions":["待用户回答的问题"],"write_requested":false,"ready_for_search":false}。
+使用短配置文件时，只要用户当前这条消息明确要求实际修改项目参数，就返回 write_requested=true 和对应 patch；不要求出现固定关键词。比如“入选上限改为500”“把 Relax 任务上限提高到900”属于直接修改；询问参数含义、征求建议或只改当前这轮 action 不属于配置写入。write_requested 只能依据当前用户原话，不能从历史对话推断。程序仍会校验字段、值和文件版本，再原子写入。缺少明确数值时先追问，不猜值。密钥、未明确值和已确认快照绝不能改写。旧版无文件会话仍按原草稿规则处理。区分硬约束与可调整建议。
+当 mode 为 configuration_json_review 时，只检查并解释用户刚导入的 JSON 配置，patch 必须为空；列出有具体字段和值作为证据的缺项、冲突或歧义。readiness 是程序检查的权威结果；若它 ready=true 且你没有发现可定位的新问题，应令 ready_for_search=true。可选阈值、空配额、尚未接通的远端提交接口不阻止仅生成搜索建议。不要猜测问题、重复索要已确认信息或擅自填值。
+程序已经读取了 verified_config_source.source_path，并在导入时解析母结构、生成合法 H、计算允许相并集和校验结果。你只能依据程序提供的 verified_config_source 和本次 draft_config 讨论事实；不得引用旧对话中的配置值，不得声称程序无法读取文件，不得要求用户手抄已生成的 H 矩阵。生成失败时程序会给出具体错误，你不要猜测生成结果。boundary.P 的允许相是端点与中间相的并集；H 的四相键属于这个并集。超算调度器未接通不会阻止只生成搜索建议，但不能提交作业。
+以下均是已定义的非阻塞口径，不得要求用户逐项重复确认：parameter_source=atomate_defaults 时空 dft.parameters 表示采用 atomate 默认值；空 generation_actions.quotas 和 focus_regions 表示由调度策略动态决定；阶段 max_cost 是各阶段独立安全上限，不要求求和小于总预算，实际累计仍受 total_relative_cost 约束；用户写入配置文件的收敛阈值视为已选择值；空 scheduler 命令只表示暂不能远端提交，不阻止配置确认和搜索建议。generated_H=false 且 readiness.status=file_not_imported 只表示尚未执行导入，不能称为 H 缺失或要求再次确认生成参数。
+本项目初次配置的重点是本地母结构路径、体系 boundary、远端 MACE 模型路径、预算、DFT/atomate 参数和收敛标准。科学计算 MLIP 默认是 mace-mh-1；calculation.mlip_version、mlip.name 和 bohb.scope.mlip_version 默认保持一致。不要询问用户选择 MLIP 版本，也不要与 DeepSeek Agent 模型混淆。用户只需提供超算端 mlip.model_path；路径缺失时只问该路径。仅当用户明确提出更换 MLIP 时才讨论其他版本。
+首次配置先收集工作区根路径和 Agent 模型版本（DeepSeek V4.1 Flash 或 V4 Pro）；允许同一条消息或分别提供。只展示这两项和设置 JSON 路径，等待用户回复“确认”。确认后将工作区根路径视为已确认的锁定事实；后续必须从 setup_facts 读取，绝不能再次索要或要求重复确认该路径。确认前不得创建设置 JSON/工作区目录或修改运行时模型。确认后更新本地运行时模型（若用户选择切换）、生成带注释的 JSON，并区分列出必填项和建议检查项。用户编辑 JSON 后可发送“读取配置 JSON”进行审核；仅审核模式通过后，等待用户简短回复“同意”，再保存配置快照并进入搜索 run。用户也可发送“读取配置 JSON 并继续”，这表示仅在 Agent 与程序检查均通过时条件确认继续；此时直接保存快照并进入搜索 Agent，不再要求第二次同意。两种方式都只进入搜索建议阶段，不派发科学计算。不得在此之前派发科学计算。DeepSeek 模型属于本地 Open WebUI 运行时，不写入科学搜索配置。
+每次配置对话都必须结合 conversation_context 中最近的问答理解短答（例如“是的”是对紧邻前一条助手问题的回答），不可丢失上下文、重复询问已确认字段或把一个确认泛化成其他问题。若紧邻问题是在确认 calculation.mlip_version 与 bohb.scope.mlip_version 使用 mace-mh-1，用户回答肯定，则将两字段记为 mace-mh-1 并告知已记录；不得转而重问工作区路径。
+配置 JSON 输出后说明工作区和主要文件位置，并分别列出必填项与建议检查项；用户可调整 storage.paths。只有 Agent 和程序检查通过，且用户已明确回复“同意”或使用“读取配置 JSON 并继续”作条件确认后，才进入搜索建议流程；不会因此自动提交计算。
 本地绝不能尝试打开/加载超算上的 MACE 模型。超算模型路径仅作为远端配置元数据。
 用户提供的“已知候选信息”只是可核对的建议值；不要假定已写入草稿，先向用户说明并征求确认。"""
 
@@ -45,6 +48,15 @@ BOOTSTRAP_HINTS = {
         "母结构位于本地电脑；MACE 模型路径属于超算，只能记录为远端元数据。",
     ],
 }
+
+RECOMMENDED_CONFIG_CHECKS = (
+    "system.boundary.P 的 Na 含量→允许相映射、H_generation 尺寸与包含条件、TM_ratio 是否准确。",
+    "母结构目录是否包含与相名一致的文件（例如 O3.vasp）；文件内容及相名映射是否正确。",
+    "mlip.model_path 是否是超算端实际可访问的模型路径；本地 Agent 不会加载该模型。",
+    "总预算及 MC、DFT 子预算是否使用一致的项目成本单位，且子预算没有超过总预算。",
+    "DFT 单点与弛豫的 user_incar_settings、赝势和计算参数来源是否符合你的既定流程。",
+    "收敛阈值及单位是否符合预期（能量误差为 eV/atom；相图变化按配置口径）；覆盖率是否仅作为证据而非硬门槛。",
+)
 
 
 def configuration_readiness(session: dict, *, base_directory, phase_references_path=None,
@@ -83,14 +95,25 @@ def configuration_readiness(session: dict, *, base_directory, phase_references_p
         phases = []
     else:
         raw_phases = boundary.get("P")
-        phases = ([str(phase) for phase in raw_phases]
-                  if isinstance(raw_phases, list) and raw_phases
-                  and all(isinstance(phase, str) and phase.strip() for phase in raw_phases) else [])
+        try:
+            phases = sorted(allowed_phases(raw_phases)) if raw_phases else []
+        except (TypeError, ValueError):
+            phases = []
         if not phases:
-            missing.append("system.boundary.P (非空相列表)")
+            missing.append("system.boundary.P (非空相列表或 Na 含量→相映射)")
+        if isinstance(raw_phases, dict) and ("at_x" in raw_phases or "intermediate" in raw_phases):
+            from scientific_layer.structures.boundary_utils import allowed_phases_at_x
+            try:
+                allowed_phases_at_x(raw_phases, 0)
+                allowed_phases_at_x(raw_phases, 1)
+                allowed_phases_at_x(raw_phases, "1/2")
+            except (TypeError, ValueError, ZeroDivisionError) as error:
+                conflicts.append(f"system.boundary.P 组分规则无效：{error}")
         h_by_phase = boundary.get("H")
         if not isinstance(h_by_phase, dict):
             missing.append("system.boundary.H (按相列出允许的超胞矩阵)")
+        elif not h_by_phase and (system.get("H_generation") or {}).get("enabled"):
+            missing.append("system.boundary.H (读取配置 JSON 时由程序从各相母结构生成)")
         else:
             if set(h_by_phase) - set(phases):
                 conflicts.append("system.boundary.H 包含 P 之外的相")
@@ -164,7 +187,7 @@ class ConfigurationChatHandler:
 
     def __init__(self, workflow_kwargs, *, config_session_path, base_directory,
                  phase_references_path=None, editable_config_path=None,
-                 editable_config_filename="search_config.draft.json",
+                 editable_config_filename="search_config.project.json",
                  workspace_root_default=None, agent_client=None, runtime_factory=None,
                  current_deepseek_model="deepseek-v4-pro", deepseek_model_switcher=None):
         self.workflow_kwargs = dict(workflow_kwargs)
@@ -201,16 +224,54 @@ class ConfigurationChatHandler:
             workspace_root_default=self.workspace_root_default,
         )
 
-    def __call__(self, messages, *, conversation_id=None):
-        session = self.workflow_kwargs.get("config_session") or {}
-        if session.get("status") == "confirmed":
-            if self.delegate is None:
-                if not callable(self.runtime_factory):
-                    return "配置快照已确认。请重启本地 Agent 进入搜索对话模式；本次没有启动计算。"
-                self.delegate = self.runtime_factory()
-            return self.delegate(messages, conversation_id=conversation_id)
+    def _setup_facts(self, session, *, config=None):
+        config = config if config is not None else session.get("config") or {}
+        storage = config.get("storage") or {}
+        calculation = config.get("calculation") or {}
+        mlip = config.get("mlip") or {}
+        bohb_scope = ((config.get("bohb") or {}).get("scope") or {})
+        workspace_root = storage.get("workspace_root") or session.get("pending_workspace_root")
+        return {
+            "workspace_root": str(workspace_root) if workspace_root else None,
+            "workspace_root_confirmed": bool(storage.get("workspace_root")),
+            "setup_stage": session.get("setup_stage"),
+            "agent_model": self.current_deepseek_model,
+            "default_mlip_version": "mace-mh-1",
+            "calculation_mlip_version": calculation.get("mlip_version") or "mace-mh-1",
+            "bohb_mlip_version": bohb_scope.get("mlip_version") or "mace-mh-1",
+            "mlip_model_path": mlip.get("model_path"),
+        }
 
+    def __call__(self, messages, *, conversation_id=None):
+        metadata_reply = _open_webui_metadata_reply(_latest_user_message(messages))
+        if metadata_reply is not None:
+            return metadata_reply
+        session = self.workflow_kwargs.get("config_session") or {}
         message = _latest_user_message(messages)
+        if session.get("status") != "confirmed" and session.get("setup_stage") == "json_ready":
+            session = self._sync_editable_source(session)
+        if session.get("status") == "confirmed":
+            if _is_config_revision_request(message):
+                updated = deepcopy(session)
+                updated["status"] = "draft"
+                updated["setup_stage"] = "json_ready"
+                updated["draft_revision"] = int(updated.get("draft_revision", 0)) + 1
+                updated["previous_confirmed_snapshot"] = deepcopy(session.get("confirmed_snapshot"))
+                for key in ("agent_reviewed_revision", "agent_reviewed_config_hash",
+                            "agent_reviewed_config_digest", "agent_reviewed_mother_digest"):
+                    updated.pop(key, None)
+                updated.setdefault("dialogue", []).append({
+                    "type": "configuration_reopened", "reason": message,
+                    "previous_config_version": (session.get("confirmed_snapshot") or {}).get("config_version"),
+                })
+                session = self._save(updated)
+                self.delegate = None
+            else:
+                if self.delegate is None:
+                    if not callable(self.runtime_factory):
+                        return "配置快照已确认。请重启本地 Agent 进入搜索对话模式；本次没有启动计算。"
+                    self.delegate = self.runtime_factory()
+                return self.delegate(messages, conversation_id=conversation_id)
         setup_stage = session.get("setup_stage")
         if setup_stage in {"awaiting_storage_path", "awaiting_storage_confirmation"}:
             return self._handle_workspace_setup(session, message)
@@ -231,10 +292,15 @@ class ConfigurationChatHandler:
             readiness = self.configuration_readiness(session)
             reviewed_revision = session.get("agent_reviewed_revision")
             reviewed_hash = session.get("agent_reviewed_config_hash")
+            reviewed_config_digest = session.get("agent_reviewed_config_digest")
+            reviewed_mother_digest = session.get("agent_reviewed_mother_digest")
             current_hash = self._editable_config_hash()
+            from config_layer.session.replace_config_from_json import config_digest, mother_structure_digest
             if (readiness["ready"] and reviewed_revision
                     and reviewed_revision == session.get("draft_revision")
-                    and reviewed_hash and reviewed_hash == current_hash):
+                    and reviewed_hash and reviewed_hash == current_hash
+                    and reviewed_config_digest == config_digest(session.get("config") or {})
+                    and reviewed_mother_digest == mother_structure_digest(session.get("config") or {})):
                 return self._confirm_and_start_search(
                     session, user_message=message, conversation_id=conversation_id,
                 )
@@ -244,7 +310,13 @@ class ConfigurationChatHandler:
                 "等待 Agent 审核通过后，再回复“同意”。",
             )
         if _is_config_json_import_command(message):
-            return self._import_and_review_config_json(session, message)
+            return self._import_and_review_config_json(
+                session, message,
+                continue_if_ready=_config_json_command_mode(message) == "continue",
+                conversation_id=conversation_id,
+            )
+        if _is_pending_config_write_command(message):
+            return self._write_pending_config_patch(session, message)
         if session.get("default_parameter_prompt", {}).get("status") == "awaiting_response":
             choice = _default_choice(message)
             if choice is not None:
@@ -259,21 +331,88 @@ class ConfigurationChatHandler:
         if not self.agent_client:
             return self._unavailable_message()
         try:
+            source_context = self._project_source_context(session)
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            return (f"当前设置文件 {self.editable_config_path} 读取失败：{error}。"
+                    "请修正该文件后发送“读取配置 JSON”；本次没有使用旧会话配置作答。")
+        working_config = (source_context["config"] if source_context else session.get("config") or {})
+        from config_layer.session.build_config_field_catalog import build_config_field_catalog
+        try:
             result = self.agent_client({
                 "mode": "configuration_dialogue",
                 "instruction": message,
-                "draft_config": session.get("config") or {},
+                "draft_config": _compact_agent_config(working_config),
+                "editable_field_catalog": build_config_field_catalog(working_config),
                 "draft_revision": session.get("draft_revision"),
+                "conversation_context": _recent_dialogue_context(session),
+                "setup_facts": self._setup_facts(session, config=working_config),
                 "bootstrap_hints": session.get("bootstrap_hints") or BOOTSTRAP_HINTS,
                 "editable_config_json": str(self.editable_config_path) if self.editable_config_path else None,
-                "readiness": self.configuration_readiness(session),
+                "verified_config_source": source_context["facts"] if source_context else None,
+                "readiness": (self.configuration_readiness(session) if not source_context or source_context["imported"]
+                              else {"ready": False, "status": "file_not_imported"}),
             })
         except Exception as error:
             diagnostic = getattr(error, "safe_message", type(error).__name__)
             self._record(session, "user", message)
             self._record(session, "assistant", f"配置助手暂时不可用（{diagnostic}）；草稿未更改。")
             return f"配置助手暂时不可用：{diagnostic}\n配置草稿未更改；请修正提示的问题后重试。"
-        return self._apply_agent_response(session, message, result)
+        return self._apply_agent_response(session, message, result, source_context=source_context)
+
+    def _sync_editable_source(self, session):
+        """Follow the selected workspace's configured short file after migration."""
+        if not self.editable_config_filename.endswith(".project.json"):
+            return session
+        preferred = self.workspace_root_default / self.editable_config_filename
+        if not preferred.is_file() or self.editable_config_path == preferred:
+            return session
+        updated = deepcopy(session)
+        old_path = str(self.editable_config_path) if self.editable_config_path else None
+        self.editable_config_path = preferred
+        updated["editable_config_json_path"] = str(preferred)
+        updated.pop("agent_reviewed_revision", None)
+        updated.pop("agent_reviewed_config_hash", None)
+        updated.pop("agent_reviewed_config_digest", None)
+        updated.pop("agent_reviewed_mother_digest", None)
+        updated.setdefault("dialogue", []).append({
+            "type": "editable_config_source_changed", "old_path": old_path,
+            "new_path": str(preferred),
+            "reason": "已按工作区运行时配置切换到现存短配置；等待重新导入。",
+        })
+        return self._save(updated)
+
+    def _project_source_context(self, session):
+        if self.editable_config_path is None or not self.editable_config_path.name.endswith(".project.json"):
+            return None
+        from config_layer.session.load_editable_config_json import load_editable_config_json
+        from config_layer.session.replace_config_from_json import config_digest, mother_structure_digest
+        from config_layer.session.resolve_phase_reference_directory import resolve_phase_reference_directory
+        from config_layer.session.summarize_config_for_agent import summarize_config_for_agent
+
+        source_hash = self._editable_config_hash()
+        if not source_hash:
+            raise ValueError("文件不存在或不可读")
+        imported = (session.get("last_imported_config_hash") == source_hash
+                    and session.get("last_imported_config_path") == str(self.editable_config_path)
+                    and session.get("last_imported_config_digest") == config_digest(session.get("config") or {})
+                    and session.get("last_imported_mother_digest") == mother_structure_digest(session.get("config") or {}))
+        if imported:
+            config = session.get("config") or {}
+        else:
+            config = load_editable_config_json(
+                self.editable_config_path, session.get("config") or {},
+                default_storage=default_workspace_storage(self.workspace_root_default),
+            )
+            config = resolve_phase_reference_directory(config, base_directory=self.base_directory)
+            if self._editable_config_hash() != source_hash:
+                raise ValueError("配置文件在读取过程中发生变化，请保存后重新读取")
+        return {
+            "hash": source_hash, "imported": imported, "config": config,
+            "facts": summarize_config_for_agent(
+                config, source_path=self.editable_config_path, source_hash=source_hash,
+                generated_h=imported,
+            ),
+        }
 
     def _handle_workspace_setup(self, session, user_message):
         normalized = " ".join(str(user_message).strip().lower().split())
@@ -431,9 +570,11 @@ class ConfigurationChatHandler:
             self.agent_client = client
 
         from config_layer.session.create_editable_config_json import create_editable_config_json
+        from config_layer.session.project_config_json import create_project_config_json
 
         try:
-            created = create_editable_config_json(
+            creator = create_project_config_json if draft_path.name.endswith(".project.json") else create_editable_config_json
+            created = creator(
                 draft_path,
                 session.get("config") or {},
                 bootstrap_hints=session.get("bootstrap_hints"),
@@ -481,49 +622,80 @@ class ConfigurationChatHandler:
         reply = (
             f"已确认工作区：{root}\nAgent 模型版本：{_deepseek_model_label(self.current_deepseek_model)}"
             f"（`{self.current_deepseek_model}`）\n{status}\n"
-            "请按 JSON 注释填写或核对体系边界、母结构、MLIP 路径、预算、DFT 参数和收敛标准。"
+            "请直接编辑该文件；下面分开列出必须补齐项和建议核对项。"
         )
         readiness = self.configuration_readiness(updated)
-        checklist = readiness.get("missing") or []
-        if checklist:
-            reply += "\n\n需要补齐：\n" + "\n".join(f"- {item}" for item in checklist)
-        reply += "\n\n完成后发送“读取配置 JSON”，由 Agent 审核；Agent 通过后你回复“同意”即可开始搜索流程。"
+        required_items = [
+            *(readiness.get("missing") or []),
+            *(readiness.get("conflicts") or []),
+            *(readiness.get("ambiguities") or []),
+        ]
+        if required_items:
+            reply += "\n\n必须补齐或解决（否则不能继续）：\n" + "\n".join(
+                f"- {item}" for item in required_items
+            )
+        else:
+            reply += "\n\n必填项：程序暂未发现缺项；仍需在导入时由 Agent 和程序复核。"
+        reply += "\n\n建议检查项（用于避免边界或成本口径误设）：\n" + "\n".join(
+            f"- {item}" for item in RECOMMENDED_CONFIG_CHECKS
+        )
+        reply += (
+            "\n\n改好后，想先审核再决定可发送“读取配置 JSON”；"
+            "若检查通过就直接进入搜索 Agent，可发送“读取配置 JSON 并继续”。"
+            "后者只在 Agent 和程序都通过时生效，也不会提交计算作业。"
+        )
         self._save(record_config_dialogue(updated, role="assistant", message=reply))
         return reply
 
-    def _import_and_review_config_json(self, session, user_message):
+    def _import_and_review_config_json(
+        self, session, user_message, *, continue_if_ready=False, conversation_id=None
+    ):
         if self.editable_config_path is None:
             return "未配置可编辑 JSON 草稿路径；配置草稿未更改。"
         from config_layer.schema.validate_search_config import validate_search_config
-        from config_layer.session.apply_config_revision import apply_config_revision
-        from config_layer.session.load_editable_config_json import (
-            config_leaf_patch, load_editable_config_json,
-        )
+        from config_layer.session.load_editable_config_json import load_editable_config_json
+        from config_layer.session.replace_config_from_json import replace_config_from_json
         from config_layer.session.resolve_phase_reference_directory import (
             resolve_phase_reference_directory,
         )
+        from config_layer.session.summarize_config_for_agent import summarize_config_for_agent
 
         try:
+            from config_layer.session.load_editable_config_json import _strip_jsonc_comments
+            from config_layer.session.project_config_json import FORMAT_ID as PROJECT_FORMAT_ID
+            source_hash_before = self._editable_config_hash()
+            document = json.loads(_strip_jsonc_comments(
+                self.editable_config_path.read_text(encoding="utf-8")))
             config = load_editable_config_json(
                 self.editable_config_path, session.get("config") or {},
                 default_storage=default_workspace_storage(self.workspace_root_default),
             )
+            config, _ = _fill_default_mlip_versions(config)
             config = resolve_phase_reference_directory(
                 config, base_directory=self.base_directory
             )
+            from config_layer.session.replace_config_from_json import mother_structure_digest
+            mother_digest_before = mother_structure_digest(config)
+            from config_layer.session.materialize_layered_h import materialize_layered_h
+            config = materialize_layered_h(config)
+            if mother_structure_digest(config) != mother_digest_before:
+                raise ValueError("母结构文件在生成 H 期间发生变化，请确认文件稳定后重新读取")
             audit = validate_search_config(config)
             imported_config_hash = self._editable_config_hash()
+            if source_hash_before != imported_config_hash:
+                raise ValueError("配置文件在读取或生成 H 期间发生变化，请保存后重新读取")
         except (OSError, TypeError, ValueError, KeyError) as error:
             return f"配置 JSON 未导入：{error}\n当前草稿未更改。"
 
-        patch = config_leaf_patch(session.get("config") or {}, config)
-        updated = session
-        if patch:
-            updated = apply_config_revision(
-                updated, patch,
-                reasons={path: "用户编辑本地配置 JSON 后导入。" for path in patch},
-                author="user_json_draft",
-            )
+        updated = replace_config_from_json(
+            session, config, source_path=str(self.editable_config_path),
+            source_hash=imported_config_hash,
+        )
+        if document.get("_format") == PROJECT_FORMAT_ID:
+            updated = dict(updated)
+            updated["config_profile"] = {
+                "name": document["profile"], "digest": document["profile_digest"],
+            }
         updated = self._with_turn(updated, user_message, "")
         updated = self._save(updated)
         agent_reply = ""
@@ -531,6 +703,12 @@ class ConfigurationChatHandler:
         agent_note = ""
         agent_passed = False
         readiness = self.configuration_readiness(updated)
+        verified_source = summarize_config_for_agent(
+            config, source_path=self.editable_config_path,
+            source_hash=imported_config_hash, generated_h=bool(
+                (config.get("system") or {}).get("H_generation", {}).get("enabled")
+            ),
+        )
         if callable(self.agent_client):
             try:
                 result = self.agent_client({
@@ -539,32 +717,46 @@ class ConfigurationChatHandler:
                         "用户刚从本地 JSON 文件导入配置草稿。请检查缺项、冲突、歧义和参数口径，"
                         "解释必要的修订并提出集中问题。只审核，不返回或应用 patch。必须返回布尔字段 "
                         "ready_for_search；仅当没有阻止开始搜索的问题时为 true。不要确认配置或启动计算。"
+                        "verified_config_source 是程序已读取、生成和校验的事实；不得否认文件可读，"
+                        "不得要求用户手工填写已生成的 H，也不得引用旧对话配置。"
+                        "atomate_defaults 的空参数、空动态配额、空 focus_regions、未接通 scheduler、"
+                        "已写入文件的收敛阈值以及阶段上限之和超过总预算都不是配置阻塞项，"
+                        "不得要求用户逐项重复确认。只报告 readiness 或 validation 中有证据的阻塞项。"
                     ),
-                    "draft_config": updated.get("config") or {},
+                    "draft_config": _compact_agent_config(updated.get("config") or {}),
                     "draft_revision": updated.get("draft_revision"),
                     "readiness": readiness,
                     "validation": audit,
+                    "verified_config_source": verified_source,
                 })
                 if isinstance(result, dict):
-                    agent_reply = str(result.get("reply") or "配置 JSON 已检查。")
-                    questions = result.get("questions") or []
+                    contradiction = _agent_source_contradiction(result, verified_source)
+                    agent_reply = (f"Agent 本次回答与程序核实结果矛盾，已忽略：{contradiction}。"
+                                   if contradiction else str(result.get("reply") or "配置 JSON 已检查。"))
+                    questions = [] if contradiction else result.get("questions") or []
                     if not isinstance(questions, list):
                         questions = []
                     if result.get("patch"):
                         agent_note = "Agent 返回了修改建议，但本次审查不会自动应用；请编辑 JSON 后再次读取。"
                     agent_passed = (
                         result.get("ready_for_search") is True
+                        and not contradiction
                         and readiness["ready"]
                         and not result.get("patch")
                         and imported_config_hash is not None
                         and self._editable_config_hash() == imported_config_hash
                     )
                     if agent_passed:
+                        from config_layer.session.replace_config_from_json import config_digest, mother_structure_digest
                         updated["agent_reviewed_revision"] = updated.get("draft_revision")
                         updated["agent_reviewed_config_hash"] = imported_config_hash
+                        updated["agent_reviewed_config_digest"] = config_digest(updated.get("config") or {})
+                        updated["agent_reviewed_mother_digest"] = mother_structure_digest(updated.get("config") or {})
                     else:
                         updated.pop("agent_reviewed_revision", None)
                         updated.pop("agent_reviewed_config_hash", None)
+                        updated.pop("agent_reviewed_config_digest", None)
+                        updated.pop("agent_reviewed_mother_digest", None)
                         if readiness["ready"]:
                             agent_note = (
                                 agent_note
@@ -582,13 +774,34 @@ class ConfigurationChatHandler:
             updated.pop("agent_reviewed_config_hash", None)
             agent_note = "DeepSeek Agent 当前不可用；文件已导入，可稍后重新发送“读取配置 JSON”进行审核。"
 
-        reply = "配置 JSON 已交给 Agent 审核，并通过程序字段校验；此次读取不会自动确认或开始搜索。"
+        reply = "配置 JSON 已读取，程序检查结果已交给 Agent 审核；此次读取不会自动确认或开始搜索。"
+        h_counts = ", ".join(
+            f"{phase}={row['count']}" for phase, row in verified_source["H_by_phase"].items()
+        ) or "无"
+        reply += (f"\n程序核实：来源={self.editable_config_path}；"
+                  f"允许相={','.join(verified_source['allowed_phases_union'])}；"
+                  f"实际 H 数量：{h_counts}。")
+        if document.get("_format") == PROJECT_FORMAT_ID:
+            selected = [f"{section}.{key}" for section, values in document.get("config", {}).items()
+                        if isinstance(values, dict) for key in values]
+            overrides = list(document.get("overrides", {}))
+            reply += (f"\n默认模板：{document['profile']} ({document['profile_digest']})。"
+                      f"\n项目填写项：{', '.join(selected) or '无'}。"
+                      f"\n高级覆盖章节：{', '.join(overrides) or '无'}。"
+                      f"\n生效关键值：MLIP={config['calculation']['mlip_version']}，"
+                      f"总预算={config['budgets']['total_relative_cost']}，"
+                      f"初态数={config['run']['initial_states_per_branch']}。")
+        if continue_if_ready:
+            reply = reply.replace("此次读取不会自动确认或开始搜索。", "按你的条件确认指令继续检查。")
         if agent_reply:
             reply += "\n\n" + agent_reply
         if agent_note:
             reply += "\n\n" + agent_note
         if agent_passed:
-            reply += "\n\nAgent 与程序检查均通过。你核对无误后回复“同意”，即可保存配置版本并进入搜索 Agent；不会自动提交计算作业。"
+            if continue_if_ready:
+                reply += "\n\nAgent 与程序检查均通过，按你本条指令继续；不会自动提交计算作业。"
+            else:
+                reply += "\n\nAgent 与程序检查均通过。你核对无误后回复“同意”，即可保存配置版本并进入搜索 Agent；不会自动提交计算作业。"
         elif not readiness["ready"]:
             reply += "\n\n当前仍有必填项或冲突，按下方清单修改 JSON 后重新发送“读取配置 JSON”。"
         updated = record_config_dialogue(updated, role="assistant", message=reply)
@@ -597,20 +810,62 @@ class ConfigurationChatHandler:
         formatted = _format_agent_reply(
             reply, [], readiness, questions, agent_review_passed=agent_passed,
         )
-        return f"文件：{self.editable_config_path}\n草稿版本：{updated.get('draft_revision')}\n\n{formatted}"
+        report = f"文件：{self.editable_config_path}\n草稿版本：{updated.get('draft_revision')}\n\n{formatted}"
+        if continue_if_ready and agent_passed:
+            continuation = self._confirm_and_start_search(
+                updated, user_message=None, conversation_id=conversation_id,
+            )
+            return f"{report}\n\n{continuation}"
+        return report
 
-    def _apply_agent_response(self, session, user_message, result):
+    def _apply_agent_response(self, session, user_message, result, *, source_context=None):
         if not isinstance(result, dict):
             return self._save_and_report(
                 self._with_turn(session, user_message, "Agent 返回格式无效，草稿未更改。"),
                 "Agent 返回格式无效，草稿未更改。请重试或使用本地配置控制接口。",
             )
+        if source_context:
+            contradiction = _agent_source_contradiction(result, source_context["facts"])
+            if contradiction:
+                result = {
+                    "reply": f"Agent 本次说法与本地程序已核实的配置矛盾，已忽略：{contradiction}。",
+                    "patch": {}, "questions": [],
+                }
         patch = result.get("patch") or {}
         if not isinstance(patch, dict) or len(patch) > 40:
             patch = None
         updated = self._with_turn(session, user_message, "")
         changes = []
-        if patch:
+        write_authorized = (_explicit_config_write_request(user_message)
+                            or result.get("write_requested") is True)
+        if patch and source_context and write_authorized:
+            try:
+                from config_layer.session.validate_requested_config_patch import validate_requested_config_patch
+                patch = validate_requested_config_patch(user_message, patch)
+                _validate_patch(patch)
+                from config_layer.session.project_config_json import write_project_config_patch
+                changes = write_project_config_patch(
+                    self.editable_config_path, patch, expected_hash=source_context["hash"])
+                updated.pop("pending_config_patch", None)
+                _clear_config_review(updated)
+                fields = "、".join(change["path"] for change in changes)
+                result = {**result, "reply": (
+                    f"已写入 {self.editable_config_path}：{fields}。"
+                    "请发送“读取配置”执行展开、H 生成和正式审核。"
+                )}
+            except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
+                patch = None
+                result = {**result, "reply": f"{result.get('reply', '')}\n\n配置文件写入被安全检查拒绝：{error}"}
+        elif patch and source_context:
+            updated["pending_config_patch"] = {
+                "patch": deepcopy(patch), "source_hash": source_context["hash"],
+                "reasons": deepcopy(result.get("reasons") or {}),
+            }
+            fields = "、".join(sorted(patch))
+            result = {**result, "reply": (
+                f"已识别配置修改建议：{fields}。尚未写入文件；回复“写入”即可执行。"
+            )}
+        elif patch:
             try:
                 _validate_patch(patch)
                 updated = apply_config_revision(
@@ -627,8 +882,37 @@ class ConfigurationChatHandler:
             questions = []
         updated["dialogue"].append({"type": "message", "role": "assistant", "message": reply})
         updated = self._save(updated)
+        if source_context and not source_context["imported"]:
+            facts = source_context["facts"]
+            return (f"当前设置文件：{self.editable_config_path}\n"
+                    f"程序已读取文件；允许相：{', '.join(facts['allowed_phases_union'])}；"
+                    f"H_generation={'已配置' if facts['H_generation'] else '未配置'}。"
+                    f"尚未执行母结构枚举及导入审核。\n\n{reply}\n\n"
+                    "发送“读取配置 JSON”后，程序会生成各相 H 并给出具体检查结果。")
         readiness = self.configuration_readiness(updated)
         return _format_agent_reply(reply, changes, readiness, questions)
+
+    def _write_pending_config_patch(self, session, user_message):
+        pending = session.get("pending_config_patch") or {}
+        patch = pending.get("patch")
+        if not isinstance(patch, dict) or not patch:
+            return "当前没有待写入的参数修改；请先告诉我具体字段和值。"
+        if self._editable_config_hash() != pending.get("source_hash"):
+            return "配置文件已在建议后变化；请重新说明修改内容，避免覆盖你的编辑。"
+        try:
+            _validate_patch(patch)
+            from config_layer.session.project_config_json import write_project_config_patch
+            changes = write_project_config_patch(
+                self.editable_config_path, patch, expected_hash=pending["source_hash"])
+        except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
+            return f"配置文件未修改：{error}"
+        updated = self._with_turn(session, user_message, "")
+        updated.pop("pending_config_patch", None)
+        _clear_config_review(updated)
+        reply = (f"已把 {len(changes)} 项修改写入 {self.editable_config_path}。"
+                 "请发送“读取配置 JSON”，审核通过后确认新版本；当前运行继续使用原配置。")
+        self._save(record_config_dialogue(updated, role="assistant", message=reply))
+        return reply
 
     def _confirm_and_start_search(self, session, *, user_message, conversation_id):
         if not callable(self.runtime_factory):
@@ -636,7 +920,10 @@ class ConfigurationChatHandler:
                 "Agent 与程序检查已通过，但当前没有配置搜索运行入口；"
                 "配置尚未确认，请检查 runtime_factory 后重试。"
             )
-        confirmation = self._confirm(self._with_turn(session, user_message, ""))
+        confirmation_session = (
+            session if user_message is None else self._with_turn(session, user_message, "")
+        )
+        confirmation = self._confirm(confirmation_session)
         confirmed = self.workflow_kwargs.get("config_session") or {}
         if confirmed.get("status") != "confirmed":
             return confirmation
@@ -719,8 +1006,8 @@ class ConfigurationChatHandler:
     @staticmethod
     def _unavailable_message():
         return ("当前是配置对话模式；尚未确认配置，也不会运行计算。"
-                "本地 DeepSeek API 尚不可用，请设置本机 DEEPSEEK_API_KEY 后重启服务；"
-                "草稿仍可通过 /phase/config/patch 修改。")
+                "本地 DeepSeek API 尚未启用。请打开本机设置页 http://127.0.0.1:8765/phase/setup，"
+                "粘贴 API Key 并测试连接；成功后无需重启服务。密钥只保存在本机系统凭据库。")
 
 
 def _latest_user_message(messages):
@@ -744,13 +1031,42 @@ def _default_choice(message):
     return None
 
 
-def _is_config_json_import_command(message):
-    """Only an explicit short command imports the edited local JSON draft."""
-    normalized = " ".join(str(message).strip().lower().split())
-    return normalized in {
-        "读取配置 json", "读取配置json", "检查配置 json", "检查配置json",
-        "审查配置 json", "审查配置json", "read config json", "review config json",
+def _config_json_command_mode(message):
+    """Accept short commands and clear natural-language requests to re-read the file."""
+    normalized = re.sub(r"[\s,，;；。.!！？?、:：]", "", str(message).strip().lower())
+    continue_commands = {
+        "读取配置json并继续", "读取配置json检查通过后继续", "读取配置json审核通过后继续",
+        "读取配置json如果没问题就继续", "读取配置json没问题就继续",
+        "读取配置json如检查通过则继续", "readconfigjsonandcontinue",
+        "readconfigjsoncontinueifvalid",
     }
+    if normalized in continue_commands:
+        return "continue"
+    review_commands = {
+        "读取配置json", "检查配置json", "审查配置json",
+        "读取配置", "检查配置", "审查配置", "重新读取配置",
+        "readconfigjson", "reviewconfigjson",
+    }
+    if normalized in review_commands:
+        return "review"
+    if normalized in {"配置改好了", "设置改好了", "我改好了", "已改好配置", "配置已保存", "设置已保存"}:
+        return "review"
+    if any(word in normalized for word in ("不要读取", "暂不读取", "别读取", "先不读取")):
+        return None
+    if normalized.startswith(("请", "帮我", "重新", "读取", "检查", "审查", "配置已改好", "我改好了")):
+        mentions_file = any(word in normalized for word in (
+            "配置json", "配置文件", "设置文件", "当前配置", "search_config.project.json",
+            "search_config.draft.json",
+        ))
+        requests_read = any(word in normalized for word in ("读取", "检查", "审查"))
+        if mentions_file and requests_read:
+            return "continue" if "通过后继续" in normalized or "没问题就继续" in normalized else "review"
+    return None
+
+
+def _is_config_json_import_command(message):
+    """Only explicit local-JSON review/conditional-continue commands are accepted."""
+    return _config_json_command_mode(message) is not None
 
 
 def _extract_workspace_path(message):
@@ -765,12 +1081,14 @@ def _extract_workspace_path(message):
         if any(ord(char) < 32 or ord(char) == 127 for char in candidate):
             return None
     candidate = re.sub(
-        r"^(?:工作区根目录|工作区根路径|根路径|工作区路径|存储路径|保存路径)\s*[:：]\s*",
+        r"^(?:工作区根目录|工作区根路径|根路径|工作区路径|存储路径|保存路径|地址是)\s*[:：]?\s*",
         "",
         candidate,
     ).strip()
     if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in "\"'`":
         candidate = candidate[1:-1].strip()
+    if re.search(r"(?:^|\s)(?:agent|deepseek|模型)(?:\s*模型)?(?:\s*版本)?\s*[:：]", candidate, re.I):
+        return None
     return candidate
 
 
@@ -789,6 +1107,10 @@ def _parse_workspace_setup_values(message):
             return None, None
     elif any(separator in raw for separator in (";", "；", "|", ",", "，")):
         segments = [part.strip() for part in re.split(r"[;；|,，]", raw) if part.strip()]
+    elif re.search(r"\s+(?=(?:agent|deepseek|模型)(?:\s*模型)?(?:\s*版本)?\s*[:：])", raw, re.I):
+        segments = [part.strip() for part in re.split(
+            r"\s+(?=(?:agent|deepseek|模型)(?:\s*模型)?(?:\s*版本)?\s*[:：])",
+            raw, flags=re.I) if part.strip()]
     else:
         segments = [raw]
 
@@ -837,6 +1159,8 @@ def normalize_workspace_path(value, *, base_directory):
     candidate = _extract_workspace_path(value)
     if not candidate:
         raise ValueError("工作区路径必须是单行路径")
+    from config_layer.session.validate_workspace_root import validate_workspace_root
+    candidate = validate_workspace_root(candidate)
     path = Path(candidate).expanduser()
     if not path.is_absolute():
         if not candidate.startswith(("./", "../", ".\\", "..\\")):
@@ -873,6 +1197,114 @@ def _deepseek_model_change_reply(model):
     )
 
 
+def _recent_dialogue_context(session, *, limit=8, max_chars=1600):
+    """Keep only dialogue since the current configuration source was imported."""
+    context = []
+    entries = session.get("dialogue") or []
+    start = 0
+    for index, entry in enumerate(entries):
+        if (entry.get("type") in {"config_import", "editable_config_source_changed"}
+                or entry.get("type") == "config_revision"
+                and entry.get("author") == "user_json_draft"):
+            start = index + 1
+    for entry in entries[start:][-limit:]:
+        if entry.get("type") != "message" or entry.get("role") not in {"user", "assistant"}:
+            continue
+        message = str(entry.get("message") or "")
+        if _open_webui_metadata_reply(message) is not None:
+            continue
+        context.append({"role": entry["role"], "message": message[-max_chars:]})
+    return context
+
+
+def _open_webui_metadata_reply(message):
+    """Keep Open WebUI title/tag/follow-up helpers out of the scientific dialogue."""
+    text = str(message or "").lstrip()
+    if not text.startswith("### Task:"):
+        return None
+    lowered = text.lower()
+    if "suggest 3-5 relevant follow-up" in lowered or '"follow_ups"' in lowered:
+        return '{"follow_ups": []}'
+    if "broad tags categorizing" in lowered or '"tags"' in lowered:
+        return '{"tags": ["材料相图搜索"]}'
+    if "generate a concise" in lowered and "title" in lowered:
+        return "相图搜索配置"
+    return None
+
+
+def _compact_agent_config(config):
+    """Send decision-relevant settings; H matrices stay in local numeric code."""
+    keys = ("frozen_parameters", "branch_partition_suggestions", "generation_actions",
+            "calculation", "budgets", "mlip", "dft", "convergence", "mc_policy",
+            "round_strategy", "run")
+    excerpt = {key: deepcopy(config[key]) for key in keys if key in config}
+    system = config.get("system") or {}
+    excerpt["system"] = {key: deepcopy(system[key]) for key in (
+        "system_id", "configuration_space", "phase_reference_directory", "phase_references", "H_generation",
+        "constraints", "branch_schema",
+    ) if key in system}
+    boundary = system.get("boundary") or {}
+    excerpt["system"]["boundary"] = {key: deepcopy(boundary[key])
+                                        for key in ("P", "TM_ratio") if key in boundary}
+    finetune = config.get("mlip_finetune") or {}
+    excerpt["mlip_finetune"] = {key: deepcopy(finetune[key]) for key in
+                                ("enabled", "validation", "refresh_validation") if key in finetune}
+    qbc = config.get("qbc") or {}
+    excerpt["qbc"] = {key: deepcopy(qbc[key]) for key in
+                      ("mode", "extreme_uncertainty") if key in qbc}
+    cluster = config.get("supercomputer") or {}
+    excerpt["supercomputer"] = {"scheduler": deepcopy(cluster.get("scheduler") or {})}
+    return excerpt
+
+
+def _agent_source_contradiction(result, facts):
+    """Catch only claims directly disproved by the current local file facts."""
+    output = str(result.get("reply") or "") + " " + " ".join(
+        map(str, result.get("questions") or [])
+    )
+    source = str(facts.get("source_path") or "")
+    if source.endswith("search_config.project.json") and any(
+        "search_config.draft.json" in line
+        and any(label in line for label in ("当前草稿", "当前配置", "可编辑配置", "正在读取", "来源="))
+        and not any(label in line for label in ("旧", "历史", "已停用"))
+        for line in output.splitlines()
+    ):
+        return "引用了旧设置文件"
+    if any(phrase in output for phrase in (
+        "我无法读取该文件", "无法读取本地文件", "无法打开本地文件",
+        "请把配置文件内容贴出", "请提供配置文件内容",
+    )):
+        return "程序已读取当前本地设置文件"
+    if facts.get("generated_H") and all(
+        (facts.get("H_by_phase") or {}).get(phase, {}).get("count", 0) > 0
+        for phase in facts.get("allowed_phases_union") or []
+    ) and any(phrase in output for phrase in (
+        "H 尚未生成", "H尚未生成", "请提供具体矩阵", "请把矩阵填入",
+        "请提供各相合法矩阵", "boundary.H 四个相键缺失",
+    )):
+        return "各相 H 已由程序生成并核实"
+    return None
+
+
+def _fill_default_mlip_versions(config):
+    """Migrate legacy null version fields when the configured model is mh-1."""
+    mlip = config.get("mlip") or {}
+    calculation = config.get("calculation") or {}
+    bohb_scope = ((config.get("bohb") or {}).get("scope") or {})
+    selected_version = calculation.get("mlip_version")
+    defaulted = []
+    if not selected_version and mlip.get("name") == "mace-mh-1":
+        selected_version = "mace-mh-1"
+        calculation["mlip_version"] = selected_version
+        config["calculation"] = calculation
+        defaulted.append("calculation.mlip_version")
+    if not bohb_scope.get("mlip_version") and selected_version:
+        bohb_scope["mlip_version"] = selected_version
+        config.setdefault("bohb", {})["scope"] = bohb_scope
+        defaulted.append("bohb.scope.mlip_version")
+    return config, defaulted
+
+
 def _validate_patch(patch):
     for path, value in patch.items():
         if not isinstance(path, str) or not path or len(path) > 180:
@@ -887,6 +1319,38 @@ def _validate_patch(patch):
             json.dumps(value, ensure_ascii=False, allow_nan=False)
         except (TypeError, ValueError) as error:
             raise ValueError(f"{path} 不是合法 JSON 值") from error
+
+
+def _explicit_config_write_request(message):
+    normalized = re.sub(r"\s+", "", str(message or "").lower())
+    return any(phrase in normalized for phrase in (
+        "你写", "帮我写", "替我写", "写入配置", "写进配置", "直接写",
+        "直接改", "帮我改", "帮我修订配置", "修改配置文件", "保存到配置", "修改设置文件",
+    ))
+
+
+def _is_pending_config_write_command(message):
+    return re.sub(r"\s+", "", str(message or "").lower()) in {
+        "写入", "保存", "写吧", "改吧", "确认写入", "执行写入",
+        "写入配置", "确认修改", "同意修改", "写进配置", "保存到配置",
+    }
+
+
+def _is_config_revision_request(message):
+    text = re.sub(r"\s+", "", str(message or "").lower())
+    config_scope = any(word in text for word in (
+        "配置", "设置文件", "参数文件", "search_config.project.json",
+    ))
+    edit_intent = any(word in text for word in (
+        "修改", "调整", "改", "设为", "更新", "修订", "写入", "保存",
+    ))
+    return config_scope and edit_intent
+
+
+def _clear_config_review(session):
+    for key in ("agent_reviewed_revision", "agent_reviewed_config_hash",
+                "agent_reviewed_config_digest", "agent_reviewed_mother_digest"):
+        session.pop(key, None)
 
 
 def _format_agent_reply(reply, changes, readiness, questions, *, agent_review_passed=False):

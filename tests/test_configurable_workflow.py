@@ -7,6 +7,7 @@ from execution_layer.dispatch.dispatch_calculation_stage import execute_register
 from data_layer.ledger.phase_data_manager import PhaseDataManager
 from config_layer.defaults.layered_oxide_system_config import layered_oxide_system_config
 from config_layer.schema.validate_system_config import validate_system_config
+from config_layer.schema.validate_configuration_space import validate_configuration_space
 
 
 class ConfigurableWorkflowTest(unittest.TestCase):
@@ -14,6 +15,22 @@ class ConfigurableWorkflowTest(unittest.TestCase):
         system = validate_system_config(layered_oxide_system_config())
         self.assertEqual(system["branch_schema"]["fields"], ["P", "H", "x", "T"])
         self.assertIn("coverage", create_generation_registry().names())
+
+    def test_fixed_tm_role_requires_explicit_reference_source(self):
+        system = layered_oxide_system_config()
+        system["configuration_space"]["roles"]["T"] = "fixed"
+        self.assertFalse(validate_configuration_space(system)["valid"])
+        system["configuration_space"]["fixed_T_source"] = "phase_reference"
+        self.assertTrue(validate_configuration_space(system)["valid"])
+        manager = PhaseDataManager(
+            {"P": ["O3"], "H": {"O3": [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]]},
+             "TM_ratio": {"Fe": 1, "Mn": 1}}, system_config=system)
+        self.assertEqual(manager.data["system_config"]["branch_schema"]["fields"],
+                         ["P", "H", "x"])
+        H = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        manager.add_branch(P="O3", H=H, x=1, T=["Fe", "Mn"])
+        with self.assertRaisesRegex(ValueError, "固定 T"):
+            manager.add_branch(P="O3", H=H, x=1, T=["Mn", "Fe"])
 
     def test_custom_branch_schema(self):
         system = layered_oxide_system_config()

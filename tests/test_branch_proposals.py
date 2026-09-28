@@ -8,6 +8,8 @@ from scientific_layer.structures.propose_branches import propose_branches
 from data_layer.ledger.phase_data_manager import PhaseDataManager
 from scientific_layer.structures.generate_branch_structure import generate_branch_structure
 from scientific_layer.structures.generate_tm_ordering_branches import generate_tm_ordering_branches
+from scientific_layer.structures.boundary_utils import det_H
+from config_layer.defaults.layered_oxide_system_config import layered_oxide_system_config
 
 
 def build_case():
@@ -47,6 +49,45 @@ def build_case():
 
 
 class BranchProposalTest(unittest.TestCase):
+    def test_fixed_tm_uses_reference_order_and_skips_tm_mutation(self) -> None:
+        manager, references, _, _ = build_case()
+        for reference in references.values():
+            reference.replace(1, "Fe")
+            reference.replace(2, "Mn")
+        system = layered_oxide_system_config(boundary=manager.boundary)
+        system["configuration_space"]["roles"]["T"] = "fixed"
+        system["configuration_space"]["fixed_T_source"] = "phase_reference"
+        manager = PhaseDataManager(manager.boundary, system_config=system)
+        first = propose_branches(manager, references,
+                                 quotas={"coverage": 4, "tm_ordering": 4}, seed=1,
+                                 register=False)
+        second = propose_branches(manager, references,
+                                  quotas={"coverage": 4, "tm_ordering": 4}, seed=99,
+                                  register=False)
+        self.assertTrue(first)
+        self.assertTrue(all(item["strategy"] != "tm_ordering" for item in first))
+        self.assertEqual([item["T"] for item in first], [item["T"] for item in second])
+
+    def test_generation_cap_filters_final_candidates(self) -> None:
+        manager, references, parent, mappings = build_case()
+        candidates = propose_branches(
+            manager, references, quotas={"coverage": 10}, seed=7,
+            parent_branch_ids=[parent], site_mappings=mappings,
+            max_det_H=1,
+        )
+        self.assertTrue(candidates)
+        self.assertTrue(all(det_H(item["H"]) <= 1 for item in candidates))
+
+    def test_coverage_can_revisit_region_with_distinct_tm_orders(self) -> None:
+        manager, references, _, _ = build_case()
+        candidates = propose_branches(
+            manager, references, quotas={"coverage": 20}, seed=17,
+            max_det_H=1, register=False,
+        )
+        self.assertEqual(len(candidates), 20)
+        self.assertTrue(all(det_H(item["H"]) == 1 for item in candidates))
+        self.assertTrue(all(item["branch_id"] is None for item in candidates))
+
     def test_framework_enumeration(self) -> None:
         manager, references, _, _ = build_case()
         frameworks = enumerate_legal_frameworks(manager.boundary, references)

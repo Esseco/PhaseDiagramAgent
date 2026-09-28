@@ -11,6 +11,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 from typing import Any, Callable
 
@@ -177,6 +178,28 @@ class SlurmBatchRunner:
         normalized["result_path"] = str(task_directory / "result.json")
         if task.get("stage") not in DFT_STAGES and self.task_preparer is not None:
             normalized = self.task_preparer(normalized)
+        worker_job = normalized.get("worker_job") or {}
+        if task.get("stage") in {"relax_and_feature", "deep_search"} and worker_job:
+            source = Path(worker_job.get("structure_path") or "")
+            if not source.is_file():
+                raise FileNotFoundError(f"MLIP input structure missing: {source}")
+            shutil.copy2(source, task_directory / "initial.vasp")
+            worker_job["structure_path"] = "initial.vasp"
+            worker_job["phase_references"] = {}
+            full_na = (worker_job.get("parameters") or {}).get("full_na_structure")
+            if full_na:
+                source_full_na = Path(full_na)
+                if not source_full_na.is_file():
+                    raise FileNotFoundError(f"full Na structure missing: {source_full_na}")
+                shutil.copy2(source_full_na, task_directory / "full_na_structure.vasp")
+                worker_job["parameters"]["full_na_structure"] = "full_na_structure.vasp"
+            checkpoint = worker_job.get("checkpoint")
+            if checkpoint:
+                source_checkpoint = Path(checkpoint)
+                if not source_checkpoint.is_file():
+                    raise FileNotFoundError(f"MC checkpoint missing: {source_checkpoint}")
+                shutil.copy2(source_checkpoint, task_directory / source_checkpoint.name)
+                worker_job["checkpoint"] = source_checkpoint.name
         if task.get("stage") in DFT_STAGES:
             if self.dispatcher is None:
                 raise ValueError("DFT Slurm 任务需要配置 atomate dispatcher")

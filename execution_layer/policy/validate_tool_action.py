@@ -20,6 +20,8 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         errors.append("config_version_mismatch")
     if tool not in registry or tool not in set((config.get("agent") or {}).get("allowed_tools") or []):
         errors.append("tool_not_allowed")
+    elif not callable(registry[tool].get("handler")):
+        errors.append("tool_handler_not_configured")
     if any(key in action for key in ("energy", "ehull", "score", "converged")):
         errors.append("agent_supplied_numeric_result")
     parameters = action.get("parameters") or {}
@@ -28,13 +30,21 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         if any(item == path or item.startswith(path + ".") or path.endswith("." + item) for item in supplied_paths):
             errors.append(f"frozen_parameter_override:{path}")
     if tool == "run_calculation_stage":
-        stage = action.get("stage")
+        stage = action.get("stage") or parameters.get("stage")
+        if len(action.get("target_ids") or []) != 1:
+            errors.append("calculation_stage_requires_one_structure_target")
         if stage not in set((config.get("calculation") or {}).get("enabled_stages") or []):
             errors.append("calculation_stage_not_enabled")
         if stage in {"dft_single_point", "dft_relax"}:
             confirmed_dft = (config.get("dft") or {}).get("parameters") or {}
             if any(key not in confirmed_dft or confirmed_dft[key] != value for key, value in parameters.items()):
                 errors.append("dft_parameter_override")
+    if tool == "restart_failed_task":
+        targets = action.get("target_ids") or []
+        retryable = {row.get("task_id") for row in state.get("tasks") or []
+                     if row.get("task_id") and row.get("status") in {"failed", "timeout"}}
+        if len(targets) != 1 or targets[0] not in retryable:
+            errors.append("retry_target_not_failed_task")
     task_key = action.get("task_key")
     if tool not in {"check_convergence", "pause_search"} and not task_key:
         errors.append("formal_tool_requires_task_key")

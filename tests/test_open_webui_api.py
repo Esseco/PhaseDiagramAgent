@@ -6,7 +6,7 @@ from pathlib import Path
 
 from run.open_webui_api import (
     RunWorkflowChatHandler, classify_user_decision, create_open_webui_runtime,
-    handle_chat_request,
+    handle_chat_request, _workspace_path_clarification_reply, format_workflow_reply,
 )
 from run.configuration_chat import ConfigurationChatHandler
 from execution_layer.remote.manual_upload_runner import ManualUploadBatchRunner
@@ -15,6 +15,29 @@ def runtime_adapter_fixture():
 
 
 class OpenWebUIAPITest(unittest.TestCase):
+    def test_workspace_correction_is_not_a_tool_proposal(self):
+        state = {"confirmed_config": {"storage": {"workspace_root": r"E:\0-FM-PhaseDiagram"}}}
+        reply = _workspace_path_clarification_reply(
+            r"地址是E:\0-FM-PhaseDiagram 你写错地方了", state)
+        self.assertIn("当前快照的工作区", reply)
+        self.assertNotIn("建议：", reply)
+        output_reply = _workspace_path_clarification_reply(
+            r"输出目录：E:\0-FM-PhaseDiagram，帮我写入", state)
+        self.assertIn("当前快照的工作区", output_reply)
+        bad_state = {"confirmed_config": {"storage": {
+            "workspace_root": r"E:\0-FM-PhaseDiagram     agent：V4.1flash"}}}
+        recovery = _workspace_path_clarification_reply(
+            r"输出目录：E:\0-FM-PhaseDiagram，帮我写入", bad_state)
+        self.assertIn("已确认快照中的工作区路径", recovery)
+        self.assertNotIn("建议：", recovery)
+
+    def test_invalid_action_is_not_presented_for_approval(self):
+        reply = format_workflow_reply(
+            {"status": "awaiting_approval", "agent_proposal": {
+                "recommended_action": None, "raw_action": {"tool": None}}}, "state.json")
+        self.assertIn("无效动作", reply)
+        self.assertNotIn("回复“同意”", reply)
+
     def _runtime_files(self, root, *, history=False, session=True):
         from data_layer.ledger.phase_data_manager import PhaseDataManager
 
@@ -157,6 +180,14 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "confirmed")
             self.assertEqual(handler.workflow_kwargs["config_session"]["confirmed_snapshot"]["config_version"], "config-test")
 
+    def test_confirmed_runtime_starts_without_deepseek_key_for_browser_setup(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("run.deepseek_credentials.load_deepseek_api_key", return_value=None):
+            runtime = self._runtime_files(directory, session=False)
+            handler = create_open_webui_runtime(runtime)
+            self.assertIsNone(handler.workflow_kwargs["agent_client"])
+            self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "confirmed")
+
     def test_history_requires_choice_before_workflow_and_continue_restores_pending(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
@@ -207,7 +238,7 @@ class OpenWebUIAPITest(unittest.TestCase):
                 create_open_webui_runtime(runtime)
 
     def test_first_start_enters_persistent_config_only_mode(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}), patch("run.deepseek_credentials.load_deepseek_api_key", return_value=None):
             root = Path(directory)
             runtime = root / "runtime.json"
             runtime.write_text(json.dumps({
@@ -244,7 +275,7 @@ class OpenWebUIAPITest(unittest.TestCase):
             confirm_path = resumed(
                 [{"role": "user", "content": "确认"}], conversation_id="setup"
             )
-            draft = workspace / "search_config.draft.json"
+            draft = workspace / "search_config.project.json"
             self.assertIn(str(draft), confirm_path)
             self.assertIn("读取配置 JSON", confirm_path)
             self.assertTrue(draft.is_file())
@@ -315,9 +346,11 @@ class OpenWebUIAPITest(unittest.TestCase):
             confirmed = handler(
                 [{"role": "user", "content": "确认"}], conversation_id="setup"
             )
-            self.assertIn("需要补齐", confirmed)
+            self.assertIn("必须补齐或解决", confirmed)
+            self.assertIn("建议检查项", confirmed)
             self.assertIn("读取配置 JSON", confirmed)
-            self.assertTrue((workspace / "search_config.draft.json").is_file())
+            self.assertIn("读取配置 JSON 并继续", confirmed)
+            self.assertTrue((workspace / "search_config.project.json").is_file())
             self.assertEqual(switched_models, ["deepseek-flash"])
             self.assertEqual(agent_calls, [])
             session = handler.workflow_kwargs["config_session"]
@@ -340,7 +373,7 @@ class OpenWebUIAPITest(unittest.TestCase):
             )
             handler([{"role": "user", "content": str(root / "workspace")}], conversation_id="setup")
             with patch(
-                "config_layer.session.create_editable_config_json.create_editable_config_json",
+                "config_layer.session.project_config_json.create_project_config_json",
                 side_effect=OSError("permission denied"),
             ):
                 reply = handler(
@@ -428,7 +461,7 @@ class OpenWebUIAPITest(unittest.TestCase):
             )
             self.assertIn("DeepSeek V4.1 Flash", confirmed)
             self.assertEqual(switch_calls, ["deepseek-flash"])
-            self.assertTrue((workspace / "search_config.draft.json").is_file())
+            self.assertTrue((workspace / "search_config.project.json").is_file())
             self.assertEqual(config_agent_calls, [])
 
     def test_deepseek_model_request_resolves_current_flash_alias(self):
@@ -525,6 +558,74 @@ class OpenWebUIAPITest(unittest.TestCase):
             blocked = handler([{"role": "user", "content": "确认配置"}], conversation_id="setup")
             self.assertIn("读取配置 JSON", blocked)
             self.assertEqual(calls, [])
+
+    def test_config_agent_receives_confirmed_setup_and_recent_question_context(self):
+        from config_layer.defaults.default_layered_search_config import default_layered_search_config
+        from config_layer.session.create_config_draft import create_config_draft
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workspace"
+            config = default_layered_search_config()
+            config["calculation"]["mlip_version"] = None  # emulate an older draft
+            config["bohb"]["scope"]["mlip_version"] = None
+            config["storage"] = {"workspace_root": str(root), "paths": {}}
+            session = create_config_draft(config)
+            session["setup_stage"] = "json_ready"
+            session["dialogue"].append({
+                "type": "message", "role": "assistant",
+                "message": (
+                    "请确认 calculation.mlip_version 与 bohb.scope.mlip_version "
+                    "是否都填 mace-mh-1？工作区 E:\\0-FM-PhaseDiagram 已确认。"
+                ),
+            })
+            payloads = []
+            handler = ConfigurationChatHandler(
+                {"state_path": str(root / "state.json"), "config_session": session},
+                config_session_path=root / "session.json", base_directory=root,
+                agent_client=lambda payload: (
+                    payloads.append(payload) or {
+                        "reply": "已按刚才确认的内容记录为 mace-mh-1。",
+                        "patch": {
+                            "calculation.mlip_version": "mace-mh-1",
+                            "bohb.scope.mlip_version": "mace-mh-1",
+                        },
+                        "reasons": {
+                            "calculation.mlip_version": "用户肯定回答了紧邻前一条版本确认问题。",
+                            "bohb.scope.mlip_version": "用户肯定回答了紧邻前一条版本确认问题。",
+                        },
+                        "questions": [],
+                    }
+                ),
+            )
+
+            reply = handler([{"role": "user", "content": "是的"}], conversation_id="setup")
+
+            self.assertIn("已按刚才确认", reply)
+            payload = payloads[0]
+            self.assertEqual(payload["setup_facts"]["workspace_root"], str(root))
+            self.assertTrue(payload["setup_facts"]["workspace_root_confirmed"])
+            self.assertEqual(payload["setup_facts"]["default_mlip_version"], "mace-mh-1")
+            self.assertIn("是否都填 mace-mh-1", payload["conversation_context"][-1]["message"])
+            updated = handler.workflow_kwargs["config_session"]["config"]
+            self.assertEqual(updated["calculation"]["mlip_version"], "mace-mh-1")
+            self.assertEqual(updated["bohb"]["scope"]["mlip_version"], "mace-mh-1")
+
+    def test_default_mlip_version_is_mh1_for_search_and_bohb(self):
+        from config_layer.defaults.default_layered_search_config import default_layered_search_config
+        from run.configuration_chat import _fill_default_mlip_versions
+
+        config = default_layered_search_config()
+        self.assertEqual(config["calculation"]["mlip_version"], "mace-mh-1")
+        self.assertEqual(config["mlip"]["name"], "mace-mh-1")
+        self.assertEqual(config["bohb"]["scope"]["mlip_version"], "mace-mh-1")
+        self.assertIsNone(config["mlip"]["model_path"])
+
+        config["calculation"]["mlip_version"] = None
+        config["bohb"]["scope"]["mlip_version"] = None
+        migrated, filled = _fill_default_mlip_versions(config)
+        self.assertEqual(migrated["calculation"]["mlip_version"], "mace-mh-1")
+        self.assertEqual(migrated["bohb"]["scope"]["mlip_version"], "mace-mh-1")
+        self.assertEqual(set(filled), {"calculation.mlip_version", "bohb.scope.mlip_version"})
 
     def test_config_cannot_start_without_agent_review(self):
         from config_layer.defaults.default_layered_search_config import default_layered_search_config
@@ -626,6 +727,95 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "confirmed")
             self.assertEqual(started[0][1], "setup")
             self.assertIn("不得直接执行", started[0][0])
+
+    def test_json_review_command_can_conditionally_continue_after_both_checks_pass(self):
+        from config_layer.defaults.default_layered_search_config import default_layered_search_config
+        from config_layer.session.create_config_draft import create_config_draft
+        from config_layer.session.create_editable_config_json import create_editable_config_json
+        from config_layer.session.resolve_workspace_paths import default_workspace_storage
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reference = root / "O3.vasp"
+            reference.write_text("structure placeholder", encoding="utf-8")
+            boundary = {
+                "P": ["O3"],
+                "H": {"O3": [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]]},
+                "TM_ratio": {"Fe": 1, "Mn": 1},
+            }
+            config = default_layered_search_config(
+                boundary=boundary, phase_references={"O3": str(reference)}
+            )
+            config["calculation"]["mlip_version"] = "mace-mh-1"
+            config["mlip"]["model_path"] = "/cluster/models/mace-mh-1.model"
+            config["storage"] = default_workspace_storage(root)
+            config_file = root / "search_config.draft.json"
+            create_editable_config_json(config_file, config, workspace_defaults=config["storage"])
+            session = create_config_draft(config)
+            session["setup_stage"] = "json_ready"
+            session["editable_config_json_path"] = str(config_file)
+            started = []
+            handler = ConfigurationChatHandler(
+                {"state_path": str(root / "state.json"), "config_session": session},
+                config_session_path=root / "session.json", base_directory=root,
+                editable_config_path=config_file,
+                agent_client=lambda _payload: {
+                    "reply": "Agent 检查通过。", "patch": {}, "questions": [],
+                    "ready_for_search": True,
+                },
+                runtime_factory=lambda: (
+                    lambda messages, *, conversation_id=None:
+                    started.append((messages[-1]["content"], conversation_id)) or "search proposal"
+                ),
+            )
+
+            reply = handler(
+                [{"role": "user", "content": "读取配置 JSON 并继续"}],
+                conversation_id="setup",
+            )
+
+            self.assertIn("配置已确认并保存为版本", reply)
+            self.assertIn("搜索 Agent 已启动首轮分析", reply)
+            self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "confirmed")
+            self.assertEqual(started[0][1], "setup")
+            user_commands = [
+                item for item in handler.workflow_kwargs["config_session"]["dialogue"]
+                if item.get("role") == "user" and item.get("message") == "读取配置 JSON 并继续"
+            ]
+            self.assertEqual(len(user_commands), 1)
+
+            blocked_config = default_layered_search_config(
+                boundary=boundary, phase_references={"O3": str(reference)}
+            )
+            blocked_config["calculation"]["mlip_version"] = "mace-mh-1"
+            blocked_config["mlip"]["model_path"] = None
+            blocked_config["storage"] = default_workspace_storage(root)
+            blocked_file = root / "blocked_config.json"
+            create_editable_config_json(
+                blocked_file, blocked_config, workspace_defaults=blocked_config["storage"]
+            )
+            blocked_session = create_config_draft(blocked_config)
+            blocked_session["setup_stage"] = "json_ready"
+            blocked_session["editable_config_json_path"] = str(blocked_file)
+            blocked_started = []
+            blocked_handler = ConfigurationChatHandler(
+                {"state_path": str(root / "blocked_state.json"),
+                 "config_session": blocked_session},
+                config_session_path=root / "blocked_session.json", base_directory=root,
+                editable_config_path=blocked_file,
+                agent_client=lambda _payload: {
+                    "reply": "Agent 检查通过。", "patch": {}, "questions": [],
+                    "ready_for_search": True,
+                },
+                runtime_factory=lambda: blocked_started.append("created"),
+            )
+            blocked_reply = blocked_handler(
+                [{"role": "user", "content": "读取配置 JSON 并继续"}],
+                conversation_id="setup",
+            )
+            self.assertIn("当前仍有必填项", blocked_reply)
+            self.assertEqual(blocked_handler.workflow_kwargs["config_session"]["status"], "draft")
+            self.assertEqual(blocked_started, [])
 
     def test_manual_upload_runner_writes_portable_review_bundle_without_submit(self):
         with tempfile.TemporaryDirectory() as directory:

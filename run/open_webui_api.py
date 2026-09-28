@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import importlib
 import json
 import os
@@ -20,12 +21,12 @@ import uuid
 from copy import deepcopy
 
 from execution_layer.step_runner.build_status_summary import build_status_summary
-from execution_layer.step_runner.file_protocol import read_json
+from execution_layer.step_runner.file_protocol import read_json, write_json
 
 
 MODEL_ID = "phase-search-agent"
 MAX_REQUEST_BYTES = 1_000_000
-MAX_RESPONSE_CHARS = 24_000
+MAX_RESPONSE_CHARS = 3_200
 
 
 class OpenWebUIRequestError(ValueError):
@@ -40,7 +41,9 @@ class RunWorkflowChatHandler:
     """
 
     def __init__(self, workflow_kwargs: dict, *, workflow=None, history_prompt=False,
-                 new_run_factory=None, deepseek_model_switcher=None):
+                 new_run_factory=None, deepseek_model_switcher=None,
+                 execution_mode="interactive", config_revision_factory=None,
+                 config_intent_client=None):
         if not isinstance(workflow_kwargs, dict) or not workflow_kwargs.get("state_path"):
             raise ValueError("workflow_kwargs must include a persistent state_path")
         self.workflow_kwargs = dict(workflow_kwargs)
@@ -51,12 +54,26 @@ class RunWorkflowChatHandler:
         self.history_decision = None if history_prompt else "continue"
         self.new_run_factory = new_run_factory
         self.deepseek_model_switcher = deepseek_model_switcher
+        self.config_revision_factory = config_revision_factory
+        self.config_intent_client = config_intent_client
+        self.config_delegate = None
+        if execution_mode not in {"interactive", "autonomous"}:
+            raise ValueError("execution_mode 必须是 interactive 或 autonomous")
+        self.execution_mode = execution_mode
         self.conversation_id = None
 
     def __call__(self, messages, *, conversation_id=None):
         user_message = _latest_user_message(messages)
+        metadata_reply = _open_webui_metadata_reply(user_message)
+        if metadata_reply is not None:
+            return metadata_reply
         with self.lock:
+            if self.config_delegate is not None:
+                return self.config_delegate(messages, conversation_id=conversation_id)
             state = read_json(self.state_path, {}) or {}
+            state, stale_pending_removed = _drop_finished_pending(state)
+            if stale_pending_removed:
+                write_json(self.state_path, state)
             if self.conversation_id not in {None, conversation_id}:
                 raise OpenWebUIRequestError(
                     "此本地运行时已绑定另一个 Open WebUI 会话。当前审批状态是进程级单用户状态；"
@@ -72,7 +89,32 @@ class RunWorkflowChatHandler:
                 except (OSError, TypeError, ValueError) as error:
                     return f"DeepSeek 模型切换失败：{type(error).__name__}: {error}。运行时设置未更改。"
                 self.workflow_kwargs["agent_client"] = client
+                self.config_intent_client = client
                 return _deepseek_switch_reply(selected_model)
+            explicit_config_scope = any(word in user_message.lower() for word in (
+                "配置", "设置文件", "json", "以后", "默认", "永久", "所有轮"))
+            pending_generation = any(
+                ((row.get("agent_proposal") or {}).get("raw_action") or {}).get("tool") == "generate_branches"
+                for row in (state.get("pending_execution_policies") or {}).values())
+            batch_feedback = (pending_generation and not explicit_config_scope
+                              and any(word in user_message.lower() for word in ("本轮", "branch", "初态", "超胞", "det(h)")))
+            if classify_user_decision(user_message) not in {"approve", "reject"} and not batch_feedback:
+                from decision_layer.agent.classify_config_edit_intent import classify_config_edit_intent
+                classifier = self.config_intent_client or self.workflow_kwargs.get("agent_client")
+                intent = classify_config_edit_intent(user_message, agent_client=classifier)
+                from run.configuration_chat import _is_config_revision_request
+                if intent == "edit" or _is_config_revision_request(user_message):
+                    if not callable(self.config_revision_factory):
+                        return "配置编辑入口未配置；本轮没有修改文件或执行旧建议。"
+                    try:
+                        self.config_delegate = self.config_revision_factory(state)
+                    except (OSError, TypeError, ValueError) as error:
+                        return f"无法安全进入配置修订：{error}。本轮未修改文件或执行动作。"
+                    instruction = "请直接修改配置文件并保存；用户原话：" + user_message
+                    return self.config_delegate(
+                        [{"role": "user", "content": instruction}],
+                        conversation_id=conversation_id,
+                    )
             if self.history_decision is None:
                 self.conversation_id = conversation_id
                 decision = _classify_history_decision(user_message)
@@ -98,20 +140,44 @@ class RunWorkflowChatHandler:
                         "请先通过离线状态工具恢复为唯一待审批状态。"
                     )
                 if pending:
+                    pending_id = next(iter(pending))
                     proposal = next(iter(pending.values())).get("agent_proposal")
+                    if self.execution_mode == "interactive" and _unsafe_debug_calculation(proposal, state):
+                        revised = self._run(pending_id, {"decision": "comment",
+                            "comment": "调试模式先准备已有结构的 Relax 输入文件"}, user_message)
+                        return format_workflow_reply(revised, self.state_path)
                     return format_workflow_reply(
                         {"status": "awaiting_approval", "agent_proposal": proposal,
                          "config_version": state.get("confirmed_config_version")}, self.state_path
                     )
+                from execution_layer.remote.summarize_manual_upload_wait import (
+                    summarize_manual_upload_wait,
+                )
+                if summarize_manual_upload_wait(state):
+                    invocation_id = f"webui-{uuid.uuid4().hex}"
+                    result = self._run(invocation_id, None, user_message)
+                    return format_workflow_reply(result, self.state_path)
                 return "已继续原运行并加载 state/ledger。请发送下一条搜索指令；本次确认不会批准任何 action。"
             pending = state.get("pending_execution_policies") or {}
             if _is_status_command(user_message):
                 return format_status_reply(state)
+            from run.configuration_chat import _is_config_json_import_command
+            if _is_config_json_import_command(user_message):
+                version = state.get("confirmed_config_version") or "未知"
+                return (f"当前搜索仍锁定配置 {version}；这条消息不会导入 JSON，也不会修改待审批建议。"
+                        "请进入配置修订并确认新快照后再生成；旧版本提案不能自动套用新参数。")
+            path_clarification = _workspace_path_clarification_reply(user_message, state)
+            if path_clarification is not None:
+                return path_clarification
             if pending:
                 if len(pending) != 1:
                     raise OpenWebUIRequestError("存在多个待审批 action；请先恢复到唯一待审批状态。")
                 invocation_id = next(iter(pending))
                 stored_proposal = pending[invocation_id].get("agent_proposal") or {}
+                if self.execution_mode == "interactive" and _unsafe_debug_calculation(stored_proposal, state):
+                    revised = self._run(invocation_id, {"decision": "comment",
+                        "comment": "调试模式先准备已有结构的 Relax 输入文件"}, user_message)
+                    return format_workflow_reply(revised, self.state_path)
                 decision = classify_user_decision(user_message)
                 if decision in {"approve", "reject"}:
                     if decision == "approve" and _is_sensitive_proposal(stored_proposal):
@@ -136,6 +202,17 @@ class RunWorkflowChatHandler:
                             "http://127.0.0.1:8765/phase/approval")
                 feedback = {"decision": decision, "comment": user_message}
             else:
+                from decision_layer.agent.resolve_explicit_generation_request import _requested_branch_batch_size
+                requested_batch = _requested_branch_batch_size(user_message)
+                if requested_batch is not None and _mentions_explicit_branch_generation(user_message):
+                    confirmed = state.get("confirmed_config") or {}
+                    run = confirmed.get("run") or {}
+                    strategy = confirmed.get("round_strategy") or {}
+                    limit = max(int(run.get("total_quota", 0)),
+                                int(strategy.get("generation_quota_total", 0)))
+                    if requested_batch > limit:
+                        return (f"要求入选 {requested_batch} 个 branch，但当前已确认的生成配额上限是 {limit}。"
+                                "请先修订并确认配置；本轮没有创建或执行建议。")
                 invocation_id, feedback = f"webui-{uuid.uuid4().hex}", None
             self.conversation_id = conversation_id
             result = self._run(invocation_id, feedback, user_message)
@@ -182,13 +259,36 @@ class RunWorkflowChatHandler:
             if key not in {"state", "execution_mode", "human_feedback", "replay_record",
                            "max_steps", "invocation_id", "state_path", "config_session_path"}
         }
+        kwargs["user_message"] = user_message
         base_agent_client = kwargs.get("agent_client")
-        if callable(base_agent_client):
+        from decision_layer.agent.resolve_explicit_generation_request import (
+            resolve_explicit_generation_request,
+        )
+        from execution_layer.local.rebuild_relax_inputs import is_relax_rebuild_request, plan_relax_rebuild
+        if callable(base_agent_client) or _mentions_explicit_branch_generation(user_message) or is_relax_rebuild_request(user_message):
             def user_contextualized_agent(payload):
+                if is_relax_rebuild_request(user_message):
+                    plan = plan_relax_rebuild(read_json(self.state_path, {}) or {},
+                        kwargs["run_config"]["upload_batches_directory"])
+                    return {"tool": "prepare_local_batch_files", "task_key": f"rebuild-relax:{invocation_id}",
+                            "target_ids": [], "budget": 0.0,
+                            "parameters": {"mode": "relax_inputs", "rebuild_inputs": True, "cleanup_plan": plan},
+                            "reason": f"请确认旧批次尚未在超算提交；批准后删除 {len(plan['directories'])} 个旧输入批次并重建，保留原结构、任务编号和预算。",
+                            "expected_purpose": "重建Relax输入，每个作业最多100个结构；不提交计算。"}
+                direct_action = resolve_explicit_generation_request(
+                    user_message,
+                    allowed_tools=payload.get("allowed_tools") or [],
+                    state=payload.get("state") or {},
+                )
+                if direct_action is not None:
+                    direct_action["task_key"] = f"generate_branches:user-request:{invocation_id}"
+                    return direct_action
+                if not callable(base_agent_client):
+                    raise ValueError("DeepSeek Agent 未配置")
                 return base_agent_client({**payload, "user_instruction": user_message})
             kwargs["agent_client"] = user_contextualized_agent
         return workflow(
-            **kwargs, execution_mode="interactive", human_feedback=human_feedback,
+            **kwargs, execution_mode=self.execution_mode, human_feedback=human_feedback,
             max_steps=1, invocation_id=invocation_id, state_path=str(self.state_path),
         )
 
@@ -202,6 +302,75 @@ def classify_user_decision(message: str) -> str:
     if final in {"reject", "拒绝"}:
         return "reject"
     return "comment"
+
+
+def _unsafe_debug_calculation(proposal, state):
+    action = (proposal or {}).get("raw_action") or {}
+    parameters = action.get("parameters") or {}
+    stage = action.get("stage") or parameters.get("stage")
+    return action.get("tool") == "run_calculation_stage" and stage in {"relax_screen", "relax_and_feature"}
+
+
+def _workspace_path_clarification_reply(message: str, state: dict) -> str | None:
+    """Answer a workspace correction without turning it into a tool action."""
+    import re
+    from run.configuration_chat import normalize_workspace_path
+
+    text = str(message or "")
+    if not any(label in text for label in (
+        "地址是", "输出目录", "保存目录", "工作区路径", "工作区根路径", "工作区根目录"
+    )):
+        return None
+    match = re.search(r"[A-Za-z]:[\\/][^\s，。；;]+", text)
+    if not match:
+        return None
+    try:
+        requested = normalize_workspace_path(match.group(), base_directory=Path.cwd())
+    except (OSError, TypeError, ValueError):
+        return "没有识别到合法的工作区路径；本轮建议未修改，也未执行动作。"
+    configured = ((state.get("confirmed_config") or {}).get("storage") or {}).get("workspace_root")
+    if not configured:
+        return (f"你指定的输出目录是 `{requested}`。当前运行状态没有可核实的工作区配置；"
+                "本轮不会生成 action 或修改路径。请检查已确认配置快照。")
+    try:
+        current = normalize_workspace_path(configured, base_directory=Path.cwd())
+    except (OSError, TypeError, ValueError):
+        return (f"你指定的输出目录是 `{requested}`，但已确认快照中的工作区路径混入了无效内容。"
+                "不能用搜索 action 修复运行台账；请先备份现有运行目录并恢复配置会话，"
+                "或在正确目录新建独立项目。本轮没有执行动作。")
+    if requested == current:
+        return (f"已核对：当前快照的工作区就是 `{current}`。"
+                "若聊天中显示了别的地址，那是建议文字错误；本轮建议未修改。")
+    return (f"你指定的输出目录是 `{requested}`；当前已确认快照记录的是 `{current}`。"
+            "目录属于硬配置，不能由搜索 action 写入或迁移现有结果。"
+            "请在正确目录新建项目，或先备份并迁移旧运行数据，再确认新配置版本；"
+            "本轮未生成 action，也未执行计算。")
+
+
+def _mentions_explicit_branch_generation(message: str) -> bool:
+    text = "".join(str(message or "").lower().split())
+    return (any(token in text for token in ("branch", "分支"))
+            and any(token in text for token in ("生成", "补充", "新增", "扩展", "generate", "regenerate", "create"))
+            and not any(token in text for token in ("不要生成", "不生成", "暂不生成", "先不生成", "取消生成", "别生成")))
+
+
+def _drop_finished_pending(state):
+    """Recover approvals left behind by a handler returning an older state copy."""
+    pending = state.get("pending_execution_policies") or {}
+    if not pending:
+        return state, False
+    finished = {"completed", "failed", "rejected", "rejected_by_user", "not_configured",
+                "paused", "cancelled", "budget_exhausted"}
+    records = {row.get("record_id"): row for row in state.get("action_records") or []}
+    invocations = state.get("invocations") or {}
+    obsolete = [key for key, item in pending.items()
+                if (invocations.get(key) or records.get(item.get("record_id")) or {}).get("status") in finished]
+    if not obsolete:
+        return state, False
+    updated = deepcopy(state)
+    for key in obsolete:
+        updated["pending_execution_policies"].pop(key, None)
+    return updated, True
 
 
 def _is_sensitive_confirmation(message):
@@ -227,11 +396,7 @@ def handle_chat_request(payload: dict, chat_handler, *, model_id=MODEL_ID) -> di
     _latest_user_message(messages)
     metadata = payload.get("metadata") or {}
     conversation_id = str(metadata.get("chat_id") or payload.get("user") or "openwebui")[:128]
-    content = chat_handler(messages, conversation_id=conversation_id)
-    if not isinstance(content, str):
-        content = json.dumps(content, ensure_ascii=False, indent=2, default=str)
-    if len(content) > MAX_RESPONSE_CHARS:
-        content = content[:MAX_RESPONSE_CHARS] + "\n…（输出已截断；完整记录保存在项目状态文件中）"
+    content = _chat_content(chat_handler(messages, conversation_id=conversation_id))
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex}", "object": "chat.completion",
         "created": int(datetime.now(timezone.utc).timestamp()), "model": model_id,
@@ -240,8 +405,25 @@ def handle_chat_request(payload: dict, chat_handler, *, model_id=MODEL_ID) -> di
     }
 
 
+def _chat_content(value):
+    """Never dump full scientific state or candidate arrays into the chat pane."""
+    if isinstance(value, dict):
+        fields = ("status", "tool", "action", "reason", "record_id")
+        parts = [f"{key}: {str(value[key])[:180]}" for key in fields
+                 if value.get(key) is not None and not isinstance(value[key], (dict, list))]
+        return "结果摘要：" + ("；".join(parts) if parts else "详细数据请查看项目记录。")
+    content = value if isinstance(value, str) else str(value)
+    if len(content) <= MAX_RESPONSE_CHARS:
+        return content
+    stripped = content.lstrip()
+    if stripped.startswith(("{", "[", "```json")) or '"composition"' in content:
+        return "本轮回复含大量内部候选明细，已从聊天窗口省略；请查看项目状态或审批文件。"
+    return content[:MAX_RESPONSE_CHARS].rsplit("\n", 1)[0] + "\n…（详细内容请查看项目记录）"
+
+
 def create_server(chat_handler, *, api_key: str, host="127.0.0.1", port=8765, model_id=MODEL_ID,
-                  local_control=None, control_api_key=None):
+                  local_control=None, control_api_key=None, deepseek_key_setup=None,
+                  deepseek_model="deepseek-flash"):
     """Create a dependency-free OpenAI-compatible server, bound locally by default."""
     if not callable(chat_handler):
         raise TypeError("chat_handler must be callable")
@@ -253,7 +435,20 @@ def create_server(chat_handler, *, api_key: str, host="127.0.0.1", port=8765, mo
 
         def do_GET(self):
             if self.path == "/health":
-                self._json(200, {"status": "ok"})
+                self._json(200, {"status": "ok", "config_protocol": 2})
+            elif self.path == "/phase/setup":
+                if not self._is_loopback_client():
+                    self._json(403, _error("forbidden", "key setup is local-only")); return
+                from run.deepseek_credentials import load_deepseek_api_key
+                self._html(200, _deepseek_setup_page(
+                    deepseek_model,
+                    configured=bool(load_deepseek_api_key()),
+                ))
+            elif self.path == "/phase/chat":
+                if not self._is_loopback_client():
+                    self._json(403, _error("forbidden", "local chat is local-only")); return
+                from run.local_chat_page import local_chat_page
+                self._html(200, local_chat_page())
             elif self.path == "/v1/models" and self._authorized():
                 self._json(200, {"object": "list", "data": [
                     {"id": model_id, "object": "model", "created": 0, "owned_by": "local-project"}
@@ -273,6 +468,28 @@ def create_server(chat_handler, *, api_key: str, host="127.0.0.1", port=8765, mo
                 self._json(404, _error("not_found", "endpoint not found"))
 
         def do_POST(self):
+            if self.path == "/phase/setup/key":
+                if not self._is_loopback_client():
+                    self._json(403, _error("forbidden", "key setup is local-only")); return
+                if not callable(deepseek_key_setup):
+                    self._json(503, _error("not_configured", "本地 DeepSeek 设置入口未配置")); return
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length <= 0 or length > 8192:
+                        raise OpenWebUIRequestError("请求内容无效")
+                    body = json.loads(self.rfile.read(length).decode("utf-8"))
+                    key = body.get("api_key") if isinstance(body, dict) else None
+                    if not isinstance(key, str) or len(key.strip()) < 16:
+                        raise OpenWebUIRequestError("请粘贴完整的 DeepSeek API Key")
+                    response = deepseek_key_setup(key.strip())
+                    self._json(200, response)
+                except (UnicodeDecodeError, json.JSONDecodeError, OpenWebUIRequestError, ValueError) as error:
+                    self._json(400, _error("invalid_request", str(error)))
+                except Exception as error:
+                    safe_message = getattr(error, "safe_message", None)
+                    message = safe_message or "连接或本地安全保存失败；密钥未在网页中回显。"
+                    self._json(502, _error("setup_failed", message))
+                return
             if self.path in {"/phase/propose", "/phase/decision", "/phase/pause", "/phase/config/patch", "/phase/config/confirm", "/phase/memory/review"}:
                 if not self._control_authorized():
                     self._json(401, _error("unauthorized", "invalid control API key")); return
@@ -316,6 +533,8 @@ def create_server(chat_handler, *, api_key: str, host="127.0.0.1", port=8765, mo
             except (UnicodeDecodeError, json.JSONDecodeError, OpenWebUIRequestError) as error:
                 self._json(400, _error("invalid_request", str(error))); return
             except Exception as error:
+                import traceback
+                traceback.print_exc()
                 self.log_error("local workflow failed (%s)", type(error).__name__)
                 self._json(500, _error("workflow_error", f"local Agent workflow failed ({type(error).__name__}); inspect server stderr")); return
             if payload.get("stream"):
@@ -331,6 +550,12 @@ def create_server(chat_handler, *, api_key: str, host="127.0.0.1", port=8765, mo
             value = self.headers.get("Authorization", "")
             return (isinstance(control_api_key, str) and len(control_api_key) >= 16 and
                     value.startswith("Bearer ") and secrets.compare_digest(value[7:], control_api_key))
+
+        def _is_loopback_client(self):
+            try:
+                return ipaddress.ip_address(self.client_address[0]).is_loopback
+            except (ValueError, IndexError):
+                return False
 
         def _json(self, status, value):
             body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -369,15 +594,47 @@ def create_server(chat_handler, *, api_key: str, host="127.0.0.1", port=8765, mo
 
 
 def serve_open_webui(chat_handler, *, api_key, host="127.0.0.1", port=8765, model_id=MODEL_ID,
-                     local_control=None, control_api_key=None):
+                     local_control=None, control_api_key=None, deepseek_key_setup=None,
+                     deepseek_model="deepseek-flash", parent_pid=None):
     server = create_server(chat_handler, api_key=api_key, host=host, port=port, model_id=model_id,
-                           local_control=local_control, control_api_key=control_api_key)
+                           local_control=local_control, control_api_key=control_api_key,
+                           deepseek_key_setup=deepseek_key_setup, deepseek_model=deepseek_model)
+    if parent_pid is not None:
+        threading.Thread(
+            target=_stop_server_when_parent_exits,
+            args=(server, int(parent_pid)), daemon=True,
+        ).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+
+
+def _stop_server_when_parent_exits(server, parent_pid):
+    """Bind a launcher-owned Agent to that launcher's lifetime."""
+    if os.name == "nt":
+        import ctypes
+        synchronize = 0x00100000
+        infinite = 0xFFFFFFFF
+        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, parent_pid)
+        if not handle:
+            server.shutdown()
+            return
+        try:
+            ctypes.windll.kernel32.WaitForSingleObject(handle, infinite)
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        server.shutdown()
+        return
+    while True:
+        try:
+            os.kill(parent_pid, 0)
+        except OSError:
+            server.shutdown()
+            return
+        threading.Event().wait(1.0)
 
 
 def format_workflow_reply(result: dict, state_path) -> str:
@@ -388,32 +645,212 @@ def format_workflow_reply(result: dict, state_path) -> str:
         (event.get("agent_proposal") for event in reversed(events) if event.get("agent_proposal")), None
     )
     if result.get("status") == "awaiting_approval" and proposal:
+        proposed_tool = proposal.get("recommended_action") or (proposal.get("raw_action") or {}).get("tool")
+        if not isinstance(proposed_tool, str) or not proposed_tool:
+            return ("Agent 返回了无效动作，本轮没有可批准的建议。"
+                    "请拒绝旧建议后重新提出；不会执行空动作。")
         cost = proposal.get("estimated_cost") or {}
+        approval_files = next(
+            (event.get("approval_files") for event in reversed(events)
+             if event.get("approval_files")), {}
+        )
+        detail = approval_files.get("directory") or _proposal_directory(state_path, proposal)
         lines = [
-            "## Agent action proposal",
-            f"状态分析：{_display(proposal.get('current_state_analysis'))}",
-            f"建议 action：`{proposal.get('recommended_action')}`",
-            f"参数：`{_display(proposal.get('action_parameters'))}`",
-            f"选择原因：{proposal.get('reason') or '未提供'}",
-            f"下一轮计算量：`{_display(proposal.get('calculation_plan'))}`",
-            f"预计成本：`{_display(cost)}`",
-            f"预期目的：{proposal.get('expected_purpose') or '未提供'}",
-            "", "核对无误后回复“同意”批准本轮；回复“拒绝”拒绝；直接写修改意见可要求 Agent 重新分析。",
+            f"建议：`{proposal.get('recommended_action')}`",
+            f"目的：{proposal.get('expected_purpose') or proposal.get('reason') or '未提供'}",
+            f"预计相对成本：{cost.get('estimated_total_cost') if cost.get('estimated_total_cost') is not None else '待任务展开后估算'}",
         ]
+        recovered_count = int(result.get("recovered_count") or 0)
+        if recovered_count:
+            lines.insert(0, f"已校验并回收 {recovered_count} 个任务结果，结果与成本已入账。")
+        if proposal.get("recommended_action") == "generate_branches":
+            params = proposal.get("action_parameters") or (proposal.get("raw_action") or {}).get("parameters") or {}
+            quotas = params.get("quotas")
+            strategy = ("、".join(f"{name} {count}" for name, count in quotas.items())
+                        if isinstance(quotas, dict) and quotas else
+                        f"覆盖补充（预计 {params.get('total_quota', '按配置')} 个；具体分配由现有 branch 覆盖决定）")
+            lines.append(f"生成策略：{strategy}")
+            if params.get("max_det_H") is not None:
+                lines.append(f"本轮超胞上限：det(H) ≤ {params['max_det_H']}")
+            else:
+                lines.append("本轮超胞上限：未单独设置，按已确认的 H 边界")
+            initial_count = params.get("initial_states_per_branch")
+            lines.append(f"入选上限：{params.get('batch_size', '按配置')} 个 branch；"
+                         f"每个 branch 静电能前 10 中至多取 {initial_count if initial_count is not None else '按配置'} 个初态")
+        fallback_reason = (proposal.get("raw_action") or {}).get("fallback_reason")
+        if fallback_reason:
+            lines.append(f"回退原因：`{fallback_reason}`")
+        if detail:
+            lines.append(f"完整参数与依据：`{detail}`")
+        lines.extend(["", "回复“同意”执行；回复“拒绝”取消；也可以直接提出修改意见。"])
         if _is_sensitive_proposal(proposal):
             lines.extend([
                 "该建议涉及敏感操作，仍需在本机审批页确认具体影响：",
                 "http://127.0.0.1:8765/phase/approval",
             ])
         return "\n".join(lines)
-    state = read_json(state_path, {}) or {}
-    summary = build_status_summary(state, config_version=result.get("config_version"))
-    fields = ("status", "config_version", "human_feedback", "final_action", "execution_result",
-              "scientific_feedback", "reconciled", "batch")
-    compact = {key: result[key] for key in fields if key in result}
-    compact["agent_proposal"] = proposal
-    compact["state_summary"] = summary
-    return "工作流返回：\n```json\n" + json.dumps(compact, ensure_ascii=False, indent=2, default=str) + "\n```"
+    status = result.get("status") or "unknown"
+    if status in {"configuration_revision_required", "configuration_version_mismatch"}:
+        reason = result.get("reason") or next(
+            (event.get("reason") for event in reversed(events) if event.get("reason")), None)
+        return f"{reason or '本轮要求超过已确认配置；请先修订配置。'}\n未执行生成或计算。"
+    action = ((result.get("final_action") or {}).get("tool")
+              or (proposal or {}).get("recommended_action")
+              or next(((event.get("final_action") or {}).get("tool") for event in reversed(events)
+                       if (event.get("final_action") or {}).get("tool")), None))
+    validation = result.get("validation") or next(
+        (event.get("validation") for event in reversed(events) if event.get("validation")), {}
+    )
+    errors = validation.get("errors") or []
+    detail_path = str(Path(state_path))
+    if status == "awaiting_manual_submission":
+        wait = result.get("manual_wait") or {}
+        recovered_count = int(wait.get("recovered_count") or result.get("recovered_count") or 0)
+        waiting_count = int(wait.get("waiting_task_count") or 0)
+        task_count = int(wait.get("task_count") or waiting_count)
+        lines = []
+        if recovered_count:
+            lines.append(f"已校验并回收 {recovered_count} 个任务结果；预算和台账已更新。")
+        if recovered_count:
+            lines.append(f"本批共 {task_count} 个任务，仍有 {waiting_count} 个未完成或未回传。")
+        else:
+            lines.append(f"MLIP 输入已准备：{waiting_count} 个任务尚未完成或回传。")
+        lines.append("本机没有提交作业。请上传完整批次目录：Relax/MC 每个批次只提交根目录的 `GPU.sh` 一次；DFT 则提交单任务目录中的 `GPU.sh`。")
+        if wait.get("upload_root"):
+            lines.append(f"本地任务总目录：`{wait['upload_root']}`")
+        if wait.get("upload_plan_path"):
+            lines.append(f"按 branch 分组的完整上传清单：`{wait['upload_plan_path']}`。每个 branch 的所有任务目录都列在一起。")
+        directories = wait.get("task_directories") or []
+        if directories:
+            lines.append("待处理任务目录：")
+            lines.extend(f"- `{path}`" for path in directories[:5])
+            if len(directories) > 5:
+                lines.append(f"- 其余 {len(directories) - 5} 个目录见任务清单和 state 文件。")
+        lines.append(
+            "任务完成后，把每个任务目录的 `result.json` 和 `task.finished.json` "
+            "放回本地对应目录，再对 Agent 说“继续”。Agent 会先校验并回收结果；"
+            "未回传任务会继续等待，不会重复准备或提交。"
+        )
+        return "\n".join(lines)
+    if status == "failed":
+        execution = result.get("execution") or next(
+            (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+        )
+        reason = ((execution or {}).get("error") or
+                  ((execution or {}).get("result") or {}).get("reason") or
+                  result.get("reason") or "未知错误")
+        return f"本轮失败：{str(reason)[:500]}\n详细记录：`{detail_path}`"
+    if status == "rejected_by_user":
+        return f"已取消本轮建议；未执行任何动作。\n详细记录：`{detail_path}`"
+    if status == "rejected":
+        reason = _friendly_validation_errors(errors)
+        workflow_reason = result.get("reason")
+        if not errors and workflow_reason:
+            reason = _friendly_workflow_rejection(workflow_reason)
+        if not errors and not workflow_reason:
+            execution = result.get("execution") or next(
+                (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+            )
+            payload = (execution or {}).get("result") or {}
+            reason = _friendly_workflow_rejection(payload.get("reason") or execution.get("error") or "执行动作被拒绝")
+        return f"本轮未执行：{reason}\n详细记录：`{detail_path}`"
+    if status == "not_configured":
+        execution = result.get("execution") or next(
+            (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+        )
+        payload = (execution or {}).get("result") or {}
+        reason = ((execution or {}).get("error") or payload.get("reason") or
+                  result.get("reason") or "执行接口未配置")
+        reason_labels = {
+            "remote_mlip_model_missing": "运行配置中未找到已确认的远端 MACE 模型路径或版本",
+            "upload_directory_or_worker_command_missing": "上传目录或远端 worker 执行命令未配置",
+            "structure_dedup_not_ready": "结构去重检查尚未完成",
+            "no_legal_existing_relax_structures": "没有可用于 Relax 的合法现有结构",
+        }
+        reason = reason_labels.get(str(reason), str(reason))
+        return f"本轮未执行：`{action or 'workflow'}` 未能准备（{reason}）。\n详细记录：`{detail_path}`"
+    if status in {"prepared", "already_prepared"} and action == "prepare_local_batch_files":
+        execution = result.get("execution") or next(
+            (event.get("execution") for event in reversed(events) if event.get("execution")), {})
+        payload = (execution or {}).get("result") or {}
+        if payload.get("batches"):
+            locations = "、".join(row.get("directory", "") for row in payload["batches"][:3])
+            return (f"已准备 {payload.get('task_count', 0)} 个 Relax 任务、"
+                    f"{payload.get('batch_count', 0)} 个上传批次；未提交超算。\n"
+                    f"按 branch 上传清单：`{payload.get('upload_plan_path') or detail_path}`。\n"
+                    f"示例目录：`{locations}`")
+        return f"Relax 输入已准备过，没有重复创建或扣费。\n详细记录：`{detail_path}`"
+    if status in {"completed", "planned_only", "tasks_in_progress"}:
+        if status == "completed" and action == "generate_branches":
+            execution = result.get("execution") or next(
+                (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+            )
+            summary = ((execution or {}).get("result") or {}).get("summary") or {}
+            if summary:
+                phases = "、".join(f"{name} {count}" for name, count in
+                                  sorted((summary.get("phase_counts") or {}).items())) or "无"
+                det_range = summary.get("det_H_range") or []
+                cells = (f"入选 det(H) {det_range[0]}–{det_range[1]}" if len(det_range) == 2
+                         else "无入选超胞")
+                cap = summary.get('max_det_H')
+                if cap is not None:
+                    cells += f"（本轮设定上限 {cap}）"
+                return (
+                    f"已生成 {summary.get('registered_branches', 0)} 个 branch、"
+                    f"{summary.get('registered_structures', 0)} 个初始结构。"
+                    f"相：{phases}；{cells}。\n"
+                    f"生成 {summary.get('proposed_branches', 0)} 个候选，"
+                    f"入选 {summary.get('selected_branches', 0)} 个 branch，"
+                    f"静电能初始化失败 {summary.get('initialization_failed_branches', 0)} 个，"
+                    f"构型去重后 {summary.get('unique_structures', 0)} 个。\n"
+                    f"结构路径与详细结果：`{detail_path}`"
+                )
+        labels = {"completed": "已完成", "planned_only": "已生成计划但未执行",
+                  "tasks_in_progress": "任务已进入处理中"}
+        return (f"{labels[status]}：`{action or 'workflow'}`。\n"
+                f"完整参数与结果：`{detail_path}`")
+    return f"工作流状态：`{status}`。\n完整记录：`{detail_path}`"
+
+
+def _friendly_validation_errors(errors):
+    mapping = {
+        "formal_tool_requires_task_key": "动作缺少内部幂等编号",
+        "configuration_not_confirmed": "配置尚未确认",
+        "config_version_mismatch": "当前运行仍绑定旧配置版本；请新建运行，或在尚无科学任务时重新发送该指令",
+        "invalid_budget": "Agent 返回的预算格式无效；预算必须是一个非负数值",
+        "tool_handler_not_configured": "该动作尚无执行函数，请改选已接通的工具",
+        "duplicate_effective_decision": "相同任务已经提交或完成",
+        "reserved_total_cost_limit": "预算不足",
+        "retry_target_not_failed_task": "重试目标不是失败的计算任务；历史动作记录不能作为 task_id",
+        "calculation_stage_requires_one_structure_target": "单项计算动作必须指向一个结构；批量任务应先准备输入文件",
+        "debug_mode_requires_remote_preparation": "调试模式只能准备远端计算输入，不在本地执行计算",
+    }
+    if not errors:
+        return "动作校验未通过"
+    return "；".join(mapping.get(item, item) for item in errors)
+
+
+def _friendly_workflow_rejection(reason):
+    mapping = {
+        "approval_required": "当前运行绑定旧配置版本，已有结果时需要明确批准迁移",
+        "rejected_non_budget_change": "新旧配置不只是预算不同，不能合并到已有运行",
+        "rejected_budget_decrease": "不能在已有运行中降低已确认预算",
+        "configuration_not_confirmed": "配置尚未确认",
+        "task_not_found": "目标计算任务不存在；历史动作记录不能作为 task_id",
+        "task_not_retryable": "该计算任务当前不允许重试",
+        "retry_limit": "该计算任务已达到重试次数上限",
+    }
+    return mapping.get(str(reason), str(reason))
+
+
+def _proposal_directory(state_path, proposal):
+    analysis = proposal.get("current_state_analysis") or {}
+    if not isinstance(analysis, dict):
+        return None
+    record_id = analysis.get("pending_approval_record_id")
+    if not record_id:
+        return None
+    return str(Path(state_path).parent / "approvals" / str(record_id))
 
 
 def format_status_reply(state: dict) -> str:
@@ -472,6 +909,21 @@ def _latest_user_message(messages):
             if text.strip():
                 return text.strip()
     raise OpenWebUIRequestError("messages must contain a non-empty user message")
+
+
+def _open_webui_metadata_reply(message):
+    """Answer Open WebUI helper requests without entering the search workflow."""
+    text = str(message or "").lstrip()
+    if not text.startswith("### Task:"):
+        return None
+    lowered = text.lower()
+    if "suggest 3-5 relevant follow-up" in lowered or '"follow_ups"' in lowered:
+        return '{"follow_ups": []}'
+    if "broad tags categorizing" in lowered or '"tags"' in lowered:
+        return '{"tags": ["材料相图搜索"]}'
+    if "generate a concise" in lowered and "title" in lowered:
+        return "相图搜索"
+    return None
 
 
 def _display(value):
@@ -568,12 +1020,13 @@ def create_open_webui_runtime(config_path=None):
     config_file = Path(configured).resolve()
     settings = _load_json_object(config_file, "Open WebUI 运行时配置")
     _reject_secrets(settings)
+    from config_layer.session.load_config_session import load_config_session
+    from decision_layer.agent.create_deepseek_client import create_deepseek_client
+    from run.deepseek_credentials import load_deepseek_api_key
     base = config_file.parent
     missing = [key for key in ("state_path", "ledger_path") if not settings.get(key)]
     if missing:
         raise ValueError(f"运行时配置缺少 {missing}；请编辑 {config_file}")
-    from config_layer.session.load_config_session import load_config_session
-    from decision_layer.agent.create_deepseek_client import create_deepseek_client
 
     state_path = _resolve_path(settings["state_path"], base)
     ledger_path = _resolve_path(settings["ledger_path"], base)
@@ -664,7 +1117,7 @@ def create_open_webui_runtime(config_path=None):
             BOOTSTRAP_HINTS, CONFIG_AGENT_SYSTEM_PROMPT, ConfigurationChatHandler,
             normalize_workspace_path, safe_config_filename,
         )
-        editable_path_setting = settings.get("editable_config_draft_path") or "search_config.draft.json"
+        editable_path_setting = settings.get("editable_config_draft_path") or "search_config.project.json"
         editable_config_filename = safe_config_filename(Path(editable_path_setting).name)
         setup_stage = session.get("setup_stage")
         if setup_stage == "json_ready":
@@ -674,10 +1127,27 @@ def create_open_webui_runtime(config_path=None):
                     storage.get("workspace_root"), base_directory=base,
                 )
                 saved_path = session.get("editable_config_json_path")
-                if saved_path:
+                preferred_path = workspace_root / editable_config_filename
+                if preferred_path.is_file():
+                    draft_candidate = preferred_path
+                    if saved_path and str(saved_path) != str(preferred_path):
+                        session["editable_config_json_path"] = str(preferred_path)
+                        session.pop("agent_reviewed_revision", None)
+                        session.pop("agent_reviewed_config_hash", None)
+                        session.pop("agent_reviewed_config_digest", None)
+                        session.pop("agent_reviewed_mother_digest", None)
+                        session.setdefault("dialogue", []).append({
+                            "type": "editable_config_source_changed",
+                            "old_path": saved_path,
+                            "new_path": str(preferred_path),
+                            "reason": "运行时指定的设置文件已存在；以它作为下一次导入来源。",
+                        })
+                        from config_layer.session.save_config_session import save_config_session
+                        save_config_session(session, resolved_session)
+                elif saved_path:
                     draft_candidate = normalize_workspace_path(saved_path, base_directory=base)
                 else:
-                    draft_candidate = workspace_root / editable_config_filename
+                    draft_candidate = preferred_path
                 if (not draft_candidate.is_relative_to(workspace_root)
                         or draft_candidate.suffix.lower() != ".json"):
                     raise ValueError("设置 JSON 必须位于已确认工作区内")
@@ -737,9 +1207,11 @@ def create_open_webui_runtime(config_path=None):
             editable_config_path = None
         if session.get("status") == "draft" and editable_config_path is not None:
             from config_layer.session.create_editable_config_json import create_editable_config_json
+            from config_layer.session.project_config_json import create_project_config_json
             # Create the template once. A user-edited file is never overwritten on restart.
             try:
-                create_editable_config_json(
+                creator = create_project_config_json if editable_config_path.name.endswith(".project.json") else create_editable_config_json
+                creator(
                     editable_config_path, session.get("config") or {},
                     bootstrap_hints=session.get("bootstrap_hints") or BOOTSTRAP_HINTS,
                     workspace_defaults=workspace_defaults,
@@ -764,6 +1236,7 @@ def create_open_webui_runtime(config_path=None):
         deepseek = settings.get("deepseek") or {}
         try:
             agent_client = create_deepseek_client(
+                api_key=load_deepseek_api_key(),
                 model=deepseek.get("model", "deepseek-v4-pro"),
                 base_url=deepseek.get("base_url", "https://api.deepseek.com"),
                 max_tokens=int(deepseek.get("max_tokens", 800)),
@@ -816,6 +1289,14 @@ def create_open_webui_runtime(config_path=None):
             )
     state_path, ledger_path = selected_state_path, selected_ledger_path
     state = _load_json_object(state_path, "state") if state_path.is_file() else {}
+    if state and state.get("confirmed_config_version") != snapshot.get("config_version"):
+        from config_layer.runtime.authorize_generation_policy_revision import (
+            authorize_generation_policy_revision,
+        )
+        migration = authorize_generation_policy_revision(state, snapshot)
+        if migration["status"] == "rebound":
+            state = migration["state"]
+            write_json(state_path, state)
 
     configured_references = ((effective_config.get("system") or {}).get("phase_references") or {})
     if phase_path and phase_path.is_file():
@@ -833,6 +1314,17 @@ def create_open_webui_runtime(config_path=None):
     from run.default_run_config import default_run_config
     if ledger_path.is_file():
         manager = PhaseDataManager.load(ledger_path)
+        saved_system = manager.data.get("system_config") or {}
+        saved_space = saved_system.get("configuration_space") or {}
+        active_space = (effective_config.get("system") or {}).get("configuration_space") or {}
+        if saved_space != active_space:
+            if manager.data.get("branches") or manager.data.get("structures"):
+                raise ValueError(
+                    "现有台账的问题变量角色与已确认配置不同；不能在原台账上改变 branch 编号。"
+                    "请建立新运行或明确迁移旧数据。")
+            manager.data["system_config"] = deepcopy(effective_config["system"])
+            if (active_space.get("roles") or {}).get("T") == "fixed":
+                manager.data["system_config"]["branch_schema"]["fields"] = ["P", "H", "x"]
     else:
         boundary = ((snapshot["config"].get("system") or {}).get("boundary"))
         if not isinstance(boundary, dict):
@@ -841,6 +1333,7 @@ def create_open_webui_runtime(config_path=None):
         manager.save(ledger_path)
 
     runtime_config = default_run_config()
+    runtime_config["system_config"] = deepcopy(effective_config["system"])
     runtime_config.update({"state_path": str(state_path), "ledger_path": str(ledger_path)})
     for key in ("structure_directory", "phase_diagram_directory", "work_directory",
                 "branch_energy_pool_ledger_path", "approval_directory",
@@ -859,15 +1352,24 @@ def create_open_webui_runtime(config_path=None):
         "work_directory": str(resolved_storage["work"]),
         "approval_directory": str(resolved_storage["approvals"]),
         "local_action_directory": str(resolved_storage["approved_batches"]),
+        "upload_batches_directory": str(resolved_storage["upload_batches"]),
     })
     runtime_config.setdefault("qbc", {})["output_path"] = str(resolved_storage["qbc_results"])
     deepseek = settings.get("deepseek") or {}
-    agent_client = create_deepseek_client(
-        model=deepseek.get("model", "deepseek-v4-pro"),
-        base_url=deepseek.get("base_url", "https://api.deepseek.com"),
-        max_tokens=int(deepseek.get("max_tokens", 800)), timeout=int(deepseek.get("timeout", 60)),
-        thinking=deepseek.get("thinking"),
-    )
+    from run.deepseek_credentials import load_deepseek_api_key
+    try:
+        agent_client = create_deepseek_client(
+            api_key=load_deepseek_api_key(),
+            model=deepseek.get("model", "deepseek-v4-pro"),
+            base_url=deepseek.get("base_url", "https://api.deepseek.com"),
+            max_tokens=int(deepseek.get("max_tokens", 800)), timeout=int(deepseek.get("timeout", 60)),
+            thinking=deepseek.get("thinking"),
+            routine_max_tokens=int(deepseek.get("routine_max_tokens", 1600)),
+            reasoning_max_tokens=int(deepseek.get("reasoning_max_tokens", 8192)),
+        )
+    except ValueError:
+        # Start the local UI without a key so the user can configure it in-browser.
+        agent_client = None
     model_switcher = _make_deepseek_model_switcher(
         config_file, deepseek, system_prompt=None, thinking=deepseek.get("thinking"),
     )
@@ -903,6 +1405,12 @@ def create_open_webui_runtime(config_path=None):
             stage_batch_sizes=manual.get("stage_batch_sizes"),
             stage_profiles=manual.get("stage_profiles"), task_preparer=task_preparer,
         )
+    if kwargs.get("task_runner") is None and kwargs.get("result_collector") is None:
+        # Read-only recovery for manually uploaded jobs; this never submits/prepares tasks.
+        from execution_layer.remote.batch_runner import RemoteBatchRunner
+        kwargs["result_collector"] = RemoteBatchRunner(
+            resolved_storage["upload_batches"], worker_command=[],
+        )
 
     def new_run():
         root = resolved_storage["new_runs"]
@@ -926,31 +1434,124 @@ def create_open_webui_runtime(config_path=None):
         fresh_kwargs.update(manager=fresh, run_config=fresh_config, state_path=str(new_state))
         return fresh_kwargs
 
+    configured_mode = settings.get("execution_mode", "debug")
+    execution_mode = "interactive" if configured_mode == "debug" else "autonomous"
+    if configured_mode not in {"debug", "automatic"}:
+        raise ValueError("运行时 execution_mode 必须是 debug 或 automatic")
+    try:
+        intent_client = create_deepseek_client(
+            api_key=load_deepseek_api_key(), model=deepseek.get("model", "deepseek-flash"),
+            base_url=deepseek.get("base_url", "https://api.deepseek.com"),
+            max_tokens=120, timeout=int(deepseek.get("timeout", 60)),
+            thinking="disabled",
+            system_prompt=("Classify only the current user's direct intent to change a persistent "
+                           "project parameter. A direct request to set/change a value authorizes "
+                           "a draft edit even without the words config file. Return JSON with "
+                           "intent and direct_request. Never infer permission from history."),
+        )
+    except ValueError:
+        intent_client = None
+
+    def start_config_revision(run_state):
+        from config_layer.session.begin_config_revision import begin_config_revision
+        from config_layer.session.save_config_session import save_config_session
+        baseline = _session_from_state(run_state)
+        if baseline is None:
+            raise ValueError("当前运行没有可核实的已确认配置")
+        previous = load_config_session(resolved_session) if resolved_session.is_file() else {}
+        baseline["draft_revision"] = max(int(previous.get("draft_revision") or 0),
+                                          int(str(baseline["confirmed_snapshot"]["config_version"])
+                                              .split("-")[1]))
+        baseline["dialogue"] = deepcopy((previous.get("dialogue") or [])[-30:])
+        baseline["editable_config_json_path"] = str(
+            Path(baseline["config"]["storage"]["workspace_root"]) /
+            (settings.get("editable_config_draft_path") or "search_config.project.json")
+        )
+        revised = begin_config_revision(baseline, reason="用户在搜索对话中要求修改配置")
+        save_config_session(revised, resolved_session)
+        current = deepcopy(run_state)
+        if current.get("pending_execution_policies"):
+            current.setdefault("cancelled_proposals", []).extend({
+                "invocation_id": key, "reason": "config_revision_started",
+                "config_version": current.get("confirmed_config_version"),
+            } for key in current["pending_execution_policies"])
+            current["pending_execution_policies"] = {}
+            write_json(state_path, current)
+        return create_open_webui_runtime(config_file)
+
     return RunWorkflowChatHandler(
         kwargs, history_prompt=_has_history(state, manager),
         new_run_factory=new_run, deepseek_model_switcher=model_switcher,
+        execution_mode=execution_mode, config_revision_factory=start_config_revision,
+        config_intent_client=intent_client,
     )
 
 
 def _make_deepseek_model_switcher(runtime_config_path, settings, *, system_prompt, thinking):
     """Create a local-only switcher that persists the selected model and replaces the client."""
     from decision_layer.agent.create_deepseek_client import create_deepseek_client
+    from run.deepseek_credentials import load_deepseek_api_key
     from run.set_deepseek_runtime_model import set_deepseek_runtime_model
 
     def switch(model):
         client = create_deepseek_client(
+            api_key=load_deepseek_api_key(),
             model=model,
             base_url=settings.get("base_url", "https://api.deepseek.com"),
             max_tokens=int(settings.get("max_tokens", 800)),
             timeout=int(settings.get("timeout", 60)),
             system_prompt=system_prompt,
             thinking=thinking,
+            routine_max_tokens=int(settings.get("routine_max_tokens", 1600)),
+            reasoning_max_tokens=int(settings.get("reasoning_max_tokens", 8192)),
         )
         selected = set_deepseek_runtime_model(runtime_config_path, model)
         settings["model"] = selected
         return selected, client
 
     return switch
+
+
+def _make_deepseek_key_setup(chat_handler, runtime_config_path):
+    """Build a local key tester that securely saves and activates a successful key."""
+    from decision_layer.agent.create_deepseek_client import create_deepseek_client
+    from run.deepseek_credentials import load_deepseek_api_key
+    from run.configuration_chat import CONFIG_AGENT_SYSTEM_PROMPT, ConfigurationChatHandler
+    from run.deepseek_setup import test_and_save_api_key
+
+    settings = _load_json_object(runtime_config_path, "Open WebUI 运行时配置")
+    deepseek = settings.get("deepseek") or {}
+
+    def activate(api_key):
+        is_configuration = isinstance(chat_handler, ConfigurationChatHandler)
+        if not is_configuration and not isinstance(chat_handler, RunWorkflowChatHandler):
+            raise ValueError("当前自定义 handler 不支持本地 API Key 设置")
+        client = create_deepseek_client(
+            api_key=api_key or load_deepseek_api_key(),
+            model=deepseek.get("model", "deepseek-flash"),
+            base_url=deepseek.get("base_url", "https://api.deepseek.com"),
+            max_tokens=int(deepseek.get("max_tokens", 800)),
+            timeout=int(deepseek.get("timeout", 60)),
+            system_prompt=CONFIG_AGENT_SYSTEM_PROMPT if is_configuration else None,
+            thinking=(deepseek.get("configuration_thinking", "disabled") if is_configuration
+                      else deepseek.get("thinking")),
+            routine_max_tokens=int(deepseek.get("routine_max_tokens", 1600)),
+            reasoning_max_tokens=int(deepseek.get("reasoning_max_tokens", 8192)),
+        )
+        if is_configuration:
+            chat_handler.agent_client = client
+        else:
+            chat_handler.workflow_kwargs["agent_client"] = client
+            chat_handler.config_intent_client = client
+
+    return lambda api_key: test_and_save_api_key(
+        api_key, settings=deepseek, activate_client=activate,
+    )
+
+
+def _deepseek_setup_page(model, *, configured):
+    from run.deepseek_setup import setup_page
+    return setup_page(model=model, configured=configured)
 
 
 def _deepseek_switch_reply(model):
@@ -987,6 +1588,8 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--token-env", default="OPENWEBUI_TOOL_TOKEN")
     parser.add_argument("--control-token-env", default="OPENWEBUI_CONTROL_TOKEN")
+    parser.add_argument("--parent-pid", type=int,
+                        help="stop this local Agent automatically when its launcher exits")
     args = parser.parse_args(argv)
     token = os.environ.get(args.token_env)
     if not token or len(token) < 16:
@@ -1000,12 +1603,21 @@ def main(argv=None):
     except (ValueError, TypeError, FileNotFoundError, ImportError, AttributeError) as error:
         parser.error(str(error))
     print(f"Open WebUI endpoint: http://{args.host}:{args.port}/v1")
+    deepseek_setup = None
+    deepseek_model = "deepseek-flash"
+    if not args.handler_factory:
+        runtime_settings = _load_json_object(args.runtime_config, "Open WebUI 运行时配置")
+        deepseek_model = (runtime_settings.get("deepseek") or {}).get("model", deepseek_model)
+        deepseek_setup = _make_deepseek_key_setup(handler, args.runtime_config)
+        print(f"本机 DeepSeek 设置页: http://127.0.0.1:{args.port}/phase/setup")
     control = None
     if isinstance(handler, RunWorkflowChatHandler):
         from run.local_agent_control import LocalAgentControl
         control = LocalAgentControl(handler)
     serve_open_webui(handler, api_key=token, host=args.host, port=args.port,
-                     local_control=control, control_api_key=control_token)
+                     local_control=control, control_api_key=control_token,
+                     deepseek_key_setup=deepseek_setup, deepseek_model=deepseek_model,
+                     parent_pid=args.parent_pid)
 
 
 if __name__ == "__main__":

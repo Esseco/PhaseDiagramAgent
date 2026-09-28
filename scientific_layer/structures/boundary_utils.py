@@ -63,6 +63,31 @@ def allowed_phases(config: Any) -> set[str]:
     raise TypeError("boundary['P'] 必须是相名、列表或分组 dict")
 
 
+def allowed_phases_at_x(config: Any, x: int | float | str | Fraction) -> set[str]:
+    """Return the phases allowed at Na content x; legacy phase lists allow all x."""
+    if not isinstance(config, dict) or not ({"at_x", "intermediate"} & set(config)):
+        return allowed_phases(config)
+    exact = config.get("at_x")
+    intermediate = config.get("intermediate")
+    if not isinstance(exact, dict) or not isinstance(intermediate, list):
+        raise ValueError("boundary.P 需要 at_x 映射和 intermediate 相列表")
+    if set(config) != {"at_x", "intermediate"}:
+        raise ValueError("boundary.P 仅允许 at_x 与 intermediate 两个分组")
+    if not exact or not intermediate:
+        raise ValueError("boundary.P 的 at_x 和 intermediate 均须非空")
+    for key, phases in exact.items():
+        at_x = Fraction(normalize_fraction(key))
+        if not 0 <= at_x <= 1 or not isinstance(phases, list) or not phases:
+            raise ValueError("boundary.P.at_x 必须映射 [0,1] 内组分到非空相列表")
+    if any(not isinstance(phase, str) or not phase.strip() for phase in intermediate):
+        raise ValueError("boundary.P.intermediate 必须是非空相名列表")
+    fraction = Fraction(normalize_fraction(x))
+    for key, phases in exact.items():
+        if Fraction(normalize_fraction(key)) == fraction:
+            return allowed_phases(phases)
+    return allowed_phases(intermediate) if 0 < fraction < 1 else set()
+
+
 def allowed_supercells(config: Any, phase: str) -> list[list[list[int]]]:
     values = (
         config.get(phase, config.get(phase.upper(), []))

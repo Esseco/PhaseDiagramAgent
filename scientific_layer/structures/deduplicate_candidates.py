@@ -100,7 +100,8 @@ def _parameters(
 ) -> dict[str, Any]:
     if candidate.get("structure") is not None and manager is not None and references:
         return identify_branch_parameters(
-            candidate["structure"], manager.boundary, phase_references=references
+            candidate["structure"], manager.boundary, phase_references=references,
+            phase_hint=candidate.get("P"),
         )
     missing = {"P", "H", "x", "T"} - candidate.keys()
     if missing:

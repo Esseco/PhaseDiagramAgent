@@ -12,9 +12,11 @@ H = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 
 def test_mlip_mc_task_is_self_contained_and_uses_incremental_budget(tmp_path):
     structure_path = tmp_path / "input.vasp"; structure_path.write_text("mock")
+    full_na_path = tmp_path / "full_na.vasp"; full_na_path.write_text("mock")
     manager = PhaseDataManager({"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}})
     branch = manager.add_branch(P="O3", H=H, x=1, T=["Fe"], composition={"Fe": 1})
     structure = manager.add_structure(branch_id=branch, arrangement={"a": 1}, source_path=structure_path)
+    manager.data["branches"][branch]["full_na_structure_path"] = str(full_na_path)
     task = {
         "task_id": "MC1", "task_key": "K1", "branch_id": branch,
         "stage": "deep_search", "status": "pending", "incremental_budget": 20,
@@ -39,6 +41,8 @@ def test_mlip_mc_task_is_self_contained_and_uses_incremental_budget(tmp_path):
     assert payload["worker_job"]["operation"] == "mc"
     assert payload["worker_job"]["segment_budget"] == 20
     assert payload["worker_job"]["model_version"] == "m1"
+    assert payload["worker_job"]["parameters"]["full_na_structure"] == "full_na_structure.vasp"
+    assert (tmp_path / "batches/slurm-000001/00000-MC1/full_na_structure.vasp").is_file()
     assert "slurm_array_task" in (tmp_path / "batches/slurm-000001/submit.sbatch").read_text()
 
     with patch("scientific_layer.mlip.slurm_executor.run_mace_worker", return_value={

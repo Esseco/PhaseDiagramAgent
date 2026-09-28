@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import itertools
-import math
 import random
 from fractions import Fraction
 from typing import Any
@@ -13,6 +11,7 @@ from typing import Any
 from scientific_layer.structures.boundary_utils import compact_json, normalize_fraction
 from scientific_layer.structures.identify_branch import extract_T
 from scientific_layer.structures.generate_branch_structure import generate_branch_structure
+from scientific_layer.structures.rank_na_orderings_by_electrostatics import rank_na_orderings_by_electrostatics
 
 
 def initialize_branch_structures(
@@ -22,6 +21,7 @@ def initialize_branch_structures(
     *,
     initial_states_per_branch: int,
     seed: int,
+    preserve_reference_tm: bool = False,
 ) -> list[dict[str, Any]]:
     """固定 P、H、x、T，为每个 branch 生成至多指定数量的不同 V。"""
     if (
@@ -37,14 +37,19 @@ def initialize_branch_structures(
         if missing:
             raise ValueError(f"branch 缺少字段：{sorted(missing)}")
         branch_seed = seed + branch_index
+        target_x = Fraction(normalize_fraction(original["x"]))
         full = generate_branch_structure(
             boundary,
             phase=original["P"],
             H=original["H"],
-            x=1,
-            T=list(original["T"]),
+            x=0 if target_x == 0 else 1,
+            T=None if preserve_reference_tm else list(original["T"]),
+            preserve_reference_tm=preserve_reference_tm,
             phase_references=phase_references,
             seed=branch_seed,
+            # Internal full-Na template only.  The final structures below are
+            # restored to original["x"] and retain the branch boundary rule.
+            enforce_phase_composition=False,
         )
         na_indices = [
             index
@@ -54,26 +59,22 @@ def initialize_branch_structures(
         oxygen_count = sum(
             site.is_ordered and site.specie.symbol == "O" for site in full
         )
-        occupied = Fraction(normalize_fraction(original["x"])) * oxygen_count / 2
+        occupied = target_x * oxygen_count / 2
         if occupied.denominator != 1 or not 0 <= occupied <= len(na_indices):
-            raise ValueError(
-                f"x={original['x']} 无法在 {len(na_indices)} 个 Na 位点上实现"
-            )
-        choices = _choose_occupancies(
-            len(na_indices),
-            occupied.numerator,
-            initial_states_per_branch,
-            branch_seed,
-        )
-        for state_index, chosen in enumerate(choices):
+            raise ValueError(f"x={original['x']} 无法在 {len(na_indices)} 个 Na 位点上实现")
+        try:
+            ranked = rank_na_orderings_by_electrostatics(full, original["x"], limit=10)
+        except Exception as error:
+            raise RuntimeError(
+                f"branch {original.get('branch_id', original.get('candidate_id', branch_index))} "
+                f"静电能初态生成失败：{error}"
+            ) from error
+        count = min(initial_states_per_branch, 3, len(ranked))
+        selected_ranks = random.Random(branch_seed).sample(range(len(ranked)), count)
+        for state_index, valid_rank in enumerate(selected_ranks):
+            structure, electrostatic_energy, charge_scheme, raw_rank = ranked[valid_rank]
+            chosen = _na_occupancy_indices(full, structure, na_indices)
             chosen_set = set(chosen)
-            structure = full.copy()
-            remove = [
-                site_index
-                for position, site_index in enumerate(na_indices)
-                if position not in chosen_set
-            ]
-            structure.remove_sites(remove)
             structure.sort()
             actual_T, _ = extract_T(structure, boundary["TM_ratio"])
             if actual_T != list(original["T"]):
@@ -84,6 +85,7 @@ def initialize_branch_structures(
                 {
                     "candidate_id": _candidate_id(original, V),
                     "structure": structure,
+                    "full_na_structure": full.copy() if target_x > 0 else None,
                     "V": V,
                     "arrangement": {
                         "V": V,
@@ -91,31 +93,34 @@ def initialize_branch_structures(
                         "vacancy_sites": [i for i, value in enumerate(V) if not value],
                     },
                     "initial_state_index": state_index,
-                    "initial_state_count": len(choices),
+                    "initial_state_count": count,
                     "initialization_seed": branch_seed,
+                    "initialization_method": "electrostatic_top10_random3_layer_occupied",
+                    "electrostatic_rank": valid_rank,
+                    "electrostatic_raw_rank": raw_rank,
+                    "electrostatic_rank_pool_size": len(ranked),
+                    "electrostatic_energy": electrostatic_energy,
+                    "electrostatic_charge_scheme": charge_scheme,
                 }
             )
             output.append(candidate)
     return output
 
 
-def _choose_occupancies(site_count, occupied_count, requested, seed):
-    total = math.comb(site_count, occupied_count)
-    count = min(requested, total)
-    rng = random.Random(seed)
-    if total <= 100_000:
-        choices = list(itertools.combinations(range(site_count), occupied_count))
-        rng.shuffle(choices)
-        return choices[:count]
-    choices = set()
-    attempts = max(100, count * 100)
-    for _ in range(attempts):
-        choices.add(tuple(sorted(rng.sample(range(site_count), occupied_count))))
-        if len(choices) == count:
-            break
-    if len(choices) < count:
-        raise RuntimeError(f"只生成 {len(choices)}/{count} 个不同 V")
-    return sorted(choices)
+def _na_occupancy_indices(full, ordered, na_indices):
+    import numpy as np
+
+    positions = [site.frac_coords for site in ordered
+                 if site.is_ordered and site.specie.symbol == "Na"]
+    chosen = []
+    for position, index in enumerate(na_indices):
+        reference = full[index].frac_coords
+        if any(np.allclose((coords - reference) - np.rint(coords - reference), 0, atol=1e-5)
+               for coords in positions):
+            chosen.append(position)
+    if len(chosen) != len(positions):
+        raise RuntimeError("静电能构型的 Na 位点无法映射回母结构")
+    return tuple(chosen)
 
 
 def _candidate_id(branch, V):

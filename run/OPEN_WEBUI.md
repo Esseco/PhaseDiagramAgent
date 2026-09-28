@@ -1,5 +1,69 @@
 # Open WebUI integration
 
+## Debug-mode Relax handoff
+
+When the confirmed ledger already has deduplicated electrostatic initial
+structures, the next proposal prepares `relax_and_feature` inputs for every
+registered structure without a completed or prepared Relax task. Existing tasks
+keep their IDs and budget reservations. New tasks from the same branch share
+one upload batch directory and have separate `GPU.sh` scripts. The generated
+`RELAX_UPLOAD_PLAN.json` groups all pending tasks by branch, including older
+single-task batches. It does not regenerate branches, run MACE locally, or
+submit a cluster job. After approval, inspect the generated directory under
+the configured `storage.paths.upload_batches`: each bundle contains copied
+`initial.vasp` files, per-task JSON, a manifest, checksums, and a Slurm script
+using the confirmed remote worker command and the MACE environment profile.
+Only upload and submit after checking the remote model path, project import
+path, resource directives, and cluster dependencies. The stored budget covers
+the individual Relax tasks; repeating preparation does not reserve them twice.
+An older pending `run_calculation_stage` proposal is revised to this safe
+preparation step before it can be approved in debug mode.
+
+## One-click local project launcher (Windows)
+
+Double-click `start_phase_agent.cmd` in the repository root. It opens a small
+project picker under `py1`. Choose **继续所选项目**, **新建独立项目**, or
+**添加已有项目** (select its `open_webui_runtime.json`). A new project creates
+only its own runtime JSON, resumable config session, and annotated science
+draft in the chosen workspace; no scientific task starts. Edit
+`search_config.project.json`, then tell the Agent `读取配置 JSON 并继续`. The first
+GUI workspace selection replaces the duplicate path-confirmation chat step;
+scientific settings still need Agent/program review and user consent.
+
+The launcher displays the chosen workspace, config status, and whether the
+project state contains approved long-term or recent short-term memory. It
+rejects a second project pointing at the same state, and refuses to attach to
+an already occupied Agent port because it cannot prove which project owns it.
+It starts the local Agent endpoint, or safely reconnects when the same project's
+Agent already owns port 8765 and accepts the stored connection token. A different
+or unidentifiable process is never reused. The launcher prefers Open WebUI at
+`open_webui_url` (default `http://127.0.0.1:3000`). If it is not running and no
+startup command is configured, the launcher opens its own lightweight chat at
+`http://127.0.0.1:8765/phase/chat`; the Agent, configuration conversation and
+approval rules are the same. Click **从剪贴板连接** once on that page. New projects
+therefore remain usable without installing or restarting Open WebUI.
+
+If you use Open WebUI, set `open_webui_start_command` as an argument list and
+`open_webui_workdir` when required by its actual installation. Shared desktop
+startup settings can be kept in
+`%LOCALAPPDATA%/PhaseSearchAgent/open_webui_startup.json`; explicit project
+settings take precedence, and newly created projects inherit the shared
+settings. A successful one-shot startup command may exit before the web page is
+ready; the launcher waits for the page. It does not invent Docker or installer
+commands. If Open WebUI startup fails, the launcher opens the local chat and
+shows the startup error in its window. The DeepSeek key stays in Windows Credential
+Manager. Separate local connection and control tokens are created there once;
+the connection token is copied to the clipboard on launch for Open WebUI's
+one-time OpenAI-compatible connection setup. Do not paste the control token
+into Open WebUI. The endpoint log is `agent_server.log` in the chosen workspace.
+
+An Open WebUI **new chat is not a new project**. Its account Memory may also
+be injected across chats. For this Agent, turn off the model's Memory injection
+in Open WebUI and use the project's reviewed long-term memory and state-derived
+short-term memory instead. Change projects with the launcher after stopping the
+old local Agent service; never point two projects at one state/ledger. Existing
+runtime JSON and scientific result files are not overwritten by the launcher.
+
 Open WebUI is the browser chat client; this project remains the Agent and the
 only authority that can approve, validate, budget, and dispatch actions. The
 local endpoint implements the OpenAI-compatible `/v1/models` and
@@ -44,15 +108,27 @@ The JSON may contain these non-secret settings:
   version); both are committed only after “确认”. This updates the
   local runtime JSON, not the scientific search config or cluster files. API
   keys remain environment-only.
-- optional `manual_upload`. When enabled, it uses the built-in portable batch
-  exporter, writes `manifest.json`, per-task JSON, `submit.sbatch`, immutable
-  snapshots, `SHA256SUMS`, and `UPLOAD_AND_SUBMIT.md`, but never calls `sbatch`.
-  Its `worker_command`, stage profiles and any task preparer must be supplied by
-  the site. `manual_upload.submit=true` is rejected.
+- optional `manual_upload`. When enabled, compatible Relax tasks are grouped up
+  to 100 per job and MC tasks up to 20 per job. Submit the batch root's `GPU.sh`
+  once; each MLIP task has its own directory, `run_mlip_task.py`, result and log.
+  DFT remains one task per job, with atomate inputs and `GPU.sh` in that task directory.
+  The parent directory keeps `manifest.json`, an immutable snapshot, `SHA256SUMS`,
+  and `UPLOAD_AND_SUBMIT.md`. No array submit script or `sbatch` invocation is made.
+  Its `worker_command` must specify an `--executor` reference for MLIP tasks.
+`manual_upload.submit=true` is rejected.
+
+After a Relax input batch is prepared in debug mode, the Agent pauses and lists
+the batch directories. Upload each complete batch directory, submit its root
+`GPU.sh` once, then copy `result.json` and `task.finished.json` back into the
+same local task directory. On the next “继续”, the local runner verifies the
+markers, records each result and settles its budget once. Until results return,
+it reports the remaining tasks instead of proposing the same preparation again.
 
 Do not put API keys, passwords, SSH secrets, structures, or guessed cluster
-paths in this file. Secret-like JSON fields are rejected. `DEEPSEEK_API_KEY`
-and the local Open WebUI bearer token are read only from environment variables.
+paths in this file. Secret-like JSON fields are rejected. The DeepSeek key is
+read from the local Windows Credential Manager or, if explicitly set, the
+`DEEPSEEK_API_KEY` environment variable. Open WebUI bearer tokens remain local
+environment-only.
 If a configured config-session file is missing, recovery is allowed only when
 the configured state explicitly contains both `confirmed_config` and a config
 version. A missing ledger can be created only when the confirmed config has a
@@ -64,9 +140,11 @@ Start the endpoint under the project's `py1` environment:
 ```powershell
 $env:OPENWEBUI_TOOL_TOKEN = "<a random local token of at least 16 characters>"
 $env:OPENWEBUI_CONTROL_TOKEN = "<a different random local control token>"
-$env:DEEPSEEK_API_KEY = "<your local API key>"
 python -m run.open_webui_api
 ```
+
+The endpoint can start without a DeepSeek key. Open the printed local setup URL
+(`http://127.0.0.1:8765/phase/setup`) and enter the key there instead.
 
 Use `--runtime-config PATH` for another local JSON. The older
 `--handler-factory package.module:function` remains an explicit override.
@@ -139,9 +217,14 @@ for independent users/runs.
 
 ## Local secrets and Open WebUI data
 
-Set `DEEPSEEK_API_KEY`, `OPENWEBUI_TOOL_TOKEN`, and the distinct
-`OPENWEBUI_CONTROL_TOKEN` in the local process
-environment, never in runtime JSON, state, task payloads, or remote manifests.
+`OPENWEBUI_TOOL_TOKEN` and the distinct `OPENWEBUI_CONTROL_TOKEN` remain local
+endpoint access tokens. The DeepSeek key no longer needs to be entered in a
+terminal: start the local service, open `http://127.0.0.1:8765/phase/setup`,
+paste the key, and choose “测试并启用”. The page makes a small JSON-mode test
+request first, then saves the key in the current Windows user's Credential
+Manager and activates it without restarting the service. If `DEEPSEEK_API_KEY`
+is already set, that environment value takes precedence. The DeepSeek key is
+never written to runtime JSON, state, task payloads, or remote manifests.
 Disable Open WebUI configuration/chat persistence when your deployment supports
 it, and protect its data directory with OS permissions and disk encryption.
 Open WebUI versions and deployment settings differ, so the project does **not**
@@ -157,15 +240,17 @@ chat history.
 
 ## First-run configuration dialogue
 
-On a clean first start, the service creates only a small resumable dialogue session at `config_session_path`. It asks for the local workspace root and Agent model version (V4.1 Flash or V4 Pro), together or separately. It previews those two choices and the JSON path. Reply “确认” to create the annotated JSON and receive the required-field list. After editing the file, send “读取配置 JSON”: the Agent reviews its contents and the program checks required fields and paths. If both pass, reply “同意” to save the immutable config snapshot and enter the search Agent. This does not submit scientific tasks.
+On a clean first start, the service creates only a small resumable dialogue session at `config_session_path`. It asks for the local workspace root and Agent model version (V4.1 Flash or V4 Pro), together or separately. It previews those two choices and the JSON path. Reply “确认” to create the annotated JSON and receive separate required-field and recommended-review lists. After editing the file, send “读取配置 JSON” for review only; after both Agent and program checks pass, reply “同意” to save the immutable config snapshot and enter the search Agent. Alternatively, “读取配置 JSON 并继续” is conditional consent to do that immediately if both checks pass. Either route enters search advice only; it does not submit scientific tasks.
 
-After confirming the workspace root, the service creates `<workspace_root>/search_config.draft.json` (or the filename configured by `editable_config_draft_path`; it is always placed under the selected root). Open that file in an editor and change values directly instead of typing every parameter into chat. Keep the outer `_format`, `_instructions`, `_section_help`, and `config` keys; edit values inside `config`. The file accepts JSONC `//` and `/* ... */` comments, but not trailing commas. `system.boundary.P` and `TM_ratio` are prefilled from the current layered-oxide defaults for review; fill the per-phase `H` matrix lists. The mother-structure directory is a single `system.phase_reference_directory`; on import, the project resolves each phase to `<directory>/<phase>.vasp` (for example, `O3.vasp`). You can still use `system.phase_references` to override individual files. Use JSON `null` for unknown values; do not delete fields or put API keys and passwords in the file. The import checks syntax, field shape, and secret-like keys.
+If no DeepSeek key is available, the Agent replies with the local setup-page link. Open it in the same computer's browser, paste the key once, and test it. The setup endpoint is restricted to loopback clients; the page does not echo the submitted value or write it to web storage. Browser password-manager behavior depends on browser settings. A successful test stores the key in Windows Credential Manager and makes the existing Agent usable immediately. Replacing the key follows the same test-before-save flow.
+
+After confirming the workspace root, the service creates `<workspace_root>/search_config.project.json` (or the filename configured by `editable_config_draft_path`; it is always placed under the selected root). This short file inherits the version-pinned `layered-oxide-v1` defaults. Edit `config` for the main project settings and `overrides` only for advanced fields; do not copy the full default configuration into the file. The file accepts JSONC comments. Set the mother-structure directory once; phase files are resolved as `<directory>/<phase>.vasp`. For layered supercells, choose indices in `selected_recommendation_indices` or provide actual integer matrices under `additional_containment_matrices`; the two recommendation matrices are examples, not automatically selected. The import checks schema, matrix shapes, template version and secret-like fields. Legacy `search_config.draft.json` remains readable and is never overwritten by the new format.
 
 The same JSON includes `config.storage`: the selected `workspace_root` and relative destinations for config snapshots, state, the main ledger, structures, phase diagrams, QBC results, approvals, task work and upload batches. New workspaces use the standard relative layout shown in the file. Relative output paths are constrained to remain under the workspace root. If you select a new root while existing state or ledger files remain elsewhere, startup stops rather than silently moving or ignoring them; manually migrate and verify those files, or point the entries back to their original locations.
 
-The dialogue session remains at the bootstrap path selected by `config_session_path`, so the local service can resume setup before the chosen workspace is loaded. The editable JSON and immutable confirmed config copy are stored under the selected workspace root; snapshots go to `workspace_root/config_snapshots/` by default. Runtime setting `editable_config_draft_path` controls only the JSON filename, not its directory.
+The dialogue session remains at the bootstrap path selected by `config_session_path`, so the local service can resume setup before the chosen workspace is loaded. The editable JSON and immutable confirmed config copy are stored under the selected workspace root; snapshots go to `workspace_root/config_snapshots/` by default. Runtime setting `editable_config_draft_path` controls only the JSON filename, not its directory. A confirmed snapshot stores the fully expanded settings and the default-profile identifier and digest, so later template edits cannot silently change an existing run.
 
-After saving the file, send `读取配置 JSON`. The local service loads it and sends its contents to the Agent for review; missing fields, conflicts, and invalid paths block progress. Agent suggestions are not silently applied—edit the JSON and read it again. When both Agent review and program validation pass, reply `同意`. This saves `config_snapshots/<config_version>.json` and immediately enters the search Agent, which proposes the next action; it does not itself submit calculations. For ordinary round proposals, reply `同意` to approve or `拒绝` to decline. Sensitive operations still require the local approval page. Runtime startup creates the JSON template only when absent and never overwrites your edits.
+After saving the file, send `读取配置 JSON`. The local service reads the configured file, resolves `<phase>.vasp` mother structures, generates per-phase H matrices when `H_generation` is enabled, and validates the resulting full configuration before asking the Agent to review it. The Agent receives the verified source path, file digest, allowed phase union and H counts; it never needs a hand-copied H list. Import replaces the entire unconfirmed in-memory draft so old conversation fields cannot survive. Ordinary configuration chat can inspect the current short file without importing it, and Agent suggestions do not silently edit that file. When both checks pass, reply `同意`; `读取配置 JSON 并继续` gives conditional consent. Restart the local Agent service after updating its code or runtime path; an already-running process keeps its previous imports and settings. Legacy long drafts remain untouched. Either confirmation route saves `config_snapshots/<config_version>.json` and enters search advice without submitting calculations.
 
 The first-run draft includes candidate setup hints from the project owner: local mother structures under E:/0-FM-PhaseDiagram/InitFile/Struct and the mh-1 model at /data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model on the supercomputer. These are checkable suggestions, not silently confirmed values. The local dialogue must keep the cluster model path as remote metadata; it must never try to load that file on the local computer. Boundary, phase-to-file mapping, budget, convergence criteria, and stage settings still require explicit review. Empty DFT parameters are accepted only when parameter_source is explicitly atomate_defaults.
 

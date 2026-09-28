@@ -12,6 +12,12 @@ from execution_layer.step_runner.file_protocol import write_json
 
 
 def prepare_local_batch_files(*, action, context):
+    if (action.get("parameters") or {}).get("mode") == "mc_inputs":
+        from execution_layer.local.prepare_mc_upload_batches import prepare_mc_upload_batches
+        return prepare_mc_upload_batches(action=action, context=context)
+    if _requests_relax_inputs(action, context):
+        from execution_layer.local.prepare_relax_upload_batches import prepare_relax_upload_batches
+        return prepare_relax_upload_batches(action=action, context=context)
     config = context.get("effective_config") or {}
     root_value = config.get("local_action_directory")
     if not root_value:
@@ -74,3 +80,16 @@ def _digest(payload):
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
                          default=str).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _requests_relax_inputs(action, context):
+    parameters = action.get("parameters") or {}
+    if parameters.get("mode") == "relax_inputs":
+        return True
+    manager = context.get("manager")
+    branches = (getattr(manager, "data", {}) or {}).get("branches", {}) if manager else {}
+    targets = action.get("target_ids") or []
+    if targets and all(target in branches for target in targets):
+        purpose = " ".join(str(action.get(key) or "") for key in ("reason", "expected_purpose"))
+        return "relax" in purpose.lower() or "弛豫" in purpose
+    return False

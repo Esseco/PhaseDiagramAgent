@@ -24,7 +24,7 @@ def default_bohb_config() -> dict:
             "lower_is_better": True,
         },
         "scope": {
-            "mlip_version": None,
+            "mlip_version": "mace-mh-1",
             "hull_reference_version": None,
             "candidate_set_version": None,
         },

@@ -55,14 +55,16 @@ class LocalAgentControl:
         return build_webui_charts(state)
 
     def config(self):
-        session = self.chat_handler.workflow_kwargs.get("config_session") or {}
+        handler = (getattr(self.chat_handler, "config_delegate", None)
+                   or self.chat_handler)
+        session = handler.workflow_kwargs.get("config_session") or {}
         return {"status": session.get("status"), "draft_revision": session.get("draft_revision"),
                 "config": deepcopy(session.get("config") or
                                    (session.get("confirmed_snapshot") or {}).get("config") or {}),
                 "confirmed_snapshot": deepcopy(session.get("confirmed_snapshot")),
                 "dialogue": deepcopy((session.get("dialogue") or [])[-20:]),
-                "readiness": (self.chat_handler.configuration_readiness(session)
-                              if callable(getattr(self.chat_handler, "configuration_readiness", None))
+                "readiness": (handler.configuration_readiness(session)
+                              if callable(getattr(handler, "configuration_readiness", None))
                               else None)}
 
     def memory(self):

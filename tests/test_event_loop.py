@@ -21,6 +21,7 @@ def _session():
         "convergence.hull_tolerance": 0.01,
         "convergence.minimum_dft_validations": 1,
         "convergence.coverage_threshold": 0.9,
+        "mlip.model_path": "/remote/mace-mh-1.model",
     })
     return confirm_config_snapshot(draft, user_confirmed=True)
 
@@ -34,6 +35,8 @@ def test_confirmed_config_overrides_protected_runtime_values():
             "seed": 7,
             "dft": {"parameters": {"encut": 1}},
             "budgets": {"total_relative_cost": 0},
+            "mlip": {"name": "mace-mh-1", "model_path": None, "model_paths": [],
+                     "device": "cuda"},
             "unknown": "ignored",
         },
     )
@@ -41,6 +44,8 @@ def test_confirmed_config_overrides_protected_runtime_values():
     assert effective["dft"] == confirmed["dft"]
     assert effective["budgets"] == confirmed["budgets"]
     assert effective["seed"] == 42
+    assert effective["mlip"]["model_path"] == "/remote/mace-mh-1.model"
+    assert effective["mlip"]["device"] == "cuda"
     assert effective["ignored_runtime_keys"] == ["budgets", "dft", "seed", "unknown"]
 
 

@@ -58,7 +58,8 @@ def generate_tm_ordering_branches(
             seed=current_seed,
         )
         parameters = identify_branch_parameters(
-            structure, manager.boundary, phase_references=phase_references
+            structure, manager.boundary, phase_references=phase_references,
+            phase_hint=parent["P"],
         )
         _assert_same_tm_composition(parent_T, parameters["T"])
         candidates.append(

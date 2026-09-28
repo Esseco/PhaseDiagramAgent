@@ -23,7 +23,7 @@ class OpenSSHTransport:
     RESULT_FILE_NAMES = {
         "result.json", "task.finished.json", "final.vasp", "CONTCAR",
         "checkpoint.json", "checkpoint.json.gz", "log_index.json",
-        "status_summary.json",
+        "status_summary.json", "initial_relaxed.vasp",
     }
 
     def __init__(self, host: str, *, ssh="ssh", scp="scp", runner: Callable = subprocess.run):
@@ -90,6 +90,26 @@ class OpenSSHTransport:
                 local_file.parent.mkdir(parents=True, exist_ok=True)
                 self._run([self.scp, f"{self.host}:{remote_file}", str(local_file)])
                 copied.append(str(task_dir / filename))
+            # The scientific result names its exact final structure. Only copy
+            # a relative path underneath this task directory, never arbitrary
+            # paths supplied by a remote JSON file.
+            remote_result = PurePosixPath(remote) / task_dir / "result.json"
+            if self._ssh("test", "-f", str(remote_result), check=False).returncode == 0:
+                result_text = self._ssh("cat", str(remote_result), check=False)
+                if result_text.returncode == 0:
+                    result = json.loads(result_text.stdout)
+                    final = ((result.get("outputs") or {}).get("structure_path")
+                             or (result.get("outputs") or {}).get("final_structure_path"))
+                    if final:
+                        from execution_layer.remote.resolve_final_structure import resolve_final_structure
+                        relative = resolve_final_structure(final, str(PurePosixPath(remote) / task_dir))
+                        if relative:
+                            source = PurePosixPath(remote) / task_dir / relative
+                            if self._ssh("test", "-f", str(source), check=False).returncode == 0:
+                                destination = target / task_dir / relative
+                                destination.parent.mkdir(parents=True, exist_ok=True)
+                                self._run([self.scp, f"{self.host}:{source}", str(destination)])
+                                copied.append(str(task_dir / relative))
         # Small batch status and log indexes are useful even if no task completed.
         for filename in ("job-status.json", "status_summary.json", "log_index.json"):
             remote_file = PurePosixPath(remote) / filename

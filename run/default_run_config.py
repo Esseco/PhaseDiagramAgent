@@ -21,9 +21,9 @@ def default_run_config() -> dict[str, Any]:
         "ledger_path": "outputs/phase_data.json",
         "branch_energy_pool_ledger_path": "outputs/branch_energy_pools.json",
         "phase_diagram_directory": "outputs/phase_diagrams",
-        "total_quota": 20,
-        "batch_size": 8,
-        "initial_states_per_branch": 4,
+        "total_quota": 600,
+        "batch_size": 250,
+        "initial_states_per_branch": 3,
         "seed": 42,
         "mlip": {
             "name": "mace-mh-1",
@@ -82,7 +82,7 @@ def default_run_config() -> dict[str, Any]:
             },
             "cost_budget": None,
             "selection_config": {
-                "max_per_framework": 4,
+                "max_per_framework": 8,
                 "max_per_parent_branch": 2,
                 "random_fraction": 0.2,
             },

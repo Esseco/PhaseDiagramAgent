@@ -18,8 +18,11 @@ def resolve_deepseek_model_request(message: str) -> str | None:
     ))
     if not switch_intent:
         return None
-    if "v4.1 flash" in text or "v4 flash" in text or "deepseek-flash" in text or "deepseekv4flash" in compact:
+    if ("v4.1 flash" in text or "v4 flash" in text or "deepseek-flash" in text
+            or compact in {"v4flash", "v41flash", "deepseekflash", "deepseekv41flash"}
+            or "deepseekv4flash" in compact):
         return "deepseek-flash"
-    if "v4 pro" in text or "deepseek-v4-pro" in text or "deepseekv4pro" in compact:
+    if ("v4 pro" in text or "deepseek-v4-pro" in text
+            or compact == "v4pro" or "deepseekv4pro" in compact):
         return "deepseek-v4-pro"
     return None

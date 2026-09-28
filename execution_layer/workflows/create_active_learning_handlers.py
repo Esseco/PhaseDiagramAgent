@@ -53,18 +53,39 @@ def _prepare_dedup(*, action, context):
 def _generate_branches(*, action, context):
     config = context["effective_config"]; params = deepcopy(action.get("parameters") or {})
     quotas = params.get("quotas")
-    if quotas is None:
+    existing = context["manager"].data.get("branches") or {}
+    from scientific_layer.structures.boundary_utils import allowed_phases
+    required_phases = allowed_phases(context["manager"].boundary["P"])
+    missing_phases = required_phases - {row["P"] for row in existing.values()}
+    if not existing:
+        # Parent-based strategies cannot produce candidates in an empty ledger.
+        total = sum(quotas.values()) if quotas is not None else int(
+            params.get("total_quota", config.get("total_quota", 0))
+        )
+        quotas = {"coverage": total}
+    elif quotas is None and missing_phases:
+        quotas = {"coverage": int(params.get("total_quota", config.get("total_quota", 0)))}
+    elif quotas is None:
         quotas = choose_generation_strategy(
             context.get("event_state", {}).get("generation_metrics") or config.get("generation_metrics") or {},
             total_quota=int(params.get("total_quota", config.get("total_quota", 0))),
         )["quotas"]
     options = deepcopy(config.get("generation_options") or {})
+    if "max_det_H" in params:
+        options["max_det_H"] = params["max_det_H"]
+    first_round_cap = ((config.get("system_config") or {}).get("H_generation") or {}).get(
+        "first_round_max_det_H"
+    )
+    if not existing and first_round_cap is not None:
+        options["max_det_H"] = first_round_cap
     result = run_branch_generation(
         context["manager"], context["phase_references"],
         structure_directory=config["structure_directory"], quotas=quotas,
         batch_size=int(params.get("batch_size", config["batch_size"])),
         initial_states_per_branch=int(params.get("initial_states_per_branch", config["initial_states_per_branch"])),
-        seed=int(params.get("seed", config["seed"])), ledger_path=config.get("ledger_path"),
+        seed=int(params.get("seed", config["seed"])) +
+             100_000 * len((context.get("event_state") or {}).get("generation_history") or []),
+        ledger_path=config.get("ledger_path"),
         system_config=config.get("system_config"), **options,
     )
     state = deepcopy(context.get("event_state") or {})
@@ -72,9 +93,17 @@ def _generate_branches(*, action, context):
         "task_key": action.get("task_key"), "quotas": deepcopy(quotas),
         "registered_ids": [item.get("structure_id") for item in result["registered"]],
         "coverage": deepcopy(result["coverage"]),
+        "summary": deepcopy(result["summary"]),
     })
     state["coverage"] = deepcopy(result["coverage"])
-    return {"status": "completed", "state": state, "registered": result["registered"], "coverage": result["coverage"]}
+    gate = state.get("dedup_gate") or {}
+    if gate.get("status") in {None, "ready"}:
+        ids = set(gate.get("valid_structure_ids") or [])
+        ids.update(item["structure_id"] for item in result["registered"])
+        state["dedup_gate"] = {"status": "ready", "source": "local_generation_dedup",
+                               "valid_structure_ids": sorted(ids)}
+    return {"status": "completed", "state": state, "registered": result["registered"],
+            "coverage": result["coverage"], "summary": result["summary"]}
 
 
 def _allocate_mc_bohb(*, action, context):
