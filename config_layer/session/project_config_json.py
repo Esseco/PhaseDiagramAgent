@@ -85,10 +85,22 @@ def create_project_config_json(path, config: dict | None = None, *, bootstrap_hi
     return True
 
 
-def expand_project_config(document: dict, *, source: Path) -> dict:
+def expand_project_config(document: dict, *, source: Path, baseline_config: dict | None = None) -> dict:
     """Expand a sparse project document into the existing complete config schema."""
-    if document.get("profile") != PROFILE_ID or document.get("profile_digest") != profile_digest():
-        raise ValueError("默认模板版本不匹配；请保留旧文件并明确迁移，不能静默套用新默认值。")
+    if document.get("profile") != PROFILE_ID:
+        raise ValueError(f"配置体系 {document.get('profile')!r} 与当前 {PROFILE_ID!r} 不兼容。")
+    profile_changed = document.get("profile_digest") != profile_digest()
+    if profile_changed:
+        if not _usable_baseline(baseline_config):
+            raise ValueError(
+                "默认模板版本已更新，且没有可用的已保存配置作为迁移基线；"
+                "保留原文件并先恢复其 config_session，再读取或修改。"
+            )
+        # Rebase on the saved full configuration so a changed default never
+        # silently replaces values inherited by an older short config.
+        defaults = _fill_missing_defaults(baseline_config, profile_defaults())
+    else:
+        defaults = profile_defaults()
     project = document.get("config")
     overrides = document.get("overrides", {})
     if not isinstance(project, dict) or not isinstance(overrides, dict):
@@ -96,7 +108,6 @@ def expand_project_config(document: dict, *, source: Path) -> dict:
     from config_layer.session.load_editable_config_json import _check_secrets
     _check_secrets(project)
     _check_secrets(overrides)
-    defaults = profile_defaults()
     allowed_optional = {"system": {"boundary", "H_generation", "phase_reference_directory"},
                         "run": {"generation_options"}, "root": {"storage"}}
     merged = _merge(defaults, project, "config", allowed_optional)
@@ -118,7 +129,8 @@ def expand_project_config(document: dict, *, source: Path) -> dict:
     return merged
 
 
-def write_project_config_patch(path, patch: dict, *, expected_hash: str | None = None) -> list[dict]:
+def write_project_config_patch(path, patch: dict, *, expected_hash: str | None = None,
+                               baseline_config: dict | None = None) -> list[dict]:
     """Apply an explicitly authorized, non-secret patch to the short JSON file."""
     from config_layer.session.load_editable_config_json import _strip_jsonc_comments
     target = Path(path)
@@ -128,10 +140,35 @@ def write_project_config_patch(path, patch: dict, *, expected_hash: str | None =
     document = json.loads(_strip_jsonc_comments(source.decode("utf-8")))
     if document.get("_format") != FORMAT_ID:
         raise ValueError("仅支持写入 phase-search-project-v2 短配置")
+    profile_changed = document.get("profile_digest") != profile_digest()
+    if profile_changed:
+        effective = expand_project_config(
+            document, source=target, baseline_config=baseline_config,
+        )
+        backup = _profile_migration_backup(target)
+        with backup.open("xb") as stream:
+            stream.write(source)
+        document = _document_for_effective_config(document, effective)
+        document["_migration"] = {
+            "from_profile_digest": json.loads(_strip_jsonc_comments(source.decode("utf-8"))).get("profile_digest"),
+            "to_profile_digest": profile_digest(),
+            "baseline": "saved_config_session",
+            "backup_file": backup.name,
+        }
     changes = []
     for dotted_path, value in sorted(patch.items()):
         parts = dotted_path.split(".")
-        section = document["config"] if parts[0] in document.get("config", {}) else document["overrides"]
+        # `overrides` is merged last. Editing `config` while the same leaf is
+        # overridden would report success without changing the effective value.
+        override_cursor = document["overrides"]
+        overridden = True
+        for part in parts:
+            if not isinstance(override_cursor, dict) or part not in override_cursor:
+                overridden = False
+                break
+            override_cursor = override_cursor[part]
+        section = (document["overrides"] if overridden
+                   or parts[0] not in document.get("config", {}) else document["config"])
         cursor = section
         for part in parts[:-1]:
             current = cursor.get(part)
@@ -141,16 +178,83 @@ def write_project_config_patch(path, patch: dict, *, expected_hash: str | None =
                 raise ValueError(f"配置路径不能向下展开：{dotted_path}")
             cursor = cursor[part]
         old = deepcopy(cursor.get(parts[-1]))
+        if old == value:
+            continue
         cursor[parts[-1]] = deepcopy(value)
         changes.append({"path": dotted_path, "old": old, "new": deepcopy(value)})
     # Check the resulting effective config before atomically replacing the file.
-    expand_project_config(document, source=target)
+    effective = expand_project_config(document, source=target)
+    for dotted_path, value in patch.items():
+        actual = effective
+        for part in dotted_path.split("."):
+            actual = actual[part]
+        if actual != value:
+            raise ValueError(f"写入后生效值不一致：{dotted_path}")
+    if not changes and not profile_changed:
+        return []
     temporary = target.with_name(target.name + ".tmp")
     header = "// 层氧短配置；profile_digest 锁定默认模板版本。旧长草稿不会被覆盖。\n"
     temporary.write_text(header + json.dumps(document, ensure_ascii=False, indent=2) + "\n",
                          encoding="utf-8")
     temporary.replace(target)
     return changes
+
+
+def _usable_baseline(config):
+    return isinstance(config, dict) and all(
+        isinstance(config.get(key), dict) for key in ("system", "budgets", "run")
+    )
+
+
+def _fill_missing_defaults(baseline, latest):
+    """Keep saved values and add only fields introduced by the newer profile."""
+    result = deepcopy(baseline)
+    for key, value in latest.items():
+        if key not in result:
+            result[key] = deepcopy(value)
+        elif isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _fill_missing_defaults(result[key], value)
+    return result
+
+
+def _document_for_effective_config(original, config):
+    system = config.get("system") or {}
+    project = {
+        "system": {key: deepcopy(system[key]) for key in (
+            "system_id", "configuration_space", "phase_reference_directory",
+            "phase_references", "boundary", "H_generation",
+        ) if key in system},
+        "mlip": {"model_path": deepcopy((config.get("mlip") or {}).get("model_path"))},
+        "budgets": {"total_relative_cost": deepcopy(
+            (config.get("budgets") or {}).get("total_relative_cost"))},
+        "dft": {key: deepcopy((config.get("dft") or {}).get(key))
+                for key in ("parameter_source", "parameters")},
+        "convergence": deepcopy(config.get("convergence") or {}),
+        "run": {key: deepcopy((config.get("run") or {}).get(key))
+                for key in ("initial_states_per_branch", "seed")
+                if key in (config.get("run") or {})},
+        "storage": deepcopy(config.get("storage") or {}),
+    }
+    remaining = _difference(profile_defaults(), config)
+    _remove_covered(remaining, project)
+    migrated = deepcopy(original)
+    migrated.update({
+        "_format": FORMAT_ID,
+        "profile": PROFILE_ID,
+        "profile_digest": profile_digest(),
+        "config": project,
+        "overrides": remaining,
+    })
+    return migrated
+
+
+def _profile_migration_backup(target):
+    candidate = target.with_name(target.name + ".pre-profile-migration.bak")
+    index = 1
+    while candidate.exists():
+        candidate = target.with_name(target.name + f".pre-profile-migration-{index}.bak")
+        index += 1
+    return candidate
 
 
 def _merge(base: dict, patch: dict, path: str, optional: dict) -> dict:

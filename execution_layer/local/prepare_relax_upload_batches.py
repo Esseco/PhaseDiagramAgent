@@ -64,11 +64,15 @@ def prepare_relax_upload_batches(*, action, context):
     settings = deepcopy(model.get("relax_parameters") or {})
     settings_id = hashlib.sha256(json.dumps(settings, sort_keys=True,
                                             default=str).encode()).hexdigest()[:12]
+    from decision_layer.agent.choose_debug_next_action import _verified_migrated_relax_ids
+    migrated_ids = _verified_migrated_relax_ids(state, model, version)
     created = []
     for bid, sid, cost in planned:
         key = f"relax-screen:{version}:{settings_id}:{sid}"
         existing = next((row for row in state.get("tasks") or []
                          if row.get("task_key") == key), None)
+        if existing is None and sid in migrated_ids:
+            continue
         if existing:
             if existing.get("status") == "completed" or _task_files_complete(existing):
                 continue
@@ -108,10 +112,14 @@ def prepare_relax_upload_batches(*, action, context):
             break
         batches.append(prepared["batch"])
     from execution_layer.remote.write_relax_upload_plan import write_relax_upload_plan
-    upload_plan = write_relax_upload_plan(state, root)
+    pending_relax = any(row.get("stage") == "relax_and_feature"
+                        and row.get("status") in {"pending", "running"}
+                        and row.get("input_path")
+                        for row in state.get("tasks") or [])
+    upload_plan = write_relax_upload_plan(state, root) if pending_relax else None
     return {"status": "prepared" if batches else "already_prepared", "state": state,
             "task_count": len(created), "batch_count": len(batches),
-            "upload_plan_path": str(upload_plan),
+            "upload_plan_path": str(upload_plan) if upload_plan else None,
             "batches": [{"batch_id": row["batch_id"], "directory": row["upload_directory"],
                          "task_directory": row.get("task_directory"),
                          "task_directories": row.get("task_directories"),

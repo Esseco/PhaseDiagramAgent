@@ -70,6 +70,10 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         mc_budget = parameters.get("mc_budget")
         if isinstance(mc_budget, bool) or not isinstance(mc_budget, int) or mc_budget <= 0:
             errors.append("invalid_mc_budget")
+        maximum_mc_budget = (config.get("round_strategy") or {}).get("maximum_mc_budget")
+        if (isinstance(mc_budget, int) and not isinstance(mc_budget, bool)
+                and maximum_mc_budget is not None and mc_budget > int(maximum_mc_budget)):
+            errors.append("mc_budget_exceeds_configured_maximum")
         exploration = parameters.get("exploration_fraction")
         minimum = ((config.get("round_strategy") or {}).get("minimum_exploration_fraction", .1))
         if not isinstance(exploration, (int, float)) or isinstance(exploration, bool) or not minimum <= exploration <= 1:

@@ -31,7 +31,7 @@ def test_remote_batch_sizes_versions_and_portable_paths(tmp_path):
         sizes.append(len(manifest)); assert all(not Path(row["input_path"]).is_absolute() for row in manifest)
         assert all(row["config_version"] == "cfg-1" and row["model_version"] == "m1" for row in manifest)
         assert output["batch"]["checksum"]
-    assert sizes == [100, 1, 20, 1]
+    assert sizes == [100, 1, 10, 10, 1]
 
 
 def test_sync_submit_query_worker_recovery_and_repeat_are_safe(tmp_path):
@@ -44,13 +44,24 @@ def test_sync_submit_query_worker_recovery_and_repeat_are_safe(tmp_path):
     assert len(submit_remote(state_path, scheduler=scheduler)["submitted"]) == 1
     assert submit_remote(state_path, scheduler=scheduler)["status"] == "nothing_to_submit"
     assert scheduler.submit_calls == 1; assert query_remote(state_path, scheduler=scheduler)["status"] == "queried"
-    remote_manifest = remote / "batches/remote-000001/manifest.json"
-    run_remote_task(remote_manifest, 0, executor=lambda task: {"status": "completed", "actual_cost": .5})
+    saved = json.loads(state_path.read_text())
+    remote_batch = Path(saved["slurm_batches"][0]["remote_path"])
+    remote_manifest = remote_batch / "manifest.json"
+    def complete_with_structure(task):
+        final = Path(task["calculation_directory"]) / "final.vasp"
+        final.write_text("mock final structure", encoding="utf-8")
+        return {"status": "completed", "actual_cost": .5,
+                "outputs": {"structure_path": final.name}}
+
+    run_remote_task(remote_manifest, 0, executor=complete_with_structure)
     # large trajectories remain remote
-    trajectory = remote / "batches/remote-000001/00000-T0001/large.traj"; trajectory.write_text("large")
+    trajectory = remote_batch / "00000-T0001/large.traj"; trajectory.write_text("large")
     sync_results(state_path, local_batch_root=local, remote_batch_root=remote / "batches", transport=transport)
-    assert runner.collect_results(json.loads(state_path.read_text()))[0]["actual_cost"] == .5
-    assert not (local / "remote-000001/00000-T0001/large.traj").exists()
+    collection = runner.collect_results_with_report(json.loads(state_path.read_text()))
+    assert collection["results"], collection["report"]
+    assert collection["results"][0]["actual_cost"] == .5
+    local_batch = Path(saved["slurm_batches"][0]["upload_directory"])
+    assert not (local_batch / "00000-T0001/large.traj").exists()
     assert "query_remote" in resume(state_path)["next_steps"]
     assert cancel_remote(state_path, scheduler=scheduler)["status"] == "cancelled"
 

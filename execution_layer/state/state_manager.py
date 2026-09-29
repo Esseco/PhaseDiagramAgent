@@ -6,11 +6,12 @@ import json
 from analysis_layer.state.build_state_snapshot import build_state_snapshot
 from config_layer.schema.action_state_schema import validate_state_schema
 from data_layer.memory.decision_memory import update_short_term_memory
+from data_layer.memory.collect_memory_candidates import collect_memory_candidates
 from config_layer.schema.state_schema_migrations import migrate_persisted_state
 
 
 def update_state_snapshot(state: dict, *, config_version=None) -> dict:
-    current = migrate_persisted_state(state)
+    current = collect_memory_candidates(migrate_persisted_state(state))
     fingerprint = _state_fingerprint(current)
     existing = current.get("current_state_snapshot") or {}
     if existing.get("source_fingerprint") == fingerprint:

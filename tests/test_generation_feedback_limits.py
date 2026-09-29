@@ -81,3 +81,31 @@ def test_populated_run_does_not_use_new_config_without_rebinding():
     result = run_tool_step(state, session, registry={}, execution_mode="interactive")
     assert result["status"] == "configuration_version_mismatch"
     assert result["state"]["confirmed_config_version"] == "old"
+
+
+def test_confirmed_mc_policy_revision_rebinds_only_idle_run():
+    from copy import deepcopy
+    from config_layer.defaults.default_layered_search_config import default_layered_search_config
+    from config_layer.runtime.authorize_generation_policy_revision import authorize_generation_policy_revision
+
+    old = default_layered_search_config()
+    new = deepcopy(old)
+    new["round_strategy"]["maximum_mc_budget"] = 5000
+    new["round_strategy"]["rule_default"]["mc_budget"] = 5000
+    state = {"confirmed_config_version": "old", "confirmed_config": old,
+             "tasks": [{"task_id": "finished", "status": "completed", "config_version": "old"}]}
+    snapshot = {"config_version": "new", "config": new}
+    result = authorize_generation_policy_revision(state, snapshot)
+    assert result["status"] == "rebound"
+    assert result["state"]["confirmed_config_version"] == "new"
+    assert result["state"]["tasks"][0]["config_version"] == "old"
+    assert authorize_generation_policy_revision(result["state"], snapshot)["status"] == "unchanged"
+
+    active = deepcopy(state)
+    active["tasks"].append({"task_id": "running", "status": "running"})
+    assert authorize_generation_policy_revision(active, snapshot)["status"] == "active_work"
+
+    scientific = deepcopy(new)
+    scientific["mlip"]["name"] = "different-model"
+    assert authorize_generation_policy_revision(state, {"config_version": "other",
+                                                  "config": scientific})["status"] == "rejected_scientific_change"

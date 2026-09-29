@@ -4,7 +4,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --partition=v100
 #SBATCH --gres=gpu:1
-#SBATCH --job-name=test
+#SBATCH --job-name=__JOB_NAME__
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 module load gcc/12.2.0

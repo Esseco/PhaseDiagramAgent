@@ -49,6 +49,16 @@ def test_confirmed_config_overrides_protected_runtime_values():
     assert effective["ignored_runtime_keys"] == ["budgets", "dft", "seed", "unknown"]
 
 
+def test_runtime_relax_defaults_do_not_change_confirmed_result_identity():
+    session = {"status": "confirmed", "confirmed_snapshot": {
+        "config_version": "v1", "config": {"mlip": {"name": "m1"},
+            "calculation": {"mlip_version": "m1"}, "run": {}}}}
+    effective = build_effective_run_config(session, {
+        "mlip": {"relax_parameters": {"fmax": 0.05, "relax_steps": 150}},
+    })
+    assert "relax_parameters" not in effective["mlip"]
+
+
 def test_autonomous_event_loop_routes_every_action_through_policy_and_registry():
     session = _session()
     actions = iter([

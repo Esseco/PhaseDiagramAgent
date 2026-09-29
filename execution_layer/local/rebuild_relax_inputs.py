@@ -13,6 +13,7 @@ def is_relax_rebuild_request(message):
 
 def plan_relax_rebuild(state, root):
     root = Path(root).resolve()
+    batches = {row.get("batch_id"): row for row in state.get("slurm_batches") or []}
     tasks = [r for r in state.get("tasks") or [] if r.get("stage") == "relax_and_feature"
              and r.get("input_path") and r.get("status") != "completed"]
     ids = {r["task_id"] for r in tasks}
@@ -21,7 +22,10 @@ def plan_relax_rebuild(state, root):
         if row.get("status") in {"running", "submitted"} or row.get("job_id"):
             raise ValueError("任务已提交或运行，请先取消；不删除输入")
         directory = Path(row["input_path"]).resolve().parent.parent
-        if directory.parent != root or not directory.name.startswith("remote-"):
+        batch = batches.get(row.get("batch_id") or row.get("slurm_batch_id")) or {}
+        recorded = Path(batch.get("upload_directory") or directory).resolve()
+        legacy_flat = directory.parent == root and directory.name.startswith("remote-")
+        if root not in directory.parents or (directory != recorded and not legacy_flat):
             raise ValueError("清理目录不在本次上传根目录内")
         directories.add(directory)
     allowed = {"manifest.json", "GPU.sh", "run_mlip_batch.py", "run_mlip_task.py", "task.json",
@@ -32,7 +36,8 @@ def plan_relax_rebuild(state, root):
         manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
         if any(r.get("task_id") not in ids for r in manifest):
             raise ValueError("批次含其他或已完成任务，禁止整批删除")
-        if any(r.get("job_id") for r in state.get("slurm_batches") or [] if r.get("batch_id") == directory.name):
+        if any(r.get("job_id") for r in state.get("slurm_batches") or []
+               if Path(r.get("upload_directory") or "").resolve() == directory):
             raise ValueError("批次已有远端job_id，请先取消")
         for path in directory.rglob("*"):
             if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()) or root not in path.resolve().parents:

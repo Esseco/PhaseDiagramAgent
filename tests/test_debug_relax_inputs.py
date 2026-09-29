@@ -1,6 +1,7 @@
 """Debug mode prepares portable Relax files without running MACE or submitting."""
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from config_layer.defaults.default_budget_rules import default_budget_rules
@@ -36,7 +37,7 @@ def test_debug_relax_preparation_is_portable_and_idempotent(tmp_path):
         "config_version": "config-test", "phase_references": {},
     })
     assert result["status"] == "prepared" and result["task_count"] == 1
-    batch = tmp_path / "upload" / result["batches"][0]["batch_id"]
+    batch = Path(result["batches"][0]["directory"])
     task_file = next(batch.glob("*/task.json"))
     task = json.loads(task_file.read_text(encoding="utf-8"))
     assert task["worker_job"]["structure_path"] == "initial.vasp"
@@ -54,7 +55,7 @@ def test_debug_relax_preparation_is_portable_and_idempotent(tmp_path):
         "config_version": "config-test", "phase_references": {},
     })
     assert again["status"] == "already_prepared" and again["task_count"] == 0
-    assert len(list((tmp_path / "upload").glob("remote-*"))) == 1
+    assert len(list((tmp_path / "upload").rglob("*remote-*"))) == 1
 
 
 def test_relax_preparation_includes_all_registered_branches_in_one_compatible_job(tmp_path):
@@ -121,7 +122,7 @@ def test_manual_mc_task_gets_own_structure_and_script(tmp_path):
             "parameters": {"full_na_structure": str(full_na)}}},
     )
     result = runner.prepare({"tasks": [task], "budget_reservations": {"mc-key": {"status": "reserved"}}})
-    directory = next((tmp_path / "upload" / result["batch"]["batch_id"]).glob("*/task.json")).parent
+    directory = next(Path(result["batch"]["upload_directory"]).glob("*/task.json")).parent
     assert (directory / "initial.vasp").is_file()
     assert (directory / "full_na_structure.vasp").is_file()
     payload = json.loads((directory / "task.json").read_text(encoding="utf-8"))
@@ -137,15 +138,18 @@ def test_manual_mc_task_gets_own_structure_and_script(tmp_path):
 
 def test_manual_dft_task_uses_atomate_inputs_and_vasp_script(tmp_path):
     def atomate(task):
-        directory = tmp_path / "upload" / "remote-000001" / "00000-DFT-1"
+        directory = Path(task["work_directory"])
         for name in ("POSCAR", "INCAR", "KPOINTS", "POTCAR"):
             (directory / name).write_text("mock", encoding="utf-8")
         return {"outputs": {"generator": "atomate"}}
 
-    task = {"task_id": "DFT-1", "task_key": "dft-key", "stage": "dft_single_point",
+    task = {"task_id": "DFT task 1", "task_key": "dft-key", "stage": "dft_single_point",
             "status": "pending"}
     runner = ManualUploadBatchRunner(tmp_path / "upload", worker_command=[], dispatcher=atomate)
     result = runner.prepare({"tasks": [task], "budget_reservations": {"dft-key": {"status": "reserved"}}})
-    directory = next((tmp_path / "upload" / result["batch"]["batch_id"]).glob("*/task.json")).parent
-    assert "vasp_std" in (directory / "GPU.sh").read_text(encoding="utf-8")
+    directory = next(Path(result["batch"]["upload_directory"]).glob("*/task.json")).parent
+    script = (directory / "GPU.sh").read_text(encoding="utf-8")
+    assert "vasp_std" in script
+    assert "#SBATCH --job-name=dft-sp-DFT-task-1" in script
+    assert "job-name=test" not in script
     assert not (directory / "run_mlip_task.py").exists()

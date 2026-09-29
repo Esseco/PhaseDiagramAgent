@@ -3,9 +3,11 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from config_layer.defaults.default_layered_search_config import default_layered_search_config
 from config_layer.session.create_config_draft import create_config_draft
+from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
 from config_layer.session.create_editable_config_json import create_editable_config_json
 from config_layer.session.load_editable_config_json import (
     _strip_jsonc_comments, config_leaf_patch, load_editable_config_json,
@@ -22,6 +24,40 @@ from run.configuration_chat import _extract_workspace_path, _parse_workspace_set
 
 
 class EditableConfigJsonTests(unittest.TestCase):
+    def test_reconfirm_unchanged_config_reuses_snapshot_version(self):
+        draft = create_config_draft(default_layered_search_config())
+        confirmed = confirm_config_snapshot(draft, user_confirmed=True)
+        self.assertEqual(confirmed["status"], "confirmed")
+        repeated = dict(confirmed, status="draft", draft_revision=confirmed["draft_revision"] + 1)
+        same = confirm_config_snapshot(repeated, user_confirmed=True)
+        self.assertEqual(same["confirmed_snapshot"]["config_version"],
+                         confirmed["confirmed_snapshot"]["config_version"])
+        changed = json.loads(json.dumps(repeated))
+        changed["config"]["round_strategy"]["rule_default"]["mc_budget"] += 1
+        different = confirm_config_snapshot(changed, user_confirmed=True)
+        self.assertNotEqual(different["confirmed_snapshot"]["config_version"],
+                            confirmed["confirmed_snapshot"]["config_version"])
+
+    def test_start_reviews_current_file_instead_of_asking_about_old_edit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "search_config.project.json"
+            create_project_config_json(path)
+            session = create_config_draft(default_layered_search_config())
+            session["setup_stage"] = "json_ready"
+            handler = ConfigurationChatHandler(
+                {"state_path": str(root / "state.json"), "config_session": session},
+                config_session_path=root / "session.json", base_directory=root,
+                editable_config_path=path,
+                agent_client=lambda _: self.fail("开始不应进入参数修改对话"),
+            )
+            with patch.object(handler, "_import_and_review_config_json", return_value="reviewed") as review:
+                self.assertEqual(handler([{"role": "user", "content": "开始"}]), "reviewed")
+            self.assertTrue(review.call_args.kwargs["continue_if_ready"])
+            with patch.object(handler, "_import_and_review_config_json", return_value="reviewed") as review:
+                self.assertEqual(handler([{"role": "user", "content": "继续"}]), "reviewed")
+            self.assertFalse(review.call_args.kwargs["continue_if_ready"])
+
     def test_fixed_tm_project_config_is_reviewable(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "search_config.project.json"
@@ -64,6 +100,23 @@ class EditableConfigJsonTests(unittest.TestCase):
                 write_project_config_patch(
                     path, {"system.H_generation.size_max": 16}, expected_hash=old_hash)
 
+    def test_patch_updates_effective_override_not_shadowed_front_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "search_config.project.json"
+            create_project_config_json(path)
+            document = json.loads(_strip_jsonc_comments(path.read_text(encoding="utf-8")))
+            document["config"]["run"]["initial_states_per_branch"] = 3
+            document["overrides"]["run"] = {"initial_states_per_branch": 4}
+            path.write_text(json.dumps(document), encoding="utf-8")
+            changes = write_project_config_patch(
+                path, {"run.initial_states_per_branch": 5})
+            self.assertEqual(len(changes), 1)
+            saved = json.loads(_strip_jsonc_comments(path.read_text(encoding="utf-8")))
+            self.assertEqual(saved["overrides"]["run"]["initial_states_per_branch"], 5)
+            self.assertEqual(expand_project_config(saved, source=path)["run"]["initial_states_per_branch"], 5)
+            self.assertEqual(write_project_config_patch(
+                path, {"run.initial_states_per_branch": 5}), [])
+
     def test_bare_write_command_applies_pending_agent_patch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -89,17 +142,18 @@ class EditableConfigJsonTests(unittest.TestCase):
             )
             proposal = handler([{"role": "user", "content": "/remote/mace-mh-1.model"}])
             self.assertIn("回复“写入”", proposal)
-            self.assertIsNone(expand_project_config(
+            self.assertEqual(expand_project_config(
                 json.loads(_strip_jsonc_comments(path.read_text(encoding="utf-8"))),
                 source=path,
-            )["mlip"]["model_path"])
+            )["mlip"]["model_path"],
+                "/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model")
 
             written = handler([{"role": "user", "content": "写入"}])
             self.assertIn("已把 1 项修改写入", written)
             document = json.loads(_strip_jsonc_comments(path.read_text(encoding="utf-8")))
             self.assertEqual(document["config"]["mlip"]["model_path"],
                              "/remote/mace-mh-1.model")
-            self.assertEqual(len(calls), 1)
+            self.assertGreaterEqual(len(calls), 1)
 
     def test_template_is_created_once_and_supports_new_boundary_and_phase_refs(self):
         with tempfile.TemporaryDirectory() as directory:

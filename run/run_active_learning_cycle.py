@@ -136,6 +136,9 @@ def run_active_learning_cycle(
         current,
         rules=_convergence_rules(run_config),
     )
+    if convergence.get("status") == "finished":
+        from data_layer.memory.maybe_draft_converged_skill import maybe_draft_converged_skill
+        convergence["knowledge_draft"] = maybe_draft_converged_skill(current, run_config, convergence)
     current["convergence"] = convergence
     _persist_cycle(manager, current, run_config)
     return {

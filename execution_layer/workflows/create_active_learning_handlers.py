@@ -109,6 +109,10 @@ def _generate_branches(*, action, context):
 def _allocate_mc_bohb(*, action, context):
     config = context["effective_config"]; params = deepcopy(action.get("parameters") or {})
     state = deepcopy(context.get("event_state") or {})
+    preview = params.get("budget_preview") or {}
+    if preview.get("compression_requires_user_choice") and params.get("compression_choice") != "reduce_branch_count":
+        return {"status": "awaiting_approval", "state": state,
+                "reason": "choose_full_plan_or_compression", "budget_preview": preview}
     region_builder = context.get("region_builder") or _default_region
     candidates = build_bohb_candidate_pool(
         context["manager"], feature_builder=context.get("bohb_feature_builder"),
@@ -165,9 +169,10 @@ def _allocate_mc_bohb(*, action, context):
     bohb = deepcopy(config.get("bohb") or {})
     bohb["new_candidates_per_iteration"] = len(candidates)
     if bohb.get('selection_policy') == 'relax_hull_uncertainty':
-        screening = prepare_branch_relaxation(candidates, state, context)
+        screening = prepare_branch_relaxation(candidates, state, {
+            **context, 'mc_hull_reference_version': params.get('hull_reference_version')})
         state = screening['state']
-        if screening['status'] != 'ready':
+        if screening['status'] not in {'ready', 'ready_partial'}:
             target_status = 'relax_pending' if screening['status'] == 'screening_pending' else 'failed'
             batch = state.get('branch_batch')
             if batch and batch.get('status') != target_status:
@@ -183,10 +188,14 @@ def _allocate_mc_bohb(*, action, context):
             batch = transition_branch_batch(batch, 'relax_completed')
         if batch.get('status') == 'relax_completed':
             batch = transition_branch_batch(batch, 'hull_ready',
-                                             hull_version=screening['pool']['version'])
+                hull_version=screening['pool']['version'],
+                screening_status=screening['status'],
+                unavailable_structures=deepcopy(screening.get('unavailable') or []),
+                unavailable_branches=deepcopy(screening.get('unavailable_branches') or []))
         state['branch_batch'] = batch
         state.pop("pending_branch_screening", None)
         bohb.setdefault('scope', {})['hull_reference_version'] = screening['pool']['version']
+        bohb['scope']['mlip_version'] = screening['pool']['model_version']
         bohb['objective'] = {**bohb['objective'], 'name': 'relaxed_batch_hull_gap'}
     bohb.setdefault("budget_limits", config["budgets"])
     bohb.setdefault("scope", {})
@@ -215,17 +224,69 @@ def _allocate_mc_bohb(*, action, context):
             model_version=bohb["scope"]["mlip_version"],
             hull_reference_version=bohb["scope"]["hull_reference_version"],
         )
-        state["tiered_mc_state"] = scheduled["state"]
+        tier_state = scheduled["state"]
+        preview = params.get("budget_preview")
+        if preview:
+            from decision_layer.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
+            checked = estimate_branch_mc_budget(candidates, screening['pool'], state, config,
+                step_limit=total_mc_budget, seed=int(params.get("seed", config.get("seed", 0))))
+            if checked['allocation_checksum'] != preview.get('allocation_checksum'):
+                return {'status': 'awaiting_approval', 'state': context.get('event_state') or {},
+                        'reason': 'mc_allocation_changed_since_approval', 'budget_preview': checked}
+            costs = {row['task_key']: row['planned_relative_cost'] for row in checked['allocations']}
+            for child in scheduled['actions']:
+                child['planned_relative_cost'] = costs[child['task_key']]
+            for child in tier_state['segments']:
+                if child['task_key'] in costs:
+                    child['planned_relative_cost'] = costs[child['task_key']]
+        full_plan_approved = (bool(context.get("human_approved_mc_full_plan")) and bool(preview)
+                              and len(scheduled["actions"]) == preview.get("selected_branch_count")
+                              and preview.get("selected_branch_count") == preview.get("full_plan_branch_count")
+                              and preview.get("requested_steps") == preview.get("full_plan_steps"))
+        reservation_limits = deepcopy(config["budgets"])
+        if full_plan_approved:
+            active_reservations = [row for row in (state.get("budget_reservations") or {}).values()
+                                   if row.get("status") in {"reserved", "submitted", "running"}]
+            existing_total = sum(float(row.get("reserved_cost", 0)) for row in active_reservations)
+            existing_mc = [row for row in active_reservations if row.get("stage") == "deep_search"]
+            approved_cost = sum(float(row["planned_relative_cost"]) for row in scheduled["actions"])
+            stage_limit = reservation_limits.setdefault("stage_limits", {}).setdefault("deep_search", {})
+            usage = state.get("budget_usage") or {}
+            stage_usage = (usage.get("stages") or {}).get("deep_search") or {}
+            reservation_limits["total_relative_cost"] = max(
+                float(reservation_limits["total_relative_cost"]),
+                float(usage.get("total_relative_cost", 0)) + existing_total + approved_cost)
+            stage_limit["max_cost"] = max(float(stage_limit.get("max_cost") or 0),
+                float(stage_usage.get("cost", 0))
+                + sum(float(row.get("reserved_cost", 0)) for row in existing_mc) + approved_cost)
+            stage_limit["max_tasks"] = max(int(stage_limit.get("max_tasks") or 0),
+                int(stage_usage.get("tasks", 0)) + len(existing_mc) + len(scheduled["actions"]))
+            state.setdefault("approved_mc_budget_overrides", []).append({
+                "allocation_checksum": preview["allocation_checksum"],
+                "task_count": len(scheduled["actions"]), "estimated_relative_cost": approved_cost,
+                "configured_limits": deepcopy(config["budgets"]),
+                "reason": "explicit_full_plan_approval"})
+        from execution_layer.budget.stratify_mc_actions import (
+            interleave_mc_strata, summarize_mc_interception,
+        )
+        branch_phase = {row.get("branch_id"): row.get("P") for row in candidates}
+        ordered_actions = (scheduled["actions"] if full_plan_approved else
+                           interleave_mc_strata(scheduled["actions"], branch_phase))
         accepted, rejected = [], []
-        for child in scheduled["actions"]:
+        for child in ordered_actions:
             reservation = reserve_budget(
                 state, task_key=child["task_key"], stage="deep_search",
-                amount=float(child["planned_relative_cost"]), limits=config["budgets"],
+                amount=float(child["planned_relative_cost"]), limits=reservation_limits,
                 config_version=context["config_version"], model_version=child["model_version"],
             )
             if reservation["status"] != "reserved":
-                rejected.append({"action": child, "reasons": reservation["reasons"]}); continue
+                rejected.append({"action": child, "reasons": reservation["reasons"]})
+                tier_state["segments"] = [row for row in tier_state.get("segments", [])
+                                           if row.get("task_key") != child["task_key"]]
+                continue
             state = reservation["state"]
+            if full_plan_approved:
+                state["budget_reservations"][child["task_key"]]["approval_override"] = preview["allocation_checksum"]
             task = {**deepcopy(child),
                     "task_id": f"MC-{hashlib.sha256(child['task_key'].encode()).hexdigest()[:12]}",
                     "object_id": child["branch_id"], "status": "pending",
@@ -235,9 +296,31 @@ def _allocate_mc_bohb(*, action, context):
                                    "seed": child["seed"]}}
             state.setdefault("tasks", []).append(task); state.setdefault("pending_tasks", []).append(task)
             accepted.append(task)
+        state["tiered_mc_state"] = tier_state
+        if rejected:
+            state["mc_budget_interception"] = summarize_mc_interception(
+                accepted, rejected, branch_phase, full_plan_approved=full_plan_approved)
+        upload = None
+        if accepted and context.get("execution_mode") == "interactive":
+            from execution_layer.local.prepare_mc_upload_batches import prepare_mc_upload_batches
+            try:
+                upload = prepare_mc_upload_batches(
+                    action={"parameters": {"mode": "mc_inputs"}},
+                    context={**context, "event_state": state},
+                )
+            except Exception as error:
+                upload = {"status": "not_configured", "reason": f"mc_input_preparation_failed:{error}"}
+            state = upload.get("state", state)
+            if upload.get("status") not in {"prepared", "already_prepared"}:
+                return {"status": "not_configured", "state": state,
+                        "reason": upload.get("reason") or "mc_inputs_not_prepared",
+                        "actions": accepted, "mc_status": scheduled["status"],
+                        "mc_upload": {key: value for key, value in upload.items() if key != "state"}}
         return {"status": "completed", "state": state, "method": scheduled["method"],
                 "mc_status": scheduled["status"], "actions": accepted,
-                "rejected_actions": rejected}
+                "rejected_actions": rejected,
+                "mc_upload": {key: value for key, value in (upload or {}).items() if key != "state"},
+                "excluded_candidates": scheduled.get("excluded_candidates", [])}
     scheduler = deepcopy(state.get("round_scheduler") or {})
     active = scheduler.get("active_round") or {}
     bohb_state = active.get("bohb_state")

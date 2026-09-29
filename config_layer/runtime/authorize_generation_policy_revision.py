@@ -9,6 +9,8 @@ _ALLOWED = {
     ("run", "generation_options", "selection_config", "max_per_framework"),
     ("round_strategy", "generation_quota_total"),
     ("round_strategy", "rule_default", "generation_quotas"),
+    ("round_strategy", "rule_default", "mc_budget"),
+    ("round_strategy", "maximum_mc_budget"),
     ("budgets", "stage_limits", "relax_and_feature", "max_tasks"),
     ("budgets", "stage_limits", "relax_and_feature", "max_cost"),
 }
@@ -28,6 +30,14 @@ def authorize_generation_policy_revision(state, confirmed_snapshot):
     if not _no_active_work(current):
         return {"status": "active_work", "state": current}
     if not _non_decreasing_relax_limit(old, new):
+        return {"status": "rejected_limit_decrease", "state": current}
+    old_mc_cap = (old.get("round_strategy") or {}).get("maximum_mc_budget")
+    new_mc_cap = (new.get("round_strategy") or {}).get("maximum_mc_budget")
+    if old_mc_cap is not None and (new_mc_cap is None or new_mc_cap < old_mc_cap):
+        return {"status": "rejected_limit_decrease", "state": current}
+    new_mc_default = ((new.get("round_strategy") or {}).get("rule_default") or {}).get("mc_budget")
+    if (new_mc_default is not None and new_mc_cap is not None
+            and new_mc_default > new_mc_cap):
         return {"status": "rejected_limit_decrease", "state": current}
     current["confirmed_config_version"] = new_version
     current["confirmed_config"] = new

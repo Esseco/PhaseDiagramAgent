@@ -19,6 +19,7 @@ from execution_layer.workflows.run_branch_generation import run_branch_generatio
 from analysis_layer.feedback.calculate_search_reward import calculate_search_reward
 from decision_layer.strategy.choose_generation_strategy import choose_generation_strategy
 from analysis_layer.phase.update_phase_diagram import update_phase_diagram
+from analysis_layer.phase.ensure_phase_identification import ensure_phase_identification
 
 
 def run_search_iteration(
@@ -213,7 +214,17 @@ def run_search_iteration(
             )
 
     feedback = []
-    if recovered_for_feedback:
+    needs_phase_retry = any(
+        row.get("status") == "pending_phase_identification"
+        for row in current["phase_records"]
+    )
+    if recovered_for_feedback or needs_phase_retry:
+        phase_cache_path = (Path(state_path).with_name("phase_identification_cache.json")
+                            if state_path is not None else None)
+        current, _ = ensure_phase_identification(
+            current, manager, phase_references=phase_references,
+            cache_path=phase_cache_path,
+        )
         old_diagrams = copy.deepcopy(current["phase_diagrams"])
         diagrams = update_phase_diagram(
             current["phase_records"], output_directory=phase_diagram_directory

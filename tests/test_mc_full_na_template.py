@@ -52,3 +52,18 @@ def test_na_free_parent_requires_explicit_na_site_template(tmp_path):
         branch, BOUNDARY, {"O1": str(parent)},
         config={"system": {"mc_full_na_templates": {"O1": str(template)}}})
     assert full.composition.get("Na") == 2
+
+
+def test_fixed_tm_order_uses_reference_when_branch_omits_t(tmp_path):
+    parent = tmp_path / "O3.vasp"
+    _parent(True).to(filename=str(parent), fmt="poscar")
+    branch = {"branch_id": "B-fixed-T", "P": "O3", "H": H, "x": "1/2"}
+
+    full = build_mc_full_na_template(
+        branch, BOUNDARY, {"O3": str(parent)},
+        config={"system": {"configuration_space": {"roles": {"T": "fixed"}}}},
+    )
+
+    assert full.composition.get("Na") == 2
+    assert full.composition.get("Fe") == 2
+    assert full.composition.get("O") == 4

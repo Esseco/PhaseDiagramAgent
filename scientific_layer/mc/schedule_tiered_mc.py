@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from fractions import Fraction
 import hashlib
 import random
 
@@ -24,18 +25,24 @@ def schedule_tiered_mc(candidates, state, *, policy, total_budget, seed, model_v
     by_branch = {}
     for row in current["segments"]:
         by_branch.setdefault(row["branch_id"], []).append(row)
+    eligible_candidates, excluded_candidates = [], []
+    for candidate in candidates:
+        reason = _mc_candidate_exclusion_reason(candidate)
+        if reason:
+            excluded_candidates.append({"branch_id": candidate.get("branch_id"), "reason": reason})
+        else:
+            eligible_candidates.append(candidate)
     high = float(policy.get("high_ehull_defer_threshold", 0.30))
     exploration = float(policy.get("random_exploration_fraction", 0.10))
     eligible, deferred = [], []
-    for candidate in candidates:
+    for candidate in eligible_candidates:
         ehull = candidate.get("relaxed_ehull")
         (deferred if ehull is not None and float(ehull) > high else eligible).append(candidate)
     rng.shuffle(deferred)
-    keep = max(0, round(len(candidates) * exploration))
-    # Keep near-hull candidates first; uncertainty is a tie-breaker only.
-    eligible.sort(key=lambda row: (row.get("relaxed_ehull") is None,
-                  float(row["relaxed_ehull"]) if row.get("relaxed_ehull") is not None else float("inf"),
-                  -float(row.get("branch_energy_std_per_atom") or 0), row["branch_id"]))
+    keep = max(0, round(len(eligible_candidates) * exploration))
+    # Keep lower-hull bands first, while rotating phase/x inside a band so an
+    # equal-hull cluster cannot consume the whole first allocation.
+    eligible = _coverage_balanced_order(eligible, policy)
     pool = eligible + deferred[:keep]
     actions, reserved = [], 0.0
     for candidate in pool:
@@ -89,7 +96,86 @@ def schedule_tiered_mc(candidates, state, *, policy, total_budget, seed, model_v
         current["segments"].append(deepcopy(action))
     status = "budget_exhausted" if not actions and total_budget <= 0 else "scheduled" if actions else "evidence_insufficient"
     return {"status": status, "state": current, "actions": actions,
-            "method": "relax_hull_tiered_mc", "requested_budget": reserved}
+            "method": "relax_hull_tiered_mc", "requested_budget": reserved,
+            "excluded_candidates": excluded_candidates}
+
+
+def _mc_candidate_exclusion_reason(candidate):
+    """Na/V Monte Carlo is undefined at the empty-ion endpoint (x=0)."""
+    raw_x = candidate.get("x")
+    if raw_x is None:
+        return None  # Preserve compatibility for callers with externally scoped candidates.
+    try:
+        x = Fraction(str(raw_x))
+    except (ValueError, ZeroDivisionError):
+        return "invalid_branch_composition"
+    if x <= 0:
+        return "no_mobile_ion_sites"
+    if x > 1:
+        return "branch_composition_out_of_range"
+    return None
+
+
+def _coverage_balanced_order(candidates, policy):
+    bands = list(policy.get("initial_ehull_bands") or [])
+    by_band = {}
+    for candidate in candidates:
+        gap = candidate.get("relaxed_ehull")
+        band_index = len(bands)
+        if gap is not None:
+            for index, band in enumerate(bands):
+                if float(gap) < float(band["max_ehull_ev_per_atom"]):
+                    band_index = index
+                    break
+        by_band.setdefault(band_index, []).append(candidate)
+
+    ordered = []
+    for band_index in sorted(by_band):
+        by_phase = {}
+        for candidate in by_band[band_index]:
+            phase = str(candidate.get("P") or "unknown").upper()
+            x_key = _composition_key(candidate.get("x"))
+            by_phase.setdefault(phase, {}).setdefault(x_key, []).append(candidate)
+
+        phase_queues = {}
+        phase_priority = {}
+        for phase, by_x in by_phase.items():
+            for rows in by_x.values():
+                rows.sort(key=_relax_candidate_key)
+            x_order = sorted(by_x, key=lambda key: _relax_candidate_key(by_x[key][0]))
+            queue = []
+            while any(by_x[key] for key in x_order):
+                for key in x_order:
+                    if by_x[key]:
+                        queue.append(by_x[key].pop(0))
+            phase_queues[phase] = queue
+            phase_priority[phase] = _relax_candidate_key(queue[0]) if queue else (True, float("inf"), 0, phase)
+
+        phase_order = sorted(phase_queues, key=lambda phase: (phase_priority[phase], phase))
+        while any(phase_queues.values()):
+            for phase in phase_order:
+                if phase_queues[phase]:
+                    ordered.append(phase_queues[phase].pop(0))
+    return ordered
+
+
+def _relax_candidate_key(candidate):
+    gap = candidate.get("relaxed_ehull")
+    allocation = candidate.get("allocation_score")
+    score = float(allocation) if allocation is not None else (
+        float(gap) if gap is not None else float("inf"))
+    return (gap is None, score, float(gap) if gap is not None else float("inf"),
+            -float(candidate.get("branch_energy_std_per_atom") or 0),
+            str(candidate.get("branch_id") or ""))
+
+
+def _composition_key(value):
+    if value is None:
+        return "unknown_x"
+    try:
+        return str(Fraction(str(value)))
+    except (ValueError, ZeroDivisionError):
+        return str(value)
 
 
 def _next_tier(previous, candidate, tiers, policy):

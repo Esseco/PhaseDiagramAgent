@@ -26,6 +26,11 @@ def build_effective_run_config(config_session: dict, runtime_config: dict | None
                 # defaults erase the confirmed remote model path or parameters.
                 merged_mlip = deepcopy(effective.get("mlip") or {})
                 for model_key, model_value in value.items():
+                    if model_key == "relax_parameters":
+                        # Relax settings affect result identity. Only the confirmed
+                        # snapshot may supply them; a local runtime default must
+                        # not turn completed Relax results into new tasks.
+                        continue
                     if model_value is None or model_value == "":
                         continue
                     if isinstance(model_value, (dict, list, tuple)) and not model_value:

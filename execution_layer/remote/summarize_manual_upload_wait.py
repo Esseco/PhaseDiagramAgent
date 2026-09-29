@@ -20,16 +20,20 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
     task_directories = sorted({str(Path(row["input_path"]).parent) for row in waiting})
     batch_directories = sorted({str(Path(row["input_path"]).parent.parent) for row in waiting})
     upload_roots = {str(Path(path).parent) for path in batch_directories}
+    stage_counts = {stage: sum(row.get("stage") == stage for row in waiting)
+                    for stage in {row.get("stage") for row in waiting}}
+    relax_only = set(stage_counts) == {"relax_and_feature"}
     return {
-        "task_count": len(waiting) + int(recovered_count or 0),
+        "task_count": len(waiting),
         "waiting_task_count": len(waiting),
+        "waiting_by_stage": stage_counts,
         "recovered_count": int(recovered_count or 0),
         "task_ids": [row.get("task_id") for row in waiting],
         "task_directories": task_directories,
         "batch_directories": batch_directories,
         "upload_root": next(iter(upload_roots)) if len(upload_roots) == 1 else None,
         "upload_plan_path": (str(Path(next(iter(upload_roots))) / "RELAX_UPLOAD_PLAN.json")
-                             if len(upload_roots) == 1 and
+                             if relax_only and len(upload_roots) == 1 and
                              (Path(next(iter(upload_roots))) / "RELAX_UPLOAD_PLAN.json").is_file()
                              else None),
     }

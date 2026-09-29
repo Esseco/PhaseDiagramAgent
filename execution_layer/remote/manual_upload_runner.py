@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 
 from execution_layer.remote.batch_runner import RemoteBatchRunner, _compatibility
 from execution_layer.remote.write_unix_shell_script import write_unix_shell_script
@@ -73,7 +74,9 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 if missing:
                     raise RuntimeError(f"atomate 未在 DFT 任务目录生成输入文件：{missing}")
             if not mlip_batch:
-                write_unix_shell_script(task_directory / "GPU.sh", template.read_bytes())
+                job_name = _slurm_job_name(stage, entry["task_id"])
+                script = _render_job_name(template.read_text(encoding="utf-8"), job_name)
+                write_unix_shell_script(task_directory / "GPU.sh", script)
         if mlip_batch:
             executor = _executor_reference(self.worker_command)
             (directory / "run_mlip_batch.py").write_text(
@@ -88,8 +91,11 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
             command = "python3 run_mlip_task.py"
             if template.count(command) != 1:
                 raise ValueError("MLIP GPU 模板必须恰有一处单任务入口")
+            job_name = _slurm_job_name(manifest[0]["stage"], batch["batch_id"])
             write_unix_shell_script(
-                directory / "GPU.sh", template.replace(command, "python3 run_mlip_batch.py"))
+                directory / "GPU.sh",
+                _render_job_name(template.replace(command, "python3 run_mlip_batch.py"), job_name),
+            )
         # The parent runner creates an array script; manual mode never exposes it.
         (directory / "submit.sbatch").unlink()
         checksums = []
@@ -123,6 +129,29 @@ def _executor_reference(command):
         raise ValueError("MLIP worker_command 缺少 --executor 模块:函数") from None
 
 
+def _slurm_job_name(stage, identifier):
+    """Build a readable, task-specific Slurm name without unsafe characters."""
+    prefix = {
+        "relax_and_feature": "relax",
+        "deep_search": "mc",
+        "dft_single_point": "dft-sp",
+        "dft_relax": "dft-relax",
+    }.get(stage, "task")
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "-", f"{prefix}-{identifier}").strip("-.")
+    if len(value) > 64:
+        suffix = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+        value = f"{value[:55]}-{suffix}"
+    return value or "phase-task"
+
+
+def _render_job_name(script, job_name):
+    pattern = r"(?m)^(\s*#SBATCH\s+--job-name=).*$"
+    matches = list(re.finditer(pattern, script))
+    if len(matches) != 1:
+        raise ValueError("GPU.sh 模板必须恰有一条 #SBATCH --job-name 指令")
+    return re.sub(pattern, lambda match: f"{match.group(1)}{job_name}", script)
+
+
 def _guide(batch_id):
     return f"""# Manual upload batch `{batch_id}`
 
@@ -131,7 +160,7 @@ This directory was generated locally. Nothing has been submitted.
 1. Inspect `manifest.json`, `task.json`, and the task directory's `GPU.sh`.
 2. Confirm the model/input files and all site-specific Slurm settings.
 3. Upload this whole batch directory. Relax jobs contain up to 100 structures;
-   MC jobs contain up to 20 compatible simulations, possibly from multiple branches.
+   MC jobs contain up to 10 compatible simulations, possibly from multiple branches.
 4. Optionally verify its files with `sha256sum -c SHA256SUMS`.
 5. For MLIP Relax/MC, submit the batch root's `GPU.sh` once; it runs each task
    subdirectory and keeps separate results/logs. For DFT, submit the only task

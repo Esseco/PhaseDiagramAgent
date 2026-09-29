@@ -14,6 +14,7 @@ import shlex
 import shutil
 import subprocess
 from typing import Any, Callable
+from execution_layer.mc_batch_policy import mc_batch_limit
 
 
 DFT_STAGES = {"dft_single_point", "dft_relax"}
@@ -56,6 +57,8 @@ class SlurmBatchRunner:
         }
         if any(size <= 0 for size in self.stage_batch_sizes.values()):
             raise ValueError("stage_batch_sizes values must be positive")
+        self.stage_batch_sizes["deep_search"] = mc_batch_limit(
+            self.stage_batch_sizes.get("deep_search", self.max_batch_tasks))
         self.max_batch_cost = float(max_batch_cost) if max_batch_cost is not None else None
         self.slurm_options = dict(slurm_options or {})
         self.stage_profiles = deepcopy(stage_profiles or {})
@@ -288,11 +291,13 @@ def _parse_job_id(stdout: str) -> str | None:
 
 
 def _compatibility_key(task):
-    """Tasks share a job only when stage, model, parameters and resources match."""
+    """MC step/seed parameters stay task-local; model and resources stay batch-wide."""
     payload = {
         "stage": task.get("stage"),
         "model_version": task.get("model_version") or task.get("calculation_version"),
-        "parameters": task.get("parameters") or {},
+        "config_version": task.get("config_version"),
+        "parameters": (None if task.get("stage") == "deep_search"
+                       else task.get("parameters") or {}),
         "resource_profile": task.get("resource_profile"),
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)

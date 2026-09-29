@@ -61,6 +61,7 @@ def run_workflow(
         **runtime_adapters,
     }
     automatic_results = []
+    collection_report = None
     loaded_state = compact_state_history(
         _read_state_for_runner(state, state_path or effective_config.get("state_path"))
     )
@@ -69,22 +70,57 @@ def run_workflow(
     )
     if migration["status"].startswith("rejected") or migration["status"] == "approval_required":
         return {"status": "rejected", "reason": migration["status"], "submitted": False,
-                "config_version": snapshot["config_version"], "state": loaded_state}
+                "config_version": snapshot["config_version"], "state": loaded_state,
+                "migration": migration,
+                "message": _config_migration_block_message(migration)}
     loaded_state = migration["state"]
+    if approve_budget_extension:
+        if migration["status"] in {"extended", "empty_run_rebound"}:
+            limits = deepcopy(effective_config.get("budgets") or {})
+            loaded_state["budget_limits"] = limits
+            total_limit = limits.get("total_relative_cost")
+            if total_limit is not None:
+                used = float((loaded_state.get("budget_usage") or {}).get("total_relative_cost", 0) or 0)
+                reserved = float(loaded_state.get("reserved_relative_cost", 0) or 0)
+                loaded_state["budget_remaining"] = max(0.0, float(total_limit) - used - reserved)
+            _save_runner_state(loaded_state, state_path or effective_config.get("state_path"))
+            return {
+                "status": "config_migrated", "state": loaded_state,
+                "migration": {key: value for key, value in migration.items() if key != "state"},
+                "from_config_version": migration.get("from"),
+                "config_version": snapshot["config_version"],
+                "submitted": False,
+            }
+        if migration["status"] == "unchanged":
+            return {
+                "status": "config_migration_not_needed", "state": loaded_state,
+                "config_version": snapshot["config_version"], "submitted": False,
+            }
     from execution_layer.state.restore_generation_gate import restore_generation_gate
     loaded_state = restore_generation_gate(loaded_state, manager)
     collector = task_runner or result_collector
     if collector is not None:
-        automatic_results = collector.collect_results(loaded_state)
+        if hasattr(collector, "collect_results_with_report"):
+            collected = collector.collect_results_with_report(loaded_state)
+            automatic_results = collected["results"]
+            collection_report = collected["report"]
+        else:
+            automatic_results = collector.collect_results(loaded_state)
     combined_results = [*(recovered_results or []), *automatic_results]
-    from analysis_layer.phase.identify_mc_result_phase import identify_mc_result_phase
-    combined_results = [identify_mc_result_phase(row, manager) for row in combined_results]
     pre_reconciled = reconcile_task_results(loaded_state, combined_results)
+    runtime_state_path = state_path or effective_config.get("state_path")
+    phase_cache_path = runtime_adapters.get("phase_identification_cache_path")
+    if phase_cache_path is None and runtime_state_path:
+        phase_cache_path = Path(runtime_state_path).with_name("phase_identification_cache.json")
     feedback = apply_scientific_feedback(
         pre_reconciled["state"], combined_results, manager=manager,
         ledger_path=effective_config.get("ledger_path"),
         phase_diagram_directory=effective_config.get("phase_diagram_directory"),
         final_frame_mlip_evaluator=runtime_adapters.get("final_frame_mlip_evaluator"),
+        active_model_version=(effective_config.get("mlip") or {}).get("version")
+            or (effective_config.get("mlip") or {}).get("name"),
+        phase_references=phase_references,
+        phase_identification_cache_path=phase_cache_path,
     )
     from analysis_layer.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
     feedback["state"] = update_local_mlip_hull_pool(
@@ -101,6 +137,8 @@ def run_workflow(
     from execution_layer.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
     manual_wait = (summarize_manual_upload_wait(feedback["state"], recovered_count=recovered_count)
                    if execution_mode == "interactive" else None)
+    if manual_wait is not None and collection_report is not None:
+        manual_wait["result_collection"] = deepcopy(collection_report)
     from execution_layer.local.rebuild_relax_inputs import is_relax_rebuild_request
     rebuilding = is_relax_rebuild_request(runtime_adapters.get("user_message")) or any(
         (((row.get("agent_proposal") or {}).get("raw_action") or {}).get("parameters") or {}).get("rebuild_inputs")
@@ -114,7 +152,7 @@ def run_workflow(
             "scientific_feedback": {key: value for key, value in feedback.items() if key != "state"},
             "reconciled": pre_reconciled["reconciled"], "steps_executed": 0,
             "submitted": False, "config_version": snapshot["config_version"],
-            "effective_config": effective_config,
+            "effective_config": effective_config, "result_collection": collection_report,
         }
     result = run_event_loop(
         feedback["state"],
@@ -145,6 +183,8 @@ def run_workflow(
         _save_runner_state(result["state"], state_path or effective_config.get("state_path"))
     manual_wait = (summarize_manual_upload_wait(result["state"], recovered_count=recovered_count)
                    if execution_mode == "interactive" else None)
+    if manual_wait is not None and collection_report is not None:
+        manual_wait["result_collection"] = deepcopy(collection_report)
     if manual_wait:
         result["status"] = "awaiting_manual_submission"
         result["manual_wait"] = manual_wait
@@ -154,8 +194,32 @@ def run_workflow(
         "submitted": result["status"] not in {"rejected", "rejected_by_user", "awaiting_manual_submission"},
         "config_version": snapshot["config_version"],
         "effective_config": effective_config,
+        "result_collection": collection_report,
     })
     return result
+
+
+def _config_migration_block_message(migration):
+    status = migration.get("status")
+    source, target = migration.get("from") or "未知", migration.get("to") or "未知"
+    if status == "approval_required":
+        return (
+            f"运行仍绑定配置 {source}，当前确认配置为 {target}；已有任务或结果。"
+            "若只是提高预算且科学设置未变，请发送“批准迁移”。"
+        )
+    if status == "rejected_non_budget_change":
+        fields = "、".join(migration.get("changed_fields") or []) or "科学设置"
+        evidence = migration.get("compatibility_rejection")
+        evidence_text = f"兼容性核验：{evidence}。" if evidence else ""
+        return (
+            f"已收到迁移批准，但配置 {source} → {target} 改动了 {fields}。"
+            f"{evidence_text}运行状态和历史结果未修改。"
+        )
+    if status == "rejected_budget_decrease":
+        return (
+            f"配置 {source} → {target} 降低了已有运行的预算上限，不能迁移；运行状态和历史结果未修改。"
+        )
+    return f"配置迁移被拒绝（{status}）；运行状态和历史结果未修改。"
 
 
 def _count_newly_recovered(reconciled):

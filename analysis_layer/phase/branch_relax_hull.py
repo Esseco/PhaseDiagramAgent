@@ -14,7 +14,9 @@ ENERGY_BASIS = 'total_eV_with_actual_cell_composition'
 
 def build_relax_hull(records, *, model_version, system_id=None):
     rows = [deepcopy(r) for r in records if r.get('model_version') == model_version
-            and r.get('converged') is True and r.get('energy_unit') == 'eV'
+            and (r.get('converged') is True or
+                 (r.get('stage') == 'deep_search' and r.get('search_completed') is True))
+            and r.get('energy_unit') == 'eV'
             and r.get('energy') is not None and math.isfinite(float(r['energy']))]
     version = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:16]
     return {'version': version, 'system_id': system_id, 'model_version': model_version,
@@ -45,7 +47,10 @@ def hull_energy_per_atom(pool, composition):
 def rank_relaxed_branches(candidates, pool, *, uncertainty_weight=1.0):
     ranked, missing = [], []
     for branch in candidates:
-        rows = [r for r in pool['records'] if r['branch_id'] == branch['branch_id']]
+        # MC improves the hull reference, but screening sigma remains a statistic
+        # of the original independent Relax samples, not the search trajectory.
+        rows = [r for r in pool['records'] if r['branch_id'] == branch['branch_id']
+                and r.get('stage') in (None, 'relax_and_feature')]
         if not rows:
             missing.append(branch['branch_id']); continue
         best = min(rows, key=lambda r: float(r['energy']) / Composition(r['composition']).num_atoms)

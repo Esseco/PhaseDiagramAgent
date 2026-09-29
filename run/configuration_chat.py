@@ -21,7 +21,7 @@ from scientific_layer.structures.boundary_utils import allowed_phases
 
 
 CONFIG_AGENT_SYSTEM_PROMPT = """你是材料相图搜索项目的首次配置助手，不是计算执行器。
-Relax每个提交作业最多100个结构，MC每个提交作业最多20个模拟，DFT一个作业一个结构；这是supercomputer.batch_sizes或运行时stage_batch_sizes的分组限制，超出就拆分作业。budgets.stage_limits.max_tasks是独立的累计预算限制，不能把它解释为每个作业上限，也不能因入选branch增加自动建议增改它。用户说每个作业/每个任务弛豫数量时，应修改分组大小。generation_actions.max_det_H不存在，不得新增该字段。
+Relax每个提交作业最多100个结构，MC每个提交作业最多10个模拟（每个branch的MC结果仍独立），DFT一个作业一个结构；这是supercomputer.batch_sizes或运行时stage_batch_sizes的分组限制，超出就拆分作业。budgets.stage_limits.max_tasks是独立的累计预算限制，不能把它解释为每个作业上限，也不能因入选branch增加自动建议增改它。用户说每个作业/每个任务弛豫数量时，应修改分组大小。generation_actions.max_det_H不存在，不得新增该字段。
 只修改当前用户明确指定的参数，其他参数原值保留。不要为满足数量而擅自调整候选配额、预算、策略、相边界或全局结构限制；关联调整只能提出建议。没有“候选/生成量/总配额”等限定时，“300个branch”按入选上限run.batch_size理解，不是run.total_quota。本轮det(H)上限属于生成动作max_det_H，不得写入budgets.structure_limits.max_det_H；只有明确首轮配置才用system.H_generation.first_round_max_det_H，明确全局边界才改全局字段。读取配置不能恢复旧默认覆盖用户已确认值。
 editable_field_catalog 是程序提供的真实配置字段目录。用户只需说中文含义和目标值，你负责从目录定位字段，不得要求用户提供内部字段路径。目录包含被精简摘要省略的参数；摘要未展示不等于字段不存在。初态数量对应 run.initial_states_per_branch，入选上限对应 run.batch_size，候选生成量对应 run.total_quota；初态规则不属于DFT。用户明确要求修改且值明确时直接返回patch和write_requested=true。确有多个不同语义字段时只集中问一个必要问题。不得声称已写入，写入是否成功由程序返回。
 只讨论并检查配置草稿。不得提交任务、调用科学计算、创建结构、运行命令或声称计算已完成。
@@ -224,6 +224,32 @@ class ConfigurationChatHandler:
             workspace_root_default=self.workspace_root_default,
         )
 
+    def revise_mc_budget_limit(self, steps: int, *, conversation_id=None):
+        """Apply an already-disambiguated MC round limit without another LLM guess."""
+        session = self.workflow_kwargs.get("config_session") or {}
+        if session.get("status") != "draft" or session.get("setup_stage") != "json_ready":
+            return "当前没有可编辑的配置草稿；MC 预算未修改。"
+        try:
+            source = self._project_source_context(session)
+            if source is None:
+                raise ValueError("当前设置文件不是项目短配置")
+            from config_layer.session.project_config_json import write_project_config_patch
+            write_project_config_patch(
+                self.editable_config_path,
+                {"round_strategy.maximum_mc_budget": int(steps)},
+                expected_hash=source["hash"], baseline_config=session.get("config") or {},
+            )
+        except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
+            return f"MC 单轮预算上限未修改：{error}"
+        updated = deepcopy(session)
+        _clear_config_review(updated)
+        self._save(updated)
+        review = self._import_and_review_config_json(
+            updated, f"将 MC 单轮预算上限设为 {steps} 步", conversation_id=conversation_id,
+        )
+        return (f"已只将 MC 单轮预算上限设为 {steps} 步；其他参数未改。"
+                "新配置仍需你确认，旧任务不会自动执行。\n" + review)
+
     def _setup_facts(self, session, *, config=None):
         config = config if config is not None else session.get("config") or {}
         storage = config.get("storage") or {}
@@ -308,6 +334,13 @@ class ConfigurationChatHandler:
                 self._with_turn(session, message, ""),
                 "还不能开始：请先检查配置 JSON 是否在审核后又被修改；若已修改，请重新发送“读取配置 JSON”，"
                 "等待 Agent 审核通过后，再回复“同意”。",
+            )
+        if message.strip() in {"开始", "开始搜索", "继续"} and setup_stage == "json_ready":
+            # Navigation commands are not parameter edits. In particular, do
+            # not send "继续" with old budget dialogue back to the LLM.
+            return self._import_and_review_config_json(
+                session, message, continue_if_ready=message.strip() != "继续",
+                conversation_id=conversation_id,
             )
         if _is_config_json_import_command(message):
             return self._import_and_review_config_json(
@@ -845,14 +878,22 @@ class ConfigurationChatHandler:
                 _validate_patch(patch)
                 from config_layer.session.project_config_json import write_project_config_patch
                 changes = write_project_config_patch(
-                    self.editable_config_path, patch, expected_hash=source_context["hash"])
+                    self.editable_config_path, patch, expected_hash=source_context["hash"],
+                    baseline_config=session.get("config") or {},
+                )
                 updated.pop("pending_config_patch", None)
                 _clear_config_review(updated)
                 fields = "、".join(change["path"] for change in changes)
+                self._save(updated)
+                review = self._import_and_review_config_json(
+                    updated, user_message, continue_if_ready=False,
+                )
                 result = {**result, "reply": (
-                    f"已写入 {self.editable_config_path}：{fields}。"
-                    "请发送“读取配置”执行展开、H 生成和正式审核。"
+                    f"{_project_config_migration_note(self.editable_config_path)}"
+                    f"{'已写入' if changes else '原值已生效，无需重复写入'} {fields or '所请求参数'}。"
+                    f"\n{review}"
                 )}
+                return result["reply"]
             except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
                 patch = None
                 result = {**result, "reply": f"{result.get('reply', '')}\n\n配置文件写入被安全检查拒绝：{error}"}
@@ -903,16 +944,18 @@ class ConfigurationChatHandler:
             _validate_patch(patch)
             from config_layer.session.project_config_json import write_project_config_patch
             changes = write_project_config_patch(
-                self.editable_config_path, patch, expected_hash=pending["source_hash"])
+                self.editable_config_path, patch, expected_hash=pending["source_hash"],
+                baseline_config=session.get("config") or {},
+            )
         except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
             return f"配置文件未修改：{error}"
         updated = self._with_turn(session, user_message, "")
         updated.pop("pending_config_patch", None)
         _clear_config_review(updated)
-        reply = (f"已把 {len(changes)} 项修改写入 {self.editable_config_path}。"
-                 "请发送“读取配置 JSON”，审核通过后确认新版本；当前运行继续使用原配置。")
-        self._save(record_config_dialogue(updated, role="assistant", message=reply))
-        return reply
+        self._save(updated)
+        review = self._import_and_review_config_json(updated, user_message)
+        return (f"已把 {len(changes)} 项修改写入 {self.editable_config_path}。"
+                "当前运行仍使用原配置，待你确认新版本。\n" + review)
 
     def _confirm_and_start_search(self, session, *, user_message, conversation_id):
         if not callable(self.runtime_factory):
@@ -1323,10 +1366,36 @@ def _validate_patch(patch):
 
 def _explicit_config_write_request(message):
     normalized = re.sub(r"\s+", "", str(message or "").lower())
-    return any(phrase in normalized for phrase in (
+    if any(phrase in normalized for phrase in (
         "你写", "帮我写", "替我写", "写入配置", "写进配置", "直接写",
         "直接改", "帮我改", "帮我修订配置", "修改配置文件", "保存到配置", "修改设置文件",
+    )):
+        return True
+    if any(word in normalized for word in (
+        "如果", "是否", "能否", "可否", "能不能", "可不可以", "建议", "怎么样", "合适吗", "吗?", "吗？",
+    )):
+        return False
+    assignment = any(word in normalized for word in (
+        "改为", "改成", "设置为", "设为", "调整为", "修改为", "增加到", "提高到", "降低到",
     ))
+    parameter = any(word in normalized for word in (
+        "上限", "预算", "配额", "branch", "初态", "步数", "patience", "ehull", "阈值",
+        "相", "超胞", "det(h)", "路径", "模型版本", "mlip", "dft", "mc",
+    ))
+    return assignment and parameter
+
+
+def _project_config_migration_note(path):
+    try:
+        from config_layer.session.load_editable_config_json import _strip_jsonc_comments
+        document = json.loads(_strip_jsonc_comments(Path(path).read_text(encoding="utf-8")))
+        migration = document.get("_migration") if isinstance(document, dict) else None
+        backup = migration.get("backup_file") if isinstance(migration, dict) else None
+        if backup:
+            return f"已按已保存配置兼容旧模板，并保留原文件备份 {Path(path).with_name(backup)}；"
+    except (OSError, ValueError, TypeError):
+        pass
+    return ""
 
 
 def _is_pending_config_write_command(message):

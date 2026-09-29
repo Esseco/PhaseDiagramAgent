@@ -30,12 +30,144 @@ class StateConsistencyTest(unittest.TestCase):
         self.assertFalse(check_global_convergence(state, rules=rules)["converged"])
 
     def test_confirmed_budget_extension_rebinds_without_resetting_state(self):
-        old = {"budgets": {"total_relative_cost": 10}, "system": {"name": "x"}}
+        old = {"budgets": {"total_relative_cost": 10}, "system": {"name": "x"},
+               "round_strategy": {"maximum_mc_budget": 1000}}
         state = {"confirmed_config_version": "v1", "confirmed_config": old, "tasks": [{"task_id": "done"}]}
-        result = authorize_budget_extension(state, {"config_version": "v2", "config": {"budgets": {"total_relative_cost": 20}, "system": {"name": "x"}}}, user_approved=True)
+        result = authorize_budget_extension(state, {"config_version": "v2", "config": {
+            "budgets": {"total_relative_cost": 20}, "system": {"name": "x"},
+            "round_strategy": {"maximum_mc_budget": 5000},
+        }}, user_approved=True)
         self.assertEqual(result["status"], "extended")
         self.assertEqual(result["state"]["tasks"], state["tasks"])
         self.assertEqual(result["state"]["confirmed_config_version"], "v2")
+        self.assertEqual(result["budget_changes"], [
+            {"field": "budgets.total_relative_cost", "from": 10, "to": 20},
+            {"field": "round_strategy.maximum_mc_budget", "from": 1000, "to": 5000},
+        ])
+
+    def test_approved_budget_migration_is_a_separate_non_executing_step(self):
+        from types import SimpleNamespace
+        from run.main import run_workflow
+
+        old = {"system": {"id": "test"}, "budgets": {"total_relative_cost": 10},
+               "round_strategy": {"maximum_mc_budget": 1000}, "agent": {"allowed_tools": []}}
+        new = {"system": {"id": "test"}, "budgets": {"total_relative_cost": 20},
+               "round_strategy": {"maximum_mc_budget": 5000}, "agent": {"allowed_tools": []}}
+        state = {"confirmed_config_version": "v1", "confirmed_config": old,
+                 "tasks": [{"task_id": "old-task", "status": "completed", "config_version": "v1"}],
+                 "budget_usage": {"total_relative_cost": 2}}
+        result = run_workflow(
+            SimpleNamespace(data={"branches": {}, "structures": {}}), {}, {},
+            {"status": "confirmed", "confirmed_snapshot": {"config_version": "v2", "config": new}},
+            state=state, approve_budget_extension=True,
+        )
+        self.assertEqual(result["status"], "config_migrated")
+        self.assertFalse(result["submitted"])
+        self.assertEqual(result["state"]["confirmed_config_version"], "v2")
+        self.assertEqual(result["state"]["tasks"][0]["config_version"], "v1")
+        self.assertEqual(result["state"]["budget_remaining"], 18)
+
+    def test_config_migration_rejects_scientific_mlip_setting_changes_with_paths(self):
+        old = {"budgets": {"total_relative_cost": 10},
+               "mlip": {"name": "mace-mh-1", "mace_head": None, "relax_parameters": None}}
+        new = {"budgets": {"total_relative_cost": 20},
+               "mlip": {"name": "mace-mh-1", "mace_head": "omat_pbe",
+                        "relax_parameters": {"fmax": 0.05}}}
+        state = {"confirmed_config_version": "v1", "confirmed_config": old,
+                 "tasks": [{"task_id": "done", "config_version": "v1"}]}
+        result = authorize_budget_extension(
+            state, {"config_version": "v2", "config": new}, user_approved=True,
+        )
+        self.assertEqual(result["status"], "rejected_non_budget_change")
+        self.assertEqual(result["changed_fields"], ["mlip.mace_head", "mlip.relax_parameters"])
+        self.assertEqual(result["state"]["confirmed_config_version"], "v1")
+        self.assertEqual(result["state"]["tasks"], state["tasks"])
+
+    def test_approved_migration_accepts_only_evidenced_legacy_mace_defaults(self):
+        old = {
+            "budgets": {"total_relative_cost": 20000},
+            "mlip": {"name": "mace-mh-1", "mace_head": None, "relax_parameters": None},
+        }
+        new = {
+            "budgets": {"total_relative_cost": 20000},
+            "mlip": {
+                "name": "mace-mh-1", "mace_head": "omat_pbe",
+                "relax_parameters": {
+                    "fmax": .05, "mace_default_dtype": "float64",
+                    "relax_cell": True, "relax_steps": 150,
+                },
+            },
+        }
+        task = {
+            "task_id": "RELAX-1", "stage": "relax_and_feature",
+            "status": "completed", "config_version": "v1",
+            "model_version": "mace-mh-1", "parameters": {},
+            "outputs": {
+                "status": "completed", "mace_head": "omat_pbe",
+                "fmax_target_ev_per_angstrom": .05, "cell_relaxed": True,
+                "relax_steps_used": 150,
+            },
+        }
+        state = {"confirmed_config_version": "v1", "confirmed_config": old,
+                 "tasks": [task]}
+
+        result = authorize_budget_extension(
+            state, {"config_version": "v2", "config": new}, user_approved=True,
+        )
+
+        self.assertEqual(result["status"], "extended")
+        self.assertEqual(result["state"]["tasks"][0]["config_version"], "v1")
+        self.assertEqual(result["compatibility"]["relax_task_count"], 1)
+        self.assertIn("mlip.relax_parameters.mace_default_dtype",
+                      result["compatibility"]["unrecorded_fields"])
+        self.assertEqual(
+            result["state"]["config_migrations"][-1]["type"],
+            "approved_migration_with_verified_legacy_mace_defaults",
+        )
+
+    def test_legacy_mace_migration_rejects_unverified_or_changed_relax_results(self):
+        old = {"budgets": {"total_relative_cost": 20},
+               "mlip": {"name": "mace-mh-1", "mace_head": None, "relax_parameters": None}}
+        new = {"budgets": {"total_relative_cost": 20},
+               "mlip": {"name": "mace-mh-1", "mace_head": "omat_pbe",
+                        "relax_parameters": {
+                            "fmax": .05, "mace_default_dtype": "float64",
+                            "relax_cell": True, "relax_steps": 150,
+                        }}}
+        task = {
+            "task_id": "RELAX-1", "stage": "relax_and_feature", "status": "completed",
+            "model_version": "mace-mh-1", "outputs": {
+                "status": "completed", "mace_head": "omat_pbe",
+                "fmax_target_ev_per_angstrom": .05, "cell_relaxed": True,
+                "relax_steps_used": 40,
+            },
+        }
+        task["outputs"]["mace_head"] = "different-head"
+        state = {"confirmed_config_version": "v1", "confirmed_config": old,
+                 "tasks": [task]}
+        result = authorize_budget_extension(
+            state, {"config_version": "v2", "config": new}, user_approved=True,
+        )
+        self.assertEqual(result["status"], "rejected_non_budget_change")
+        self.assertEqual(result["state"]["confirmed_config_version"], "v1")
+        self.assertTrue(result["compatibility_rejection"])
+
+    def test_budget_migration_does_not_change_structure_search_bounds(self):
+        old = {"budgets": {
+            "total_relative_cost": 10,
+            "structure_limits": {"max_det_H": 24},
+        }}
+        new = {"budgets": {
+            "total_relative_cost": 20,
+            "structure_limits": {"max_det_H": 64},
+        }}
+        state = {"confirmed_config_version": "v1", "confirmed_config": old,
+                 "tasks": [{"task_id": "done", "status": "completed"}]}
+        result = authorize_budget_extension(
+            state, {"config_version": "v2", "config": new}, user_approved=True,
+        )
+        self.assertEqual(result["status"], "rejected_non_budget_change")
+        self.assertIn("budgets.structure_limits.max_det_H", result["changed_fields"])
 
     def test_concurrent_reservation_and_duplicate_settlement(self):
         limits = default_budget_rules(); limits["total_relative_cost"] = 10; limits["stage_limits"]["deep_search"]["max_cost"] = 10

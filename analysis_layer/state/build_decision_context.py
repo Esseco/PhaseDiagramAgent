@@ -1,6 +1,7 @@
 """从现有台账提取有界上下文；长期人工建议与近期观测严格分开。"""
 
 from copy import deepcopy
+from data_layer.memory.retrieve_relevant_knowledge import retrieve_relevant_knowledge
 
 
 def build_decision_context(state, *, recent_limit=5):
@@ -38,13 +39,17 @@ def build_decision_context(state, *, recent_limit=5):
             "tool": action.get("tool") or action.get("action_type"),
             "target_ids": deepcopy((action.get("target_ids") or [])[:5]),
             "failure_reason": str(execution.get("error") or result.get("reason") or "")[:500],
-            "recent_comments": [str(item.get("comment") or "")[:300] for item in comments],
+            "recent_comments": [{"comment": str(item.get("comment") or "")[:300]} for item in comments],
         })
     retryable_tasks = [
         {"task_id": row.get("task_id"), "stage": row.get("stage"), "status": row.get("status")}
         for row in (state.get("tasks") or [])
         if row.get("task_id") and row.get("status") in {"failed", "timeout"}
     ][-recent_limit:]
+    system_id = (((state.get("confirmed_config") or {}).get("system") or {}).get("system_id")
+                 or state.get("system_id"))
+    relevant = retrieve_relevant_knowledge(
+        state, system_id=system_id, model_version=state.get("active_model_version"), limit=8)
     return {
         "long_term_human_advice": {"version": memory.get("version", 0), "items": deepcopy(memory.get("long_term_advice") or long_term.get("human_system_knowledge") or []), "source": memory.get("source")},
         "long_term_memory": {
@@ -54,6 +59,10 @@ def build_decision_context(state, *, recent_limit=5):
             "search_rules": deepcopy(long_term.get("search_rules") or []),
         },
         "short_term_memory": deepcopy(memory.get("short_term") or {}),
+        "relevant_approved_knowledge": [
+            {key: deepcopy(row.get(key)) for key in
+             ("knowledge_id", "scope", "statement", "maturity", "evidence_refs", "source_project")}
+            for row in relevant],
         "current_phase_diagram": phase_summary,
         "coverage_gaps": deepcopy((state.get("coverage_gaps") or [])[:10]),
         "available_branches": deepcopy((state.get("branch_candidates") or [])[:200]),

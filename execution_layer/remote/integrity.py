@@ -29,7 +29,7 @@ def verify_result(result_path, marker_path, expected: dict) -> dict:
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         return {"valid": False, "reason": f"invalid_json:{error}"}
-    for key in ("task_id", "batch_id", "config_version", "model_version", "protocol_version",
+    for key in ("task_id", "task_key", "batch_id", "config_version", "model_version", "protocol_version",
                 "input_file_version"):
         wanted = expected.get(key)
         if wanted is not None and marker.get(key) != wanted:

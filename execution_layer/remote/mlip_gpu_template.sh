@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=test
+#SBATCH --job-name=__JOB_NAME__
 #SBATCH -N 1
 #SBATCH -n 2
 #SBATCH --ntasks-per-node=2

@@ -15,6 +15,23 @@
 
 第一版可人工上传下载；`ManualUploadBatchRunner` 将兼容 Relax task 最多 100 个、MC task
 最多 20 个放在一个上传批次目录，写出 manifest、快照、SHA256SUMS 和操作说明。
+
+新生成批次采用可读且版本隔离的目录层级，例如：
+
+```text
+upload_batches/
+  MLIP-round-0001_mace-mh-1/
+    Relax-screening/Relax-submission-0001_remote-000001/
+    MC-search/MC-sampling-0001_remote-000002/
+    DFT-single-point/DFT-single-point-submission-0001_remote-000003/
+    DFT-relax/DFT-relax-submission-0001_remote-000004/
+```
+
+`MLIP-round` 表示对应模型版本的轮次；同一阶段按实际生成顺序编号。`remote-*`
+仍是稳定的机器 `batch_id`，task 子目录仍以 `task_id` 标识。旧的平铺目录不会被移动，
+恢复与回收优先使用台账保存的 `upload_directory`，因此新旧布局可以同时存在。
+已有平铺批次如需整理，使用 `migrate_legacy_upload_layout` 先预演再迁移；该工具会备份
+主状态、拒绝移动运行中作业，并同步更新台账中的绝对路径，不改变任何科学结果或编号。
 MLIP 批次只提交根目录 `GPU.sh` 一次；批内 task 仍各有独立目录、日志、结果和完成标记。
 `RELAX_UPLOAD_PLAN.json` 按 branch 列出所有待上传批次与任务，一个批次可覆盖多个 branch。
 MLIP Relax/MC 每个批次根目录有一个 `run_mlip_batch.py` 和一个 `GPU.sh`；

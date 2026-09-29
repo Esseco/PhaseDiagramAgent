@@ -13,7 +13,7 @@ FIELDS = (
     "record_id", "structure_id", "phase", "x_Na_per_O2", "composition",
     "original_energy", "normalized_total_energy_eV", "ehull_eV_per_atom",
     "is_stable", "structure_path", "na_layer_uniform", "na_layer_status",
-    "na_layer_rule",
+    "na_layer_rule", "model_version", "energy_eV_per_O2", "hull_energy_eV_per_O2", "ehull_eV_per_O2",
 )
 
 
@@ -47,6 +47,10 @@ def export_phase_diagram_csv(snapshot: dict, path: str | Path) -> Path:
                 "na_layer_uniform": entry.get("na_layer_uniform"),
                 "na_layer_status": entry.get("na_layer_status"),
                 "na_layer_rule": entry.get("na_layer_rule"),
+                "model_version": snapshot.get("model_version"),
+                "energy_eV_per_O2": entry.get("energy_per_O2"),
+                "hull_energy_eV_per_O2": entry.get("hull_energy_per_O2"),
+                "ehull_eV_per_O2": entry.get("ehull_per_O2"),
             })
     temporary.replace(target)
     return target

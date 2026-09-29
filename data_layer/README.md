@@ -9,3 +9,5 @@ action、收益、失败任务和当前搜索状态，绝不自动晋升为长�
 负责稳定编号、结构与结果台账、任务历史、模型/委员会版本记录、保存加载和恢复状态。历史 JSON 字段与稳定 ID 算法保持兼容。
 
 子目录：`ledger/` 编号和科学/任务台账，`memory/` 决策记忆，`state/` 调度状态保存恢复，`models/` 模型版本与委员会清单。`ledger/branch_energy_pool_ledger.py` 以 `system_id + mlip_version + energy_basis` 隔离能量池。本层保存事实，不做策略决策或凸包分析。
+
+结构化记忆按 run（当前事实）、project（本项目经验）、system（体系经验）和 user（个人偏好）区分。任务/批次事实可自动成为 `memory_candidates`，但不会自动变成 Agent 长期指令。可复用建议必须逐条审核；确认相图收敛后才可生成体系 Skill 草稿，发布到共享库仍需人工批准。旧 `long_term` 列表继续可读。

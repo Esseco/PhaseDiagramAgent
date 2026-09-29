@@ -4,8 +4,14 @@
 def summarize_agent_state(state: dict) -> dict:
     tasks = state.get("tasks", [])
     status_counts = {}
+    phase_counts = {"identified": 0, "unknown": 0}
     for item in tasks:
         status_counts[item.get("status", "unknown")] = status_counts.get(item.get("status", "unknown"), 0) + 1
+        if item.get("status") == "completed" and item.get("stage") in {
+                "relax_and_feature", "deep_search", "dft_single_point", "dft_relax"}:
+            identified = (item.get("outputs") or {}).get("phase_identification") or {}
+            key = "identified" if identified.get("status") == "identified" else "unknown"
+            phase_counts[key] += 1
     stale = []
     for collection in ("energy_records", "feature_records", "surrogate_predictions", "phase_diagrams"):
         values = state.get(collection, [])
@@ -26,6 +32,7 @@ def summarize_agent_state(state: dict) -> dict:
         "budget_reservations": state.get("budget_reservations", {}),
         "task_status_counts": status_counts,
         "active_model_version": state.get("active_model_version"),
+        "phase_identification_counts": phase_counts,
         "stale_or_refresh_required": stale,
         "unknown_results": [item.get("task_key") for item in tasks if item.get("status") in {"unknown", "not_configured"}],
         "deferred_tasks": [item.get("task_key") for item in tasks if item.get("status") == "deferred"],

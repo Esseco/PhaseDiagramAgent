@@ -52,7 +52,7 @@ def test_stage_batch_sizes_and_compatibility(tmp_path):
         if result["status"] == "no_tasks":
             break
         sizes.append(len(result["batch"]["task_ids"]))
-    assert sizes == [100, 100, 5, 1, 20, 20, 1, 1, 1, 1]
+    assert sizes == [100, 100, 5, 1, 10, 10, 10, 10, 1, 1, 1, 1]
 
 
 def test_plan_prepare_submit_are_idempotent(tmp_path):

@@ -159,6 +159,20 @@ class ExecutionPolicyTest(unittest.TestCase):
         self.assertEqual(revised["revision_status"], "revised")
         self.assertEqual(revised["action"]["parameters"], {"max_det_H": 12})
 
+    def test_mc_action_cannot_exceed_confirmed_per_round_limit(self):
+        from execution_layer.policy.validate_tool_action import validate_tool_action
+
+        registry = create_tool_registry({"allocate_mc_bohb": self._handler})
+        action = {
+            "tool": "allocate_mc_bohb", "task_key": "mc-budget-check",
+            "target_ids": ["B1"],
+            "parameters": {"mc_budget": 1001, "exploration_fraction": 0.1},
+            "budget": 0, "reason": "test budget guard", "expected_purpose": "ensure cap",
+        }
+        result = validate_tool_action(action, {}, self.session, registry)
+        self.assertFalse(result["valid"])
+        self.assertIn("mc_budget_exceeds_configured_maximum", result["errors"])
+
     def test_approve_without_final_approval_comment_is_rejected(self):
         proposed = run_tool_step(None, self.session, registry=self.registry, agent_client=self._agent, execution_mode="interactive", invocation_id="strict-approval")
         with self.assertRaisesRegex(ValueError, "comment"):

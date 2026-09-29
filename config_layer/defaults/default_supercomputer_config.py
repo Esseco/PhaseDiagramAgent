@@ -8,7 +8,7 @@ def default_supercomputer_config() -> dict:
         "batch_sizes": {
             "simple_check": 100,
             "relax_and_feature": 100,
-            "deep_search": 20,
+            "deep_search": 10,
             "dft_single_point": 1,
             "dft_relax": 1,
         },

@@ -49,3 +49,11 @@ initial_long_term_advice=[
 近期经验从现有 action_records/rewards 提取，不由 AI 自动写成长久规则。历史数值按原值呈现，不把相关性描述成因果结论。缺失的相图和收益数据保持缺失，不生成虚构观测。新收益记录附加前后相图版本与能量基准，但相图版本本身不足以证明模型可比，跨模型比较仍需核对计算来源。
 
 通用 action、人工修订、轮次策略和 DFT 决策均接入统一上下文。独立调用轮次/DFT接口时需要传入含 decision_memory、rewards 和 phase_diagrams（或 phase_diagram_state）的状态；正式主动学习调用会转交这些字段。通用 proposal JSON/MD 同时展示长期建议、当前相图与近期经验，便于审查。
+
+## 结构化记忆与体系经验包
+
+新增 `decision_memory.records`（人工审核的长期记录）和 `memory_candidates`（自动收集的事实候选），不改变旧状态格式。记录包含作用范围、适用条件、证据引用、成熟度和有效状态。Agent 每次只读取少量相关且已审核记录；候选事实不能直接成为建议。
+
+本地控制接口：`GET /phase/memory` 查看记录与审核队列；`POST /phase/memory/propose` 提议记录；`POST /phase/memory/review` 逐条批准或拒绝。体系 Skill 在用户确认收敛后生成于项目 `knowledge_export/<体系>-draft`，包括 `SKILL.md`、`profile.json`、`evidence.json` 和 `CHANGELOG.md`。草稿不自动发布；设置运行时 `knowledge_library_root` 或环境变量 `PHASE_SEARCH_KNOWLEDGE_ROOT` 后，使用 `POST /phase/memory/skills/publish` 明确批准发布。`GET /phase/memory/skills` 查看新项目匹配结果，`POST /phase/memory/skills/import` 只创建逐条审核提案，不改配置硬约束。
+
+这些 Skill 是经验记录，不含可执行代码。预算耗尽、缺少收敛证据或仅有未经审核的候选观察不能发布。旧项目可调用 `backfill_memory_candidates(state_path, dry_run=True)` 预览，再以 `dry_run=False` 写回；写回前自动创建 `.memory-backup`，不删除原文件。

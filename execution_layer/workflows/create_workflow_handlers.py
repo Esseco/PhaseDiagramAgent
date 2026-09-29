@@ -28,7 +28,12 @@ def create_workflow_handlers(
 def _check_convergence(*, action, context):
     state = context.get("event_state") or {}
     rules = (context.get("effective_config") or {}).get("convergence") or {}
-    return check_global_convergence(state, rules=_normalize_rules(rules))
+    result = check_global_convergence(state, rules=_normalize_rules(rules))
+    if result.get("status") == "finished":
+        from data_layer.memory.maybe_draft_converged_skill import maybe_draft_converged_skill
+        result["knowledge_draft"] = maybe_draft_converged_skill(
+            state, context.get("effective_config") or {}, result)
+    return result
 
 
 def _pause_search(*, action, context):

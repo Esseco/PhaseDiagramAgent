@@ -7,7 +7,10 @@ def estimate_proposal_cost(action, state):
     tool = action.get("tool"); params = action.get("parameters") or {}
     stages = []
     if tool == "allocate_mc_bohb":
-        stages.append({"stage": "deep_search", "tasks": "BOHB-selected", "mc_steps": int(params.get("mc_budget", 0)), "initial_cost": float(action.get("budget", 0) or params.get("mc_budget", 0))})
+        preview = params.get("budget_preview") or {}
+        stages.append({"stage": "deep_search", "tasks": preview.get("selected_branch_count", "MC-selected"),
+                       "mc_steps": preview.get("requested_steps", int(params.get("mc_budget", 0))),
+                       "initial_cost": float(action.get("budget", 0) or params.get("mc_budget", 0))})
     elif tool == "prepare_local_batch_files" and params.get("mode") == "relax_inputs":
         stages.append({"stage": "relax_and_feature", "tasks": "existing legal structures",
                        "initial_cost": float(action.get("budget", 0) or 0)})

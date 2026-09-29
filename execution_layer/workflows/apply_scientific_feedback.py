@@ -7,6 +7,8 @@ from copy import deepcopy
 from analysis_layer.feedback.calculate_search_reward import calculate_search_reward
 from analysis_layer.state.summarize_agent_state import summarize_agent_state
 from analysis_layer.phase.update_phase_diagram import update_phase_diagram
+from analysis_layer.phase.refresh_identified_phases import refresh_identified_phases
+from analysis_layer.phase.ensure_phase_identification import ensure_phase_identification
 from data_layer.ledger.collect_calculation_results import collect_calculation_results
 from data_layer.ledger.coverage_report import coverage
 
@@ -22,12 +24,16 @@ def apply_scientific_feedback(
     ledger_path=None,
     phase_diagram_directory=None,
     final_frame_mlip_evaluator=None,
+    active_model_version=None,
+    phase_references=None,
+    phase_identification_cache_path=None,
 ):
     """Persist each terminal result once, then rebuild hull/reward summaries."""
     current = deepcopy(state)
     processed = current.setdefault("feedback_processed_task_ids", [])
     current.setdefault("phase_records", [])
     current.setdefault("phase_diagrams", {})
+    current.setdefault("phase_diagrams_by_model", {})
     current.setdefault("reward_states", {})
     current.setdefault("rewards", [])
     accepted, rejected, feedback_rows = [], [], []
@@ -62,15 +68,29 @@ def apply_scientific_feedback(
             current["phase_records"].append(phase_record)
             feedback_rows.append({**result, "phase_record": phase_record})
 
-    if feedback_rows:
+    current, _ = ensure_phase_identification(
+        current, manager, phase_references=phase_references,
+        cache_path=phase_identification_cache_path,
+    )
+    refresh_identified_phases(current)
+    selected_model = active_model_version or current.get("active_model_version")
+    if selected_model is not None:
+        current["active_model_version"] = selected_model
+    if current.get("phase_records"):
         previous = deepcopy(current["phase_diagrams"])
-        diagrams = update_phase_diagram(
+        previous_models = current["phase_diagrams_by_model"]
+        output = update_phase_diagram(
             current["phase_records"], output_directory=phase_diagram_directory,
-            parent_versions={name: row.get("version") for name, row in previous.items()},
-        )["diagrams"]
+            parent_versions={**{name: row.get("version") for name, row in previous.items()},
+                             **{f"mlip:{name}": row.get("version") for name, row in previous_models.items()}},
+            active_model_version=active_model_version or current.get("active_model_version"),
+        )
+        diagrams = output["diagrams"]
+        current["phase_diagrams_by_model"].update(output["mlip_by_version"])
         current["phase_diagrams"] = diagrams
-        _record_convergence_round(current, previous, diagrams)
-        _record_rewards(current, previous, diagrams, feedback_rows)
+        if feedback_rows:
+            _record_convergence_round(current, previous, diagrams)
+            _record_rewards(current, previous, diagrams, feedback_rows)
     current["coverage"] = coverage(manager.data, manager.stages, manager.stage_labels)
     current["agent_state_summary"] = summarize_agent_state(current)
     if ledger_path is not None and accepted:
@@ -86,9 +106,12 @@ def _record_rewards(state, previous, diagrams, feedback_rows):
         relevant = [
             row for row in feedback_rows
             if row["phase_record"].get("energy_method") == method
+            and (method != "mlip" or row["phase_record"].get("model_version") ==
+                 (diagrams.get("mlip") or {}).get("model_version"))
         ]
         before, after = previous.get(method), diagrams.get(method)
-        if not relevant or not before or not after or after.get("status") != "completed":
+        if (not relevant or not before or not after or after.get("status") != "completed"
+                or before.get("energy_basis_id") != after.get("energy_basis_id")):
             continue
         reward = calculate_search_reward(
             before, after,
@@ -153,6 +176,8 @@ def _record_final_frame_error(state, result, manager, structure_id, evaluator=No
 def _record_convergence_round(state, previous, current):
     method = "dft" if (current.get("dft") or {}).get("entries") else "mlip"
     before, after = previous.get(method) or {}, current.get(method) or {}
+    if before.get("energy_basis_id") != after.get("energy_basis_id"):
+        return
     if not before.get("entries") or not after.get("entries"):
         return
     old = {row.get("structure_id"): row for row in before["entries"]}

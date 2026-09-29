@@ -38,6 +38,8 @@ def build_mc_full_na_template(branch, boundary, phase_references, *, config=None
                          f"母结构有 {na_count} 个 Na、{oxygen_count} 个 O")
     space = system.get("configuration_space") or (config or {}).get("configuration_space") or {}
     fixed_t = (space.get("roles") or {}).get("T") == "fixed"
+    if not fixed_t and branch.get("T") is None:
+        raise ValueError(f"branch {branch.get('branch_id')}: 可变 T 的 MC 满 Na模板缺少 branch.T")
     structure = generate_branch_structure(
         boundary, phase=phase, H=branch["H"], x=1,
         T=None if fixed_t else list(branch["T"]),
@@ -45,6 +47,6 @@ def build_mc_full_na_template(branch, boundary, phase_references, *, config=None
         enforce_phase_composition=False,
     )
     actual_t, _ = extract_T(structure, boundary["TM_ratio"])
-    if actual_t != list(branch["T"]):
+    if branch.get("T") is not None and actual_t != list(branch["T"]):
         raise ValueError(f"branch {branch.get('branch_id')}: 模板 TM 占位与 branch.T 不一致")
     return structure

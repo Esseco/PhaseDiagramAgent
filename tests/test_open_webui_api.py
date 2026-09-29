@@ -7,6 +7,7 @@ from pathlib import Path
 from run.open_webui_api import (
     RunWorkflowChatHandler, classify_user_decision, create_open_webui_runtime,
     handle_chat_request, _workspace_path_clarification_reply, format_workflow_reply,
+    _is_config_migration_approval,
 )
 from run.configuration_chat import ConfigurationChatHandler
 from execution_layer.remote.manual_upload_runner import ManualUploadBatchRunner
@@ -71,6 +72,35 @@ class OpenWebUIAPITest(unittest.TestCase):
         self.assertEqual(classify_user_decision("请解释预算"), "comment")
         self.assertEqual(classify_user_decision("不同意"), "comment")
         self.assertEqual(classify_user_decision("拒绝"), "reject")
+
+    def test_config_migration_approval_is_routed_separately_from_action_approval(self):
+        self.assertTrue(_is_config_migration_approval("批准迁移"))
+        self.assertTrue(_is_config_migration_approval("请批准迁移"))
+        self.assertFalse(_is_config_migration_approval("为什么批准迁移会失败"))
+        self.assertFalse(_is_config_migration_approval("不批准迁移"))
+        calls = []
+        state_path = Path.cwd() / "migration-test-state-does-not-exist.json"
+
+        def workflow(**kwargs):
+            calls.append(kwargs)
+            return {"status": "config_migrated", "from_config_version": "v1",
+                    "config_version": "v2", "migration": {"budget_changes": [
+                        {"field": "round_strategy.maximum_mc_budget", "from": 1000, "to": 5000},
+                      ], "compatibility": {
+                          "relax_task_count": 406,
+                          "unrecorded_fields": ["mlip.relax_parameters.mace_default_dtype"],
+                      }}}
+
+        handler = RunWorkflowChatHandler(
+            {"state_path": str(state_path)}, workflow=workflow, history_prompt=False,
+        )
+        reply = handler([{"role": "user", "content": "批准迁移"}], conversation_id="chat")
+        self.assertTrue(calls[0]["approve_budget_extension"])
+        self.assertIn("历史任务和结果仍保留原版本归属", reply)
+        self.assertIn("maximum_mc_budget 1000→5000", reply)
+        self.assertIn("已核对 406 条旧 Relax 结果", reply)
+        self.assertIn("mace_default_dtype", reply)
+        self.assertFalse(calls[0].get("execute_scientific_action", False))
 
     def test_openai_request_passes_real_user_messages(self):
         seen = {}
@@ -205,6 +235,33 @@ class OpenWebUIAPITest(unittest.TestCase):
             continued = handler([{"role": "user", "content": "继续"}], conversation_id="chat-a")
             self.assertIn("Agent action proposal", continued)
             self.assertEqual(calls, [])
+
+    def test_continue_does_not_call_config_edit_classifier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            state_path.write_text(json.dumps({"tasks": [{"task_id": "T1", "status": "completed"}]}),
+                                  encoding="utf-8")
+            handler = RunWorkflowChatHandler({"state_path": str(state_path)},
+                                             workflow=lambda **_: {"status": "planned_only"},
+                                             history_prompt=True)
+            with patch("decision_layer.agent.classify_config_edit_intent.classify_config_edit_intent",
+                       side_effect=AssertionError("纯继续不应分析为配置编辑")):
+                handler([{"role": "user", "content": "继续"}])
+
+    def test_navigation_commands_never_open_config_revision(self):
+        for command in ("开始", "开始搜索", "下一步", "然后呢", "恢复运行"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:
+                state_path = Path(directory) / "state.json"
+                state_path.write_text("{}", encoding="utf-8")
+                handler = RunWorkflowChatHandler(
+                    {"state_path": str(state_path)},
+                    workflow=lambda **_: {"status": "planned_only"},
+                    config_intent_client=lambda _: (_ for _ in ()).throw(
+                        AssertionError("流程指令不应调用配置分类器")),
+                    config_revision_factory=lambda _: (_ for _ in ()).throw(
+                        AssertionError("流程指令不应创建配置草稿")),
+                )
+                handler([{"role": "user", "content": command}])
 
     def test_new_run_uses_unique_paths_and_keeps_old_ledger(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": "local-test-key"}):

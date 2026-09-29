@@ -29,7 +29,7 @@
     ],
     "stage_batch_sizes": {
       "relax_and_feature": 100,
-      "deep_search": 20,
+      "deep_search": 10,
       "dft_single_point": 1,
       "dft_relax": 1
     },

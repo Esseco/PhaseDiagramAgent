@@ -1,13 +1,19 @@
 """Small authenticated control surface; no shell, Python, or arbitrary file tools."""
 
 from copy import deepcopy
+import os
+from pathlib import Path
 
 from analysis_layer.visualization.build_webui_charts import build_webui_charts
 from config_layer.runtime.path_mapping import validate_path_mappings
 from config_layer.session.apply_config_revision import apply_config_revision
 from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
 from config_layer.session.save_config_session import save_config_session
-from data_layer.memory.review_queue import review_memory_update
+from data_layer.memory.review_queue import propose_knowledge_record, review_memory_update
+from data_layer.memory.build_system_signature import build_system_signature
+from data_layer.memory.load_matching_domain_skills import load_matching_domain_skills
+from data_layer.memory.propose_domain_skill_import import propose_domain_skill_import
+from data_layer.memory.publish_domain_skill import publish_domain_skill
 from execution_layer.policy.file_approval import proposal_hash
 from execution_layer.step_runner.build_status_summary import build_status_summary
 from execution_layer.step_runner.file_protocol import read_json, write_json
@@ -70,7 +76,53 @@ class LocalAgentControl:
     def memory(self):
         state = read_json(self.state_path, {}) or {}
         return {"active": deepcopy((state.get("decision_memory") or {}).get("long_term") or {}),
+                "records": deepcopy((state.get("decision_memory") or {}).get("records") or []),
+                "candidate_count": len(state.get("memory_candidates") or []),
                 "review_queue": deepcopy(state.get("memory_review_queue") or [])}
+
+    def propose_memory(self, record):
+        state = read_json(self.state_path, {}) or {}
+        result = propose_knowledge_record(state, record, source="agent_proposal")
+        write_json(self.state_path, result["state"])
+        return {"status": result["proposal"]["status"],
+                "proposal_id": result["proposal"]["proposal_id"]}
+
+    def _knowledge_root(self):
+        value = (getattr(self.chat_handler, "knowledge_library_root", None)
+                 or os.environ.get("PHASE_SEARCH_KNOWLEDGE_ROOT"))
+        if not value:
+            raise ValueError("knowledge library root is not configured")
+        return Path(value).resolve()
+
+    def domain_skill_matches(self):
+        config = ((self.config().get("confirmed_snapshot") or {}).get("config") or {})
+        signature = build_system_signature(config.get("system") or config.get("system_config"))
+        return {"matches": load_matching_domain_skills(self._knowledge_root(), signature)}
+
+    def propose_skill_import(self):
+        config = ((self.config().get("confirmed_snapshot") or {}).get("config") or {})
+        signature = build_system_signature(config.get("system") or config.get("system_config"))
+        state = read_json(self.state_path, {}) or {}
+        result = propose_domain_skill_import(state, self._knowledge_root(), signature)
+        if result["proposals"]:
+            write_json(self.state_path, result["state"])
+        return {"status": "pending_review", "proposal_ids":
+                [row["proposal_id"] for row in result["proposals"]]}
+
+    def publish_skill(self, draft_directory, *, approved, version="1.0.0"):
+        state = read_json(self.state_path, {}) or {}
+        root = Path(self.config().get("config", {}).get("storage", {}).get("workspace_root") or
+                    self.state_path).resolve()
+        if root.is_file() or root.suffix == ".json":
+            root = root.parent.parent
+        draft = Path(draft_directory).resolve()
+        if root not in draft.parents or draft.parent.name != "knowledge_export":
+            raise ValueError("draft must be inside this project's knowledge_export directory")
+        if not (state.get("user_accepted_convergence") is True and
+                (state.get("convergence_result") or state.get("convergence") or {}).get("converged") is True):
+            raise ValueError("accepted convergence is required")
+        return publish_domain_skill(draft, self._knowledge_root(), approved=approved,
+                                    version=version)
 
     def propose(self, instruction, *, conversation_id="local-control"):
         return {"reply": self.chat_handler([{"role": "user", "content": str(instruction)}],

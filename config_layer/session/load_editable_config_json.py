@@ -35,7 +35,9 @@ def load_editable_config_json(path, current_config: dict, *, default_storage=Non
         raise ValueError(f"无法读取配置文件：{error}") from error
     from config_layer.session.project_config_json import FORMAT_ID as PROJECT_FORMAT_ID, expand_project_config
     if isinstance(document, dict) and document.get("_format") == PROJECT_FORMAT_ID:
-        return expand_project_config(document, source=source)
+        return expand_project_config(
+            document, source=source, baseline_config=current_config,
+        )
     if not isinstance(document, dict) or document.get("_format") != FORMAT_ID:
         raise ValueError(f"文件格式标识无效；应为 {FORMAT_ID}。")
     config = document.get("config")

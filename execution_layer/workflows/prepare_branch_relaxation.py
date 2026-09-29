@@ -4,6 +4,7 @@ from copy import deepcopy
 import hashlib
 import json
 
+
 from scientific_layer.structures.initialize_branch_structures import initialize_branch_structures
 from data_layer.ledger.register_candidate_batch import register_candidate_batch
 from execution_layer.budget.reserve_budget import reserve_budget
@@ -33,6 +34,8 @@ def prepare_branch_relaxation(candidates, state, context):
         for saved_pool in restored:
             current.setdefault('branch_hull_batches', {}).setdefault(saved_pool['version'], saved_pool)
     records = []
+    from decision_layer.agent.choose_debug_next_action import _verified_migrated_relax_ids
+    migrated_ids = _verified_migrated_relax_ids(current, mlip, version)
     for branch in candidates:
         existing_ids = branch.get('structure_ids') or []
         screened_ids = [sid for sid in existing_ids
@@ -51,6 +54,10 @@ def prepare_branch_relaxation(candidates, state, context):
         for sid in ids:
             key = f'relax-screen:{version}:{settings_id}:{sid}'
             matches = [t for t in current.get('tasks', []) if t.get('task_key') == key]
+            if not matches and sid in migrated_ids:
+                matches = [t for t in current.get('tasks', [])
+                           if t.get('structure_id') == sid and t.get('model_version') == version
+                           and t.get('stage') == 'relax_and_feature' and t.get('status') == 'completed']
             if matches:
                 task = matches[-1]; out = task.get('outputs') or {}
                 normal_stop = out.get('relax_stopped_normally', task.get('converged') is True)
@@ -85,10 +92,18 @@ def prepare_branch_relaxation(candidates, state, context):
                     'screening_basis': 'electrostatic_top10_random3_layer_occupied'}
             current.setdefault('tasks', []).append(task)
             current.setdefault('pending_tasks', []).append(task); pending.append(task)
-    if pending or unavailable:
+    if pending:
         return {'state': current, 'status': 'screening_pending' if pending else 'screening_incomplete',
                 'candidates': [], 'unavailable': unavailable}
-    pool = build_relax_hull(records, model_version=version, system_id=system_id)
+    if not records:
+        return {'state': current, 'status': 'screening_incomplete', 'candidates': [],
+                'unavailable': unavailable, 'reason': 'no_successful_relax_results'}
+    frozen_version = (context.get('mc_hull_reference_version'))
+    pool = (current.get('branch_hull_batches') or {}).get(frozen_version) if frozen_version else None
+    if frozen_version and (not pool or pool.get('model_version') != version):
+        return {'state': current, 'status': 'screening_incomplete', 'candidates': [],
+                'unavailable': unavailable, 'reason': 'approved_hull_reference_unavailable'}
+    pool = pool or build_relax_hull(records, model_version=version, system_id=system_id)
     ranked, missing = rank_relaxed_branches(candidates, pool,
         uncertainty_weight=float(settings.get('uncertainty_weight', 1.0)))
     current.setdefault('branch_hull_batches', {})[pool['version']] = pool
@@ -96,8 +111,13 @@ def prepare_branch_relaxation(candidates, state, context):
     if ledger_path:
         save_branch_energy_pool(pool, ledger_path)
         current['branch_energy_pool_ledger_path'] = str(ledger_path)
-    return {'state': current, 'status': 'ready' if not missing else 'uncertainty_unavailable',
-            'candidates': ranked, 'pool': pool, 'unavailable': missing}
+    unavailable_structures = sorted(set(unavailable))
+    unavailable_branches = sorted(set(missing))
+    status = 'ready' if ranked and not (unavailable_structures or unavailable_branches) else (
+        'ready_partial' if ranked else 'screening_incomplete')
+    return {'state': current, 'status': status, 'candidates': ranked, 'pool': pool,
+            'unavailable': unavailable_structures, 'unavailable_branches': unavailable_branches,
+            'partial': bool(unavailable_structures or unavailable_branches)}
 
 
 def _screen_structure_ids(manager, branch_id, *, count, seed):

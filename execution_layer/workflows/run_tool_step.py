@@ -87,6 +87,27 @@ def run_tool_step(
 
     pending_key = invocation_id or "__single_interactive_action__"
     stored = current["pending_execution_policies"].get(pending_key)
+    rejecting = isinstance(human_feedback, dict) and human_feedback.get("decision") == "reject"
+    if mode == "interactive" and stored and not rejecting and _is_pending_relax_preparation(stored):
+        allowed = [name for name in (config.get("agent") or {}).get("allowed_tools") or []
+                   if callable((registry.get(name) or {}).get("handler"))]
+        from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
+        next_action = choose_debug_next_action(
+            current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
+            allowed_tools=allowed, user_message="继续",
+        )
+        if next_action and next_action.get("tool") == "allocate_mc_bohb":
+            stored = deepcopy(stored)
+            previous = (stored.get("agent_proposal") or {}).get("raw_action") or {}
+            stored["revision"] = int(stored.get("revision", 0)) + 1
+            stored.setdefault("feedback_history", []).append({
+                "revision_status": "relax_results_recovered",
+                "prior_action": previous.get("tool"),
+                "analysis": "已回收的 Relax 结果覆盖该批结构；改为 MC 预算与输入文件准备。",
+            })
+            stored["agent_proposal"] = build_agent_proposal(next_action, decision_state)
+            current["pending_execution_policies"][pending_key] = stored
+            human_feedback = None  # Approval for the old Relax proposal cannot approve MC.
     advice_changed = False
     if mode == "interactive" and stored and isinstance(human_feedback, dict) and human_feedback.get("long_term_advice") is not None:
         updated = update_long_term_advice(current, human_feedback["long_term_advice"], source=f"{pending_key}:revision-{stored.get('revision', 0)}")
@@ -147,6 +168,10 @@ def run_tool_step(
             current = record_budget_usage(
                 current, {"llm_usage": action["_llm_usage"], "iteration": current.get("iteration", 0)}
             )
+        mc_intent = current.get("mc_budget_intent") or {}
+        if (action.get("tool") == "allocate_mc_bohb"
+                and (action.get("parameters") or {}).get("mc_budget") == mc_intent.get("steps")):
+            current.pop("mc_budget_intent", None)
         proposal = build_agent_proposal(action, decision_state)
         record_id = _record_id(current, invocation_id)
 
@@ -154,6 +179,27 @@ def run_tool_step(
     if advice_changed:
         opinion = str(human_feedback.get("comment") or "") + "\n请根据更新后的人工长期建议重新分析，生成供人工审批的新 proposal。"
     if opinion is not None:
+        from decision_layer.agent.resolve_mc_budget_feedback import (
+            resolve_mc_budget_feedback, resolve_mc_full_plan_steps,
+        )
+        requested_mc_steps = (resolve_mc_budget_feedback(opinion, proposal.get("raw_action"))
+                              or resolve_mc_full_plan_steps(opinion, proposal.get("raw_action")))
+        maximum_mc_budget = (config.get("round_strategy") or {}).get("maximum_mc_budget")
+        if (requested_mc_steps is not None and maximum_mc_budget is not None
+                and requested_mc_steps > int(maximum_mc_budget)):
+            current["pending_execution_policies"].pop(pending_key, None)
+            current.setdefault("cancelled_proposals", []).append({
+                "invocation_id": pending_key, "reason": "mc_budget_exceeds_confirmed_maximum",
+                "requested_steps": requested_mc_steps,
+                "config_version": current.get("confirmed_config_version")})
+            current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
+            return {"status": "configuration_revision_required", "execution_mode": mode,
+                    "reason": (f"本轮 MC 目标 {requested_mc_steps} 步超过已确认配置的单轮上限 "
+                               f"{maximum_mc_budget} 步；先修订 round_strategy.maximum_mc_budget "
+                               "并确认新配置，不能批准旧建议。"),
+                    "agent_proposal": None, "final_action": None, "action": None,
+                    "validation": None, "execution": None, "execution_result": None,
+                    "record_id": record_id, "state": current, "idempotent_replay": False}
         from decision_layer.agent.resolve_explicit_generation_request import _requested_branch_batch_size
         requested_batch = _requested_branch_batch_size(opinion)
         if requested_batch is not None and (proposal.get("raw_action") or {}).get("tool") == "generate_branches":
@@ -181,7 +227,20 @@ def run_tool_step(
         revision = ({"action": safe_next, "analysis": safe_next["reason"],
                      "revision_status": "debug_preparation_required"} if safe_next else
                     revise_tool_proposal(proposal, opinion, state=decision_state,
-                                         allowed_tools=allowed, agent_client=agent_client))
+                                         allowed_tools=allowed, agent_client=agent_client,
+                                         source_state=current, manager=(context or {}).get("manager"),
+                                         config=(context or {}).get("effective_config") or config))
+        if revision.get("revision_status") == "mc_budget_preview_unavailable":
+            current["pending_execution_policies"].pop(pending_key, None)
+            current.setdefault("cancelled_proposals", []).append({
+                "invocation_id": pending_key, "reason": revision["revision_status"],
+                "config_version": current.get("confirmed_config_version")})
+            current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
+            return {"status": "mc_budget_preview_unavailable", "execution_mode": mode,
+                    "reason": revision["analysis"], "agent_proposal": None,
+                    "final_action": None, "action": None, "validation": None,
+                    "execution": None, "execution_result": None,
+                    "record_id": record_id, "state": current, "idempotent_replay": False}
         if (revision.get("action") or {}).get("tool") == "generate_branches":
             revision["action"] = _apply_generation_defaults(revision["action"], decision_state, config)
         if mode == "interactive":
@@ -280,6 +339,12 @@ def run_tool_step(
                 **(context or {}),
                 "confirmed_config": config,
                 "config_version": validation["config_version"],
+                "execution_mode": mode,
+                "human_approved_mc_full_plan": (
+                    mode == "interactive"
+                    and (policy.get("human_feedback") or {}).get("decision") == "approve"
+                    and action.get("tool") == "allocate_mc_bohb"
+                    and bool((action.get("parameters") or {}).get("budget_preview"))),
             },
         )
         current, payload_status = _apply_execution_result(
@@ -313,6 +378,12 @@ def run_tool_step(
 
 def _record_id(state, invocation_id):
     return invocation_id or f"action-{len(state.get('action_records', [])) + 1:06d}"
+
+
+def _is_pending_relax_preparation(stored):
+    action = ((stored.get("agent_proposal") or {}).get("raw_action") or {})
+    return (action.get("tool") == "prepare_local_batch_files"
+            and (action.get("parameters") or {}).get("mode") == "relax_inputs")
 
 
 def _prepare_debug_relax_screen_action(action, state, context, config, allowed_tools, *, invocation_id=None):

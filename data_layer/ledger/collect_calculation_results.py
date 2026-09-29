@@ -110,7 +110,7 @@ def collect_calculation_results(
 def _phase_record(manager, structure_id, result_id, stage, result):
     outputs = result.get("outputs") or {}
     energy = outputs.get("energy")
-    if energy is None or result.get("converged") is not True:
+    if energy is None or (stage != "deep_search" and result.get("converged") is not True):
         return None
     unit = outputs.get("energy_unit")
     if unit != "eV":
@@ -126,25 +126,30 @@ def _phase_record(manager, structure_id, result_id, stage, result):
         return None
     structure = manager.data["structures"][structure_id]
     branch = manager.data["branches"][structure["branch_id"]]
-    if stage == "deep_search" and not outputs.get("actual_phase"):
-        return None
     composition = outputs.get("composition") or structure.get("composition") or branch.get("composition")
     if not composition:
         return None
-    source_version = (
-        outputs.get("mlip_version")
-        or outputs.get("mlip_relax_version")
-        or ("atomate" if method == "dft" else None)
-    )
+    source_version = (result.get("model_version") or outputs.get("mlip_version")
+                      or outputs.get("mlip_relax_version")) if method == "mlip" else (
+                          outputs.get("dft_version") or "atomate")
+    identification = outputs.get("phase_identification") or {}
+    identified = identification.get("status") == "identified" and bool(outputs.get("actual_phase"))
     return {
         "record_id": result_id,
         "structure_id": structure_id,
         "structure_path": outputs.get("structure_path") or outputs.get("final_structure_path"),
-        "phase": outputs.get("actual_phase") if stage == "deep_search" else branch.get("P"),
+        "phase": outputs.get("actual_phase") if identified else None,
+        "source_phase": branch.get("P"),
+        "phase_identification_status": "identified" if identified else "unknown",
+        "phase_identification": copy.deepcopy(identification),
+        "structure_sha256": identification.get("structure_sha256"),
         "composition": composition,
         "energy": float(energy),
         "energy_unit": unit,
         "energy_method": method,
         "source_version": source_version,
-        "status": "completed",
+        "model_version": source_version if method == "mlip" else None,
+        "source_task_id": result.get("task_id"),
+        "stage": stage,
+        "status": "completed" if identified else "pending_phase_identification",
     }

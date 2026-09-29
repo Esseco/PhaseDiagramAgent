@@ -13,7 +13,7 @@ POLICY = {
         {"name": "small", "max_mc_steps": 10, "patience_steps": 3, "min_improvement": .01},
         {"name": "large", "max_mc_steps": 30, "patience_steps": 6, "min_improvement": .01},
     ],
-    "max_segments_per_branch": 2, "max_cumulative_cost_per_branch": 5,
+    "max_segments_per_branch": 2, "max_cumulative_cost_per_branch": 50,
     "random_exploration_fraction": 0, "high_ehull_defer_threshold": .3,
     "near_hull_retry_threshold": .1,
 }
@@ -32,12 +32,14 @@ class TieredClosedLoopTest(unittest.TestCase):
         self.assertEqual(result["selected"][0]["phase_soc_region"], "O3:x=0.5")
 
     def test_small_first_and_patience_near_hull_retries_new_segment(self):
-        candidate = {"branch_id": "B1", "relaxed_ehull": .02}
+        candidate = {"branch_id": "B1", "relaxed_ehull": .02,
+                     "structure_path": "initial.vasp", "structure_id": "S1"}
         first = schedule_tiered_mc([candidate], {}, policy=POLICY, total_budget=100,
                                    seed=1, model_version="m1", hull_reference_version="h1")
         self.assertEqual(first["actions"][0]["tier"], "small")
         state = first["state"]
-        state["segments"][0].update(status="completed", stop_reason="patience",
+        state["segments"][0].update(status="completed", result_path="lowest.vasp",
+                                    stop_reason="patience",
                                     actual_mc_steps=4, actual_gpu_core_hours=1)
         second = schedule_tiered_mc([candidate], state, policy=POLICY, total_budget=100,
                                     seed=1, model_version="m1", hull_reference_version="h1")
@@ -49,6 +51,55 @@ class TieredClosedLoopTest(unittest.TestCase):
         result = schedule_tiered_mc([high], {}, policy=POLICY, total_budget=100,
                                     seed=1, model_version="m1", hull_reference_version="h1")
         self.assertEqual(result["actions"], [])
+
+    def test_na0_endpoint_is_excluded_from_na_v_mc(self):
+        candidates = [
+            {"branch_id": "Na0", "x": "0/1", "relaxed_ehull": .01},
+            {"branch_id": "NaHalf", "x": "1/2", "relaxed_ehull": .02},
+        ]
+        result = schedule_tiered_mc(candidates, {}, policy=POLICY, total_budget=100,
+                                    seed=1, model_version="m1", hull_reference_version="h1")
+        self.assertEqual([row["branch_id"] for row in result["actions"]], ["NaHalf"])
+        self.assertEqual(result["excluded_candidates"], [
+            {"branch_id": "Na0", "reason": "no_mobile_ion_sites"}
+        ])
+
+    def test_equal_hull_mc_allocation_rotates_phase_and_composition(self):
+        policy = {**POLICY, "max_cumulative_cost_per_branch": 200,
+                  "initial_ehull_bands": [
+                      {"max_ehull_ev_per_atom": .01, "max_mc_steps": 100, "patience_steps": 8},
+                      {"max_ehull_ev_per_atom": .02, "max_mc_steps": 60, "patience_steps": 6},
+                      {"max_ehull_ev_per_atom": .04, "max_mc_steps": 30, "patience_steps": 4},
+                  ]}
+        candidates = [
+            {"branch_id": "OP2-x1", "P": "OP2", "x": "1/4", "relaxed_ehull": .005},
+            {"branch_id": "OP2-x2", "P": "OP2", "x": "1/2", "relaxed_ehull": .005},
+            {"branch_id": "OP2-x3", "P": "OP2", "x": "3/4", "relaxed_ehull": .005},
+            {"branch_id": "O3-x1", "P": "O3", "x": "1/4", "relaxed_ehull": .005},
+            {"branch_id": "P3-x1", "P": "P3", "x": "1/4", "relaxed_ehull": .005},
+        ]
+        result = schedule_tiered_mc(candidates, {}, policy=policy, total_budget=300,
+                                    seed=4, model_version="m1", hull_reference_version="h1")
+        self.assertEqual(len(result["actions"]), 3)
+        phase_by_branch = {row["branch_id"]: row["P"] for row in candidates}
+        self.assertEqual({phase_by_branch[row["branch_id"]] for row in result["actions"]},
+                         {"OP2", "O3", "P3"})
+
+    def test_relax_energy_sigma_prioritizes_candidates_within_same_phase_and_x(self):
+        policy = {**POLICY, "max_cumulative_cost_per_branch": 200,
+                  "initial_ehull_bands": [
+                      {"max_ehull_ev_per_atom": .01, "max_mc_steps": 10, "patience_steps": 3},
+                      {"max_ehull_ev_per_atom": .02, "max_mc_steps": 20, "patience_steps": 4},
+                  ]}
+        candidates = [
+            {"branch_id": "low-sigma", "P": "O3", "x": "1/2", "relaxed_ehull": .005,
+             "branch_energy_std_per_atom": .001, "allocation_score": .00475},
+            {"branch_id": "high-sigma", "P": "O3", "x": "1/2", "relaxed_ehull": .005,
+             "branch_energy_std_per_atom": .01, "allocation_score": .0025},
+        ]
+        result = schedule_tiered_mc(candidates, {}, policy=policy, total_budget=10,
+                                    seed=4, model_version="m1", hull_reference_version="h1")
+        self.assertEqual(result["actions"][0]["branch_id"], "high-sigma")
 
     def test_budget_exhaustion_model_switch_and_resume_are_distinct(self):
         candidate = {"branch_id": "B1", "relaxed_ehull": .02}

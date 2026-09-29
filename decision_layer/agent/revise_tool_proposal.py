@@ -8,10 +8,50 @@ from config_layer.schema.action_state_schema import normalize_action
 from decision_layer.agent.resolve_explicit_generation_request import (
     _requested_branch_batch_size, _requested_max_det_H,
 )
+from decision_layer.agent.resolve_mc_budget_feedback import (
+    resolve_mc_budget_feedback, resolve_mc_full_plan_steps,
+)
 
 
-def revise_tool_proposal(proposal, comment, *, state, allowed_tools, agent_client):
+def revise_tool_proposal(proposal, comment, *, state, allowed_tools, agent_client,
+                         source_state=None, manager=None, config=None):
     original = proposal.get("raw_action") or {}
+    requested_mc_steps = (resolve_mc_budget_feedback(comment, original)
+                          or resolve_mc_full_plan_steps(comment, original))
+    if requested_mc_steps is not None and "allocate_mc_bohb" in allowed_tools:
+        if source_state is None or manager is None or config is None:
+            return {"action": deepcopy(original), "analysis": "缺少 MC 凸包或配置，无法重新估算预算。",
+                    "revision_status": "mc_budget_preview_unavailable"}
+        from decision_layer.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
+        params = original.get("parameters") or {}
+        pool_version = params.get("hull_reference_version") or source_state.get("current_branch_hull_version")
+        pool = (source_state.get("branch_hull_batches") or {}).get(pool_version)
+        branches = (manager.data.get("branches") or {})
+        ids = list(original.get("target_ids") or [])
+        if not pool or not ids or any(branch_id not in branches for branch_id in ids):
+            return {"action": deepcopy(original), "analysis": "原 MC 候选池或冻结凸包已失效，请重新生成预算建议。",
+                    "revision_status": "mc_budget_preview_unavailable"}
+        candidates = [{**branches[branch_id], "branch_id": branch_id} for branch_id in ids]
+        preview = estimate_branch_mc_budget(candidates, pool, source_state, config,
+            step_limit=requested_mc_steps, seed=int(params.get("seed", (config.get("run") or {}).get("seed", 42))))
+        if not preview["allocations"]:
+            return {"action": deepcopy(original), "analysis": "当前凸包下没有可分配 MC 预算的 branch。",
+                    "revision_status": "mc_budget_preview_unavailable"}
+        action = deepcopy(original)
+        action.pop("_llm_usage", None)
+        action.setdefault("parameters", {})["mc_budget"] = requested_mc_steps
+        action["parameters"]["budget_preview"] = preview
+        action["budget"] = preview["estimated_relative_cost"]
+        digest = hashlib.sha256(json.dumps([original.get("task_key"), requested_mc_steps,
+            preview["allocation_checksum"]], sort_keys=True).encode()).hexdigest()[:20]
+        action["task_key"] = f"allocate-mc:revised:{digest}"
+        action["reason"] = f"按人工反馈把本轮 MC 总步数目标设为 {requested_mc_steps}，并重新计算分配与成本。"
+        action["expected_purpose"] = (f"目标 {requested_mc_steps} 步；预计使用 "
+            f"{preview['requested_steps']} 步、覆盖 {preview['selected_branch_count']} 个 branch；"
+            "批准后创建 MC tasks 并生成可上传输入文件。")
+        action["decision_source"] = "explicit_user_instruction"
+        return {"action": normalize_action(action), "analysis": action["reason"],
+                "revision_status": "user_mc_budget_applied"}
     requested_limit = _requested_max_det_H(comment)
     requested_batch_size = _requested_branch_batch_size(comment)
     if ((requested_limit is not None or requested_batch_size is not None)

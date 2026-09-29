@@ -6,14 +6,24 @@ from pathlib import Path, PurePosixPath
 from execution_layer.step_runner.file_protocol import read_json, write_json
 
 
+def _batch_locations(batch, local_batch_root, remote_batch_root):
+    local_root = Path(local_batch_root).resolve()
+    local = Path(batch.get("upload_directory") or (local_root / batch["batch_id"])).resolve()
+    try:
+        relative = local.relative_to(local_root)
+    except ValueError as exc:
+        raise ValueError(f"batch upload_directory escaped local root: {local}") from exc
+    remote = PurePosixPath(remote_batch_root).joinpath(*relative.parts)
+    return local, remote
+
+
 def sync_results(state_path, *, local_batch_root, remote_batch_root, transport):
     """Download artifacts only; reconciliation remains a local operation."""
     state = read_json(state_path, {}) or {}; synced = []
     for batch in state.get("slurm_batches") or []:
         if batch.get("status") not in {"submitted", "running", "completed", "results_synced"}:
             continue
-        local = Path(local_batch_root) / batch["batch_id"]
-        remote = PurePosixPath(remote_batch_root) / batch["batch_id"]
+        local, remote = _batch_locations(batch, local_batch_root, remote_batch_root)
         result = transport.download_tree(str(remote), local)
         if result.get("status") == "synced": synced.append(batch["batch_id"])
     return {"status": "synced" if synced else "nothing_to_sync", "batch_ids": synced}
@@ -35,8 +45,7 @@ def sync_tasks(state_path, *, local_batch_root, remote_batch_root, transport):
     state = read_json(state_path, {}) or {}; synced = []
     for batch in state.get("slurm_batches") or []:
         if batch.get("status") not in {"prepared", "synced"}: continue
-        local = Path(local_batch_root) / batch["batch_id"]
-        remote = PurePosixPath(remote_batch_root) / batch["batch_id"]
+        local, remote = _batch_locations(batch, local_batch_root, remote_batch_root)
         outcome = transport.upload_tree(local, str(remote))
         if outcome.get("status") not in {"synced", "already_synced"}:
             raise RuntimeError(f"batch sync failed: {batch['batch_id']}: {outcome}")
