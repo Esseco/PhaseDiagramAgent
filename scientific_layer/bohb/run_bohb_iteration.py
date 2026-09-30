@@ -38,10 +38,12 @@ def run_bohb_iteration(candidates: list[dict], state: dict | None, *, config: di
             continue
         cost_estimate = estimate_stage_cost("deep_search", atom_count=by_id[branch_id].get("atom_count"), mc_steps=increment, budgets=config.get("budget_limits"))
         action = {"task_key": task_key, "branch_id": branch_id, "stage": "deep_search", "status": "pending", "budget": budget, "incremental_budget": increment, "planned_relative_cost": cost_estimate["value"], "cost_estimate": cost_estimate, "seed": seed + offset, "checkpoint": proposal.get("checkpoint"), "selection_source": proposal.get("selection_source", "bohb_promotion"), "model_version": config["scope"]["mlip_version"], "hull_reference_version": config["scope"]["hull_reference_version"], "scope_id": scope["scope_id"]}
+        action["phase_diagram_version"] = config["scope"].get("phase_diagram_version")
         actions.append(action)
         branch = by_id[branch_id]
         if branch.get('structure_id'):
             action.update({key: branch[key] for key in ('structure_id', 'structure_path', 'relaxed_ehull',
+                'relaxed_ehull_unit', 'ehull_source', 'phase_diagram_version',
                 'branch_energy_std_per_atom', 'hull_reference_energy_per_atom')})
             action['max_mc_steps'] = increment
         planned += increment

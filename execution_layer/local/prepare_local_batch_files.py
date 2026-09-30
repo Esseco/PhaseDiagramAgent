@@ -12,6 +12,9 @@ from execution_layer.step_runner.file_protocol import write_json
 
 
 def prepare_local_batch_files(*, action, context):
+    if (action.get("parameters") or {}).get("mode") == "dft_inputs":
+        from execution_layer.local.prepare_dft_upload_batches import prepare_dft_upload_batches
+        return prepare_dft_upload_batches(action=action, context=context)
     if (action.get("parameters") or {}).get("mode") == "mc_inputs":
         from execution_layer.local.prepare_mc_upload_batches import prepare_mc_upload_batches
         return prepare_mc_upload_batches(action=action, context=context)

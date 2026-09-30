@@ -32,14 +32,19 @@ def revise_tool_proposal(proposal, comment, *, state, allowed_tools, agent_clien
             return {"action": deepcopy(original), "analysis": "原 MC 候选池或冻结凸包已失效，请重新生成预算建议。",
                     "revision_status": "mc_budget_preview_unavailable"}
         candidates = [{**branches[branch_id], "branch_id": branch_id} for branch_id in ids]
-        preview = estimate_branch_mc_budget(candidates, pool, source_state, config,
-            step_limit=requested_mc_steps, seed=int(params.get("seed", (config.get("run") or {}).get("seed", 42))))
-        if not preview["allocations"]:
-            return {"action": deepcopy(original), "analysis": "当前凸包下没有可分配 MC 预算的 branch。",
+        try:
+            preview = estimate_branch_mc_budget(candidates, pool, source_state, config,
+                step_limit=requested_mc_steps, seed=int(params.get("seed", (config.get("run") or {}).get("seed", 42))))
+        except ValueError as error:
+            return {"action": deepcopy(original), "analysis": str(error),
+                    "revision_status": "mc_budget_preview_unavailable"}
+        if not preview["allocations"] or preview["missing_branch_ids"]:
+            return {"action": deepcopy(original), "analysis": "当前相图缺少所选 Relax 结构的 Ehull/atom，不能派发 MC。",
                     "revision_status": "mc_budget_preview_unavailable"}
         action = deepcopy(original)
         action.pop("_llm_usage", None)
         action.setdefault("parameters", {})["mc_budget"] = requested_mc_steps
+        action["parameters"]["phase_diagram_version"] = preview["phase_diagram_version"]
         action["parameters"]["budget_preview"] = preview
         action["budget"] = preview["estimated_relative_cost"]
         digest = hashlib.sha256(json.dumps([original.get("task_key"), requested_mc_steps,

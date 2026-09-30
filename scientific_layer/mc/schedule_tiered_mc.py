@@ -9,7 +9,7 @@ import random
 
 
 def schedule_tiered_mc(candidates, state, *, policy, total_budget, seed, model_version,
-                       hull_reference_version):
+                       hull_reference_version, phase_diagram_version=None):
     current = deepcopy(state or {"segments": [], "processed_task_keys": []})
     current.setdefault("segments", []); current.setdefault("processed_task_keys", [])
     tiers = list(policy.get("tiers") or [])
@@ -66,10 +66,12 @@ def schedule_tiered_mc(candidates, state, *, policy, total_budget, seed, model_v
         if reserved + requested > total_budget:
             continue
         segment_index = len(previous)
-        task_key = "tiered-mc:" + hashlib.sha256(
-            f"{model_version}:{hull_reference_version}:{branch_id}:{segment_index}:{seed}".encode()
-        ).hexdigest()[:16]
-        action = {"task_key": task_key, "branch_id": branch_id, "stage": "deep_search",
+        identity = f"{model_version}:{hull_reference_version}:{branch_id}:{segment_index}:{seed}"
+        if phase_diagram_version is not None:
+            identity += f":{phase_diagram_version}"
+        task_key = "tiered-mc:" + hashlib.sha256(identity.encode()).hexdigest()[:16]
+        action = {"task_key": task_key, "branch_id": branch_id, "segment_index": segment_index,
+                  "stage": "deep_search",
                   "status": "pending", "budget": requested, "incremental_budget": requested,
                   "planned_relative_cost": requested, "max_mc_steps": requested,
                   "requested_max_mc_steps": requested,
@@ -78,7 +80,10 @@ def schedule_tiered_mc(candidates, state, *, policy, total_budget, seed, model_v
                   "seed": seed + segment_index + len(actions), "tier": tier.get("name", tier_index),
                   "tier_index": tier_index, "selection_source": "relax_hull_tiered_mc",
                   "segment_reason": reason, "restart_mode": "new_segment_from_structure",
-                  "model_version": model_version, "hull_reference_version": hull_reference_version}
+                  "model_version": model_version, "hull_reference_version": hull_reference_version,
+                  "phase_diagram_version": phase_diagram_version,
+                  "ehull_source": candidate.get("ehull_source"),
+                  "relaxed_ehull_unit": "eV/atom" if candidate.get("relaxed_ehull") is not None else None}
         if not previous:
             action["input_energy_per_atom"] = candidate.get("relaxed_energy_per_atom")
         else:
@@ -88,7 +93,9 @@ def schedule_tiered_mc(candidates, state, *, policy, total_budget, seed, model_v
             if not action["structure_path"]:
                 continue
         for key in ("structure_id", "relaxed_ehull",
-                    "branch_energy_std_per_atom", "hull_reference_energy_per_atom"):
+                    "branch_energy_std_per_atom", "hull_reference_energy_per_atom",
+                    "first_round_energy_improvement_ev_per_atom",
+                    "first_round_actual_mc_steps", "first_round_stop_reason"):
             if key in candidate: action[key] = candidate[key]
         if not previous and candidate.get("structure_path"):
             action["structure_path"] = candidate["structure_path"]
@@ -160,6 +167,10 @@ def _coverage_balanced_order(candidates, policy):
 
 
 def _relax_candidate_key(candidate):
+    if candidate.get("second_round_priority") is not None:
+        return (False, -float(candidate["second_round_priority"]),
+                float(candidate.get("relaxed_ehull") or 0),
+                str(candidate.get("branch_id") or ""))
     gap = candidate.get("relaxed_ehull")
     allocation = candidate.get("allocation_score")
     score = float(allocation) if allocation is not None else (

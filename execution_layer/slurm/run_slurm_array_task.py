@@ -27,11 +27,13 @@ def run_slurm_array_task(
         raise IndexError(f"manifest 中不存在 array index {array_index}") from error
     root = Path(manifest_path).resolve().parent
     input_path = Path(entry["input_path"])
-    result_path = Path(entry["result_path"])
+    download_result_path = Path(entry["result_path"])
     if not input_path.is_absolute():
         input_path = root / input_path
-    if not result_path.is_absolute():
-        result_path = root / result_path
+    if not download_result_path.is_absolute():
+        download_result_path = root / download_result_path
+    consolidated = download_result_path.parent.parent.name == "results"
+    result_path = input_path.parent / "result.json" if consolidated else download_result_path
     task = json.loads(input_path.read_text(encoding="utf-8"))
     task["result_path"] = str(result_path)
     if task.get("calculation_directory"):
@@ -66,6 +68,9 @@ def run_slurm_array_task(
               "input_file_version", "status")}
     marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})
     _write_json(result_path.with_name("task.finished.json"), marker)
+    if consolidated:
+        from execution_layer.remote.export_batch_result import export_batch_result
+        export_batch_result(input_path.parent, download_result_path.parent.parent)
     return payload
 
 

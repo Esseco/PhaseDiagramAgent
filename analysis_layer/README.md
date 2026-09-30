@@ -1,7 +1,7 @@
 # analysis_layer
 
 Relax 与 MC 的最终结构在本地回收时识别相，保存原始相、实际相及未知原因，保留原 branch。
-MC 审批前使用当前 MLIP 冻结凸包计算 Ehull，按现有分档规则预估完整方案步数及规模相关成本。
+MC 审批前使用当前 MLIP 相图快照中与 CSV `ehull_eV_per_atom` 同源的 Ehull，逐一核对 Relax 最低能结构 ID、能量与路径，按现有分档规则预估完整方案步数及规模相关成本。相图未就绪或结构不能唯一对应时不派发；预览冻结相图版本，批准执行时复核。
 建议同时展示完整预算与目标预算；低于目标正常审批运行，超过目标由用户选择完整运行（先核对硬上限）
 或缩减 branch。逐项参数保存在审批记录 budget_preview 中；批准后复核分配校验值并准备文件。
 
@@ -17,7 +17,9 @@ MC 审批前使用当前 MLIP 冻结凸包计算 Ehull，按现有分档规则�
 
 子目录：`phase/` 凸包和相图，`convergence/` 收敛证据，`feedback/` 收益和重评估，`state/` Agent 状态摘要，`cost/` proposal 成本展示。本层不派发任务、不替 Agent 选择 action。
 
-每次保存相图 JSON 时，同目录生成同版本的 `phase_diagram_<mlip|dft>_<version>.csv`。CSV 逐条列出组分、原始/归一化能量、Ehull、相、结构来源与 Na 层均匀性。Na 判定复用 `Process_Vasp.structure.check_layer_equal`（默认 3 个 Na 层且层间 Na 数相等）；没有最终结构或本地无法导入 Py-Code 时标记 unknown，不影响凸包。纯脱钠结构标记 not_applicable。
+每次保存相图 JSON 时，同目录生成同版本的 `phase_diagram_<mlip|dft>_<version>.csv`。对同一 TM/O2 组分、只变化 Na 的结构，取已观测最小/最大 Na 含量处最低的 eV/O2 能量作端点；逐结构计算 Eform/O2，按同一 Na 含量最低 Eform 构建下凸包，再算 Ehull/O2 和供 MC 使用的 Ehull/atom。TM/O2 不一致会明确报错；只有一个 Na 含量时相图状态为 unknown，不臆造端点。CSV 含结构 ID/路径、实际相及识别状态、组分、Na 含量、端点、Eform、凸包 Eform、Ehull，并分别标记同组分最低能结构和凸包稳定结构。相图仍按 MLIP 版本与 DFT 分开。Na 层均匀性判定复用 `Process_Vasp.structure.check_layer_equal`；缺最终结构时标记 unknown。聊天中请求“导出当前相图CSV”只导出已保存的当前版本，不推进搜索。
+新生成的 MLIP 相图直接按模型版本放在 `phase_diagrams/<模型版本>/`，DFT 放在 `phase_diagrams/dft/`。旧版根目录或 `mlip/<模型版本>/` 快照不移动、同版本不重复导出；CSV 的 `x_Na_per_O2` 写成十位小数。聊天中的“导出当前相图”优先返回已有 CSV；若文件丢失但 state 内当前相图快照完整，则只从快照恢复 CSV 到对应版本目录并更新 `csv_path`，不重算凸包、不重复识别相、不推进任务。
+
 # 本地 MLIP Relax 凸包池
 
 每次回收已完成的 Relax/MC 任务后，先对最终结构识别实际相；相识别按结构文件内容哈希缓存，未变化不重复计算。无 Na 端点用母结构与合法超胞核对；无法识别的结果保留在台账，但暂不进入凸包。已识别结果按 MLIP 版本建立独立能量池，保存到运行配置的 `branch_energy_pool_ledger_path`；新 MC 能量更新当前版本凸包，旧版本和已审批批次的冻结参考仍保留。池中保留原始 eV 总能量，`hull_energy_per_atom` 只在已覆盖组成范围内求凸包，范围外返回未知。Relax 预筛的最低能与三个初态能量 σ 仍只取 Relax 样本，MC 仅影响后续凸包参考。MLIP 和 DFT 相图分开保存，MLIP 相图按模型版本隔离。

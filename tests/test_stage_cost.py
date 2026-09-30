@@ -11,8 +11,8 @@ def test_size_and_mc_work_change_estimate():
     assert estimate_stage_cost("dft_single_point", atom_count=80)["value"] == 240
     assert estimate_stage_cost("dft_relax", atom_count=40)["value"] == 900
     assert estimate_stage_cost("dft_relax", atom_count=80)["value"] == 7200
-    assert estimate_stage_cost("deep_search", atom_count=40, mc_steps=10)["value"] == 10
-    assert estimate_stage_cost("deep_search", atom_count=80, mc_steps=10)["value"] == pytest.approx(10 * 2**1.2)
+    assert estimate_stage_cost("deep_search", atom_count=40, mc_steps=10)["value"] == 1
+    assert estimate_stage_cost("deep_search", atom_count=80, mc_steps=10)["value"] == pytest.approx(2**1.2)
     assert estimate_stage_cost("dft_single_point")["basis"] == "reference_size_assumed"
     with pytest.raises(ValueError):
         estimate_stage_cost("dft_single_point", atom_count=float("nan"))

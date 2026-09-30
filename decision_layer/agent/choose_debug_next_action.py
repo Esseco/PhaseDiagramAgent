@@ -12,16 +12,28 @@ def choose_debug_next_action(state, manager, config, *, allowed_tools, user_mess
         return None
     if "prepare_local_batch_files" not in allowed_tools or manager is None:
         return None
+    dft_pending = [row for row in state.get("tasks") or []
+                   if row.get("stage") in {"dft_relax", "dft_single_point"}
+                   and row.get("status") == "pending" and not row.get("slurm_batch_id")]
+    if dft_pending:
+        digest = hashlib.sha256(json.dumps(sorted(row["task_id"] for row in dft_pending)).encode()).hexdigest()[:16]
+        return {"tool": "prepare_local_batch_files", "task_key": f"prepare-dft-inputs:{digest}",
+                "target_ids": [row["task_id"] for row in dft_pending],
+                "parameters": {"mode": "dft_inputs"}, "budget": 0.0,
+                "reason": "为已批准的 DFT 任务准备 Py-Code atomate2 结构优化输入。",
+                "expected_purpose": "仅准备上传文件，不计算、不提交。",
+                "decision_source": "debug_state_gate"}
     mc_pending = [row for row in state.get("tasks") or [] if row.get("stage") == "deep_search"
                   and row.get("status") == "pending" and not row.get("slurm_batch_id")]
     if mc_pending:
-        if any(not row.get("structure_id") or not row.get("structure_path") for row in mc_pending):
+        if any(not row.get("structure_path") or not Path(row["structure_path"]).is_file()
+               for row in mc_pending):
             return None
         digest = hashlib.sha256(json.dumps(sorted(row["task_id"] for row in mc_pending)).encode()).hexdigest()[:16]
         return {"tool": "prepare_local_batch_files", "task_key": f"prepare-mc-inputs:{digest}",
                 "target_ids": [row["task_id"] for row in mc_pending],
                 "parameters": {"mode": "mc_inputs"}, "budget": 0.0,
-                "reason": "已分配 MC 预算且有下载后的 Relax 结构；先生成可上传 MC 输入，不在本地运行。",
+                "reason": "已分配 MC 预算且输入结构已回传；准备器核对 branch 引用并生成对应分配的上传文件。",
                 "expected_purpose": f"为 {len(mc_pending)} 个 MC task 准备最多10个任务一组的上传批次。",
                 "decision_source": "debug_state_gate"}
     if (state.get("dedup_gate") or {}).get("status") != "ready":
@@ -65,6 +77,17 @@ def choose_debug_next_action(state, manager, config, *, allowed_tools, user_mess
     )
     if mc_action is not None:
         return mc_action
+    has_mc = any(row.get("stage") == "deep_search" for row in state.get("tasks") or [])
+    if has_mc:
+        from scientific_layer.mc.second_round_state import (
+            first_round_source, second_round_already_allocated,
+        )
+        source = first_round_source(state, version)
+        second_enabled = (config.get("mc_policy") or {}).get("second_segment_enabled", True)
+        if (not second_enabled or source is None
+                or not second_round_already_allocated(state, version, source["checksum"])):
+            # Supplementary, unscreened branches must not send an MC run back to Relax.
+            return None
     valid_ids = set((state.get("dedup_gate") or {}).get("valid_structure_ids") or [])
     for bid, branch in sorted(candidates, key=lambda item: (item[1].get("det_H") or 0, item[1].get("P") or "", item[0])):
         ids = [sid for sid in branch.get("structure_ids") or []
@@ -173,11 +196,19 @@ def _mc_action_from_completed_relax(state, candidates, structures, config, versi
     """Advance to MC only when the saved Relax pool covers each selected initial state."""
     if "allocate_mc_bohb" not in allowed_tools:
         return None
-    if any(row.get("stage") == "deep_search" for row in state.get("tasks") or []):
+    from scientific_layer.mc.second_round_state import first_round_source, second_round_already_allocated
+    has_mc = any(row.get("stage") == "deep_search" for row in state.get("tasks") or [])
+    source = first_round_source(state, version) if has_mc else None
+    if has_mc and (source is None or not (config.get("mc_policy") or {}).get("second_segment_enabled", True)
+                   or second_round_already_allocated(state, version, source["checksum"])):
         return None
     hull_version = state.get("current_branch_hull_version")
     pool = (state.get("branch_hull_batches") or {}).get(hull_version) or {}
     if pool.get("model_version") != version:
+        return None
+    diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    if (diagram.get("status") != "completed" or diagram.get("model_version") != version
+            or not diagram.get("version")):
         return None
     ready_ids = {row.get("structure_id") for row in pool.get("records") or []
                  if row.get("model_version") == version
@@ -196,6 +227,11 @@ def _mc_action_from_completed_relax(state, candidates, structures, config, versi
             eligible.append(branch_id)
     if not eligible:
         return None
+    if source:
+        first_ids = set(source["branch_ids"])
+        eligible = [branch_id for branch_id in eligible if branch_id in first_ids]
+        if not eligible:
+            return None
     strategy = config.get("round_strategy") or {}
     raw_budget = (strategy.get("rule_default") or {}).get("mc_budget")
     if isinstance(raw_budget, bool) or not isinstance(raw_budget, (int, float)) or raw_budget <= 0:
@@ -217,19 +253,33 @@ def _mc_action_from_completed_relax(state, candidates, structures, config, versi
         pool, state, config, step_limit=mc_budget, seed=seed)
     if not preview["allocations"]:
         return None
+    missing_ids = set(preview.get("missing_branch_ids") or [])
+    dispatch_branch_ids = [branch_id for branch_id in eligible if branch_id not in missing_ids]
+    if not dispatch_branch_ids:
+        return None
+    missing_count = len(missing_ids)
     exploration = max(float((config.get("mc_policy") or {}).get("random_exploration_fraction", 0.1)),
                       float(strategy.get("minimum_exploration_fraction", 0.1)))
-    identity = json.dumps([version, hull_version, eligible, mc_budget], sort_keys=True).encode()
-    return {"tool": "allocate_mc_bohb", "target_ids": eligible,
+    identity = json.dumps([version, hull_version, eligible, mc_budget,
+                           source["checksum"] if source else None], sort_keys=True).encode()
+    return {"tool": "allocate_mc_bohb", "target_ids": dispatch_branch_ids,
             "task_key": "allocate-mc:" + hashlib.sha256(identity).hexdigest()[:16],
             "parameters": {"mc_budget": mc_budget, "dft_budget": 0,
                            "exploration_fraction": exploration, "seed": seed,
                            "hull_reference_version": hull_version,
+                           "phase_diagram_version": diagram["version"],
+                           "round_kind": "second" if source else "first",
+                           "first_round_source_checksum": source["checksum"] if source else None,
                            "budget_preview": preview},
             "budget": preview["estimated_relative_cost"],
-            "reason": "已回收本版本 Relax 结果并建立结构能量池；按 Ehull 与结构间能量差分配首段 MC 预算。",
-            "expected_purpose": (f"已构建本版 MLIP 凸包；从 {len(eligible)} 个含 Na branch 中，"
-                f"完整方案需要 {preview['full_plan_steps']} 步，目标预算 {mc_budget} 步；"
+            "reason": ("首轮 MC 已完成；结合首轮结果、当前相图 Ehull、相分层和预算，提出一次第二轮 MC 分配。"
+                       + (f"当前相图缺少唯一 Ehull/atom 匹配的 {missing_count} 个 branch，已排除。"
+                          if missing_count else "")
+                       if source else "已回收本版本 Relax 结果并建立结构能量池；按 Ehull 与结构间能量差分配首段 MC 预算。"),
+            "expected_purpose": ((f"首轮已完成 {source['completed_count']} 个 branch；" if source else "已构建本版 MLIP 凸包；")
+                + f"从 {len(eligible)} 个含 Na branch 中，"
+                + (f"排除 {missing_count} 个缺少唯一相图 Ehull/atom 证据的 branch；" if missing_count else "")
+                + f"完整方案需要 {preview['full_plan_steps']} 步，目标预算 {mc_budget} 步；"
                 + ("超过目标，请选择完整运行并调整预算，或压缩方案。" if preview['exceeds_target'] else
                    f"可完整运行 {preview['selected_branch_count']} 个 branch，批准后准备 MC 文件。")),
             "decision_source": "debug_state_gate"}

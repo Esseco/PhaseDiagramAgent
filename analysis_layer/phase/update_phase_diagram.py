@@ -13,6 +13,7 @@ from pymatgen.core import Composition
 
 from analysis_layer.phase.check_na_layer_uniformity import check_na_layer_uniformity
 from analysis_layer.phase.export_phase_diagram_csv import export_phase_diagram_csv
+from analysis_layer.phase.phase_snapshot_paths import phase_snapshot_directory
 
 
 def update_phase_diagram(
@@ -74,9 +75,16 @@ def update_phase_diagram(
         else:
             output["diagrams"][method] = snapshot
         if output_directory is not None:
-            directory = Path(output_directory)
-            directory.mkdir(parents=True, exist_ok=True)
-            path = directory / f"phase_diagram_{method}_{snapshot['version']}.json"
+            root = Path(output_directory)
+            directory = phase_snapshot_directory(root, method, model_version)
+            filename = f"phase_diagram_{method}_{snapshot['version']}"
+            path = directory / f"{filename}.json"
+            legacy_paths = [root / f"{filename}.json"]
+            if method == "mlip":
+                legacy_paths.insert(0, root / "mlip" / directory.name / f"{filename}.json")
+            if not path.is_file():
+                # Keep unchanged historical snapshots in place; do not duplicate them.
+                path = next((candidate for candidate in legacy_paths if candidate.is_file()), path)
             if path.is_file():
                 # The same input must reuse the original immutable snapshot.
                 stored = json.loads(path.read_text(encoding="utf-8"))
@@ -85,7 +93,8 @@ def update_phase_diagram(
                     snapshot.clear()
                     snapshot.update(stored)
                     continue
-            csv_path = directory / f"phase_diagram_{method}_{snapshot['version']}.csv"
+            directory.mkdir(parents=True, exist_ok=True)
+            csv_path = directory / f"{filename}.csv"
             export_phase_diagram_csv(snapshot, csv_path)
             snapshot["csv_path"] = str(csv_path)
             snapshot["path"] = str(path)
@@ -129,7 +138,7 @@ def _build_snapshot(method, records, rejected, basis, parent):
     ]
     version = hashlib.sha256(
         json.dumps(
-            {"method": method, "basis": basis, "entries": payload}, sort_keys=True
+            {"method": method, "basis": basis, "algorithm": "na_eform_hull_v1", "entries": payload}, sort_keys=True
         ).encode()
     ).hexdigest()[:12]
     snapshot = {
@@ -153,7 +162,7 @@ def _build_snapshot(method, records, rejected, basis, parent):
         if records and not elements.issubset(elemental_endpoints):
             from analysis_layer.phase.build_composition_hull_entries import build_composition_hull_entries
             snapshot["entries"] = build_composition_hull_entries(records)
-            snapshot["hull_domain"] = "covered_compositions_only"
+            snapshot["hull_domain"] = "observed_Na_endpoints"
             return snapshot
         entries = [
             PDEntry(
@@ -186,7 +195,11 @@ def _build_snapshot(method, records, rejected, basis, parent):
                 }
             )
     except Exception as error:
-        snapshot.update(
-            {"status": "failed", "error": f"{type(error).__name__}: {error}"}
-        )
+        if isinstance(error, ValueError) and "至少需要两个不同 Na 含量" in str(error):
+            snapshot.update({"status": "unknown", "reason": "insufficient_Na_endpoints",
+                             "error": str(error)})
+        else:
+            snapshot.update(
+                {"status": "failed", "error": f"{type(error).__name__}: {error}"}
+            )
     return snapshot

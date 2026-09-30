@@ -96,18 +96,51 @@ def run_tool_step(
             current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
             allowed_tools=allowed, user_message="继续",
         )
-        if next_action and next_action.get("tool") == "allocate_mc_bohb":
+        has_mc_results = any(
+            row.get("stage") == "deep_search" for row in current.get("tasks") or []
+        )
+        next_mode = ((next_action or {}).get("parameters") or {}).get("mode")
+        is_mc_next_step = (
+            (next_action or {}).get("tool") == "allocate_mc_bohb"
+            or ((next_action or {}).get("tool") == "prepare_local_batch_files"
+                and next_mode == "mc_inputs")
+        )
+        if next_action and (is_mc_next_step or not has_mc_results):
             stored = deepcopy(stored)
             previous = (stored.get("agent_proposal") or {}).get("raw_action") or {}
             stored["revision"] = int(stored.get("revision", 0)) + 1
             stored.setdefault("feedback_history", []).append({
-                "revision_status": "relax_results_recovered",
+                "revision_status": ("mc_round_transition_refreshed" if has_mc_results
+                                    else "relax_results_recovered"),
                 "prior_action": previous.get("tool"),
-                "analysis": "已回收的 Relax 结果覆盖该批结构；改为 MC 预算与输入文件准备。",
+                "analysis": ("已有 MC 结果与当前相图可用于下一段分配；以 MC 方案替换补充 Relax 方案。"
+                             if has_mc_results else
+                             "已回收的 Relax 结果覆盖该批结构；改为 MC 预算与输入文件准备。"),
             })
             stored["agent_proposal"] = build_agent_proposal(next_action, decision_state)
             current["pending_execution_policies"][pending_key] = stored
             human_feedback = None  # Approval for the old Relax proposal cannot approve MC.
+        elif has_mc_results:
+            current["pending_execution_policies"].pop(pending_key, None)
+            return _mc_continuation_block(
+                current, mode, (context or {}).get("effective_config") or config)
+    if mode == "interactive" and stored and not rejecting:
+        previous = (stored.get("agent_proposal") or {}).get("raw_action") or {}
+        stage = previous.get("stage") or (previous.get("parameters") or {}).get("stage")
+        if previous.get("tool") == "run_calculation_stage" and stage == "deep_search":
+            allowed = [name for name in (config.get("agent") or {}).get("allowed_tools") or []
+                       if callable((registry.get(name) or {}).get("handler"))]
+            corrected = _prepare_debug_relax_screen_action(
+                previous, current, context, config, allowed, invocation_id=invocation_id)
+            stored = deepcopy(stored)
+            stored["revision"] = int(stored.get("revision", 0)) + 1
+            stored.setdefault("feedback_history", []).append({
+                "revision_status": "mc_batch_action_corrected",
+                "analysis": corrected["reason"],
+            })
+            stored["agent_proposal"] = build_agent_proposal(corrected, decision_state)
+            current["pending_execution_policies"][pending_key] = stored
+            human_feedback = None  # The old single-task approval does not approve the new action.
     advice_changed = False
     if mode == "interactive" and stored and isinstance(human_feedback, dict) and human_feedback.get("long_term_advice") is not None:
         updated = update_long_term_advice(current, human_feedback["long_term_advice"], source=f"{pending_key}:revision-{stored.get('revision', 0)}")
@@ -125,6 +158,33 @@ def run_tool_step(
         if memory_changed:
             current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
             decision_state = agent_state_summary(current)
+    if mode == "interactive" and stored and not rejecting:
+        prior_action = (stored.get("agent_proposal") or {}).get("raw_action") or {}
+        has_mc_tasks = any(row.get("stage") == "deep_search" for row in current.get("tasks") or [])
+        if (has_mc_tasks and prior_action.get("tool") == "allocate_mc_bohb"
+                and not _is_verified_second_mc_action(prior_action, current,
+                    (context or {}).get("effective_config") or config)):
+            from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
+            allowed = [name for name in (config.get("agent") or {}).get("allowed_tools") or []
+                       if callable((registry.get(name) or {}).get("handler"))]
+            replacement = choose_debug_next_action(
+                current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
+                allowed_tools=allowed, user_message="继续",
+            )
+            if replacement and replacement.get("parameters", {}).get("round_kind") == "second":
+                stored = deepcopy(stored)
+                stored["revision"] = int(stored.get("revision", 0)) + 1
+                stored.setdefault("feedback_history", []).append({
+                    "revision_status": "unverified_mc_allocation_replaced",
+                    "analysis": "原 MC 建议缺少首轮来源与第二轮预算预览；已替换为重新校验的方案。",
+                })
+                stored["agent_proposal"] = build_agent_proposal(replacement, decision_state)
+                current["pending_execution_policies"][pending_key] = stored
+                human_feedback = None  # Approval for an unverified MC proposal cannot approve its replacement.
+            else:
+                current["pending_execution_policies"].pop(pending_key, None)
+                return _mc_continuation_block(current, mode,
+                    (context or {}).get("effective_config") or config)
     if mode == "interactive" and stored:
         proposal = deepcopy(stored["agent_proposal"])
         record_id = stored["record_id"]
@@ -138,11 +198,18 @@ def run_tool_step(
         from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
         mc_files_pending = any(row.get("stage") == "deep_search" and row.get("status") == "pending"
                                and not row.get("slurm_batch_id") for row in current.get("tasks") or [])
+        has_mc_tasks = any(row.get("stage") == "deep_search" for row in current.get("tasks") or [])
+        continue_requested = str((context or {}).get("user_message") or "").strip().lower() in {
+            "继续", "下一步", "然后呢", "continue", "next",
+        }
         safe_next = (choose_debug_next_action(
             current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
             allowed_tools=allowed, user_message=(context or {}).get("user_message"),
         ) if mode == "interactive" and (mc_files_pending or not callable(agent_client) or
-             str((context or {}).get("user_message") or "").strip() in {"继续", "下一步", "然后呢"}) else None)
+             continue_requested) else None)
+        if mode == "interactive" and has_mc_tasks and (mc_files_pending or continue_requested) and not safe_next:
+            return _mc_continuation_block(current, mode,
+                (context or {}).get("effective_config") or config)
         action = safe_next or propose_agent_tool_action(
             decision_state, agent_client=agent_client, allowed_tools=allowed, config=config
         )
@@ -155,6 +222,19 @@ def run_tool_step(
                 recovery["_llm_usage"] = action.get("_llm_usage")
                 recovery["fallback_reason"] = action.get("fallback_reason")
                 action = recovery
+        if (mode == "interactive" and has_mc_tasks
+                and action.get("tool") == "allocate_mc_bohb"
+                and not _is_verified_second_mc_action(action, current,
+                    (context or {}).get("effective_config") or config)):
+            safe_next = choose_debug_next_action(
+                current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
+                allowed_tools=allowed, user_message="继续",
+            )
+            if safe_next and safe_next.get("parameters", {}).get("round_kind") == "second":
+                action = safe_next
+            else:
+                return _mc_continuation_block(current, mode,
+                    (context or {}).get("effective_config") or config)
         if mode == "interactive":
             original_usage = action.get("_llm_usage")
             original_evidence = action.get("evidence_refs")
@@ -387,7 +467,7 @@ def _is_pending_relax_preparation(stored):
 
 
 def _prepare_debug_relax_screen_action(action, state, context, config, allowed_tools, *, invocation_id=None):
-    """Turn a proposed Relax calculation into portable input-file preparation."""
+    """Route interactive calculation proposals to the corresponding safe workflow."""
     parameters = action.get("parameters") or {}
     if action.get("tool") == "prepare_local_batch_files" and parameters.get("rebuild_inputs"):
         return action
@@ -396,6 +476,22 @@ def _prepare_debug_relax_screen_action(action, state, context, config, allowed_t
     if action.get("tool") != "run_calculation_stage" and not is_relax_input:
         return action
     stage = action.get("stage") or parameters.get("stage")
+    if action.get("tool") == "run_calculation_stage" and stage == "deep_search":
+        from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
+        preparation = choose_debug_next_action(
+            state, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
+            allowed_tools=allowed_tools,
+        )
+        if preparation and preparation.get("tool") in {"allocate_mc_bohb", "prepare_local_batch_files"}:
+            return preparation
+        completed_mc = any(row.get("stage") == "deep_search" and row.get("status") == "completed"
+                           for row in state.get("tasks") or [])
+        reason = ("本轮 MC 结果已回收，且当前策略未开放第二段 MC；先评估收敛与后续阶段。"
+                  if completed_mc and not (config.get("mc_policy") or {}).get("second_segment_enabled", True)
+                  else "当前没有可直接执行的单结构 MC 动作；先评估已完成结果，再确定下一批任务。")
+        return {"tool": "check_convergence", "target_ids": [], "parameters": {}, "budget": 0.0,
+                "reason": reason, "expected_purpose": "评估本轮已回收结果和下一阶段条件。",
+                "decision_source": "debug_mc_batch_guard"}
     if not is_relax_input and stage not in {"relax_screen", "relax_and_feature"}:
         return action
     if "prepare_local_batch_files" not in allowed_tools:
@@ -416,6 +512,51 @@ def _prepare_debug_relax_screen_action(action, state, context, config, allowed_t
     preparation["task_key"] = f"prepare-relax-inputs:{suffix}"
     preparation["parameters"] = {"mode": "relax_inputs", "selection_scope": "all_registered"}
     return preparation
+
+
+def _is_verified_second_mc_action(action, state, config):
+    """Require a frozen second-round preview before MC can follow MC results."""
+    from scientific_layer.mc.second_round_state import first_round_source, second_round_already_allocated
+
+    params = action.get("parameters") or {}
+    preview = params.get("budget_preview") or {}
+    model = config.get("mlip") or {}
+    version = model.get("version") or model.get("name")
+    source = first_round_source(state, version)
+    if (not (config.get("mc_policy") or {}).get("second_segment_enabled", True)
+            or source is None
+            or params.get("round_kind") != "second"
+            or preview.get("round_kind") != "second"
+            or params.get("first_round_source_checksum") != source["checksum"]
+            or preview.get("first_round_source_checksum") != source["checksum"]
+            or not preview.get("allocations")
+            or second_round_already_allocated(state, version, source["checksum"])):
+        return False
+    targets = set(action.get("target_ids") or [])
+    allowed_targets = set(source["branch_ids"])
+    allocations = preview["allocations"]
+    try:
+        segment_one_only = all(int(row.get("segment_index", -1)) == 1 for row in allocations)
+    except (TypeError, ValueError):
+        segment_one_only = False
+    allocated_branches = {row.get("branch_id") for row in allocations}
+    return bool(targets and targets.issubset(allowed_targets) and segment_one_only
+                and allocated_branches.issubset(targets))
+
+
+def _mc_continuation_block(state, mode, config):
+    """Stop unsafe LLM fallback and explain which prerequisite is missing."""
+    if not (config.get("mc_policy") or {}).get("second_segment_enabled", True):
+        status = "configuration_revision_required"
+        reason = "首轮 MC 已完成，但当前已确认配置关闭了第二段 MC；请修订并确认 MC 策略后再生成第二轮方案。"
+    else:
+        status = "not_configured"
+        reason = ("已有 MC 结果，但当前轮次或相图证据不足以生成经校验的下一段 MC 分配；"
+                  "系统不会回退到 Relax，也未生成新的计算任务。")
+    return {"status": status, "execution_mode": mode, "reason": reason,
+            "agent_proposal": None, "final_action": None, "action": None,
+            "validation": None, "execution": None, "execution_result": None,
+            "record_id": None, "state": state, "idempotent_replay": False}
 
 
 def _can_rebind_empty_run(state):

@@ -37,7 +37,7 @@ class SearchFeedbackTest(unittest.TestCase):
             self.assertEqual(len(rows), 3)
             oxide = next(row for row in rows if row["record_id"] == "oxide")
             self.assertEqual(oxide["na_layer_status"], "missing_final_structure")
-            self.assertEqual(oxide["x_Na_per_O2"], "4")
+            self.assertEqual(oxide["x_Na_per_O2"], "4.0000000000")
 
     def test_phase_diagrams_are_separate_and_reward_is_idempotent(self):
         records = []

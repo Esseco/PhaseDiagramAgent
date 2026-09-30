@@ -90,6 +90,8 @@ def prepare_branch_relaxation(candidates, state, context):
                     'model_version': version, 'config_version': context['config_version'],
                     'planned_relative_cost': cost, 'parameters': relax_settings,
                     'screening_basis': 'electrostatic_top10_random3_layer_occupied'}
+            task['generation_cycle'] = len(current.get('generation_history') or [])
+            task['parent_decision_id'] = context.get('approval_record_id')
             current.setdefault('tasks', []).append(task)
             current.setdefault('pending_tasks', []).append(task); pending.append(task)
     if pending:
@@ -104,8 +106,22 @@ def prepare_branch_relaxation(candidates, state, context):
         return {'state': current, 'status': 'screening_incomplete', 'candidates': [],
                 'unavailable': unavailable, 'reason': 'approved_hull_reference_unavailable'}
     pool = pool or build_relax_hull(records, model_version=version, system_id=system_id)
+    diagram = (current.get('phase_diagrams') or {}).get('mlip') or {}
+    if (diagram.get('status') != 'completed' or diagram.get('model_version') != version
+            or not diagram.get('version')):
+        return {'state': current, 'status': 'screening_incomplete', 'candidates': [],
+                'unavailable': unavailable, 'reason': 'current_mlip_phase_diagram_unavailable'}
+    approved_diagram = context.get('mc_phase_diagram_version')
+    if approved_diagram and diagram['version'] != approved_diagram:
+        return {'state': current, 'status': 'screening_incomplete', 'candidates': [],
+                'unavailable': unavailable, 'reason': 'approved_phase_diagram_changed'}
     ranked, missing = rank_relaxed_branches(candidates, pool,
-        uncertainty_weight=float(settings.get('uncertainty_weight', 1.0)))
+        uncertainty_weight=float(settings.get('uncertainty_weight', 1.0)),
+        phase_diagram=diagram)
+    if missing:
+        return {'state': current, 'status': 'screening_incomplete', 'candidates': [],
+                'unavailable': unavailable, 'unavailable_branches': sorted(set(missing)),
+                'reason': 'relax_structure_missing_from_current_phase_diagram'}
     current.setdefault('branch_hull_batches', {})[pool['version']] = pool
     current['current_branch_hull_version'] = pool['version']
     if ledger_path:

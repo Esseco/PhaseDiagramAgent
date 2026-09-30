@@ -41,6 +41,9 @@ def run_single_task(task_path="task.json", *, executor):
               "input_file_version", "status")}
     marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})
     _write(directory / "task.finished.json", marker)
+    if (directory.parent / "batch.snapshot.json").is_file():
+        from execution_layer.remote.export_batch_result import export_batch_result
+        export_batch_result(directory, directory.parent.parent / "results")
     return payload
 
 

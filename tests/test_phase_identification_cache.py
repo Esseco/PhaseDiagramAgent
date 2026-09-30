@@ -98,4 +98,6 @@ def test_unidentified_result_remains_in_ledger_but_not_hull():
                             "phase_identification": {"status": "identified", "phase": "P3"}}})
     diagram = update_phase_diagram([unknown, identified],
                                     active_model_version="m1")["diagrams"]["mlip"]
-    assert [row["record_id"] for row in diagram["entries"]] == ["R2"]
+    assert diagram["entries"] == []
+    assert diagram["status"] == "unknown"
+    assert diagram["reason"] == "insufficient_Na_endpoints"

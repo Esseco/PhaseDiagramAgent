@@ -10,7 +10,8 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
     """Return a compact handoff summary, or None when no prepared task is waiting."""
     tasks = [
         row for row in (state or {}).get("tasks", [])
-        if row.get("stage") in {"relax_and_feature", "deep_search"}
+        if row.get("stage") in {"relax_and_feature", "deep_search",
+                                "dft_single_point", "dft_relax"}
         and row.get("batch_id") and row.get("input_path")
     ]
     waiting = [row for row in tasks if row.get("status") in ACTIVE_STATUSES]
@@ -31,6 +32,8 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
         "task_ids": [row.get("task_id") for row in waiting],
         "task_directories": task_directories,
         "batch_directories": batch_directories,
+        "results_directories": sorted({str(Path(path).parent / "results")
+                                        for path in batch_directories}),
         "upload_root": next(iter(upload_roots)) if len(upload_roots) == 1 else None,
         "upload_plan_path": (str(Path(next(iter(upload_roots))) / "RELAX_UPLOAD_PLAN.json")
                              if relax_only and len(upload_roots) == 1 and

@@ -37,9 +37,10 @@ def test_relax_101_tasks_use_two_jobs(tmp_path):
     assert set(first["batch"]["task_ids"]).isdisjoint(second["batch"]["task_ids"])
     first_directory = Path(first["batch"]["upload_directory"])
     second_directory = Path(second["batch"]["upload_directory"])
-    assert first_directory.parts[-3:] == (
-        "MLIP-round-0001_mh-1", "Relax-screening",
-        "Relax-submission-0001_remote-000001")
+    assert first_directory.parts[-4:-2] == ("MLIP-round-0001_mh-1", "Search-group-0001")
+    assert first_directory.parent.name == "Relax-0001"
+    assert first_directory.name == "Relax-submission-0001_remote-000001"
+    assert first_directory.parent == second_directory.parent
     assert second_directory.name == "Relax-submission-0002_remote-000002"
     assert first["batch"]["mlip_round"] == 1
     assert first["batch"]["submission_index"] == 1
@@ -63,12 +64,27 @@ def test_mc_21_tasks_use_three_jobs_without_splitting_branches(tmp_path):
     second = runner.prepare(first["state"])
     third = runner.prepare(second["state"])
     assert [len(row["batch"]["task_ids"]) for row in (first, second, third)] == [9, 9, 3]
-    assert Path(first["batch"]["upload_directory"]).parts[-2:] == (
-        "MC-search", "MC-sampling-0001_remote-000001")
+    assert Path(first["batch"]["upload_directory"]).parts[-3] == "Search-group-0001"
+    assert Path(first["batch"]["upload_directory"]).parent.name == "Relax-0001_MC-round-0001"
     assert Path(second["batch"]["upload_directory"]).name == "MC-sampling-0002_remote-000002"
     assert Path(third["batch"]["upload_directory"]).name == "MC-sampling-0003_remote-000003"
     script = Path(first["batch"]["upload_directory"], "GPU.sh").read_text(encoding="utf-8")
     assert "#SBATCH --job-name=mc-remote-000001" in script
+
+
+def test_two_mc_allocations_have_separate_results_and_never_mix(tmp_path):
+    runner = ManualUploadBatchRunner(
+        tmp_path / "upload", worker_command=["python3", "--executor", "x:y"],
+        task_preparer=_prepared_task)
+    state = _make_tasks(tmp_path, 2, "deep_search")
+    state["tasks"][0].update(upload_operation_id="first", segment_index=0)
+    state["tasks"][1].update(upload_operation_id="second", segment_index=1)
+    first = runner.prepare(state)
+    second = runner.prepare(first["state"])
+    assert first["batch"]["task_ids"] == ["T-0"]
+    assert second["batch"]["task_ids"] == ["T-1"]
+    assert first["batch"]["results_directory"] != second["batch"]["results_directory"]
+    assert Path(second["batch"]["upload_directory"]).parent.name == "Relax-0001_MC-round-0002"
 
 
 def test_new_model_version_starts_a_new_mlip_round(tmp_path):

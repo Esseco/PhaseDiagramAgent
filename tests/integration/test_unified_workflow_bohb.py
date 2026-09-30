@@ -45,7 +45,7 @@ def test_public_entry_owns_bohb_selection_budget_and_resume(tmp_path):
     task = first["state"]["pending_tasks"][0]
     assert task["branch_id"] == branch_id
     assert task["incremental_budget"] == 10
-    assert task["planned_relative_cost"] == pytest.approx(10 * (4 / 40) ** 1.2)
+    assert task["planned_relative_cost"] == pytest.approx((4 / 40) ** 1.2)
     assert first["state"]["active_round"]["branch_selection_owner"] == "agent"
     assert first["state"]["active_round"]["mc_fidelity_owner"] == "hyperband"
     assert first["state"]["budget_reservations"][task["task_key"]]["stage"] == "deep_search"

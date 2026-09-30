@@ -24,6 +24,9 @@ class OpenSSHTransport:
         "result.json", "task.finished.json", "final.vasp", "CONTCAR",
         "checkpoint.json", "checkpoint.json.gz", "log_index.json",
         "status_summary.json", "initial_relaxed.vasp",
+        "task.stdout.log", "task.stderr.log",
+        "status.json.gz", "settings.json.gz", "trace.json.gz",
+        "pool_summary.json.gz",
     }
 
     def __init__(self, host: str, *, ssh="ssh", scp="scp", runner: Callable = subprocess.run):
@@ -73,6 +76,10 @@ class OpenSSHTransport:
         target.mkdir(parents=True, exist_ok=True)
         manifest_text = self._ssh("cat", str(PurePosixPath(remote) / "manifest.json"), check=False)
         if manifest_text.returncode != 0:
+            is_directory = self._ssh("test", "-d", str(remote), check=False)
+            if is_directory.returncode == 0 and remote.name == "results":
+                self._run([self.scp, "-r", f"{self.host}:{remote}/.", str(target)])
+                return {"status": "synced", "path": str(target), "files": []}
             return {"status": "not_found", "path": remote}
         try:
             manifest = json.loads(manifest_text.stdout)
@@ -81,6 +88,7 @@ class OpenSSHTransport:
         copied = []
         for row in manifest:
             task_dir = PurePosixPath(row["result_path"]).parent
+            input_dir = PurePosixPath(row.get("input_path") or row["result_path"]).parent
             for filename in sorted(self.RESULT_FILE_NAMES):
                 remote_file = PurePosixPath(remote) / task_dir / filename
                 check = self._ssh("test", "-f", str(remote_file), check=False)
@@ -102,11 +110,11 @@ class OpenSSHTransport:
                              or (result.get("outputs") or {}).get("final_structure_path"))
                     if final:
                         from execution_layer.remote.resolve_final_structure import resolve_final_structure
-                        relative = resolve_final_structure(final, str(PurePosixPath(remote) / task_dir))
+                        relative = resolve_final_structure(final, str(PurePosixPath(remote) / input_dir))
                         if relative:
-                            source = PurePosixPath(remote) / task_dir / relative
+                            source = PurePosixPath(remote) / task_dir / relative.name
                             if self._ssh("test", "-f", str(source), check=False).returncode == 0:
-                                destination = target / task_dir / relative
+                                destination = target / task_dir / relative.name
                                 destination.parent.mkdir(parents=True, exist_ok=True)
                                 self._run([self.scp, f"{self.host}:{source}", str(destination)])
                                 copied.append(str(task_dir / relative))

@@ -6,10 +6,14 @@ from pathlib import Path
 import subprocess
 import sys
 
+from execution_layer.remote.export_batch_result import export_batch_result
+
 
 def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
     manifest = Path(manifest_path).resolve()
     entries = json.loads(manifest.read_text(encoding="utf-8"))
+    results_directory = manifest.parent.parent / "results"
+    results_directory.mkdir(exist_ok=True)
     failures = []
     for entry in entries:
         # Batch manifests may have been generated on Windows and uploaded as-is.
@@ -20,9 +24,12 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
         if marker.is_file() and (task_dir / "result.json").is_file():
             try:
                 if json.loads(marker.read_text(encoding="utf-8")).get("status") == "completed":
+                    export_batch_result(task_dir, results_directory)
                     continue
-            except (OSError, ValueError):
-                pass
+            except (OSError, ValueError) as error:
+                print(f"已有结果汇集失败 {entry['task_id']}: {error}", file=sys.stderr)
+                failures.append(entry["task_id"])
+                continue
         with (task_dir / "task.stdout.log").open("a", encoding="utf-8") as stdout, \
                 (task_dir / "task.stderr.log").open("a", encoding="utf-8") as stderr:
             command = ([sys.executable, "-m", "execution_layer.remote.run_single_task",
@@ -34,6 +41,13 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
             )
         if outcome.returncode != 0 or not marker.is_file():
             failures.append(entry["task_id"])
+        if marker.is_file() and (task_dir / "result.json").is_file():
+            try:
+                export_batch_result(task_dir, results_directory)
+            except (OSError, ValueError) as error:
+                print(f"结果汇集失败 {entry['task_id']}: {error}", file=sys.stderr)
+                if entry["task_id"] not in failures:
+                    failures.append(entry["task_id"])
     return failures
 
 

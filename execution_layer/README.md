@@ -12,6 +12,13 @@ Linux/Windows 离线审批可设置 `approval_directory`。interactive action �
 
 `create_active_learning_handlers.py` 将 `generate_branches`、`allocate_mc_bohb` 和 `run_calculation_stage` 接入统一入口。BOHB 的 pending/完成记录嵌入 event state；恢复结果先结算共享预算，再由 BOHB 记录观测并决定晋级。
 
+人工上传模式按 MLIP 版本、阶段、批次保存输入。Relax/MC 每批只提交根目录
+`GPU.sh`，DFT 在唯一任务目录提交 `GPU.sh`；DFT 输入仍由 atomate 生成。
+计算结束后，每轮每个阶段的共享 `results/<任务目录>/` 集中保存所有提交批次的
+`result.json`、`task.finished.json` 和最终结构，可直接下载整个 `results/` 到本地同一阶段目录。
+本地回收依据原 `task.json` 和校验值识别结果；已有旧批次仍从任务目录回收。
+MC 预算中每步成本系数为原估算的 0.1，实际步数与任务分层不变。
+
 `slurm_batch_runner.py` 将已经通过校验且已经预留预算的 `pending_tasks` 组成
 Slurm array batch。它只负责文件、提交和回收，不重新选择任务或改写预算。每个任务
 目录包含 `task.json`，worker 必须原子写入 `result.json`，随后写入

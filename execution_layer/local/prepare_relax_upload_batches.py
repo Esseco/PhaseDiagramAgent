@@ -95,6 +95,8 @@ def prepare_relax_upload_batches(*, action, context):
                 "config_version": context["config_version"], "planned_relative_cost": cost,
                 "parameters": deepcopy(settings),
                 "screening_basis": "electrostatic_top10_random3_layer_occupied"}
+        task["generation_cycle"] = len(state.get("generation_history") or [])
+        task["parent_decision_id"] = context.get("approval_record_id")
         state.setdefault("tasks", []).append(task)
         state.setdefault("pending_tasks", []).append(task)
         created.append(task)
@@ -121,6 +123,7 @@ def prepare_relax_upload_batches(*, action, context):
             "task_count": len(created), "batch_count": len(batches),
             "upload_plan_path": str(upload_plan) if upload_plan else None,
             "batches": [{"batch_id": row["batch_id"], "directory": row["upload_directory"],
+                         "results_directory": row["results_directory"],
                          "task_directory": row.get("task_directory"),
                          "task_directories": row.get("task_directories"),
                          "task_ids": row["task_ids"]} for row in batches], "submitted": False}

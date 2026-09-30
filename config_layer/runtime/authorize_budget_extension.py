@@ -1,9 +1,27 @@
 """Safely migrate a persisted run to an approved configuration revision."""
 
 from copy import deepcopy
+from math import isfinite
+
+
+_APPROVED_MC_POLICY_PATHS = {
+    "mc_policy.second_segment_enabled",
+    "budgets.cost_model.mc_step_cost_factor",
+    "qbc.budget_limits.cost_model.mc_step_cost_factor",
+    "qbc.cost_model.mc_step_cost_factor",
+}
+# Legacy snapshots predate mc_step_cost_factor and used one MLIP relaxation
+# per MC step, i.e. an effective factor of 1.0.
+_LEGACY_MC_STEP_COST_FACTOR = 1.0
 
 
 def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False):
+    from config_layer.runtime.authorize_generation_policy_revision import (
+        authorize_second_mc_segment_revision,
+    )
+    second_mc = authorize_second_mc_segment_revision(state, confirmed_snapshot)
+    if second_mc["status"] != "not_applicable":
+        return second_mc
     current = deepcopy(state)
     new_version = confirmed_snapshot["config_version"]
     old_version = current.get("confirmed_config_version")
@@ -29,9 +47,22 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
         _normalize_legacy_mace_relax_defaults(current, old or {}, new, old_version)
     )
     comparison_old = normalized_old if normalized_old is not None else (old or {})
+    policy_changes = _approved_mc_policy_changes(comparison_old, new)
+    if policy_changes is None:
+        policy_changes = []
+    elif policy_changes and _has_active_work(current):
+        return {"status": "rejected_active_work", "state": current,
+                "from": old_version, "to": new_version,
+                "changed_fields": [row["field"] for row in policy_changes]}
+    compared_old = _without_migratable_budget_limits(comparison_old)
+    compared_new = _without_migratable_budget_limits(new)
+    if policy_changes:
+        for row in policy_changes:
+            parts = tuple(row["field"].split("."))
+            _remove_path(compared_old, parts)
+            _remove_path(compared_new, parts)
     changed_fields = _changed_paths(
-        _without_migratable_budget_limits(comparison_old),
-        _without_migratable_budget_limits(new),
+        compared_old, compared_new,
     )
     if not old or changed_fields or (compatibility_rejection and normalized_old is None):
         return {
@@ -50,13 +81,18 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
     current["confirmed_config_version"] = new_version
     current["confirmed_config"] = new
     budget_changes = _budget_limit_changes(old, new)
-    migration_type = (
-        "approved_migration_with_verified_legacy_mace_defaults"
-        if compatibility else "approved_budget_extension"
-    )
+    if compatibility:
+        migration_type = "approved_migration_with_verified_legacy_mace_defaults"
+    elif policy_changes and budget_changes:
+        migration_type = "approved_mc_policy_and_budget_revision"
+    elif policy_changes:
+        migration_type = "approved_mc_policy_revision"
+    else:
+        migration_type = "approved_budget_extension"
     migration_record = {
         "type": migration_type, "from": old_version, "to": new_version,
         "budget_changes": budget_changes,
+        "policy_changes": policy_changes,
     }
     if compatibility:
         migration_record["compatibility"] = deepcopy(compatibility)
@@ -69,7 +105,92 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
     }
     if compatibility:
         result["compatibility"] = compatibility
+    if policy_changes:
+        result["policy_changes"] = deepcopy(policy_changes)
     return result
+
+
+def _approved_mc_policy_changes(old, new):
+    """Return only validated MC-segment and cost-estimate policy changes."""
+    changes = []
+    for field in sorted(_APPROVED_MC_POLICY_PATHS):
+        before, after = _get_path(old, field), _get_path(new, field)
+        if before == after:
+            continue
+        if field == "mc_policy.second_segment_enabled":
+            if before is not False or after is not True:
+                return None
+            changes.append({"field": field, "from": before, "to": after})
+            continue
+        before_is_implicit = not _path_exists(old, field)
+        effective_before = (
+            _LEGACY_MC_STEP_COST_FACTOR if before_is_implicit else before
+        )
+        if not (_positive_finite_number(effective_before)
+                and _positive_finite_number(after)):
+            return None
+        changes.append({
+            "field": field,
+            "from": float(effective_before),
+            "to": float(after),
+            "from_basis": "implicit_default" if before_is_implicit else "configured",
+        })
+    if changes and not _mc_cost_factors_consistent(new):
+        return None
+    return changes
+
+
+def _positive_finite_number(value):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and isfinite(float(value)) and float(value) > 0)
+
+
+def _mc_cost_factors_consistent(config):
+    fields = (
+        "budgets.cost_model.mc_step_cost_factor",
+        "qbc.budget_limits.cost_model.mc_step_cost_factor",
+        "qbc.cost_model.mc_step_cost_factor",
+    )
+    values = []
+    for field in fields:
+        value = _get_path(config, field)
+        if not _path_exists(config, field):
+            value = _LEGACY_MC_STEP_COST_FACTOR
+        elif not _positive_finite_number(value):
+            return False
+        values.append(float(value))
+    return not values or all(abs(value - values[0]) <= 1e-12 for value in values[1:])
+
+
+def _has_active_work(state):
+    active = {"pending", "planned", "reserved", "submitted", "running", "queued"}
+    tasks = state.get("tasks") or []
+    if isinstance(tasks, dict):
+        tasks = list(tasks.values())
+    if any((row or {}).get("status") in active for row in tasks):
+        return True
+    if any((row or {}).get("status") in active
+           for row in (state.get("budget_reservations") or {}).values()):
+        return True
+    return bool(state.get("pending_execution_policies"))
+
+
+def _remove_path(value, path):
+    cursor = value
+    for part in path[:-1]:
+        if not isinstance(cursor, dict) or part not in cursor:
+            return
+        cursor = cursor[part]
+    if isinstance(cursor, dict):
+        cursor.pop(path[-1], None)
+
+
+def _path_exists(value, path):
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return False
+        value = value[part]
+    return True
 
 
 def _without_migratable_budget_limits(config):

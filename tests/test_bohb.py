@@ -25,7 +25,7 @@ class BohbTest(unittest.TestCase):
         config, candidates = case()
         first = run_bohb_iteration(candidates, None, config=config, total_mc_budget=100, seed=1)
         self.assertEqual(first["actions"][0]["incremental_budget"], 10)
-        self.assertEqual(first["actions"][0]["planned_relative_cost"], 10)
+        self.assertEqual(first["actions"][0]["planned_relative_cost"], 1)
         task = first["state"]["pending_tasks"][0]
         result = {**simulator(branch=candidates[int(task["branch_id"][1:])], action=task), "task_key": task["task_key"]}
         state = collect_bohb_results(first["state"], candidates, [result], config=config)

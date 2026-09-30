@@ -16,7 +16,7 @@ _ALLOWED = {
 }
 
 
-def authorize_generation_policy_revision(state, confirmed_snapshot):
+def authorize_generation_policy_revision(state, confirmed_snapshot, *, allowed_paths=None):
     """Apply only confirmed, non-scientific scheduling changes to an idle run."""
     current = deepcopy(state)
     old_version = current.get("confirmed_config_version")
@@ -25,7 +25,7 @@ def authorize_generation_policy_revision(state, confirmed_snapshot):
         return {"status": "unchanged", "state": current}
     old = current.get("confirmed_config") or {}
     new = deepcopy(confirmed_snapshot.get("config") or {})
-    if not old or not _same_outside_allowed(old, new):
+    if not old or not _same_outside_allowed(old, new, allowed_paths=allowed_paths):
         return {"status": "rejected_scientific_change", "state": current}
     if not _no_active_work(current):
         return {"status": "active_work", "state": current}
@@ -48,10 +48,30 @@ def authorize_generation_policy_revision(state, confirmed_snapshot):
     return {"status": "rebound", "state": current}
 
 
-def _same_outside_allowed(old, new):
+def authorize_second_mc_segment_revision(state, confirmed_snapshot):
+    """Bind only an explicitly confirmed false-to-true second MC segment change."""
+    old = (state.get("confirmed_config") or {})
+    new = (confirmed_snapshot.get("config") or {})
+    path = ("mc_policy", "second_segment_enabled")
+    if (((old.get("mc_policy") or {}).get("second_segment_enabled") is not False)
+            or ((new.get("mc_policy") or {}).get("second_segment_enabled") is not True)
+            or not state.get("confirmed_config_version")
+            or state.get("confirmed_config_version") == confirmed_snapshot.get("config_version")
+            or not _same_outside_allowed(old, new, allowed_paths={path})):
+        return {"status": "not_applicable", "state": deepcopy(state)}
+    result = authorize_generation_policy_revision(
+        state, confirmed_snapshot, allowed_paths={path})
+    if result["status"] == "active_work":
+        result["status"] = "rejected_active_work"
+    if result["status"] == "rebound":
+        result["changed_fields"] = ["mc_policy.second_segment_enabled"]
+    return result
+
+
+def _same_outside_allowed(old, new, *, allowed_paths=None):
     before, after = deepcopy(old), deepcopy(new)
     for tree in (before, after):
-        for path in _ALLOWED:
+        for path in _ALLOWED if allowed_paths is None else allowed_paths:
             _remove(tree, path)
     return before == after
 

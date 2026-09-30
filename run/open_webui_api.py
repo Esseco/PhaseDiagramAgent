@@ -68,17 +68,55 @@ class RunWorkflowChatHandler:
         if metadata_reply is not None:
             return metadata_reply
         with self.lock:
-            if self.config_delegate is not None:
-                return self.config_delegate(messages, conversation_id=conversation_id)
             state = read_json(self.state_path, {}) or {}
-            state, stale_pending_removed = _drop_finished_pending(state)
-            if stale_pending_removed:
-                write_json(self.state_path, state)
             if self.conversation_id not in {None, conversation_id}:
                 raise OpenWebUIRequestError(
                     "此本地运行时已绑定另一个 Open WebUI 会话。当前审批状态是进程级单用户状态；"
                     "请使用原会话，或为另一用户启动独立服务和 state。"
                 )
+            from execution_layer.local.regenerate_mc_inputs import is_mc_regeneration_request, is_mc_regeneration_confirmation
+            from execution_layer.local.identify_rerun_plan import is_rerun_plan_request
+            known = (_phase_csv_request(user_message) or _is_status_command(user_message)
+                     or _is_navigation_command(user_message) or is_rerun_plan_request(user_message)
+                     or is_mc_regeneration_request(user_message) or is_mc_regeneration_confirmation(user_message)
+                     or classify_user_decision(user_message) in {"approve", "reject"}
+                     or _is_config_migration_approval(user_message))
+            if not known and self.config_delegate is None:
+                from decision_layer.agent.resolve_chat_intent import resolve_chat_intent
+                intent = resolve_chat_intent(user_message, state,
+                    agent_client=self.workflow_kwargs.get("agent_client"))
+                kind = intent["intent"]
+                if kind == "clarify":
+                    return "你想查看结果、继续下一步，还是重新准备某一轮的输入？请说明阶段和轮次。"
+                if kind == "export_phase_csv":
+                    user_message = "导出当前相图" + (" DFT" if intent.get("stage") == "dft" else "")
+                elif kind == "status":
+                    user_message = "查看状态"
+                elif kind == "continue":
+                    user_message = "继续"
+                elif kind == "redo_plan":
+                    # Use read-only generic planning, not the MC deletion confirmation path.
+                    from execution_layer.local.identify_rerun_plan import identify_rerun_plan, format_rerun_plan
+                    stage = {"mc": "MC", "relax": "Relax", "dft": "DFT", "branch": "branch"}[intent["stage"]]
+                    return format_rerun_plan(identify_rerun_plan(f"重新准备当前轮{stage}", state))
+            if _phase_csv_request(user_message):
+                from analysis_layer.phase.export_current_phase_diagram import export_current_phase_diagram
+                method = "dft" if "dft" in user_message.lower() else "mlip"
+                try:
+                    before = ((state.get("phase_diagrams") or {}).get(method) or {}).get("csv_path")
+                    path, count, version = export_current_phase_diagram(
+                        state, directory=self.workflow_kwargs.get("phase_diagram_directory"),
+                        method=method)
+                    if str(path) != before:
+                        write_json(self.state_path, state)
+                except (OSError, ValueError) as error:
+                    return f"当前相图 CSV 未导出：{error}。未推进搜索或修改任务。"
+                return f"当前 {method.upper()} 相图 CSV（版本 {version}，{count} 个结构）：`{path}`"
+            if self.config_delegate is not None:
+                return self.config_delegate(messages, conversation_id=conversation_id)
+            state, stale_pending_removed = _drop_finished_pending(state)
+            if stale_pending_removed:
+                write_json(self.state_path, state)
             from execution_layer.local.regenerate_mc_inputs import (
                 is_mc_regeneration_request, is_mc_regeneration_confirmation,
                 plan_mc_regeneration, regenerate_mc_inputs,
@@ -86,7 +124,7 @@ class RunWorkflowChatHandler:
             pending_mc = state.get("pending_mc_regeneration")
             mc_request = is_mc_regeneration_request(user_message)
             mc_confirmed = is_mc_regeneration_confirmation(user_message)
-            if pending_mc or mc_request or mc_confirmed:
+            if mc_request or mc_confirmed or (pending_mc and classify_user_decision(user_message) == "reject"):
                 if pending_mc and classify_user_decision(user_message) == "reject":
                     state.pop("pending_mc_regeneration", None)
                     write_json(self.state_path, state)
@@ -206,7 +244,8 @@ class RunWorkflowChatHandler:
                               and any(word in user_message.lower() for word in ("本轮", "branch", "初态", "超胞", "det(h)")))
             batch_feedback = batch_feedback or requested_mc_steps is not None
             navigation_only = _is_navigation_command(user_message)
-            if (not navigation_only and classify_user_decision(user_message) not in {"approve", "reject"}
+            if (not navigation_only and not pending_actions
+                    and classify_user_decision(user_message) not in {"approve", "reject"}
                     and not batch_feedback):
                 from decision_layer.agent.classify_config_edit_intent import classify_config_edit_intent
                 classifier = self.config_intent_client or self.workflow_kwargs.get("agent_client")
@@ -262,6 +301,11 @@ class RunWorkflowChatHandler:
                             {"decision": "comment", "comment": "继续"},
                             user_message,
                         )
+                        return format_workflow_reply(refreshed, self.state_path)
+                    if self.execution_mode == "interactive" and _is_pending_mc_proposal(proposal, state):
+                        # A history-resume command must re-enter the workflow
+                        # so stale MC proposals cannot be echoed as a fresh plan.
+                        refreshed = self._run(pending_id, None, user_message)
                         return format_workflow_reply(refreshed, self.state_path)
                     if self.execution_mode == "interactive" and _unsafe_debug_calculation(proposal, state):
                         revised = self._run(pending_id, {"decision": "comment",
@@ -457,6 +501,13 @@ def _is_pending_relax_input_proposal(proposal):
     parameters = action.get("parameters") or {}
     return (action.get("tool") == "prepare_local_batch_files"
             and parameters.get("mode") == "relax_inputs")
+
+
+def _is_pending_mc_proposal(proposal, state):
+    action = (proposal or {}).get("raw_action") or {}
+    if action.get("tool") != "allocate_mc_bohb":
+        return False
+    return any(row.get("stage") == "deep_search" for row in state.get("tasks") or [])
 
 
 def _unsafe_debug_calculation(proposal, state):
@@ -804,7 +855,59 @@ def _stop_server_when_parent_exits(server, parent_pid):
         threading.Event().wait(1.0)
 
 
-def format_workflow_reply(result: dict, state_path) -> str:
+def format_workflow_reply(result: dict, state_path, *, verbose=False) -> str:
+    """Keep routine chat concise; full evidence stays in existing records."""
+    if verbose or not isinstance(result, dict):
+        return _format_workflow_reply_verbose(result, state_path)
+    events = result.get("events") or []
+    proposal = result.get("agent_proposal") or next(
+        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")), {})
+    status = result.get("status")
+    if status == "awaiting_approval" and proposal:
+        # Preserve all approval limits, budget interceptions and sensitive warnings.
+        text = _format_workflow_reply_verbose(result, state_path)
+        labels = {"generate_branches": "生成 branch", "allocate_mc_bohb": "分配 MC",
+                  "prepare_local_batch_files": "准备输入文件", "select_dft_candidates": "筛选 DFT"}
+        tool = proposal.get("recommended_action")
+        text = text.replace(f"建议：`{tool}`", f"建议：{labels.get(tool, tool)}")
+        lines = [line for line in text.splitlines()
+                 if not line.startswith("完整参数与依据：")]
+        lines = [line.replace("回复“同意”执行；回复“拒绝”取消；也可以直接提出修改意见。",
+                              "回复“同意”执行、“拒绝”取消，或提出修改。") for line in lines]
+        return "\n".join(lines)
+    if status == "awaiting_manual_submission":
+        wait = result.get("manual_wait") or {}
+        recovered = int(wait.get("recovered_count") or result.get("recovered_count") or 0)
+        names = {"deep_search": "MC", "relax_and_feature": "Relax",
+                 "dft_single_point": "DFT 单点", "dft_relax": "DFT 优化"}
+        stages = wait.get("waiting_by_stage") or {}
+        summary = "、".join(f"{names.get(stage, stage)} {count} 个" for stage, count in sorted(stages.items()))
+        lines = ([f"已回收 {recovered} 个结果。"] if recovered else [])
+        lines.append(f"等待结果：{summary or str(wait.get('waiting_task_count', 0)) + ' 个任务'}。")
+        collection = wait.get("result_collection") or {}
+        issues = int(collection.get("invalid_count", 0)) + int(collection.get("missing_structure_count", 0))
+        markers = int(collection.get("missing_marker_count", 0))
+        if issues or markers:
+            lines.append(f"需检查：校验/结构问题 {issues} 个，缺完成标记 {markers} 个。")
+        interception = (result.get("state") or {}).get("mc_budget_interception") or {}
+        if interception.get("rejected_count"):
+            verbose_text = _format_workflow_reply_verbose(result, state_path)
+            lines.extend(line for line in verbose_text.splitlines() if line.startswith("预算拦截："))
+        if wait.get("upload_root"):
+            lines.append(f"目录：`{wait['upload_root']}`")
+        else:
+            roots = list(dict.fromkeys(str(Path(path).parent) for path in wait.get("batch_directories") or []))
+            if roots:
+                lines.append("目录：" + "、".join(f"`{path}`" for path in roots))
+        lines.append("尚未本机提交。Relax/MC 提交批次 GPU.sh；DFT 提交单任务 GPU.sh。")
+        lines.append("完成后回传对应 results 文件夹，再说“继续”。未回传任务保持等待。")
+        return "\n".join(lines)
+    text = _format_workflow_reply_verbose(result, state_path)
+    return "\n".join(line for line in text.splitlines() if not line.startswith((
+        "详细记录：", "完整参数与结果：", "完整记录：", "示例目录：", "结构路径与详细结果：")))
+
+
+def _format_workflow_reply_verbose(result: dict, state_path) -> str:
     if not isinstance(result, dict):
         return str(result)
     events = result.get("events") or []
@@ -849,6 +952,9 @@ def format_workflow_reply(result: dict, state_path) -> str:
             preview = params.get("budget_preview") or {}
             lines.append(f"MC 总步数目标：{params.get('mc_budget', '待定')} 步；"
                          f"本次计划：{preview.get('requested_steps', '待重算')} 步。")
+            if preview.get("phase_diagram_version"):
+                lines.append(f"Ehull 标准：当前 MLIP 相图版本 {preview['phase_diagram_version']} 的 eV/atom 值；"
+                             "批准前会复核相图版本与结构能量。")
         fallback_reason = (proposal.get("raw_action") or {}).get("fallback_reason")
         if fallback_reason:
             lines.append(f"回退原因：`{fallback_reason}`")
@@ -873,6 +979,16 @@ def format_workflow_reply(result: dict, state_path) -> str:
                 f"{row.get('field')} {row.get('from')}→{row.get('to')}" for row in changes
             )
             change_text = f"预算调整：{details}。"
+        policy_changes = migration.get("policy_changes") or []
+        policy_text = ""
+        if policy_changes:
+            details = "、".join(
+                f"{row.get('field')} "
+                f"{'隐含默认值 ' if row.get('from_basis') == 'implicit_default' else ''}"
+                f"{row.get('from')}→{row.get('to')}"
+                for row in policy_changes
+            )
+            policy_text = f"已批准的 MC 策略/成本估算调整：{details}。"
         compatibility = migration.get("compatibility") or {}
         compatibility_text = ""
         if compatibility:
@@ -884,7 +1000,7 @@ def format_workflow_reply(result: dict, state_path) -> str:
             )
         return (
             f"运行配置已从 {source} 迁移到 {target}；历史任务和结果仍保留原版本归属。"
-            f"{change_text}{compatibility_text}"
+            f"{change_text}{policy_text}{compatibility_text}"
             "本次只更新配置绑定，没有生成、提交或运行计算。请发送下一步任务指令。"
         )
     if status == "config_migration_not_needed":
@@ -908,7 +1024,8 @@ def format_workflow_reply(result: dict, state_path) -> str:
         waiting_count = int(wait.get("waiting_task_count") or 0)
         by_stage = wait.get("waiting_by_stage") or {}
         stage_label = ("MC" if set(by_stage) == {"deep_search"} else
-                       "Relax" if set(by_stage) == {"relax_and_feature"} else "计算")
+                       "Relax" if set(by_stage) == {"relax_and_feature"} else
+                       "DFT" if set(by_stage) <= {"dft_single_point", "dft_relax"} else "计算")
         lines = []
         if recovered_count:
             lines.append(f"已校验并回收 {recovered_count} 个任务结果；预算和台账已更新。")
@@ -937,21 +1054,25 @@ def format_workflow_reply(result: dict, state_path) -> str:
                 f"{', '.join(interception.get('reasons') or [])}。"
                 f"按层级/相分布：{breakdown}。"
                 "如果要运行全部，请先查看完整估计成本并明确批准全量方案。")
-        lines.append("本机没有提交作业。请上传完整批次目录：Relax/MC 每个批次只提交根目录的 `GPU.sh` 一次；DFT 则提交单任务目录中的 `GPU.sh`。")
+        lines.append("本机没有提交作业。请将同一阶段的批次目录放在同一轮次目录下：Relax/MC 每个批次根目录的 `GPU.sh` 提交一次；DFT 则在单任务目录提交 `GPU.sh`。")
         if wait.get("upload_root"):
             lines.append(f"本地任务总目录：`{wait['upload_root']}`")
         if wait.get("upload_plan_path"):
             lines.append(f"按 branch 分组的完整上传清单：`{wait['upload_plan_path']}`。每个 branch 的所有任务目录都列在一起。")
-        directories = wait.get("task_directories") or []
+        directories = wait.get("batch_directories") or wait.get("task_directories") or []
         if directories:
-            lines.append("待处理任务目录：")
+            lines.append("待提交的批次目录：")
             lines.extend(f"- `{path}`" for path in directories[:5])
             if len(directories) > 5:
-                lines.append(f"- 其余 {len(directories) - 5} 个目录见任务清单和 state 文件。")
+                lines.append(f"- 其余 {len(directories) - 5} 个批次见任务清单和 state 文件。")
+        results_directories = wait.get("results_directories") or []
+        if results_directories:
+            lines.append("本阶段统一结果目录：" + "、".join(f"`{path}`" for path in results_directories))
         lines.append(
-            "任务完成后，把每个任务目录的 `result.json` 和 `task.finished.json` "
-            "放回本地对应目录，再对 Agent 说“继续”。Agent 会先校验并回收结果；"
-            "未回传任务会继续等待，不会重复准备或提交。"
+            "本阶段任务完成后，只需下载对应的整个 `results/` 文件夹，放回本地同一阶段目录，"
+            "其中含所有任务的 `result.json`、`task.finished.json` 和最终结构；再对 Agent 说“继续”。"
+            "Agent 会按任务校验并回收；未回传任务继续等待，不会重复准备或提交。"
+            "旧批次仍按原任务目录回收。"
         )
         return "\n".join(lines)
     if status == "failed":
@@ -991,6 +1112,10 @@ def format_workflow_reply(result: dict, state_path) -> str:
             "upload_directory_or_worker_command_missing": "上传目录或远端 worker 执行命令未配置",
             "structure_dedup_not_ready": "结构去重检查尚未完成",
             "no_legal_existing_relax_structures": "没有可用于 Relax 的合法现有结构",
+            "current_mlip_phase_diagram_unavailable": "当前 MLIP 相图未就绪，不能按 Ehull/atom 派发 MC",
+            "approved_phase_diagram_changed": "相图在审批后变化，需重新预览并批准 MC 方案",
+            "relax_structure_missing_from_current_phase_diagram": "所选 Relax 结构在当前相图中缺少唯一匹配的 Ehull/atom",
+            "mc_requires_current_phase_diagram_ehull_per_atom": "MC 派发缺少当前相图的 Ehull/atom 证据",
         }
         reason = reason_labels.get(str(reason), str(reason))
         return f"本轮未执行：`{action or 'workflow'}` 未能准备（{reason}）。\n详细记录：`{detail_path}`"
@@ -1161,6 +1286,14 @@ def _is_status_command(message):
         "/status", "/状态", "status", "progress", "状态", "进度", "当前状态",
         "当前进度", "查看状态", "查看进度", "查看预算", "查看相图",
     }
+
+
+def _phase_csv_request(message):
+    value = " ".join(str(message or "").lower().split())
+    export_verb = any(word in value for word in ("导出", "输出", "给我"))
+    named_artifact = "相图" in value or "csv" in value
+    return (export_verb and named_artifact and
+            ("当前" in value or "最新" in value or "相图" in value))
 
 
 def _classify_history_decision(message):

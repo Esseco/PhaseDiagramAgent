@@ -108,4 +108,7 @@ def reconcile_task_results(state: dict | None, recovered_results=None) -> dict:
                 reservation["status"] = "submitted" if status == "pending" else "running"
             reconciled.append({"status": status, "task_id": task_id, "task_key": task_key})
     current["pending_tasks"] = [item for item in tasks if item.get("status") in ACTIVE_STATUSES]
+    if current.get("tiered_mc_state"):
+        from scientific_layer.mc.second_round_state import reconciled_mc_state
+        current["tiered_mc_state"] = reconciled_mc_state(current)
     return {"state": current, "reconciled": reconciled}

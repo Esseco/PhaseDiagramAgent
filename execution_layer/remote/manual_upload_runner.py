@@ -69,6 +69,11 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 else "mlip_gpu_template.sh"
             )
             if stage in {"dft_single_point", "dft_relax"}:
+                if (json.loads((task_directory / "task.json").read_text(encoding="utf-8"))
+                        .get("atomate", {}).get("backend") == "pycode_atomate2_relax"):
+                    write_unix_shell_script(task_directory / "GPU.sh",
+                        (task_directory / "submit_gpu.sh").read_text(encoding="utf-8"))
+                    continue
                 missing = [name for name in ("POSCAR", "INCAR", "KPOINTS", "POTCAR")
                            if not (task_directory / name).is_file()]
                 if missing:
@@ -76,6 +81,14 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
             if not mlip_batch:
                 job_name = _slurm_job_name(stage, entry["task_id"])
                 script = _render_job_name(template.read_text(encoding="utf-8"), job_name)
+                vasp_command = "mpirun -np $SLURM_NPROCS vasp_std"
+                if script.count(vasp_command) != 1:
+                    raise ValueError("DFT GPU 模板必须恰有一处 VASP 入口")
+                script = script.replace(vasp_command,
+                    'cd "${SLURM_SUBMIT_DIR:-.}"\n'
+                    'set +e\n' + vasp_command + '\nvasp_exit_code=$?\nset -e\n'
+                    'python3 -m execution_layer.remote.finalize_vasp '
+                    '--directory . --exit-code "$vasp_exit_code"')
                 write_unix_shell_script(task_directory / "GPU.sh", script)
         if mlip_batch:
             executor = _executor_reference(self.worker_command)
@@ -109,12 +122,15 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
         guide_path = directory / "UPLOAD_AND_SUBMIT.md"
         guide_path.write_text(_guide(batch["batch_id"]), encoding="utf-8")
         script_path = directory / "GPU.sh" if mlip_batch else Path(task_directories[0]) / "GPU.sh"
+        results_directory = directory.parent / "results"
         batch.update({"upload_directory": str(directory), "script_path": str(script_path),
+                      "results_directory": str(results_directory),
                       "task_directory": task_directories[0], "task_directories": task_directories,
                       "checksums_path": str(checksum_path), "upload_guide": str(guide_path)})
         result["batch"] = batch
         result["state"]["slurm_batches"][-1].update({
             "upload_directory": str(directory), "script_path": str(script_path),
+            "results_directory": str(results_directory),
             "task_directory": task_directories[0], "task_directories": task_directories,
             "checksums_path": str(checksum_path),
             "upload_guide": str(guide_path),
@@ -157,17 +173,23 @@ def _guide(batch_id):
 
 This directory was generated locally. Nothing has been submitted.
 
-1. Inspect `manifest.json`, `task.json`, and the task directory's `GPU.sh`.
+1. Keep every submission directory for this stage as a sibling under the same
+   allocation folder under the MLIP-round stage. Inspect `manifest.json`, `task.json`, and `GPU.sh`.
 2. Confirm the model/input files and all site-specific Slurm settings.
-3. Upload this whole batch directory. Relax jobs contain up to 100 structures;
-   MC jobs contain up to 10 compatible simulations, possibly from multiple branches.
+3. Upload the complete allocation folder, keeping its batch directories as siblings. Relax jobs
+   contain up to 100 structures; MC jobs contain up to 10 compatible simulations,
+   possibly from multiple branches.
 4. Optionally verify its files with `sha256sum -c SHA256SUMS`.
 5. For MLIP Relax/MC, submit the batch root's `GPU.sh` once; it runs each task
-   subdirectory and keeps separate results/logs. For DFT, submit the only task
-   subdirectory's `GPU.sh` once. Never submit both levels.
-6. Download result JSON, completion markers, final structures/checkpoints and logs
-   according to the project's result whitelist, then run the local recovery flow.
+   subdirectory and collects results in this allocation folder's shared `results/`.
+   For DFT, change into the only task subdirectory and submit its `GPU.sh` once.
+   Never submit both levels.
+6. After all jobs for this allocation finish, download the allocation folder's single
+   `results/` directory into the matching local allocation folder. It includes result JSON,
+   completion markers and required final structures.
 
 The generated script is not evidence that executables, environments, paths,
 pseudopotentials, permissions, or resource requests are correct for your site.
+For DFT, the remote Python environment must import this project and pymatgen
+to parse VASP output and publish `results/` after the calculation.
 """

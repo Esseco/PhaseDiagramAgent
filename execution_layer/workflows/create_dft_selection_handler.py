@@ -55,7 +55,9 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 "task_key": decision["task_key"],
                 "object_id": decision["candidate_id"],
                 "structure_id": decision["candidate_id"],
-                "branch_id": decision.get("branch_id"),
+                "branch_id": decision.get("branch_id") or next((row.get("branch_id")
+                    for row in candidates if (row.get("candidate_id") or row.get("structure_id"))
+                    == decision["candidate_id"]), None),
                 "stage": stage,
                 "status": "pending",
                 "planned_relative_cost": decision["relative_cost"],
@@ -63,7 +65,18 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 "config_version": context["config_version"],
                 "selection_reason": decision.get("reason"),
                 "selection_source": proposal["source"],
+                "parent_decision_id": context.get("approval_record_id"),
+                "generation_cycle": len(state.get("generation_history") or []),
+                "model_version": (context["effective_config"].get("mlip") or {}).get("version")
+                    or (context["effective_config"].get("mlip") or {}).get("name")
+                    or state.get("active_model_version"),
+                "upload_operation_id": hashlib.sha256(str(action.get("task_key")
+                    or context.get("approval_record_id") or decision["task_key"]).encode()).hexdigest()[:12],
             }
+            selected = next((row for row in candidates
+                if (row.get("candidate_id") or row.get("structure_id")) == decision["candidate_id"]), {})
+            if selected.get("structure_path"):
+                task["structure_path"] = selected["structure_path"]
             state.setdefault("tasks", []).append(task)
             state.setdefault("pending_tasks", []).append(task)
             tasks.append(task)

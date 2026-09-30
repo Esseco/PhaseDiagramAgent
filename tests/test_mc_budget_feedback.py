@@ -98,7 +98,13 @@ def test_mc_budget_revision_recomputes_frozen_hull_preview():
         "energy": -40.0, "energy_unit": "eV", "converged": True,
         "model_version": "m1", "stage": "relax_and_feature"}], model_version="m1")
     state = {"branch_hull_batches": {pool["version"]: pool},
-             "current_branch_hull_version": pool["version"]}
+                 "current_branch_hull_version": pool["version"]}
+    state["phase_diagrams"] = {"mlip": {"method": "mlip", "status": "completed",
+        "model_version": "m1", "version": "test-phase-v1", "entries": [{
+            "structure_id": "S1", "structure_path": "final.vasp",
+            "normalized_total_energy": -40.0, "ehull": 0.0,
+            "ehull_unit": "eV/atom", "phase": "O3",
+            "phase_identification_status": "identified"}]}}
     manager = SimpleNamespace(data={"branches": {"B1": {"P": "O3", "x": "1/2"}}})
     original = {"tool": "allocate_mc_bohb", "task_key": "mc-old", "target_ids": ["B1"],
                 "parameters": {"mc_budget": 300, "seed": 7,

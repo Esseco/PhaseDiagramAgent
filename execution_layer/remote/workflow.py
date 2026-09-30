@@ -20,12 +20,20 @@ def _batch_locations(batch, local_batch_root, remote_batch_root):
 def sync_results(state_path, *, local_batch_root, remote_batch_root, transport):
     """Download artifacts only; reconciliation remains a local operation."""
     state = read_json(state_path, {}) or {}; synced = []
+    result_locations = {}
     for batch in state.get("slurm_batches") or []:
         if batch.get("status") not in {"submitted", "running", "completed", "results_synced"}:
             continue
         local, remote = _batch_locations(batch, local_batch_root, remote_batch_root)
-        result = transport.download_tree(str(remote), local)
-        if result.get("status") == "synced": synced.append(batch["batch_id"])
+        local_results = Path(batch.get("results_directory") or (local.parent / "results"))
+        remote_batch = PurePosixPath(batch.get("remote_path") or remote)
+        remote_results = remote_batch.parent / "results"
+        key = (str(local_results.resolve()), str(remote_results))
+        result_locations.setdefault(key, []).append(batch["batch_id"])
+    for (local_results, remote_results), batch_ids in result_locations.items():
+        result = transport.download_tree(remote_results, local_results)
+        if result.get("status") == "synced":
+            synced.extend(batch_ids)
     return {"status": "synced" if synced else "nothing_to_sync", "batch_ids": synced}
 
 

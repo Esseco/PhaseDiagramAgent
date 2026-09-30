@@ -51,6 +51,13 @@ def generate_dft_workflow_with_atomate(
     writer = input_writer or _materialize_vasp_inputs
     try:
         written = writer(workflow, directory)
+        incar_path = directory / "INCAR"
+        if incar_path.is_file():
+            from pymatgen.io.vasp.inputs import Incar
+            from scientific_layer.dft.incar_policy import layered_oxide_incar
+            incar = Incar.from_file(incar_path)
+            incar.update(layered_oxide_incar())
+            incar.write_file(incar_path)
     except Exception as error:
         return {
             "status": "failed",

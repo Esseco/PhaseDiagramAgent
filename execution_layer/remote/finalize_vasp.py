@@ -3,18 +3,33 @@ import argparse
 import json
 from pathlib import Path
 from execution_layer.remote.integrity import file_checksum, payload_checksum
+from execution_layer.remote.export_batch_result import export_batch_result
 from scientific_layer.dft.parse_vasp_result import parse_vasp_result
 
 
-def finalize_vasp(directory, *, exit_code=0):
-    root = Path(directory); task = json.loads((root / "task.json").read_text(encoding="utf-8"))
-    result = parse_vasp_result(root, exit_code=exit_code)
-    keys = ("task_id", "task_key", "batch_id", "config_version", "model_version")
-    result.update({key: task.get(key) for key in keys}); result["task_checksum"] = payload_checksum(task)
+def finalize_vasp(directory, *, exit_code=0, calculation_directory=None):
+    root = Path(directory).resolve(); task = json.loads((root / "task.json").read_text(encoding="utf-8"))
+    calculation = Path(calculation_directory or root).resolve()
+    result = parse_vasp_result(calculation, exit_code=exit_code)
+    outputs = result.get("outputs") or {}
+    structure_path = outputs.get("structure_path")
+    if structure_path:
+        structure = Path(structure_path)
+        if not structure.is_absolute():
+            structure = calculation / structure
+        result["outputs"] = {**outputs, "structure_path": str(structure)}
+        if structure.is_file():
+            result["outputs"]["structure_checksum"] = file_checksum(structure)
+    keys = ("task_id", "task_key", "batch_id", "config_version", "model_version",
+            "protocol_version", "input_file_version")
+    result.update({key: task.get(key) for key in keys})
+    result["task_checksum"] = task.get("task_checksum") or payload_checksum(task)
     result_path = root / "result.json"; _write(result_path, result)
     marker = {key: result.get(key) for key in (*keys, "task_checksum", "status")}
     marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})
-    _write(root / "task.finished.json", marker); return result
+    _write(root / "task.finished.json", marker)
+    export_batch_result(root, root.parent.parent / "results")
+    return result
 
 
 def _write(path, payload):
@@ -25,7 +40,8 @@ def _write(path, payload):
 def main(argv=None):
     parser = argparse.ArgumentParser(); parser.add_argument("--directory", required=True)
     parser.add_argument("--exit-code", type=int, default=0); args = parser.parse_args(argv)
-    finalize_vasp(args.directory, exit_code=args.exit_code); return 0
+    result = finalize_vasp(args.directory, exit_code=args.exit_code)
+    return 0 if result["status"] == "completed" else 1
 
 
 if __name__ == "__main__": raise SystemExit(main())

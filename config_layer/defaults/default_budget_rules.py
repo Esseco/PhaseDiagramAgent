@@ -9,7 +9,8 @@ def default_budget_rules() -> dict:
                        "stage_exponents": {"relax_and_feature": 1.2, "deep_search": 1.2,
                                            "dft_single_point": 3.0, "dft_relax": 3.0},
                        "reference_mc_steps": 1.0,
-                       "deep_search_cost_basis": "one_mlip_relaxation_per_mc_step"},
+                       "mc_step_cost_factor": 0.1,
+                       "deep_search_cost_basis": "one_tenth_mlip_relaxation_per_mc_step"},
         "structure_limits": {"max_atoms": 500, "max_det_H": 64, "max_proxy_cost_per_task": None},
         "stage_limits": {
             # Overall priority: MLIP exploration > DFT single-point > DFT relaxation.

@@ -70,6 +70,13 @@ def test_screening_reserves_relax_before_any_mc_and_reuses_results(tmp_path):
     for i, task in enumerate(state['tasks']):
         task.update(status='completed', converged=True, outputs={'composition':{'Fe':1},
             'structure_path':str(path), 'energy':-i, 'energy_unit':'eV'})
+    state['phase_diagrams'] = {'mlip': {'method': 'mlip', 'status': 'completed',
+        'model_version': 'm1', 'version': 'test-phase-v1', 'entries': [
+            {'structure_id': task['structure_id'], 'structure_path': str(path),
+             'normalized_total_energy': task['outputs']['energy'],
+             'ehull': 2 - i, 'ehull_unit': 'eV/atom',
+             'phase': 'O3', 'phase_identification_status': 'identified'}
+            for i, task in enumerate(state['tasks'])]}}
     ready = prepare_branch_relaxation(candidates, state, context)
     assert ready['status'] == 'ready'
     assert ready['candidates'][0]['relaxed_energy_per_atom'] == -2

@@ -109,6 +109,28 @@ def _generate_branches(*, action, context):
 def _allocate_mc_bohb(*, action, context):
     config = context["effective_config"]; params = deepcopy(action.get("parameters") or {})
     state = deepcopy(context.get("event_state") or {})
+    from scientific_layer.mc.second_round_state import (
+        first_round_source, reconciled_mc_state, second_round_candidates,
+        second_round_already_allocated,
+    )
+    second_round = params.get("round_kind") == "second"
+    has_existing_mc = any(row.get("stage") == "deep_search" for row in state.get("tasks") or [])
+    if has_existing_mc and not second_round:
+        return {"status": "not_configured", "state": state,
+                "reason": "existing_mc_results_require_verified_second_round_proposal"}
+    if second_round:
+        model_version = (config.get("mlip") or {}).get("version") or (config.get("mlip") or {}).get("name")
+        if second_round_already_allocated(state, model_version,
+                                          params.get("first_round_source_checksum")):
+            return {"status": "not_configured", "state": state,
+                    "reason": "second_mc_round_already_allocated"}
+        source = first_round_source(state, model_version)
+        if not (config.get("mc_policy") or {}).get("second_segment_enabled", True):
+            return {"status": "not_configured", "state": state,
+                    "reason": "second_mc_segment_disabled_in_confirmed_config"}
+        if source is None or source["checksum"] != params.get("first_round_source_checksum"):
+            return {"status": "awaiting_approval", "state": state,
+                    "reason": "first_round_mc_results_changed_since_approval"}
     preview = params.get("budget_preview") or {}
     if preview.get("compression_requires_user_choice") and params.get("compression_choice") != "reduce_branch_count":
         return {"status": "awaiting_approval", "state": state,
@@ -122,12 +144,15 @@ def _allocate_mc_bohb(*, action, context):
     lifecycle = state.get("branch_batch") or {}
     frozen_batch = lifecycle if lifecycle.get("status") in ACTIVE_BRANCH_BATCH_STATES else (state.get("pending_branch_screening") or {})
     frozen_ids = list(frozen_batch.get("branch_ids") or [])
-    if frozen_ids:
+    if frozen_ids and not second_round:
         if requested and set(requested) != set(frozen_ids):
             return {"status": "not_configured", "state": state,
                     "error": "agent_branch_batch_changed_during_screening",
                     "required_branch_ids": frozen_ids}
         requested = frozen_ids
+    if second_round and (not requested or not set(requested).issubset(source["branch_ids"])):
+        return {"status": "not_configured", "state": state,
+                "reason": "second_mc_round_requires_completed_first_round_branches"}
     known = {item["branch_id"] for item in candidates}
     unknown = sorted(set(requested) - known)
     if unknown:
@@ -153,7 +178,7 @@ def _allocate_mc_bohb(*, action, context):
         return {"status": "not_configured", "state": state,
                 "error": "no_legal_branch_after_relax_prescreen", "prescreen": prescreen}
     uses_relax_screening = (config.get("bohb") or {}).get("selection_policy") == "relax_hull_uncertainty"
-    if uses_relax_screening and not frozen_ids:
+    if uses_relax_screening and not frozen_ids and not second_round:
         state["branch_batch"] = create_branch_batch(
             [item["branch_id"] for item in candidates],
             selected_by=action.get("decision_source", "agent_tool_action"),
@@ -168,9 +193,37 @@ def _allocate_mc_bohb(*, action, context):
         item.setdefault("atom_count", _branch_atom_count(context["manager"], item))
     bohb = deepcopy(config.get("bohb") or {})
     bohb["new_candidates_per_iteration"] = len(candidates)
-    if bohb.get('selection_policy') == 'relax_hull_uncertainty':
+    if second_round:
+        diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+        approved_diagram_version = (params.get("phase_diagram_version")
+                                    or (params.get("budget_preview") or {}).get("phase_diagram_version"))
+        if (diagram.get("status") != "completed" or diagram.get("model_version") != model_version
+                or not approved_diagram_version or diagram.get("version") != approved_diagram_version):
+            return {"status": "awaiting_approval", "state": context.get("event_state") or {},
+                    "reason": "mc_phase_diagram_changed_since_approval"}
+        approved_hull_version = params.get("hull_reference_version")
+        pool = (state.get("branch_hull_batches") or {}).get(approved_hull_version)
+        if (not approved_hull_version or not pool or pool.get("version") != approved_hull_version
+                or pool.get("model_version") != model_version):
+            return {"status": "awaiting_approval", "state": context.get("event_state") or {},
+                    "reason": "mc_hull_reference_changed_since_approval"}
+        candidates, missing_mc = second_round_candidates(
+            candidates, state, diagram, model_version)
+        if missing_mc or not candidates:
+            return {"status": "not_configured", "state": state,
+                    "reason": "second_mc_round_requires_current_identified_mc_hull_entries",
+                    "missing_branch_ids": missing_mc}
+        candidates = [{**row, "phase_diagram_version": diagram["version"]}
+                     for row in candidates]
+        screening = {"state": state, "status": "ready", "candidates": candidates,
+                     "pool": pool, "unavailable": [], "unavailable_branches": []}
+        bohb.setdefault('scope', {})['hull_reference_version'] = approved_hull_version
+        bohb['scope']['mlip_version'] = model_version
+        bohb['objective'] = {**bohb.get('objective', {}), 'name': 'relaxed_batch_hull_gap'}
+    elif bohb.get('selection_policy') == 'relax_hull_uncertainty':
         screening = prepare_branch_relaxation(candidates, state, {
-            **context, 'mc_hull_reference_version': params.get('hull_reference_version')})
+            **context, 'mc_hull_reference_version': params.get('hull_reference_version'),
+            'mc_phase_diagram_version': params.get('phase_diagram_version')})
         state = screening['state']
         if screening['status'] not in {'ready', 'ready_partial'}:
             target_status = 'relax_pending' if screening['status'] == 'screening_pending' else 'failed'
@@ -179,20 +232,24 @@ def _allocate_mc_bohb(*, action, context):
                 state['branch_batch'] = transition_branch_batch(batch, target_status,
                     unavailable=deepcopy(screening.get('unavailable') or []))
             return {'status': 'completed' if screening['status'] == 'screening_pending' else 'not_configured',
-                    'state': state, 'screening': screening['status'], 'unavailable': screening['unavailable']}
+                    'state': state, 'screening': screening['status'],
+                    'reason': screening.get('reason'),
+                    'unavailable': screening['unavailable'],
+                    'unavailable_branches': screening.get('unavailable_branches', [])}
         candidates = screening['candidates']
         batch = state.get('branch_batch')
-        if batch.get('status') == 'selected':
+        if batch and batch.get('status') == 'selected':
             batch = transition_branch_batch(batch, 'relax_pending')
-        if batch.get('status') == 'relax_pending':
+        if batch and batch.get('status') == 'relax_pending':
             batch = transition_branch_batch(batch, 'relax_completed')
-        if batch.get('status') == 'relax_completed':
+        if batch and batch.get('status') == 'relax_completed':
             batch = transition_branch_batch(batch, 'hull_ready',
                 hull_version=screening['pool']['version'],
                 screening_status=screening['status'],
                 unavailable_structures=deepcopy(screening.get('unavailable') or []),
                 unavailable_branches=deepcopy(screening.get('unavailable_branches') or []))
-        state['branch_batch'] = batch
+        if batch:
+            state['branch_batch'] = batch
         state.pop("pending_branch_screening", None)
         bohb.setdefault('scope', {})['hull_reference_version'] = screening['pool']['version']
         bohb['scope']['mlip_version'] = screening['pool']['model_version']
@@ -203,13 +260,20 @@ def _allocate_mc_bohb(*, action, context):
         "mlip_version": bohb["scope"].get("mlip_version") or (config.get("mlip") or {}).get("version") or (config.get("mlip") or {}).get("name") or "unconfigured",
         "hull_reference_version": bohb["scope"].get("hull_reference_version") or _hull_version(state),
         "candidate_set_version": bohb["scope"].get("candidate_set_version") or _candidate_version(candidates),
+        "phase_diagram_version": ((state.get("phase_diagrams") or {}).get("mlip") or {}).get("version"),
     }
+    current_diagram_version = bohb["scope"].get("phase_diagram_version")
+    if params.get("budget_preview") and params["budget_preview"].get("phase_diagram_version") != current_diagram_version:
+        return {"status": "awaiting_approval", "state": context.get("event_state") or {},
+                "reason": "mc_phase_diagram_changed_since_approval"}
+    if any(row.get("ehull_source") != "phase_diagram"
+           or row.get("phase_diagram_version") != current_diagram_version
+           or row.get("relaxed_ehull") is None
+           or row.get("relaxed_ehull_unit") != "eV/atom" for row in candidates):
+        return {"status": "not_configured", "state": state,
+                "reason": "mc_requires_current_phase_diagram_ehull_per_atom"}
     if not bohb.get("bohb_selection_interface_enabled", False):
-        tier_state = deepcopy(state.get("tiered_mc_state") or {})
-        segments = tier_state.get("segments") or []
-        task_rows = {row.get("task_key"): row for row in state.get("tasks", [])}
-        tier_state["segments"] = [{**row, **deepcopy(task_rows.get(row.get("task_key")) or {})}
-                                   for row in segments]
+        tier_state = reconciled_mc_state(state)
         total_mc_budget = int(params.get("mc_budget", action.get("budget", 0)))
         mc_policy = config.get("mc_policy") or {
             "tiers": [{"name": str(value), "max_mc_steps": value,
@@ -223,8 +287,15 @@ def _allocate_mc_bohb(*, action, context):
             total_budget=total_mc_budget, seed=int(params.get("seed", config.get("seed", 0))),
             model_version=bohb["scope"]["mlip_version"],
             hull_reference_version=bohb["scope"]["hull_reference_version"],
+            phase_diagram_version=(state.get('phase_diagrams') or {}).get('mlip', {}).get('version'),
         )
         tier_state = scheduled["state"]
+        from execution_layer.budget.estimate_stage_cost import estimate_stage_cost
+        candidate_atoms = {row["branch_id"]: row.get("atom_count") for row in candidates}
+        costs = {child["task_key"]: estimate_stage_cost(
+            "deep_search", atom_count=candidate_atoms[child["branch_id"]],
+            mc_steps=child["max_mc_steps"], budgets=config["budgets"])["value"]
+            for child in scheduled["actions"]}
         preview = params.get("budget_preview")
         if preview:
             from decision_layer.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
@@ -234,11 +305,16 @@ def _allocate_mc_bohb(*, action, context):
                 return {'status': 'awaiting_approval', 'state': context.get('event_state') or {},
                         'reason': 'mc_allocation_changed_since_approval', 'budget_preview': checked}
             costs = {row['task_key']: row['planned_relative_cost'] for row in checked['allocations']}
-            for child in scheduled['actions']:
+        if second_round and (not preview or preview.get("round_kind") != "second"
+                             or preview.get("first_round_source_checksum") != source["checksum"]
+                             or any(child.get("segment_index") != 1 for child in scheduled["actions"])):
+            return {"status": "awaiting_approval", "state": context.get("event_state") or {},
+                    "reason": "second_mc_round_allocation_changed_since_approval"}
+        for child in scheduled['actions']:
+            child['planned_relative_cost'] = costs[child['task_key']]
+        for child in tier_state['segments']:
+            if child['task_key'] in costs:
                 child['planned_relative_cost'] = costs[child['task_key']]
-            for child in tier_state['segments']:
-                if child['task_key'] in costs:
-                    child['planned_relative_cost'] = costs[child['task_key']]
         full_plan_approved = (bool(context.get("human_approved_mc_full_plan")) and bool(preview)
                               and len(scheduled["actions"]) == preview.get("selected_branch_count")
                               and preview.get("selected_branch_count") == preview.get("full_plan_branch_count")
@@ -290,6 +366,10 @@ def _allocate_mc_bohb(*, action, context):
             task = {**deepcopy(child),
                     "task_id": f"MC-{hashlib.sha256(child['task_key'].encode()).hexdigest()[:12]}",
                     "object_id": child["branch_id"], "status": "pending",
+                    "generation_cycle": len(state.get("generation_history") or []),
+                    "parent_decision_id": context.get("approval_record_id"),
+                    "upload_operation_id": hashlib.sha256(str((preview or {}).get(
+                        "allocation_checksum") or action.get("task_key")).encode()).hexdigest()[:12],
                     "parameters": {"max_mc_steps": child["max_mc_steps"],
                                    "patience_steps": child["patience_steps"],
                                    "min_improvement": child["min_improvement"],
@@ -297,6 +377,16 @@ def _allocate_mc_bohb(*, action, context):
             state.setdefault("tasks", []).append(task); state.setdefault("pending_tasks", []).append(task)
             accepted.append(task)
         state["tiered_mc_state"] = tier_state
+        if second_round and accepted:
+            allocation_record = {
+                "source_checksum": source["checksum"],
+                "allocation_checksum": preview["allocation_checksum"],
+                "task_ids": [row["task_id"] for row in accepted],
+                "model_version": model_version,
+                "phase_diagram_version": current_diagram_version,
+            }
+            state.setdefault("mc_second_round_allocations", []).append(allocation_record)
+            state["mc_second_round_allocation"] = allocation_record
         if rejected:
             state["mc_budget_interception"] = summarize_mc_interception(
                 accepted, rejected, branch_phase, full_plan_approved=full_plan_approved)
@@ -349,12 +439,13 @@ def _allocate_mc_bohb(*, action, context):
     )
     scheduler = output["state"]; state["round_scheduler"] = scheduler
     state["active_round"] = deepcopy(scheduler.get("active_round"))
-    if state.get('branch_batch', {}).get('status') == 'hull_ready':
-        terminal = 'completed' if output.get('status') == 'budget_exhausted' else 'hb_active'
-        state['branch_batch'] = transition_branch_batch(state['branch_batch'], terminal,
-                                                        strategy_version=output.get('strategy_version'))
-    elif state.get('branch_batch', {}).get('status') == 'hb_active' and output.get('status') == 'budget_exhausted':
-        state['branch_batch'] = transition_branch_batch(state['branch_batch'], 'completed')
+    if not second_round:
+        if state.get('branch_batch', {}).get('status') == 'hull_ready':
+            terminal = 'completed' if output.get('status') == 'budget_exhausted' else 'hb_active'
+            state['branch_batch'] = transition_branch_batch(state['branch_batch'], terminal,
+                                                            strategy_version=output.get('strategy_version'))
+        elif state.get('branch_batch', {}).get('status') == 'hb_active' and output.get('status') == 'budget_exhausted':
+            state['branch_batch'] = transition_branch_batch(state['branch_batch'], 'completed')
     pending_keys = {item["task_key"] for item in ((scheduler.get("active_round") or {}).get("bohb_state") or {}).get("pending_tasks", [])}
     accepted, rejected = [], []
     for child in output.get("actions", []):

@@ -1,5 +1,6 @@
 import json
 import hashlib
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -46,7 +47,8 @@ def test_final_structure_must_be_downloaded_before_recovery(tmp_path):
     assert resolve_local_relax_structure(bad, tmp_path) is None
 
 
-def test_mc_inputs_use_relaxed_structure_and_full_na_template(tmp_path):
+@pytest.mark.parametrize("second_segment", [False, True])
+def test_mc_inputs_use_relaxed_structure_and_full_na_template(tmp_path, second_segment):
     relaxed = tmp_path / "relaxed.vasp"; relaxed.write_text("relaxed")
     full_na = tmp_path / "full_na.vasp"; full_na.write_text("full Na")
     manager = SimpleNamespace(data={"branches": {"B1": {"structure_ids": ["S1"]}},
@@ -57,6 +59,10 @@ def test_mc_inputs_use_relaxed_structure_and_full_na_template(tmp_path):
               "structure_path": str(relaxed), "model_version": "mh1", "incremental_budget": 10,
               "parameters": {"max_mc_steps": 10, "patience_steps": 3, "min_improvement": 0.001}}
              for i in range(21)]
+    if second_segment:
+        for task in tasks:
+            task.pop("structure_id")
+            task["segment_index"] = 1
     state = {"dedup_gate": {"status": "ready", "valid_structure_ids": ["S1"]},
              "tasks": tasks, "budget_reservations": {
                  row["task_key"]: {"status": "reserved"} for row in tasks}}
@@ -112,6 +118,14 @@ def _completed_relax_fixture(tmp_path):
     state = {"tasks": tasks, "dedup_gate": {"status": "ready"},
              "branch_hull_batches": {pool["version"]: pool},
              "current_branch_hull_version": pool["version"]}
+    state["phase_diagrams"] = {"mlip": {
+        "method": "mlip", "status": "completed", "model_version": "m1",
+        "version": "test-phase-v1", "entries": [{
+            "structure_id": row["structure_id"], "structure_path": row["structure_path"],
+            "normalized_total_energy": row["energy"],
+            "ehull": (row["energy"] + 42) / 6, "ehull_unit": "eV/atom",
+            "phase_identification_status": "identified", "phase": "O3",
+        } for row in rows]}}
     config = default_layered_search_config()
     config["mlip"].update({"name": "m1", "version": "m1", "model_path": "/remote/model"})
     config["mlip"].pop("relax_parameters")
@@ -138,6 +152,79 @@ def test_completed_relax_advances_to_mc_and_prepares_upload_files(tmp_path):
     assert (mc_dir / "initial.vasp").read_text(encoding="utf-8") == "relaxed 2"
     assert (mc_dir / "full_na_structure.vasp").read_text(encoding="utf-8") == "full Na"
     assert "#SBATCH --job-name=mc-" in (batch / "GPU.sh").read_text(encoding="utf-8")
+
+
+def test_completed_first_mc_proposes_one_second_segment_only(tmp_path):
+    manager, state, config = _completed_relax_fixture(tmp_path)
+    final = tmp_path / "mc-final.vasp"
+    final.write_text("mc final", encoding="utf-8")
+    first = {"task_id": "MC-first", "task_key": "first-mc", "stage": "deep_search",
+             "branch_id": "B1", "model_version": "m1", "status": "completed",
+             "segment_index": 0, "tier_index": 0, "max_mc_steps": 10,
+             "min_improvement": 0.001, "energy_improvement": 0.01,
+             "stop_reason": "max_steps", "result_path": str(final),
+             "outputs": {"energy_per_atom": -6.0}}
+    state["tasks"].append(first)
+    state["tiered_mc_state"] = {"segments": [{**first, "status": "pending"}],
+                               "processed_task_keys": []}
+    state["phase_diagrams"]["mlip"]["entries"].append({
+        "structure_id": "MC-final", "structure_path": str(final),
+        "normalized_total_energy": -42.0, "ehull": 0.0,
+        "ehull_unit": "eV/atom", "phase": "O3",
+        "phase_identification_status": "identified"})
+    action = choose_debug_next_action(state, manager, config,
+        allowed_tools=config["agent"]["allowed_tools"], user_message="继续")
+    assert action["tool"] == "allocate_mc_bohb"
+    assert action["parameters"]["round_kind"] == "second"
+    assert action["parameters"]["budget_preview"]["selected_branch_count"] == 1
+    assert action["parameters"]["budget_preview"]["allocations"][0]["segment_index"] == 1
+    result = _allocate_mc_bohb(action=action, context={"manager": manager,
+        "phase_references": {}, "effective_config": config, "event_state": state,
+        "config_version": "v1", "execution_mode": "automatic"})
+    assert result["status"] == "completed"
+    assert len(result["actions"]) == 1
+    again = _allocate_mc_bohb(action=action, context={"manager": manager,
+        "phase_references": {}, "effective_config": config,
+        "event_state": result["state"], "config_version": "v1", "execution_mode": "automatic"})
+    assert again["reason"] == "second_mc_round_already_allocated"
+
+
+def test_second_mc_requires_confirmed_policy_and_current_mc_phase_entry(tmp_path):
+    manager, state, config = _completed_relax_fixture(tmp_path)
+    final = tmp_path / "mc-final.vasp"
+    final.write_text("mc final", encoding="utf-8")
+    first = {"task_id": "MC-first", "task_key": "first-mc", "stage": "deep_search",
+             "branch_id": "B1", "model_version": "m1", "status": "completed",
+             "segment_index": 0, "tier_index": 0, "max_mc_steps": 10,
+             "min_improvement": 0.001, "energy_improvement": 0.01,
+             "result_path": str(final)}
+    state["tasks"].append(first)
+    state["tiered_mc_state"] = {"segments": [first]}
+    assert choose_debug_next_action(state, manager, config,
+        allowed_tools=config["agent"]["allowed_tools"], user_message="继续") is None
+    state["phase_diagrams"]["mlip"]["entries"].append({
+        "structure_id": "MC-final", "structure_path": str(final),
+        "normalized_total_energy": -42.0, "ehull": 0.0,
+        "ehull_unit": "eV/atom", "phase": "O3",
+        "phase_identification_status": "identified"})
+    config["mc_policy"]["second_segment_enabled"] = False
+    assert choose_debug_next_action(state, manager, config,
+        allowed_tools=config["agent"]["allowed_tools"], user_message="继续") is None
+
+
+def test_mc_approval_stops_if_phase_diagram_changed(tmp_path):
+    manager, state, config = _completed_relax_fixture(tmp_path)
+    action = choose_debug_next_action(state, manager, config,
+        allowed_tools=config["agent"]["allowed_tools"], user_message="继续")
+    assert action["parameters"]["phase_diagram_version"] == "test-phase-v1"
+    state["phase_diagrams"]["mlip"]["version"] = "new-phase-version"
+    result = _allocate_mc_bohb(action=action, context={"manager": manager,
+        "phase_references": {}, "effective_config": config, "event_state": state,
+        "config_version": "v1", "execution_mode": "interactive"})
+    assert result["status"] == "not_configured"
+    assert result["reason"] == "approved_phase_diagram_changed"
+    assert not [task for task in result["state"].get("tasks", [])
+                if task["stage"] == "deep_search"]
 
 
 def test_verified_legacy_relax_results_advance_to_mc_after_config_migration(tmp_path):
@@ -174,6 +261,7 @@ def test_verified_legacy_relax_results_advance_to_mc_after_config_migration(tmp_
     }]
     pool = state["branch_hull_batches"][state["current_branch_hull_version"]]
     pool["model_version"] = "mace-mh-1"
+    state["phase_diagrams"]["mlip"]["model_version"] = "mace-mh-1"
     for row in pool["records"]:
         row["model_version"] = "mace-mh-1"
 
@@ -206,6 +294,7 @@ def test_scheduling_revision_keeps_relax_pool_and_does_not_block_mc(tmp_path):
     ]})
     pool = state["branch_hull_batches"][state["current_branch_hull_version"]]
     pool["model_version"] = "mace-mh-1"
+    state["phase_diagrams"]["mlip"]["model_version"] = "mace-mh-1"
     for row in pool["records"]:
         row["model_version"] = "mace-mh-1"
 

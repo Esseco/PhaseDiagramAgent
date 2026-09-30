@@ -41,7 +41,7 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
                 {"max_ehull_ev_per_atom": 0.040, "max_mc_steps": 30, "patience_steps": 4},
             ],
             "exploration_max_mc_steps": 15, "exploration_patience_steps": 3,
-            "second_segment_enabled": False,
+            "second_segment_enabled": True,
             "tiers": [
                 {"name": "small", "max_mc_steps": 10, "patience_steps": 3, "min_improvement": 0.001},
                 {"name": "medium", "max_mc_steps": 30, "patience_steps": 6, "min_improvement": 0.001},

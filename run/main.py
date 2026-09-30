@@ -205,7 +205,8 @@ def _config_migration_block_message(migration):
     if status == "approval_required":
         return (
             f"运行仍绑定配置 {source}，当前确认配置为 {target}；已有任务或结果。"
-            "若只是提高预算且科学设置未变，请发送“批准迁移”。"
+            "若要迁移预算上限、已确认开启第二段 MC，或调整 MC 步数成本估算系数，"
+            "请核对配置后发送“批准迁移”；其他科学设置变化不会被迁移。"
         )
     if status == "rejected_non_budget_change":
         fields = "、".join(migration.get("changed_fields") or []) or "科学设置"

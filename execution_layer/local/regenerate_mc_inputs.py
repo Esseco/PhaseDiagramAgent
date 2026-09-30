@@ -41,7 +41,8 @@ def plan_mc_regeneration(state, upload_root):
     keys = [row.get("task_key") for row in allocations]
     if len(set(keys)) != len(keys) or not all(keys):
         raise ValueError("已批准的 MC 分配清单含重复或空任务键")
-    current = [row for row in state.get("tasks") or [] if row.get("stage") == "deep_search"]
+    current = [row for row in state.get("tasks") or []
+               if row.get("stage") == "deep_search" and row.get("task_key") in set(keys)]
     if any(row.get("status") not in {"pending"} or row.get("job_id") for row in current):
         raise ValueError("当前轮 MC 已提交、完成或状态不明，不能重生成")
     old_ids = {row.get("task_id") for row in current}
@@ -51,8 +52,16 @@ def plan_mc_regeneration(state, upload_root):
     if len(paths) != 1:
         raise ValueError("无法唯一确定当前轮 MC-search 目录")
     mc_root = paths.pop()
-    if mc_root.name != "MC-search" or root not in mc_root.parents:
-        raise ValueError("MC-search 目录不在配置的上传根目录内")
+    if (mc_root.name != "MC-search" and not (
+            mc_root.name.startswith("allocation-") and mc_root.parent.name == "MC-search")) or root not in mc_root.parents:
+        if not ((mc_root.name.startswith('MC-round-') or '_MC-round-' in mc_root.name)
+                and mc_root.parent.name.startswith('Search-group-') and root in mc_root.parents):
+            raise ValueError("MC-search 目录不在配置的上传根目录内")
+    other_tasks = [row for row in state.get("tasks") or []
+                   if row.get("task_id") not in old_ids and row.get("input_path")
+                   and mc_root in Path(row["input_path"]).resolve().parents]
+    if other_tasks:
+        raise ValueError("此目录还包含其他 MC 分配，请先拆分目录；不能删除历史输入或结果")
     batches = [row for row in state.get("slurm_batches") or []
                if (row.get("calculation_group") == "MC-search"
                    and Path(row.get("upload_directory") or "").resolve().parent == mc_root)
@@ -155,7 +164,9 @@ def regenerate_mc_inputs(state, *, approved_plan, upload_root, config, manager,
                                "seed": child["seed"]}}
         current["tasks"].append(task)
         current["pending_tasks"].append(task)
-    current.setdefault("tiered_mc_state", {})["segments"] = allocations
+    tier_state = current.setdefault("tiered_mc_state", {})
+    tier_state["segments"] = [row for row in tier_state.get("segments") or []
+                              if row.get("task_key") not in old_keys] + allocations
     current.setdefault("mc_regeneration_history", []).append({
         **plan, "approved_action_task_key": next(row["final_action"]["task_key"]
             for row in reversed(current["action_records"])
