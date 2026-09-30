@@ -10,7 +10,8 @@ def test_local_pool_uses_only_recovered_matching_model(tmp_path):
     task = {"task_id": "r1", "branch_id": "b1", "structure_id": "s1",
             "stage": "relax_and_feature", "status": "completed", "converged": True,
             "model_version": "m1", "outputs": {"composition": {"Na": 1, "Fe": 1},
-            "structure_path": str(structure), "energy": -2.0, "energy_unit": "eV"}}
+            "structure_path": str(structure), "energy": -2.0, "energy_unit": "eV",
+            "actual_phase": "O3", "phase_identification": {"status": "identified", "phase": "O3"}}}
     state = {"tasks": [task, {**task, "task_id": "r2", "model_version": "m2"}]}
     path = tmp_path / "pool.json"
     first = update_local_mlip_hull_pool(state, config=config, path=path)

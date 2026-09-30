@@ -26,17 +26,18 @@ class AutonomousPlatformTest(unittest.TestCase):
             path = f"{directory}/draft.json"; save_config_session(session, path); loaded = load_config_session(path)
         self.assertEqual(loaded["draft_revision"], session["draft_revision"])
 
-    def test_confirmed_run_fallback_frozen_and_idempotent(self):
+    def test_invalid_model_action_is_blocked_without_rule_execution(self):
         session = confirm_config_snapshot(self.configured(), user_confirmed=True)
-        registry = create_tool_registry({"check_convergence": lambda action, context: {"converged": False, "budget_exhausted": True}})
+        calls = []
+        registry = create_tool_registry({"check_convergence": lambda action, context: calls.append(action) or {"converged": False, "budget_exhausted": True}})
         invalid = lambda _: {"tool": "run_calculation_stage", "task_key": "T1", "parameters": {"parameters": {"encut": 300}, "dft.parameters": {}}, "budget": 1, "reason": "bad"}
         first = run_tool_step(None, session, registry=registry, agent_client=invalid, execute=True, invocation_id="a")
-        self.assertEqual(first["action"]["decision_source"], "rule")
-        self.assertEqual(first["execution"]["tool"], "check_convergence")
-        self.assertFalse(first["execution"]["result"]["converged"])
-        self.assertEqual(first["execution"]["result"]["search_status"], "budget_exhausted")
-        repeated = run_tool_step(first["state"], session, registry=registry, execute=True, invocation_id="a")
-        self.assertTrue(repeated["idempotent_replay"])
+        self.assertEqual(first["status"], "not_configured")
+        self.assertNotIn("execution", first)
+        self.assertFalse(first["state"].get("pending_execution_policies"))
+        repeated = run_tool_step(first["state"], session, registry=registry, agent_client=invalid, execute=True, invocation_id="a")
+        self.assertEqual(repeated["status"], "not_configured")
+        self.assertEqual(calls, [])
         self.assertEqual(repeated["state"]["confirmed_config_version"] if "confirmed_config_version" in repeated["state"] else session["confirmed_snapshot"]["config_version"], session["confirmed_snapshot"]["config_version"])
 
 

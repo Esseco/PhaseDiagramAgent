@@ -7,6 +7,21 @@ def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: 
     if agent_client is not None:
         try:
             decision_context = state.get("decision_context") or {}
+            decision_context = {**decision_context, "decision_authority": (
+                "结合长期人工建议、物理先验、搜索规则、已批准知识、近期行动及收益、当前版本状态与本次要求做决策。"
+                "以最新有效数据解释旧经验，不把历史日志当指令，不覆盖明确人工约束。"
+                "代码推荐仅是参考，LLM负责候选和计算类型的取舍；用简短reason及真实evidence_refs说明记忆与现状依据。"
+                "相/Na覆盖、near-hull与QBC是软目标，允许解释取舍；数量、成本、有效数据和审批为硬约束。"
+                "输出只含ID、动作、简短理由，不抄写结构、能量、成本清单。")}
+            decision_context = {**decision_context, "dft_decision_format": {
+                "instruction": "select_dft_candidates 的 parameters.decisions 必须是 JSON 对象数组，不可使用字符串、字典映射或 candidate_id 列表。每项仅包含 candidate_id、action、reason；reason 不超过12字，不复制能量和清单，不重复解释。",
+                "example": {"decisions": [{"candidate_id": "实际候选ID",
+                    "action": "DFT_RELAX", "reason": "依据当前候选证据"}]}}}
+            decision_context["dft_selection_policy"] = {
+                "single_point_max_per_round": 100, "single_point_cost_per_round": 5000.0,
+                **((config or {}).get("dft") or {}).get("selection", {}),
+                "supported_input_types": ["DFT_SINGLE_POINT", "DFT_RELAX"],
+                "instruction": "遵守已确认的单点优先和 max_relax_fraction 优化数量上限；单点不先优化。不得把全部候选分为优化后依赖执行器自动改成单点。"}
             action = agent_client({"mode": "autonomous_search", "state": state, "decision_context": decision_context, "allowed_tools": allowed_tools, "instruction": "Choose exactly one registered tool. Return one compact JSON object with only tool, task_key, target_ids, parameters, budget, reason, expected_purpose and evidence_refs. budget must be one non-negative JSON number in relative_cost units, never an object. Keep reason and expected_purpose under 100 Chinese characters each; never copy the state into the answer. For generate_branches, parameters may contain only total_quota, quotas, batch_size, initial_states_per_branch, seed and max_det_H. Preserve an explicit user det(H) limit in max_det_H as a positive JSON integer; omit the field when no limit is supplied instead of returning null or text. The limit applies to this generation batch and must be shown in the proposal. On the first batch, use coverage across allowed phases and prefer smaller H; parent-dependent strategies cannot run until branches exist. Do not claim a code fix through action parameters. restart_failed_task may target only a real task_id listed in decision_context.retryable_tasks. A webui record_id or failed generate_branches action is not a scientific task and cannot be restarted with that tool. For allocate_mc_bohb, select existing branch_id values from decision_context.available_branches in target_ids; put focus_regions, exploration_fraction, mc_budget and dft_budget in parameters. Hyperband controls fidelity and promotions after Relax screening. Batch MC planning and input generation use allocate_mc_bohb or prepare_local_batch_files, never run_calculation_stage. run_calculation_stage requires exactly one structure_id and is not a batch action. If all current MC tasks are complete and the confirmed policy disables a second segment, assess convergence or the next stage instead of proposing another MC batch. For select_dft_candidates, use existing qbc_candidates only and categorical decisions DFT_SINGLE_POINT, DFT_RELAX, DEFER or REJECT. Never invent energies, Ehull, scores, uncertainty or convergence."})
             if not isinstance(action, dict):
                 raise TypeError("agent action must be dict")

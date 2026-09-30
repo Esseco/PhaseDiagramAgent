@@ -17,6 +17,23 @@ def reconciled_mc_state(state):
     return tier_state
 
 
+def second_round_completed(state, model_version):
+    """Require a recorded allocation and every allocated task completed."""
+    allocations = list(state.get("mc_second_round_allocations") or [])
+    if state.get("mc_second_round_allocation"):
+        allocations.append(state["mc_second_round_allocation"])
+    allocations = [row for row in allocations if row.get("model_version") == model_version]
+    tasks = [row for row in state.get("tasks") or []
+             if row.get("stage") == "deep_search" and row.get("model_version") == model_version]
+    if not allocations or not tasks or any(row.get("status") != "completed" for row in tasks):
+        return False
+    ids = set(allocations[-1].get("task_ids") or [])
+    keys = set(allocations[-1].get("task_keys") or [])
+    second = [row for row in tasks if row.get("segment_index") == 1]
+    return bool(second) and (not ids or ids.issubset({row.get("task_id") for row in second})) \
+        and (not keys or keys.issubset({row.get("task_key") for row in second}))
+
+
 def first_round_source(state, model_version):
     """Only a fully recovered first wave can seed a second allocation."""
     segments = [row for row in reconciled_mc_state(state)["segments"]

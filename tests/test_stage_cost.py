@@ -22,6 +22,7 @@ def test_confirmed_costs_propagate_and_running_relax_consumes_stage_capacity():
     budgets = default_budget_rules()
     budgets["stage_limits"]["dft_single_point"]["task_cost"] = 30
     config = default_dft_decision_config(budgets=budgets)
+    config["selection_policy"] = {"max_relax_fraction": 1.0}  # Isolate stage capacity, not selection policy.
     assert config["action_costs"]["DFT_SINGLE_POINT"] == 30
     state = {"budget_reservations": {"running": {"status": "running", "stage": "dft_relax", "reserved_cost": 900}}}
     proposal = {"decisions": [{"candidate_id": str(i), "action": "DFT_RELAX"} for i in range(2)]}

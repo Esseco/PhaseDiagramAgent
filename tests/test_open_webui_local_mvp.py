@@ -88,11 +88,9 @@ class OpenWebUILocalMVPTest(unittest.TestCase):
                                       "budget": 0, "reason": "not allowed"}
             blocked = run_tool_step({}, session, registry=registry, agent_client=illegal,
                 execution_mode="interactive", invocation_id="BAD-1")
-            blocked = run_tool_step(blocked["state"], session, registry=registry,
-                execution_mode="interactive", invocation_id="BAD-1",
-                human_feedback={"decision": "approve", "comment": "approve"})
-            self.assertEqual(blocked["status"], "rejected")
-            self.assertIn("tool_not_allowed", blocked["validation"]["errors"])
+            self.assertEqual(blocked["status"], "not_configured")
+            self.assertFalse(blocked["state"].get("pending_execution_policies"))
+            self.assertNotIn("execution", blocked)
 
     def test_simple_chat_agreement_approves_and_repeat_page_decision_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -114,7 +112,7 @@ class OpenWebUILocalMVPTest(unittest.TestCase):
                 handler.review_pending("P1", "approve", expected_state_version="old",
                                        expected_proposal_hash=proposal_hash(proposal))
             reply = handler([{"role": "user", "content": "同意"}], conversation_id="chat")
-            self.assertIn("completed", reply)
+            self.assertIn("已完成", reply)
             self.assertEqual(len(calls), 1)
             result = handler.review_pending("P1", "approve", expected_state_version=version,
                                             expected_proposal_hash=proposal_hash(proposal))

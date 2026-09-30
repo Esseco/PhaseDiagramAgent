@@ -25,9 +25,21 @@ def test_relax_uses_selected_path_and_gga_none(tmp_path):
     compile((target / "workflow.py").read_text(), "workflow.py", "exec")
 
 
-def test_single_point_is_not_silently_changed():
-    with pytest.raises(ValueError, match="dft_relax"):
-        prepare_pycode_relax({"stage": "dft_single_point"}, manager=None)
+def test_single_point_is_not_relaxed(tmp_path):
+    source = tmp_path / "selected.vasp"
+    source.write_text("selected")
+    received = {}
+    def generator(directory, structure, **kwargs):
+        received.update(kwargs)
+        directory.mkdir()
+        (directory / "workflow.py").write_text("pass")
+    result = prepare_pycode_relax({"stage": "dft_single_point", "structure_path": str(source),
+        "work_directory": str(tmp_path / "task")}, manager=SimpleNamespace(data={}), generator=generator)
+    assert received["calculation"] == "static"
+    assert received["incar_settings"]["static"]["NSW"] == 0
+    assert received["incar_settings"]["static"]["IBRION"] == -1
+    assert received["incar_settings"]["static"]["ALGO"] == "Normal"
+    assert result["backend"] == "pycode_atomate2_static"
 
 
 def test_legacy_atomate_incar_policy(tmp_path):
@@ -43,3 +55,21 @@ def test_legacy_atomate_incar_policy(tmp_path):
     assert incar["ALGO"] == "Normal"
     assert incar["AMIX_MAG"] == 0.8
     assert incar["ENCUT"] == 520
+
+
+def test_real_pycode_generator_supports_static(tmp_path):
+    import json
+    from pymatgen.core import Lattice, Structure
+    from Process_Vasp.generation import generate_atomate_input
+    source = tmp_path / "test.vasp"
+    Structure(Lattice.cubic(4), ["Na", "O"], [[0, 0, 0], [0.5, 0.5, 0.5]]).to(filename=source, fmt="poscar")
+    directory = tmp_path / "static"
+    generate_atomate_input(directory, source, calculation="static",
+                          incar_settings={"static": {"NSW": 0, "ALGO": "Normal"}})
+    assert json.loads((directory / "workflow.json").read_text())["calculation"] == "static"
+    script = (directory / "workflow.py").read_text()
+    compile(script, "workflow.py", "exec")
+    assert 'from atomate_runner import main' in script
+    runner = (directory / "atomate_runner.py").read_text()
+    assert '"static": ["static"]' in runner
+    compile(runner, "atomate_runner.py", "exec")

@@ -149,7 +149,7 @@ def test_public_entry_creates_budgeted_dft_child_tasks_from_qbc(tmp_path):
     assert result["state"]["budget_reservations"][task["task_key"]]["reserved_cost"] == 30.0
 
 
-def test_recovered_dft_result_updates_ledger_hull_and_summary(tmp_path):
+def test_recovered_dft_without_final_structure_updates_ledger_but_not_hull(tmp_path):
     boundary = {"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}}
     manager = PhaseDataManager(boundary)
     branch = manager.add_branch(P="O3", H=H, x=1, T=["Fe"], composition={"Fe": 1})
@@ -180,8 +180,12 @@ def test_recovered_dft_result_updates_ledger_hull_and_summary(tmp_path):
     )
     history = manager.data["structures"][structure]["stage_history"]["dft_single_point"]
     assert len(history) == 1
-    assert result["state"]["phase_diagrams"]["dft"]["status"] == "completed"
-    assert result["state"]["phase_diagrams"]["dft"]["entries"][0]["ehull"] == 0
+    assert result["state"]["phase_diagrams"]["dft"]["status"] == "unknown"
+    assert result["state"]["phase_diagrams"]["dft"]["reason"] == "no_identified_energy_records"
+    assert not result["state"]["phase_diagrams"]["dft"]["entries"]
+    record = result["state"]["phase_records"][0]
+    assert record["phase_identification_status"] == "unknown"
+    assert record["phase_identification"]["reason"] == "final_structure_missing"
     assert result["state"]["coverage"]
     assert result["state"]["agent_state_summary"]["completed_task_keys"] == ["DK1"]
     assert result["state"]["budget_usage"]["total_relative_cost"] == 28.0

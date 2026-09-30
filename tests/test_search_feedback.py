@@ -31,7 +31,10 @@ class SearchFeedbackTest(unittest.TestCase):
             snapshot = result["diagrams"]["mlip"]
             csv_path = Path(snapshot["csv_path"])
             self.assertTrue(csv_path.is_file())
-            self.assertIn(snapshot["version"], csv_path.name)
+            self.assertEqual(csv_path.name, "phase_diagram.csv")
+            archive = Path(snapshot["archive_csv_path"])
+            self.assertIn(snapshot["version"], archive.name)
+            self.assertEqual(csv_path.read_bytes(), archive.read_bytes())
             with csv_path.open(encoding="utf-8-sig", newline="") as stream:
                 rows = list(csv.DictReader(stream))
             self.assertEqual(len(rows), 3)

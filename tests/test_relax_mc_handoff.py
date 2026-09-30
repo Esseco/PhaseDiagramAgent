@@ -434,5 +434,5 @@ def test_old_relax_approval_is_replaced_without_approving_mc(tmp_path):
     assert wait["upload_plan_path"] is None
     reply = format_workflow_reply({"status": "awaiting_manual_submission",
                                    "manual_wait": wait}, tmp_path / "state.json")
-    assert "MC 任务" in reply
+    assert "MC 1 个" in reply
     assert "RELAX_UPLOAD_PLAN.json" not in reply

@@ -45,7 +45,7 @@ def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=Non
             "human_system_knowledge": deepcopy((state.get("decision_memory") or {}).get("long_term_advice") or []),
             "physical_priors": [], "frozen_parameter_advice": [], "search_rules": [],
         }),
-        "available_branches": deepcopy((state.get("branch_candidates") or [])[:200]),
+        "available_branches": deepcopy(state.get("branch_candidates") or []),
     }
     snapshot["decision_context"] = build_decision_context({**state, "decision_memory": state.get("decision_memory") or {}})
     return snapshot

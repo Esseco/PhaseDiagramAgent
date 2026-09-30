@@ -69,12 +69,24 @@ def identify_rerun_plan(message, state):
     action = row["final_action"]
     branch_ids = set((state.get("branch_batch") or {}).get("branch_ids") or [])
     related = _current_round_tasks(state, branch_ids) if round_number == len(anchors) else []
+    if action.get("tool") == "select_dft_candidates":
+        # DFT can select MC descendants outside the original branch_batch.
+        # Bind to this approval using its explicit task keys or upload operation.
+        import hashlib
+        selected = {item.get("candidate_id") for item in
+                    (action.get("parameters") or {}).get("decisions") or []
+                    if item.get("action") in {"DFT_SINGLE_POINT", "DFT_RELAX"}}
+        operation = hashlib.sha256(str(action.get("task_key") or row.get("record_id")).encode()).hexdigest()[:12]
+        related = [task for task in state.get("tasks") or []
+                   if task.get("stage") in {"dft_single_point", "dft_relax"}
+                   and (task.get("parent_decision_id") == row.get("record_id")
+                        or task.get("upload_operation_id") == operation)
+                   and task.get("structure_id") in selected]
     affected = _affected_tasks(action, related)
     return {**base, "status": "identified", "action": _action_summary(row),
             "affected_task_count": len(affected),
             "affected_by_stage": _count_by_stage(affected),
-            "existing_input_count": sum(Path(task.get("input_path") or "").is_file()
-                                        for task in affected),
+            "existing_input_count": sum(_has_input_files(state, task) for task in affected),
             "scope_note": ("已按当前 branch_batch 关联任务；执行前仍须单独核对依赖和清理范围"
                            if round_number == len(anchors) else
                            "历史轮次缺少可靠的任务归属标记；不能据此自动清理或重做")}
@@ -153,9 +165,27 @@ def _affected_tasks(action, tasks):
     mode = (action.get("parameters") or {}).get("mode")
     if tool == "generate_branches":
         return tasks
+    if tool == "select_dft_candidates":
+        return [row for row in tasks if row.get("stage") in {"dft_single_point", "dft_relax"}]
     stage = ("relax_and_feature" if mode == "relax_inputs" else
              "deep_search" if tool == "allocate_mc_bohb" or mode == "mc_inputs" else None)
     return [row for row in tasks if row.get("stage") == stage] if stage else []
+
+
+def _has_input_files(state, task):
+    direct = task.get("input_path")
+    if direct and Path(direct).is_file():
+        return True
+    from execution_layer.remote.batch_runner import _task_directories_by_id
+    matches = _task_directories_by_id(state).get((task.get("batch_id") or task.get("slurm_batch_id"), task.get("task_id")), [])
+    directory = matches[0][0] if len(matches) == 1 else None
+    if isinstance(directory, (tuple, list)):
+        directory = directory[0]
+    if isinstance(directory, dict):
+        directory = directory.get("task_directory") or directory.get("directory")
+    if directory:
+        return (Path(directory) / "task.json").is_file()
+    return False
 
 
 def _count_by_stage(tasks):

@@ -138,7 +138,7 @@ class OpenWebUIAPITest(unittest.TestCase):
                 "config_session": {"status": "confirmed"},
             }, workflow=workflow)
             reply = handler([{"role": "user", "content": "调整预算后再看"}])
-            self.assertIn("Agent action proposal", reply)
+            self.assertIn("待确认", reply)
             self.assertEqual(calls[0]["invocation_id"], "action-7")
             self.assertEqual(calls[0]["execution_mode"], "interactive")
             self.assertEqual(calls[0]["human_feedback"], {
@@ -158,7 +158,7 @@ class OpenWebUIAPITest(unittest.TestCase):
                 return_value={"status": "completed", "result": {"status": "completed"}},
             ) as review:
                 reply = handler([{"role": "user", "content": "同意"}])
-            self.assertIn("completed", reply)
+            self.assertIn("已完成", reply)
             self.assertEqual(review.call_args.args[0], "action-9")
             self.assertEqual(review.call_args.args[1], "approve")
 
@@ -233,7 +233,7 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertIn("继续", first)
             self.assertEqual(calls, [])
             continued = handler([{"role": "user", "content": "继续"}], conversation_id="chat-a")
-            self.assertIn("Agent action proposal", continued)
+            self.assertIn("待确认", continued)
             self.assertEqual(calls, [])
 
     def test_continue_does_not_call_config_edit_classifier(self):
@@ -675,7 +675,7 @@ class OpenWebUIAPITest(unittest.TestCase):
         self.assertEqual(config["calculation"]["mlip_version"], "mace-mh-1")
         self.assertEqual(config["mlip"]["name"], "mace-mh-1")
         self.assertEqual(config["bohb"]["scope"]["mlip_version"], "mace-mh-1")
-        self.assertIsNone(config["mlip"]["model_path"])
+        self.assertTrue(config["mlip"]["model_path"].endswith("mace-mh-1.model"))
 
         config["calculation"]["mlip_version"] = None
         config["bohb"]["scope"]["mlip_version"] = None
@@ -878,7 +878,8 @@ class OpenWebUIAPITest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             runner = ManualUploadBatchRunner(
                 Path(directory) / "batches",
-                worker_command=["python3", "-m", "worker"],
+                worker_command=["python3", "-m", "worker", "--executor", "test.worker:execute"],
+                task_preparer=lambda task: task,
                 stage_profiles={"mc": {"stages": ["deep_search"],
                                        "slurm_options": {"partition": "REVIEW_ME"}}},
             )

@@ -102,11 +102,12 @@ def test_phase_backfill_changes_version_without_rewriting_old_snapshot(tmp_path)
                 "energy": -4, "energy_unit": "eV"}]
     initial = update_phase_diagram(records, active_model_version="m1", output_directory=tmp_path)
     old = initial["diagrams"]["mlip"]
-    old_text = (tmp_path / "m1" / f"phase_diagram_mlip_{old['version']}.json").read_text(encoding="utf-8")
+    history_path = tmp_path / "m1" / "history" / f"phase_diagram_mlip_{old['version']}.json"
+    old_text = history_path.read_text(encoding="utf-8")
     repeated = update_phase_diagram(records, active_model_version="m1", output_directory=tmp_path,
                                     parent_versions={"mlip:m1": old["version"]})
     assert repeated["diagrams"]["mlip"] == old
-    assert (tmp_path / "m1" / f"phase_diagram_mlip_{old['version']}.json").read_text(encoding="utf-8") == old_text
+    assert history_path.read_text(encoding="utf-8") == old_text
     state = {"tasks": [{"task_id": "T", "structure_id": "S", "model_version": "m1",
                          "stage": "relax_and_feature", "status": "completed",
                          "outputs": {"energy": -4, "actual_phase": "P3",
@@ -119,4 +120,4 @@ def test_phase_backfill_changes_version_without_rewriting_old_snapshot(tmp_path)
     updated = update_phase_diagram(state["phase_records"], active_model_version="m1",
                                    output_directory=tmp_path)
     assert updated["diagrams"]["mlip"]["version"] != old["version"]
-    assert (tmp_path / "m1" / f"phase_diagram_mlip_{old['version']}.json").read_text(encoding="utf-8") == old_text
+    assert history_path.read_text(encoding="utf-8") == old_text

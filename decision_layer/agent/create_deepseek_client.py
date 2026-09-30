@@ -32,6 +32,11 @@ def create_deepseek_client(
     def call(payload: dict) -> dict:
         important = needs_deep_reasoning(payload)
         payload = prepare_llm_request(payload)
+        context = payload.get("decision_context") or {}
+        count = len((context.get("dft_sampling_recommendation") or {}).get("candidate_ids") or [])
+        if not count and "select_dft_candidates" in (payload.get("allowed_tools") or []):
+            count = len(context.get("qbc_candidates") or [])
+        json_ceiling = max(int(routine_max_tokens), min(16384, 1024 + 100 * count))
         messages = [
             {
                 "role": "system",
@@ -44,9 +49,11 @@ def create_deepseek_client(
         ]
         thinking_this_try = "enabled" if important and thinking != "disabled" else "disabled"
         token_ceiling = (max(int(max_tokens), int(reasoning_max_tokens))
-                         if thinking_this_try == "enabled" else int(routine_max_tokens))
+                         if thinking_this_try == "enabled" else json_ceiling)
+        token_ceiling = max(token_ceiling, json_ceiling)
         max_tokens_this_try = (token_ceiling if thinking_this_try == "enabled"
-                               else min(int(max_tokens), token_ceiling))
+                               else min(max(int(max_tokens), 1024 + 100 * count)
+                                        if count else int(max_tokens), token_ceiling))
         input_tokens = output_tokens = 0
         last_error = None
 
@@ -123,13 +130,15 @@ def create_deepseek_client(
                 if finish_reason == "length":
                     if reasoning_content:
                         thinking_this_try = "disabled"
-                    token_ceiling = int(routine_max_tokens) if thinking_this_try == "disabled" else token_ceiling
+                    token_ceiling = max(token_ceiling, json_ceiling)
                     max_tokens_this_try = min(max(max_tokens_this_try * 2, 1200), token_ceiling)
                 elif finish_reason in {"content_filter", "insufficient_system_resource", "aborted"}:
                     break
                 continue
 
             try:
+                if finish_reason == "length":
+                    raise ValueError("incomplete response")
                 action = _parse_json_object(content)
             except (json.JSONDecodeError, ValueError):
                 last_error = DeepSeekResponseError(
@@ -139,7 +148,7 @@ def create_deepseek_client(
                 )
                 if finish_reason == "length":
                     thinking_this_try = "disabled"
-                    max_tokens_this_try = int(routine_max_tokens)
+                    max_tokens_this_try = min(max(max_tokens_this_try * 2, json_ceiling), token_ceiling)
                 elif finish_reason in {"content_filter", "insufficient_system_resource", "aborted"}:
                     break
                 continue

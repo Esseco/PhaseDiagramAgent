@@ -128,10 +128,11 @@ class ExecutionPolicyTest(unittest.TestCase):
             execution_mode="interactive",
             human_feedback={"decision": "comment", "comment": "地址是 E:\\0-FM-PhaseDiagram"},
             invocation_id="revise-empty")
-        self.assertEqual(revised["status"], "awaiting_approval")
-        self.assertEqual(revised["agent_proposal"]["recommended_action"],
-                         proposed["agent_proposal"]["recommended_action"])
-        self.assertEqual(revised["feedback_history"][-1]["revision_status"], "revision_failed")
+        self.assertEqual(revised["status"], "rejected")
+        stored = revised["state"]["pending_execution_policies"]["revise-empty"]
+        self.assertEqual(stored["agent_proposal"], proposed["agent_proposal"])
+        self.assertIn("修订失败", revised["reason"])
+        self.assertIsNone(revised.get("execution_result"))
 
     def test_formal_revision_gets_stable_task_key(self):
         from decision_layer.agent.revise_tool_proposal import revise_tool_proposal
@@ -156,7 +157,7 @@ class ExecutionPolicyTest(unittest.TestCase):
             proposal, "H首轮上限设为12", state={}, allowed_tools=["generate_branches"],
             agent_client=agent,
         )
-        self.assertEqual(revised["revision_status"], "revised")
+        self.assertEqual(revised["revision_status"], "user_generation_limits_applied")
         self.assertEqual(revised["action"]["parameters"], {"max_det_H": 12})
 
     def test_mc_action_cannot_exceed_confirmed_per_round_limit(self):
@@ -250,7 +251,8 @@ class ExecutionPolicyTest(unittest.TestCase):
             agent_client=self._agent, execution_mode="dry_run",
         )
         self.assertEqual(result["state"]["confirmed_config_version"], "old-config")
-        self.assertIn("config_version_mismatch", result["validation"]["errors"])
+        self.assertEqual(result["status"], "configuration_version_mismatch")
+        self.assertIsNone(result["validation"])
 
 
 if __name__ == "__main__":

@@ -63,6 +63,13 @@ class RunWorkflowChatHandler:
         self.conversation_id = None
 
     def __call__(self, messages, *, conversation_id=None):
+        reply = self._respond(messages, conversation_id=conversation_id)
+        if _open_webui_metadata_reply(_latest_user_message(messages)) is not None:
+            return reply
+        state = read_json(self.state_path, {}) or {}
+        return brief_chat_state(state, configuring=self.config_delegate is not None) + "\n" + str(reply)
+
+    def _respond(self, messages, *, conversation_id=None):
         user_message = _latest_user_message(messages)
         metadata_reply = _open_webui_metadata_reply(user_message)
         if metadata_reply is not None:
@@ -122,10 +129,12 @@ class RunWorkflowChatHandler:
                 plan_mc_regeneration, regenerate_mc_inputs,
             )
             pending_mc = state.get("pending_mc_regeneration")
+            reject_mc = (pending_mc and not state.get("pending_execution_policies")
+                         and classify_user_decision(user_message) == "reject")
             mc_request = is_mc_regeneration_request(user_message)
             mc_confirmed = is_mc_regeneration_confirmation(user_message)
-            if mc_request or mc_confirmed or (pending_mc and classify_user_decision(user_message) == "reject"):
-                if pending_mc and classify_user_decision(user_message) == "reject":
+            if mc_request or mc_confirmed or reject_mc:
+                if reject_mc:
                     state.pop("pending_mc_regeneration", None)
                     write_json(self.state_path, state)
                     return "已取消 MC 重生成计划；任务状态和文件未改变。"
@@ -187,7 +196,19 @@ class RunWorkflowChatHandler:
                 is_rerun_plan_request, identify_rerun_plan, format_rerun_plan,
             )
             if is_rerun_plan_request(user_message):
-                return format_rerun_plan(identify_rerun_plan(user_message, state))
+                plan = identify_rerun_plan(user_message, state)
+                if (plan.get("status") == "identified" and plan.get("intent") == "generate"
+                        and plan.get("action", {}).get("tool") == "select_dft_candidates"):
+                    from execution_layer.local.regenerate_dft_files import regenerate_dft_files
+                    try:
+                        result = regenerate_dft_files(state, user_message,
+                            manager=self.workflow_kwargs.get("manager"),
+                            upload_root=self.workflow_kwargs["run_config"]["upload_batches_directory"])
+                    except (ValueError, OSError, RuntimeError) as error:
+                        return f"DFT 文件重生成未执行或已回滚：{error}。未提交作业。"
+                    return (f"已按原批准参数重新生成 {result['task_count']} 个 DFT 任务的输入文件。"
+                        f"任务身份和预算不变，未提交作业。旧输入备份：{result['backup_directory']}。")
+                return format_rerun_plan(plan)
             from run.resolve_deepseek_model_request import resolve_deepseek_model_request
             requested_model = resolve_deepseek_model_request(user_message)
             if requested_model:
@@ -291,6 +312,9 @@ class RunWorkflowChatHandler:
                     pending_id = next(iter(pending))
                     pending_record = next(iter(pending.values()))
                     proposal = pending_record.get("agent_proposal")
+                    if self.execution_mode == "interactive" and _is_model_failure_proposal(proposal):
+                        refreshed = self._run(pending_id, None, user_message)
+                        return format_workflow_reply(refreshed, self.state_path)
                     if self.execution_mode == "interactive" and _is_pending_relax_input_proposal(proposal):
                         # A pending Relax-input proposal can become stale after
                         # remote Relax results are recovered. Re-enter the
@@ -339,6 +363,10 @@ class RunWorkflowChatHandler:
                     raise OpenWebUIRequestError("存在多个待审批 action；请先恢复到唯一待审批状态。")
                 invocation_id = next(iter(pending))
                 stored_proposal = pending[invocation_id].get("agent_proposal") or {}
+                if (self.execution_mode == "interactive" and _is_model_failure_proposal(stored_proposal)
+                        and str(user_message).strip().lower() in {"继续", "下一步", "continue", "next"}):
+                    refreshed = self._run(invocation_id, None, user_message)
+                    return format_workflow_reply(refreshed, self.state_path)
                 if self.execution_mode == "interactive" and _is_pending_relax_input_proposal(stored_proposal):
                     # This is also the normal path after the chat has already
                     # selected an existing run. Refresh the pending action
@@ -414,7 +442,7 @@ class RunWorkflowChatHandler:
                 raise OpenWebUIRequestError("proposal_hash_mismatch; refresh the approval page")
             if decision not in {"approve", "reject", "confirm_sensitive"}:
                 raise OpenWebUIRequestError("invalid approval-page decision")
-            if _is_sensitive_proposal(proposal) and decision != "confirm_sensitive":
+            if _is_sensitive_proposal(proposal) and decision == "approve":
                 raise OpenWebUIRequestError("sensitive action requires confirm_sensitive")
             approved = decision in {"approve", "confirm_sensitive"}
             audit_comment = str(comment or "").strip()
@@ -584,13 +612,10 @@ def _is_sensitive_confirmation(message):
     return bool(lines and lines[-1] in {"确认敏感操作", "confirm sensitive action"})
 
 
-def _is_sensitive_proposal(proposal):
-    action = proposal.get("raw_action") or {}
-    tool = action.get("tool") or action.get("stage")
-    if tool in {"update_mlip", "activate_model", "change_hard_constraint", "dft_relax"}:
-        return True
-    decisions = ((action.get("parameters") or {}).get("decisions") or [])
-    return any(row.get("action") == "DFT_RELAX" for row in decisions if isinstance(row, dict))
+from run.chat_approval_rules import is_sensitive_proposal as _is_sensitive_proposal
+
+
+from run.chat_state_presentation import brief_chat_state  # Compatible public import.
 
 
 def handle_chat_request(payload: dict, chat_handler, *, model_id=MODEL_ID) -> dict:
@@ -619,6 +644,8 @@ def _chat_content(value):
                  if value.get(key) is not None and not isinstance(value[key], (dict, list))]
         return "结果摘要：" + ("；".join(parts) if parts else "详细数据请查看项目记录。")
     content = value if isinstance(value, str) else str(value)
+    if "入选结构（Na/O₂；相；Ehull eV/atom）" in content and len(content) <= 16000:
+        return content  # Bounded, intentional list of at most 100 approved candidates.
     if len(content) <= MAX_RESPONSE_CHARS:
         return content
     stripped = content.lstrip()
@@ -855,352 +882,14 @@ def _stop_server_when_parent_exits(server, parent_pid):
         threading.Event().wait(1.0)
 
 
-def format_workflow_reply(result: dict, state_path, *, verbose=False) -> str:
-    """Keep routine chat concise; full evidence stays in existing records."""
-    if verbose or not isinstance(result, dict):
-        return _format_workflow_reply_verbose(result, state_path)
-    events = result.get("events") or []
-    proposal = result.get("agent_proposal") or next(
-        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")), {})
-    status = result.get("status")
-    if status == "awaiting_approval" and proposal:
-        # Preserve all approval limits, budget interceptions and sensitive warnings.
-        text = _format_workflow_reply_verbose(result, state_path)
-        labels = {"generate_branches": "生成 branch", "allocate_mc_bohb": "分配 MC",
-                  "prepare_local_batch_files": "准备输入文件", "select_dft_candidates": "筛选 DFT"}
-        tool = proposal.get("recommended_action")
-        text = text.replace(f"建议：`{tool}`", f"建议：{labels.get(tool, tool)}")
-        lines = [line for line in text.splitlines()
-                 if not line.startswith("完整参数与依据：")]
-        lines = [line.replace("回复“同意”执行；回复“拒绝”取消；也可以直接提出修改意见。",
-                              "回复“同意”执行、“拒绝”取消，或提出修改。") for line in lines]
-        return "\n".join(lines)
-    if status == "awaiting_manual_submission":
-        wait = result.get("manual_wait") or {}
-        recovered = int(wait.get("recovered_count") or result.get("recovered_count") or 0)
-        names = {"deep_search": "MC", "relax_and_feature": "Relax",
-                 "dft_single_point": "DFT 单点", "dft_relax": "DFT 优化"}
-        stages = wait.get("waiting_by_stage") or {}
-        summary = "、".join(f"{names.get(stage, stage)} {count} 个" for stage, count in sorted(stages.items()))
-        lines = ([f"已回收 {recovered} 个结果。"] if recovered else [])
-        lines.append(f"等待结果：{summary or str(wait.get('waiting_task_count', 0)) + ' 个任务'}。")
-        collection = wait.get("result_collection") or {}
-        issues = int(collection.get("invalid_count", 0)) + int(collection.get("missing_structure_count", 0))
-        markers = int(collection.get("missing_marker_count", 0))
-        if issues or markers:
-            lines.append(f"需检查：校验/结构问题 {issues} 个，缺完成标记 {markers} 个。")
-        interception = (result.get("state") or {}).get("mc_budget_interception") or {}
-        if interception.get("rejected_count"):
-            verbose_text = _format_workflow_reply_verbose(result, state_path)
-            lines.extend(line for line in verbose_text.splitlines() if line.startswith("预算拦截："))
-        if wait.get("upload_root"):
-            lines.append(f"目录：`{wait['upload_root']}`")
-        else:
-            roots = list(dict.fromkeys(str(Path(path).parent) for path in wait.get("batch_directories") or []))
-            if roots:
-                lines.append("目录：" + "、".join(f"`{path}`" for path in roots))
-        lines.append("尚未本机提交。Relax/MC 提交批次 GPU.sh；DFT 提交单任务 GPU.sh。")
-        lines.append("完成后回传对应 results 文件夹，再说“继续”。未回传任务保持等待。")
-        return "\n".join(lines)
-    text = _format_workflow_reply_verbose(result, state_path)
-    return "\n".join(line for line in text.splitlines() if not line.startswith((
-        "详细记录：", "完整参数与结果：", "完整记录：", "示例目录：", "结构路径与详细结果：")))
-
-
-def _format_workflow_reply_verbose(result: dict, state_path) -> str:
-    if not isinstance(result, dict):
-        return str(result)
-    events = result.get("events") or []
-    proposal = result.get("agent_proposal") or next(
-        (event.get("agent_proposal") for event in reversed(events) if event.get("agent_proposal")), None
-    )
-    if result.get("status") == "awaiting_approval" and proposal:
-        proposed_tool = proposal.get("recommended_action") or (proposal.get("raw_action") or {}).get("tool")
-        if not isinstance(proposed_tool, str) or not proposed_tool:
-            return ("Agent 返回了无效动作，本轮没有可批准的建议。"
-                    "请拒绝旧建议后重新提出；不会执行空动作。")
-        cost = proposal.get("estimated_cost") or {}
-        approval_files = next(
-            (event.get("approval_files") for event in reversed(events)
-             if event.get("approval_files")), {}
-        )
-        detail = approval_files.get("directory") or _proposal_directory(state_path, proposal)
-        lines = [
-            f"建议：`{proposal.get('recommended_action')}`",
-            f"目的：{proposal.get('expected_purpose') or proposal.get('reason') or '未提供'}",
-            f"预计相对成本：{cost.get('estimated_total_cost') if cost.get('estimated_total_cost') is not None else '待任务展开后估算'}",
-        ]
-        recovered_count = int(result.get("recovered_count") or 0)
-        if recovered_count:
-            lines.insert(0, f"已校验并回收 {recovered_count} 个任务结果，结果与成本已入账。")
-        if proposal.get("recommended_action") == "generate_branches":
-            params = proposal.get("action_parameters") or (proposal.get("raw_action") or {}).get("parameters") or {}
-            quotas = params.get("quotas")
-            strategy = ("、".join(f"{name} {count}" for name, count in quotas.items())
-                        if isinstance(quotas, dict) and quotas else
-                        f"覆盖补充（预计 {params.get('total_quota', '按配置')} 个；具体分配由现有 branch 覆盖决定）")
-            lines.append(f"生成策略：{strategy}")
-            if params.get("max_det_H") is not None:
-                lines.append(f"本轮超胞上限：det(H) ≤ {params['max_det_H']}")
-            else:
-                lines.append("本轮超胞上限：未单独设置，按已确认的 H 边界")
-            initial_count = params.get("initial_states_per_branch")
-            lines.append(f"入选上限：{params.get('batch_size', '按配置')} 个 branch；"
-                         f"每个 branch 静电能前 10 中至多取 {initial_count if initial_count is not None else '按配置'} 个初态")
-        if proposal.get("recommended_action") == "allocate_mc_bohb":
-            params = proposal.get("action_parameters") or (proposal.get("raw_action") or {}).get("parameters") or {}
-            preview = params.get("budget_preview") or {}
-            lines.append(f"MC 总步数目标：{params.get('mc_budget', '待定')} 步；"
-                         f"本次计划：{preview.get('requested_steps', '待重算')} 步。")
-            if preview.get("phase_diagram_version"):
-                lines.append(f"Ehull 标准：当前 MLIP 相图版本 {preview['phase_diagram_version']} 的 eV/atom 值；"
-                             "批准前会复核相图版本与结构能量。")
-        fallback_reason = (proposal.get("raw_action") or {}).get("fallback_reason")
-        if fallback_reason:
-            lines.append(f"回退原因：`{fallback_reason}`")
-        if detail:
-            lines.append(f"完整参数与依据：`{detail}`")
-        lines.extend(["", "回复“同意”执行；回复“拒绝”取消；也可以直接提出修改意见。"])
-        if _is_sensitive_proposal(proposal):
-            lines.extend([
-                "该建议涉及敏感操作，仍需在本机审批页确认具体影响：",
-                "http://127.0.0.1:8765/phase/approval",
-            ])
-        return "\n".join(lines)
-    status = result.get("status") or "unknown"
-    if status == "config_migrated":
-        migration = result.get("migration") or {}
-        source = result.get("from_config_version") or migration.get("from") or "旧版本"
-        target = result.get("config_version") or migration.get("to") or "新版本"
-        changes = migration.get("budget_changes") or []
-        change_text = ""
-        if changes:
-            details = "、".join(
-                f"{row.get('field')} {row.get('from')}→{row.get('to')}" for row in changes
-            )
-            change_text = f"预算调整：{details}。"
-        policy_changes = migration.get("policy_changes") or []
-        policy_text = ""
-        if policy_changes:
-            details = "、".join(
-                f"{row.get('field')} "
-                f"{'隐含默认值 ' if row.get('from_basis') == 'implicit_default' else ''}"
-                f"{row.get('from')}→{row.get('to')}"
-                for row in policy_changes
-            )
-            policy_text = f"已批准的 MC 策略/成本估算调整：{details}。"
-        compatibility = migration.get("compatibility") or {}
-        compatibility_text = ""
-        if compatibility:
-            count = compatibility.get("relax_task_count", 0)
-            unknown = compatibility.get("unrecorded_fields") or []
-            compatibility_text = (
-                f"已核对 {count} 条旧 Relax 结果与 mh-1 的既有默认设置一致；"
-                f"未记录项：{'、'.join(unknown) if unknown else '无'}。"
-            )
-        return (
-            f"运行配置已从 {source} 迁移到 {target}；历史任务和结果仍保留原版本归属。"
-            f"{change_text}{policy_text}{compatibility_text}"
-            "本次只更新配置绑定，没有生成、提交或运行计算。请发送下一步任务指令。"
-        )
-    if status == "config_migration_not_needed":
-        return "当前运行已绑定最新确认配置，无需迁移；本次没有执行任何计算。"
-    if status in {"configuration_revision_required", "configuration_version_mismatch"}:
-        reason = result.get("reason") or next(
-            (event.get("reason") for event in reversed(events) if event.get("reason")), None)
-        return f"{reason or '本轮要求超过已确认配置；请先修订配置。'}\n未执行生成或计算。"
-    action = ((result.get("final_action") or {}).get("tool")
-              or (proposal or {}).get("recommended_action")
-              or next(((event.get("final_action") or {}).get("tool") for event in reversed(events)
-                       if (event.get("final_action") or {}).get("tool")), None))
-    validation = result.get("validation") or next(
-        (event.get("validation") for event in reversed(events) if event.get("validation")), {}
-    )
-    errors = validation.get("errors") or []
-    detail_path = str(Path(state_path))
-    if status == "awaiting_manual_submission":
-        wait = result.get("manual_wait") or {}
-        recovered_count = int(wait.get("recovered_count") or result.get("recovered_count") or 0)
-        waiting_count = int(wait.get("waiting_task_count") or 0)
-        by_stage = wait.get("waiting_by_stage") or {}
-        stage_label = ("MC" if set(by_stage) == {"deep_search"} else
-                       "Relax" if set(by_stage) == {"relax_and_feature"} else
-                       "DFT" if set(by_stage) <= {"dft_single_point", "dft_relax"} else "计算")
-        lines = []
-        if recovered_count:
-            lines.append(f"已校验并回收 {recovered_count} 个任务结果；预算和台账已更新。")
-        collection = wait.get("result_collection") or {}
-        if collection:
-            lines.append(
-                "已直接检查 upload_batches 原任务目录（未复制旧文件）："
-                f"扫描 {collection.get('considered_count', 0)} 个，"
-                f"回收 {collection.get('recovered_count', 0)} 个；"
-                f"缺结果 {collection.get('missing_result_count', 0)} 个，"
-                f"缺完成标记 {collection.get('missing_marker_count', 0)} 个，"
-                f"校验/结构问题 {int(collection.get('invalid_count', 0)) + int(collection.get('missing_structure_count', 0))} 个。"
-            )
-        if recovered_count:
-            lines.append(f"当前有 {waiting_count} 个 {stage_label} 任务待提交或回传。")
-        else:
-            lines.append(f"{stage_label} 输入已准备：{waiting_count} 个任务待提交或回传。")
-        interception = (result.get("state") or {}).get("mc_budget_interception") or {}
-        if stage_label == "MC" and interception.get("rejected_count"):
-            breakdown = "、".join(
-                f"{key} 入选{row['accepted']}/拦截{row['rejected']}"
-                for key, row in sorted((interception.get("strata") or {}).items()))
-            lines.append(
-                f"预算拦截：入选 {interception['accepted_count']} 个，"
-                f"拦截 {interception['rejected_count']} 个；原因："
-                f"{', '.join(interception.get('reasons') or [])}。"
-                f"按层级/相分布：{breakdown}。"
-                "如果要运行全部，请先查看完整估计成本并明确批准全量方案。")
-        lines.append("本机没有提交作业。请将同一阶段的批次目录放在同一轮次目录下：Relax/MC 每个批次根目录的 `GPU.sh` 提交一次；DFT 则在单任务目录提交 `GPU.sh`。")
-        if wait.get("upload_root"):
-            lines.append(f"本地任务总目录：`{wait['upload_root']}`")
-        if wait.get("upload_plan_path"):
-            lines.append(f"按 branch 分组的完整上传清单：`{wait['upload_plan_path']}`。每个 branch 的所有任务目录都列在一起。")
-        directories = wait.get("batch_directories") or wait.get("task_directories") or []
-        if directories:
-            lines.append("待提交的批次目录：")
-            lines.extend(f"- `{path}`" for path in directories[:5])
-            if len(directories) > 5:
-                lines.append(f"- 其余 {len(directories) - 5} 个批次见任务清单和 state 文件。")
-        results_directories = wait.get("results_directories") or []
-        if results_directories:
-            lines.append("本阶段统一结果目录：" + "、".join(f"`{path}`" for path in results_directories))
-        lines.append(
-            "本阶段任务完成后，只需下载对应的整个 `results/` 文件夹，放回本地同一阶段目录，"
-            "其中含所有任务的 `result.json`、`task.finished.json` 和最终结构；再对 Agent 说“继续”。"
-            "Agent 会按任务校验并回收；未回传任务继续等待，不会重复准备或提交。"
-            "旧批次仍按原任务目录回收。"
-        )
-        return "\n".join(lines)
-    if status == "failed":
-        execution = result.get("execution") or next(
-            (event.get("execution") for event in reversed(events) if event.get("execution")), {}
-        )
-        reason = ((execution or {}).get("error") or
-                  ((execution or {}).get("result") or {}).get("reason") or
-                  result.get("reason") or "未知错误")
-        return f"本轮失败：{str(reason)[:500]}\n详细记录：`{detail_path}`"
-    if status == "rejected_by_user":
-        return f"已取消本轮建议；未执行任何动作。\n详细记录：`{detail_path}`"
-    if status == "rejected":
-        reason = _friendly_validation_errors(errors)
-        workflow_reason = result.get("message") or result.get("reason")
-        if not errors and workflow_reason:
-            reason = _friendly_workflow_rejection(workflow_reason)
-        if not errors and not workflow_reason:
-            execution = result.get("execution") or next(
-                (event.get("execution") for event in reversed(events) if event.get("execution")), {}
-            )
-            payload = (execution or {}).get("result") or {}
-            reason = _friendly_workflow_rejection(payload.get("reason") or execution.get("error") or "执行动作被拒绝")
-        return f"本轮未执行：{reason}\n详细记录：`{detail_path}`"
-    if status == "not_configured":
-        execution = result.get("execution") or next(
-            (event.get("execution") for event in reversed(events) if event.get("execution")), {}
-        )
-        payload = (execution or {}).get("result") or {}
-        reason = ((execution or {}).get("error") or payload.get("reason") or
-                  result.get("reason") or "执行接口未配置")
-        if action == "allocate_mc_bohb" and payload.get("actions"):
-            return (f"已分配 {len(payload['actions'])} 个 MC 任务的预算，但输入文件尚未准备好：{reason}。"
-                    f"任务已保留；修正原因后可继续准备 MC 输入。\n详细记录：`{detail_path}`")
-        reason_labels = {
-            "remote_mlip_model_missing": "运行配置中未找到已确认的远端 MACE 模型路径或版本",
-            "upload_directory_or_worker_command_missing": "上传目录或远端 worker 执行命令未配置",
-            "structure_dedup_not_ready": "结构去重检查尚未完成",
-            "no_legal_existing_relax_structures": "没有可用于 Relax 的合法现有结构",
-            "current_mlip_phase_diagram_unavailable": "当前 MLIP 相图未就绪，不能按 Ehull/atom 派发 MC",
-            "approved_phase_diagram_changed": "相图在审批后变化，需重新预览并批准 MC 方案",
-            "relax_structure_missing_from_current_phase_diagram": "所选 Relax 结构在当前相图中缺少唯一匹配的 Ehull/atom",
-            "mc_requires_current_phase_diagram_ehull_per_atom": "MC 派发缺少当前相图的 Ehull/atom 证据",
-        }
-        reason = reason_labels.get(str(reason), str(reason))
-        return f"本轮未执行：`{action or 'workflow'}` 未能准备（{reason}）。\n详细记录：`{detail_path}`"
-    if status in {"prepared", "already_prepared"} and action == "prepare_local_batch_files":
-        execution = result.get("execution") or next(
-            (event.get("execution") for event in reversed(events) if event.get("execution")), {})
-        payload = (execution or {}).get("result") or {}
-        if payload.get("batches"):
-            locations = "、".join(row.get("directory", "") for row in payload["batches"][:3])
-            return (f"已准备 {payload.get('task_count', 0)} 个 Relax 任务、"
-                    f"{payload.get('batch_count', 0)} 个上传批次；未提交超算。\n"
-                    f"按 branch 上传清单：`{payload.get('upload_plan_path') or detail_path}`。\n"
-                    f"示例目录：`{locations}`")
-        return f"Relax 输入已准备过，没有重复创建或扣费。\n详细记录：`{detail_path}`"
-    if status in {"completed", "planned_only", "tasks_in_progress"}:
-        if status == "completed" and action == "generate_branches":
-            execution = result.get("execution") or next(
-                (event.get("execution") for event in reversed(events) if event.get("execution")), {}
-            )
-            summary = ((execution or {}).get("result") or {}).get("summary") or {}
-            if summary:
-                phases = "、".join(f"{name} {count}" for name, count in
-                                  sorted((summary.get("phase_counts") or {}).items())) or "无"
-                det_range = summary.get("det_H_range") or []
-                cells = (f"入选 det(H) {det_range[0]}–{det_range[1]}" if len(det_range) == 2
-                         else "无入选超胞")
-                cap = summary.get('max_det_H')
-                if cap is not None:
-                    cells += f"（本轮设定上限 {cap}）"
-                return (
-                    f"已生成 {summary.get('registered_branches', 0)} 个 branch、"
-                    f"{summary.get('registered_structures', 0)} 个初始结构。"
-                    f"相：{phases}；{cells}。\n"
-                    f"生成 {summary.get('proposed_branches', 0)} 个候选，"
-                    f"入选 {summary.get('selected_branches', 0)} 个 branch，"
-                    f"静电能初始化失败 {summary.get('initialization_failed_branches', 0)} 个，"
-                    f"构型去重后 {summary.get('unique_structures', 0)} 个。\n"
-                    f"结构路径与详细结果：`{detail_path}`"
-                )
-        labels = {"completed": "已完成", "planned_only": "已生成计划但未执行",
-                  "tasks_in_progress": "任务已进入处理中"}
-        return (f"{labels[status]}：`{action or 'workflow'}`。\n"
-                f"完整参数与结果：`{detail_path}`")
-    return f"工作流状态：`{status}`。\n完整记录：`{detail_path}`"
-
-
-def _friendly_validation_errors(errors):
-    mapping = {
-        "formal_tool_requires_task_key": "动作缺少内部幂等编号",
-        "configuration_not_confirmed": "配置尚未确认",
-        "config_version_mismatch": "当前运行仍绑定旧配置版本；请新建运行，或在尚无科学任务时重新发送该指令",
-        "invalid_budget": "Agent 返回的预算格式无效；预算必须是一个非负数值",
-        "tool_handler_not_configured": "该动作尚无执行函数，请改选已接通的工具",
-        "duplicate_effective_decision": "相同任务已经提交或完成",
-        "reserved_total_cost_limit": "预算不足",
-        "retry_target_not_failed_task": "重试目标不是失败的计算任务；历史动作记录不能作为 task_id",
-        "calculation_stage_requires_one_structure_target": "单项计算动作必须指向一个结构；批量任务应先准备输入文件",
-        "debug_mode_requires_remote_preparation": "调试模式只能准备远端计算输入，不在本地执行计算",
-    }
-    if not errors:
-        return "动作校验未通过"
-    return "；".join(mapping.get(item, item) for item in errors)
-
-
-def _friendly_workflow_rejection(reason):
-    mapping = {
-        "approval_required": "当前运行绑定旧配置版本，已有结果时需要明确批准迁移",
-        "rejected_non_budget_change": "新旧配置不只是预算不同，不能合并到已有运行",
-        "rejected_budget_decrease": "不能在已有运行中降低已确认预算",
-        "configuration_not_confirmed": "配置尚未确认",
-        "task_not_found": "目标计算任务不存在；历史动作记录不能作为 task_id",
-        "task_not_retryable": "该计算任务当前不允许重试",
-        "retry_limit": "该计算任务已达到重试次数上限",
-    }
-    return mapping.get(str(reason), str(reason))
-
-
-def _proposal_directory(state_path, proposal):
-    analysis = proposal.get("current_state_analysis") or {}
-    if not isinstance(analysis, dict):
-        return None
-    record_id = analysis.get("pending_approval_record_id")
-    if not record_id:
-        return None
-    return str(Path(state_path).parent / "approvals" / str(record_id))
+from run.workflow_reply_presentation import (
+    format_workflow_reply,
+    _format_workflow_reply_verbose,
+    _is_model_failure_proposal,
+    _friendly_validation_errors,
+    _friendly_workflow_rejection,
+    _proposal_directory,
+)  # Keep existing imports compatible while presentation owns these functions.
 
 
 def format_status_reply(state: dict) -> str:

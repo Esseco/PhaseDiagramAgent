@@ -28,7 +28,9 @@ def export_current_phase_diagram(state, *, directory=None, method="mlip"):
         if not snapshot.get("path"):
             raise ValueError("未配置相图输出目录")
         parent = Path(snapshot["path"]).parent
-        if parent.name == "dft":
+        if parent.name == "history":
+            directory = parent.parent.parent
+        elif parent.name == "dft":
             directory = parent.parent
         elif parent.parent.name == "mlip":
             directory = parent.parent.parent
@@ -40,5 +42,6 @@ def export_current_phase_diagram(state, *, directory=None, method="mlip"):
     path = target_dir / f"phase_diagram_{method}_{version}.csv"
     if not path.is_file():
         export_phase_diagram_csv(snapshot, path)
-    snapshot["csv_path"] = str(path)
-    return path, len(snapshot["entries"]), version
+    from analysis_layer.phase.publish_current_csv import publish_current_csv
+    current = publish_current_csv(snapshot, path)
+    return current, len(snapshot["entries"]), version

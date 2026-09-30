@@ -120,8 +120,14 @@ class LocalAgentControlTest(unittest.TestCase):
             self.assertEqual(len(submit_remote(path, scheduler=scheduler)["submitted"]), 1)
             self.assertEqual(submit_remote(path, scheduler=scheduler)["status"], "nothing_to_submit")
             self.assertIn("query_remote", resume(path)["next_steps"])
-            manifest = remote / "batches/remote-000001/manifest.json"
-            run_remote_task(manifest, 0, executor=lambda _task: {"status": "completed", "actual_cost": .5})
+            saved = json.loads(path.read_text())
+            manifest = Path(saved["slurm_batches"][0]["remote_path"]) / "manifest.json"
+            def complete_with_structure(task):
+                final = Path(task["calculation_directory"]) / "final.vasp"
+                final.write_text("mock final structure", encoding="utf-8")
+                return {"status": "completed", "actual_cost": .5,
+                        "outputs": {"structure_path": final.name}}
+            run_remote_task(manifest, 0, executor=complete_with_structure)
             sync_results(path, local_batch_root=local, remote_batch_root=remote / "batches", transport=transport)
             first = runner.collect_results(json.loads(path.read_text()))
             second = runner.collect_results({**json.loads(path.read_text()), "processed_task_ids": ["T1"]})

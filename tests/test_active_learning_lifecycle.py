@@ -51,6 +51,7 @@ class ActiveLearningLifecycleTest(unittest.TestCase):
             validation_evaluator=lambda model, data: {
                 "energy_mae": 0.1 if model.get("version") == "m1" else 0.05,
                 "force_rmse": 0.2 if model.get("version") == "m1" else 0.1,
+                "critical_failure_fraction": 0.0, "near_hull_ranking_reversals": 0,
             },
             validation_data_provider=lambda **kwargs: [{"id": "V1"}],
             candidate_provider=lambda **kwargs: [],
@@ -59,6 +60,28 @@ class ActiveLearningLifecycleTest(unittest.TestCase):
             trigger={"action": "RETRAIN_MLIP"}, state=state, manager=manager,
             config={"mlip": {"version": "m1"}, "mlip_finetune": {}},
         )
+        self.assertEqual(result["status"], "needs_user_confirmation")
+        self.assertEqual(result["state"]["active_model_version"], "m1")
+        self.assertEqual(result["state"]["new_dft_records"], state["new_dft_records"])
+        self.assertFalse(result["validation"]["passed"])
+        confirmed_config = {"mlip": {"version": "m1"}, "mlip_finetune": {
+            "validation": {"max_energy_mae": .2, "max_critical_failure_fraction": .1,
+                           "max_near_hull_ranking_reversals": 1},
+            "activation": {"requires_separate_approval": True}}}
+        result = handler(trigger={"action": "RETRAIN_MLIP"}, state=state,
+                         manager=manager, config=confirmed_config)
+        self.assertEqual(result["status"], "awaiting_activation_approval")
+        self.assertTrue(result["validation"]["passed"])
+        pending_state = result["state"]
+        refused = handler(trigger={"action": "ACTIVATE_CANDIDATE_MODEL",
+            "candidate_model_version": "mlip-candidate-000003"}, state=pending_state,
+            manager=manager, config={"mlip": {"version": "m1"}})
+        self.assertEqual(refused["status"], "awaiting_user_approval")
+        self.assertEqual(refused["state"]["active_model_version"], "m1")
+        result = handler(trigger={"action": "ACTIVATE_CANDIDATE_MODEL",
+            "candidate_model_version": "mlip-candidate-000003",
+            "user_approval_reason": "独立验证改善，确认启用"}, state=pending_state,
+            manager=manager, config={"mlip": {"version": "m1"}})
         self.assertEqual(result["status"], "activated")
         self.assertEqual(result["state"]["active_model_version"], "mlip-candidate-000003")
         self.assertEqual(result["state"]["phase_diagrams"]["mlip"]["validity"], "stale")

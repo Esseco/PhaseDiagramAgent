@@ -32,7 +32,8 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
         "dft": {"backend": "atomate", "parameter_source": "atomate_defaults",
                 "parameters": {}, "independent_audit_fraction": 0.05,
                 "selection": {"near_hull_ev_per_atom": 0.10, "single_point_first": True,
-                              "max_relax_fraction": 0.10,
+                                "max_relax_fraction": 0.10,
+                                "single_point_max_per_round": 100, "single_point_cost_per_round": 5000.0,
                               "agent_threshold_adjustment": {"minimum": 0.05, "maximum": 0.20}}},
         "mc_policy": {
             "initial_ehull_bands": [

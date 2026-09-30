@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 
 from analysis_layer.feedback.calculate_search_reward import calculate_search_reward
 from analysis_layer.state.summarize_agent_state import summarize_agent_state
@@ -30,6 +32,7 @@ def apply_scientific_feedback(
 ):
     """Persist each terminal result once, then rebuild hull/reward summaries."""
     current = deepcopy(state)
+    original_phase_records = deepcopy(current.get("phase_records") or [])
     processed = current.setdefault("feedback_processed_task_ids", [])
     current.setdefault("phase_records", [])
     current.setdefault("phase_diagrams", {})
@@ -76,7 +79,15 @@ def apply_scientific_feedback(
     selected_model = active_model_version or current.get("active_model_version")
     if selected_model is not None:
         current["active_model_version"] = selected_model
-    if current.get("phase_records"):
+    records_checksum = hashlib.sha256(json.dumps(sorted(current.get("phase_records") or [],
+        key=lambda row: (str(row.get("record_id") or ""), str(row.get("structure_id") or ""))),
+        sort_keys=True, default=str).encode()).hexdigest()
+    if (current.get("phase_diagram_input_checksum") is None and current.get("phase_diagrams")
+            and not feedback_rows and original_phase_records == (current.get("phase_records") or [])):
+        # Adopt the saved legacy diagram without exporting unchanged data once more.
+        current["phase_diagram_input_checksum"] = records_checksum
+    if (current.get("phase_records") and (records_checksum != current.get("phase_diagram_input_checksum")
+            or selected_model != (current.get("phase_diagrams", {}).get("mlip") or {}).get("model_version"))):
         previous = deepcopy(current["phase_diagrams"])
         previous_models = current["phase_diagrams_by_model"]
         output = update_phase_diagram(
@@ -88,6 +99,7 @@ def apply_scientific_feedback(
         diagrams = output["diagrams"]
         current["phase_diagrams_by_model"].update(output["mlip_by_version"])
         current["phase_diagrams"] = diagrams
+        current["phase_diagram_input_checksum"] = records_checksum
         if feedback_rows:
             _record_convergence_round(current, previous, diagrams)
             _record_rewards(current, previous, diagrams, feedback_rows)
@@ -149,7 +161,8 @@ def _record_cost_observation(state, result, manager, structure_id):
         "actual_cost": actual, "estimated_cost": estimated,
         "actual_cost_known": actual is not None,
         "actual_gpu_core_hours": result.get("actual_gpu_core_hours"),
-        "status": result.get("status")})
+        "status": result.get("status"), "runtime_observation": deepcopy(result.get("runtime_observation") or task.get("runtime_observation") or {}),
+        "actual_mc_steps": result.get("actual_mc_steps")})
 
 
 def _record_final_frame_error(state, result, manager, structure_id, evaluator=None):

@@ -21,6 +21,11 @@ from execution_layer.state.state_manager import agent_state_summary, update_stat
 from execution_layer.workflows.compact_action_history import compact_action_history
 
 
+def _model_failure_action(action):
+    return (action.get("decision_source") == "rule"
+            and str(action.get("fallback_reason") or "").startswith("llm_failed:"))
+
+
 def run_tool_step(
     state: dict | None,
     session: dict,
@@ -88,6 +93,27 @@ def run_tool_step(
     pending_key = invocation_id or "__single_interactive_action__"
     stored = current["pending_execution_policies"].get(pending_key)
     rejecting = isinstance(human_feedback, dict) and human_feedback.get("decision") == "reject"
+    previous = ((stored or {}).get("agent_proposal") or {}).get("raw_action") or {}
+    if mode == "interactive" and stored and _model_failure_action(previous) and not rejecting:
+        if isinstance(human_feedback, dict) and human_feedback.get("decision") == "approve":
+            return {"status": "rejected", "state": current,
+                    "reason": "该建议由模型通信失败产生，不是科学决策。请说“继续”重新获取方案；未执行任务。"}
+        if str((context or {}).get("user_message") or "").strip().lower() in {"继续", "下一步", "continue", "next"}:
+            current["pending_execution_policies"].pop(pending_key, None)
+            stored = None
+            human_feedback = None
+    if mode == "interactive" and stored and not rejecting:
+        from execution_layer.workflows.preview_dft_inputs import stale_dft_preview
+        if stale_dft_preview(stored.get("agent_proposal") or {}):
+            decision = (human_feedback or {}).get("decision")
+            if decision == "approve":
+                return {"status": "rejected", "state": current,
+                        "reason": "该 DFT 方案缺少新版候选清单与采点依据，请说“继续”刷新后再确认；未执行任务。"}
+            message = str((context or {}).get("user_message") or "").strip().lower()
+            if message in {"继续", "下一步", "continue", "next"}:
+                current["pending_execution_policies"].pop(pending_key, None)
+                stored = None  # Re-propose only; never carry an approval into a new plan.
+                human_feedback = None
     if mode == "interactive" and stored and not rejecting and _is_pending_relax_preparation(stored):
         allowed = [name for name in (config.get("agent") or {}).get("allowed_tools") or []
                    if callable((registry.get(name) or {}).get("handler"))]
@@ -202,18 +228,52 @@ def run_tool_step(
         continue_requested = str((context or {}).get("user_message") or "").strip().lower() in {
             "继续", "下一步", "然后呢", "continue", "next",
         }
+        from scientific_layer.mc.second_round_state import second_round_completed
+        effective = (context or {}).get("effective_config") or config
+        model = effective.get("mlip") or {}
+        version = model.get("version") or model.get("name") or current.get("active_model_version")
+        post_mc = second_round_completed(current, version)
+        if post_mc:
+            from scientific_layer.qbc.post_mc_candidates import post_mc_candidates
+            current["qbc_candidates"] = post_mc_candidates(current, version)
+            decision_state["qbc_candidates"] = deepcopy(current["qbc_candidates"])
+            decision_state.setdefault("decision_context", {})["qbc_candidates"] = deepcopy(current["qbc_candidates"])
+            from decision_layer.qbc_selection.recommend_post_mc_dft import recommend_post_mc_dft
+            recommendation = recommend_post_mc_dft(current["qbc_candidates"], effective, current)
+            decision_state["decision_context"]["dft_sampling_recommendation"] = {
+                "candidate_ids": [row["candidate_id"] for row in recommendation["selected_candidates"]],
+                "summary": recommendation["summary"],
+                "instruction": "此为可选参考而非最终决定；结合记忆与现状自行选择。兼顾near-hull、相、Na、已知QBC与抽查，缺失QBC不评分；偏离覆盖目标说明理由。"}
+            from execution_layer.budget.estimate_stage_cost import estimate_dft_cost
+            decision_state["decision_context"]["dft_candidate_costs"] = [{"candidate_id": row["candidate_id"],
+                "single_point_cost": estimate_dft_cost("DFT_SINGLE_POINT", row, effective["qbc"]),
+                "relax_cost": estimate_dft_cost("DFT_RELAX", row, effective["qbc"])} for row in current["qbc_candidates"]]
+            decision_state["decision_context"]["dft_stage_limits"] = (effective.get("budgets") or {}).get("stage_limits")
+            if not current["qbc_candidates"]:
+                return {"status": "not_configured", "state": current,
+                        "reason": "第二轮 MC 已完成；DFT 候选缺少当前相图中唯一匹配的已识别结构与 Ehull/atom。未追加 MC 或回退 Relax。"}
         safe_next = (choose_debug_next_action(
             current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
             allowed_tools=allowed, user_message=(context or {}).get("user_message"),
         ) if mode == "interactive" and (mc_files_pending or not callable(agent_client) or
              continue_requested) else None)
-        if mode == "interactive" and has_mc_tasks and (mc_files_pending or continue_requested) and not safe_next:
+        if post_mc:
+            safe_next = None
+            allowed = [tool for tool in allowed if tool not in {
+                "allocate_mc_bohb", "generate_branches", "run_calculation_stage", "prepare_local_batch_files"}]
+        if mode == "interactive" and has_mc_tasks and not post_mc and (mc_files_pending or continue_requested) and not safe_next:
             return _mc_continuation_block(current, mode,
                 (context or {}).get("effective_config") or config)
         action = safe_next or propose_agent_tool_action(
             decision_state, agent_client=agent_client, allowed_tools=allowed, config=config
         )
-        if mode == "interactive" and action.get("decision_source") == "rule":
+        if _model_failure_action(action):
+            if action.get("_llm_usage"):
+                current = record_budget_usage(current, {"llm_usage": action["_llm_usage"],
+                                                       "iteration": current.get("iteration", 0)})
+            return {"status": "not_configured", "state": current,
+                    "reason": "模型未能返回完整有效方案，未暂停搜索或执行任务。请继续重试。原因：" + str(action.get("fallback_reason"))}
+        if mode == "interactive" and not post_mc and action.get("decision_source") == "rule":
             recovery = choose_debug_next_action(
                 current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
                 allowed_tools=allowed, user_message=(context or {}).get("user_message"),
@@ -252,9 +312,27 @@ def run_tool_step(
         if (action.get("tool") == "allocate_mc_bohb"
                 and (action.get("parameters") or {}).get("mc_budget") == mc_intent.get("steps")):
             current.pop("mc_budget_intent", None)
+        if mode == "interactive" and action.get("tool") == "select_dft_candidates":
+            from execution_layer.workflows.prepare_dft_proposal import prepare_dft_proposal
+            action, current, error = prepare_dft_proposal(
+                action, current, decision_state, (context or {}).get("effective_config") or config,
+                agent_client=agent_client, revise=revise_tool_proposal)
+            if error:
+                return {"status": "rejected", "state": current, "reason": error}
         proposal = build_agent_proposal(action, decision_state)
         record_id = _record_id(current, invocation_id)
 
+    if mode == "interactive" and proposal.get("recommended_action") == "select_dft_candidates":
+        from execution_layer.workflows.dft_template_review import gate_template
+        proposal, template_wait = gate_template(proposal, current, stored, human_feedback,
+            (context or {}).get("effective_config") or config,
+            (context or {}).get("manager"), agent_client)
+        if template_wait:
+            human_feedback = None
+            if stored:
+                stored = deepcopy(stored)
+                stored["agent_proposal"] = deepcopy(proposal)
+                current["pending_execution_policies"][pending_key] = stored
     opinion = _extract_opinion(human_feedback) if mode == "interactive" and stored else None
     if advice_changed:
         opinion = str(human_feedback.get("comment") or "") + "\n请根据更新后的人工长期建议重新分析，生成供人工审批的新 proposal。"
@@ -335,7 +413,16 @@ def run_tool_step(
         if revision_usage:
             current = record_budget_usage(current, {"llm_usage": revision_usage,
                                                    "iteration": current.get("iteration", 0)})
-        proposal = build_agent_proposal(revision["action"], decision_state)
+        if revision.get("revision_status") == "revision_failed":
+            return {"status": "rejected", "state": current,
+                    "reason": revision["analysis"] + "；原待确认方案保留，未执行任务。"}
+        from execution_layer.workflows.attach_dft_preview import attach_dft_preview
+        revised_action, preview_error = attach_dft_preview(
+            revision["action"], current, (context or {}).get("effective_config") or config)
+        if preview_error:
+            return {"status": "rejected", "state": current,
+                    "reason": preview_error + "；原方案未被替换，未执行任务。"}
+        proposal = build_agent_proposal(revised_action, decision_state)
         history = deepcopy(stored.get("feedback_history") or [])
         history.append({"comment": opinion, "revision_status": revision["revision_status"], "analysis": revision["analysis"]})
         revision_number = int(stored.get("revision", 0)) + 1

@@ -24,8 +24,8 @@ def test_eform_hull_ground_state_and_csv(tmp_path):
             record("left-high", 0, -2.8)]
     snapshot = update_phase_diagram(rows, active_model_version="m1",
                                     output_directory=tmp_path)["diagrams"]["mlip"]
-    assert snapshot["csv_path"] == str(tmp_path / "m1" /
-                                      f"phase_diagram_mlip_{snapshot['version']}.csv")
+    assert snapshot["csv_path"] == str(tmp_path / "m1" / "phase_diagram.csv")
+    assert Path(snapshot["archive_csv_path"]).parent == tmp_path / "m1" / "history"
     by_id = {row["record_id"]: row for row in snapshot["entries"]}
     assert by_id["mid-ground"]["eform_per_O2"] == pytest.approx(-.2)
     assert by_id["mid-ground"]["ehull"] == pytest.approx(0)
@@ -65,7 +65,7 @@ def test_csv_request_uses_current_snapshot_without_running_workflow(tmp_path):
         assert snapshot["version"] in reply
         assert "MC 输入重生成" not in reply
     assert calls == []
-    csv_path = tmp_path / "m1" / f"phase_diagram_mlip_{snapshot['version']}.csv"
+    csv_path = tmp_path / "m1" / "phase_diagram.csv"
     assert csv_path.is_file()
     assert json.loads(state_path.read_text(encoding="utf-8"))["active_model_version"] == "m1"
     assert json.loads(state_path.read_text(encoding="utf-8"))["pending_mc_regeneration"] == {"directory": "untouched"}

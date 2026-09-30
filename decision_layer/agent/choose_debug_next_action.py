@@ -20,7 +20,7 @@ def choose_debug_next_action(state, manager, config, *, allowed_tools, user_mess
         return {"tool": "prepare_local_batch_files", "task_key": f"prepare-dft-inputs:{digest}",
                 "target_ids": [row["task_id"] for row in dft_pending],
                 "parameters": {"mode": "dft_inputs"}, "budget": 0.0,
-                "reason": "为已批准的 DFT 任务准备 Py-Code atomate2 结构优化输入。",
+                "reason": "为已批准的 DFT 任务准备 Py-Code atomate2 单点或优化输入。",
                 "expected_purpose": "仅准备上传文件，不计算、不提交。",
                 "decision_source": "debug_state_gate"}
     mc_pending = [row for row in state.get("tasks") or [] if row.get("stage") == "deep_search"

@@ -70,7 +70,7 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
             )
             if stage in {"dft_single_point", "dft_relax"}:
                 if (json.loads((task_directory / "task.json").read_text(encoding="utf-8"))
-                        .get("atomate", {}).get("backend") == "pycode_atomate2_relax"):
+                        .get("atomate", {}).get("backend") in {"pycode_atomate2_relax", "pycode_atomate2_static"}):
                     write_unix_shell_script(task_directory / "GPU.sh",
                         (task_directory / "submit_gpu.sh").read_text(encoding="utf-8"))
                     continue
@@ -86,6 +86,7 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                     raise ValueError("DFT GPU 模板必须恰有一处 VASP 入口")
                 script = script.replace(vasp_command,
                     'cd "${SLURM_SUBMIT_DIR:-.}"\n'
+                    'export PHASE_TASK_STARTED_EPOCH=$(date +%s)\n'
                     'set +e\n' + vasp_command + '\nvasp_exit_code=$?\nset -e\n'
                     'python3 -m execution_layer.remote.finalize_vasp '
                     '--directory . --exit-code "$vasp_exit_code"')

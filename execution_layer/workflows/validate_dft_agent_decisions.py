@@ -8,16 +8,19 @@ from copy import deepcopy
 def validate_dft_agent_decisions(proposal: dict, metrics: list[dict], state: dict, *, config: dict, config_version: str, remaining_budget: float) -> dict:
     errors, accepted, rejected = [], [], []
     budget_state = deepcopy(state)
-    if proposal.get("source") == "llm_agent" and _contains_forbidden_numeric({"decisions": proposal.get("decisions"), "global_action": proposal.get("global_action"), "reason": proposal.get("reason")}):
+    if str(proposal.get("source") or "").startswith("llm_agent") and _contains_forbidden_numeric({"decisions": proposal.get("decisions"), "global_action": proposal.get("global_action"), "reason": proposal.get("reason")}):
         errors.append("agent_supplied_scientific_numeric_value")
     by_id = {item["candidate_id"]: item for item in metrics}; seen = set(); spent = 0.0
     decisions = proposal.get("decisions", [])
+    if not isinstance(decisions, list) or any(not isinstance(item, dict) for item in decisions):
+        return {"valid": False, "errors": ["invalid_dft_decisions_format"],
+                "accepted": [], "rejected": [], "global_action": proposal.get("global_action")}
     relax_limit = max(1, int(len(decisions) * float((config.get("selection_policy") or {}).get(
         "max_relax_fraction", 0.10)))) if decisions else 0
     relax_accepted = 0
     for item in decisions:
         extra_fields = set(item) - {"candidate_id", "action", "reason"}
-        if proposal.get("source") == "llm_agent" and extra_fields:
+        if str(proposal.get("source") or "").startswith("llm_agent") and extra_fields:
             errors.append(f"agent_decision_fields_forbidden:{','.join(sorted(extra_fields))}")
             continue
         candidate_id, action = item.get("candidate_id"), item.get("action")
@@ -34,9 +37,13 @@ def validate_dft_agent_decisions(proposal: dict, metrics: list[dict], state: dic
                              "reason": "dft_relax_reserved_for_limited_geometry_checks"}); continue
         hard = _hard_action(metric, config)
         if metric.get("duplicate_of"):
-            action = "REJECT"; hard = "duplicate_safety_rule"
+            if action not in {"REJECT", "DEFER"}:
+                rejected.append({"candidate_id": candidate_id, "action": action,
+                                 "reason": "duplicate_safety_rule"}); continue
+            hard = "duplicate_safety_rule"
         elif hard and action in {"DEFER", "REJECT"}:
-            action = hard
+            rejected.append({"candidate_id": candidate_id, "action": action,
+                             "reason": "configured_uncertainty_rule_requires_revision", "required_action": hard}); continue
         task_key = f"{config_version}:{candidate_id}:{action}"
         if task_key in (state.get("effective_decisions") or {}):
             rejected.append({"candidate_id": candidate_id, "action": action, "reason": "duplicate_task_key"}); continue

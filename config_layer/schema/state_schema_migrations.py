@@ -26,6 +26,6 @@ def migrate_persisted_state(state: dict) -> dict:
     current = deepcopy(state or {})
     if current.get("current_state_snapshot"):
         current["current_state_snapshot"] = migrate_state_snapshot(current["current_state_snapshot"])
-    current["state_snapshots"] = [migrate_state_snapshot(item)
+    current["state_snapshots"] = [deepcopy(item) if item.get("history_format") == "summary-v1" else migrate_state_snapshot(item)
                                   for item in current.get("state_snapshots") or []]
     return current

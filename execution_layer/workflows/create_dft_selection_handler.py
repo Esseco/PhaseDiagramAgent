@@ -15,6 +15,9 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
 
     def handler(*, action, context):
         state = deepcopy(context.get("event_state") or {})
+        if context.get("execution_mode") == "interactive" and not (action.get("parameters") or {}).get("dft_input_preview"):
+            return {"status": "rejected", "state": state, "tasks": [],
+                    "reason": "旧 DFT 方案缺少输入数量与成本预览，请拒绝后重新获取方案。"}
         candidates = (
             candidates_provider(action, context)
             if callable(candidates_provider)
@@ -38,14 +41,27 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             proposal, metrics_result["metrics"], state, config=config,
             config_version=context["config_version"], remaining_budget=remaining,
         )
-        if not validation["valid"]:
+        if not validation["valid"] or validation["rejected"]:
             return {
                 "status": "rejected", "state": state, "metrics": metrics_result,
                 "validation": validation, "tasks": [],
             }
+        if parameters.get("dft_input_preview") and validation["rejected"]:
+            return {"status": "rejected", "state": state, "validation": validation,
+                    "reason": "批准后候选或预算变化；请重新确认方案。", "tasks": []}
+        reviewed_settings = None
+        review = action.get("dft_template_review")
+        if context.get("execution_mode") == "interactive":
+            from execution_layer.workflows.dft_template_review import validate_review
+            try:
+                reviewed_settings = validate_review(review, action, context["config_version"])
+            except (ValueError, OSError) as error:
+                return {"status": "rejected", "state": state, "tasks": [], "reason": str(error)}
         state = reserve_dft_actions(state, validation["accepted"])
         tasks = []
         confirmed_parameters = deepcopy((context["effective_config"].get("dft") or {}).get("parameters") or {})
+        if reviewed_settings is not None:
+            confirmed_parameters = deepcopy(reviewed_settings["parameters"])
         for decision in validation["accepted"]:
             if decision["action"] not in {"DFT_SINGLE_POINT", "DFT_RELAX"}:
                 continue
@@ -77,6 +93,9 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 if (row.get("candidate_id") or row.get("structure_id")) == decision["candidate_id"]), {})
             if selected.get("structure_path"):
                 task["structure_path"] = selected["structure_path"]
+            if reviewed_settings is not None:
+                task["reviewed_submit_script"] = reviewed_settings["submit_script"]
+                task["dft_template_digest"] = review["digest"]
             state.setdefault("tasks", []).append(task)
             state.setdefault("pending_tasks", []).append(task)
             tasks.append(task)
@@ -85,6 +104,11 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             "accepted": deepcopy(validation["accepted"]),
             "rejected": deepcopy(validation["rejected"]),
         })
+        if parameters.get("dft_input_preview") and tasks:
+            from execution_layer.local.prepare_dft_upload_batches import prepare_dft_upload_batches
+            prepared = prepare_dft_upload_batches(action={"target_ids": [row["task_id"] for row in tasks]},
+                context={**context, "event_state": state})
+            return {**prepared, "tasks": tasks, "task_count": len(tasks), "validation": validation}
         return {
             "status": "completed", "state": state, "metrics": metrics_result,
             "validation": validation, "tasks": tasks,

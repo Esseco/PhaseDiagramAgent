@@ -59,10 +59,11 @@ def test_download_copies_only_whitelisted_files_and_never_trajectories(tmp_path)
         def __init__(self): self.calls = []
         def __call__(self, argv, **kwargs):
             self.calls.append(argv)
-            if "cat" in argv:
-                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(manifest), stderr="")
-            if "task.finished.json" in argv[-1]:
-                Path(argv[-1].split(":", 1)[-1]).write_text("{}")
+            if argv[0] == "ssh" and argv[-1].startswith("cat "):
+                body = manifest if argv[-1].endswith("manifest.json") else {}
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(body), stderr="")
+            if argv[0] == "scp" and "task.finished.json" in argv[-1]:
+                Path(argv[-1]).write_text("{}")
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
     runner = DownloadRunner(); transport = OpenSSHTransport("BJ-HPC", runner=runner)
     result = transport.download_tree("/remote/batches/b1", tmp_path)

@@ -41,9 +41,16 @@ class QbcAgentDecisionTest(unittest.TestCase):
             dft_parameters={"encut": 520}, context=context,
             dft_submitter=submitter, invocation_id="fixed",
         )
+        self.assertEqual(agent["status"], "rejected")
+        self.assertEqual(agent["submissions"], [])
         actions = {item["candidate_id"]: item["action"] for item in agent["validation"]["accepted"]}
-        self.assertEqual(actions["near"], "DFT_RELAX"); self.assertEqual(actions["far"], "DEFER"); self.assertEqual(actions["dup"], "REJECT")
-        self.assertEqual(agent["retrain"]["action"], "RETRAIN_MLIP")
+        self.assertEqual(actions["near"], "DFT_RELAX")
+        self.assertEqual(actions["far"], "DEFER")
+        self.assertNotIn("dup", actions)
+        duplicate = next(row for row in agent["validation"]["rejected"] if row["candidate_id"] == "dup")
+        self.assertEqual(duplicate["action"], "DFT_SINGLE_POINT")
+        self.assertEqual(duplicate["reason"], "duplicate_safety_rule")
+        self.assertIsNone(agent["retrain"])
         self.assertEqual(baseline["status"], "completed")
 
     def test_illegal_numeric_and_budget_are_rejected(self):
@@ -160,7 +167,7 @@ class QbcAgentDecisionTest(unittest.TestCase):
             context={"remaining_dft_budget": 2000},
             agent_client=lambda _: {"decisions": [{"candidate_id": "near", "action": "DFT_SINGLE_POINT"}]},
             invocation_id="permission", execution_session=session,
-            tool_registry=create_tool_registry(), execution_mode="dry_run",
+            tool_registry=create_tool_registry({"select_dft_candidates": lambda **kwargs: None}), execution_mode="dry_run",
         )
         self.assertEqual(result["status"], "planned_only")
         self.assertTrue(result["tool_validation"]["valid"])

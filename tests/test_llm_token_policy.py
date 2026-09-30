@@ -54,5 +54,5 @@ class TokenPolicyTest(unittest.TestCase):
             result = client({"decision_kind": "strategy"})
         retry = json.loads(request.call_args.args[0].data)
         self.assertEqual(retry["thinking"]["type"], "disabled")
-        self.assertEqual(retry["max_tokens"], 1600)
+        self.assertEqual(retry["max_tokens"], 8192)
         self.assertEqual(result["_llm_usage"]["calls"], 2)

@@ -24,13 +24,25 @@ def update_state_snapshot(state: dict, *, config_version=None) -> dict:
     snapshot["source_fingerprint"] = fingerprint
     current["state_snapshot_index"] = index
     current["current_state_snapshot"] = snapshot
-    current.setdefault("state_snapshots", []).append(deepcopy(snapshot))
+    current.setdefault("state_snapshots", []).append(_history_snapshot(snapshot))
     current["state_snapshots"] = current["state_snapshots"][-50:]
     return update_short_term_memory(current, snapshot)
 
 
 def agent_state_summary(state: dict) -> dict:
     return deepcopy(state.get("current_state_snapshot") or {})
+
+
+def _history_snapshot(snapshot):
+    """History indexes reference current ledger; old full snapshots stay readable."""
+    return {"history_format": "summary-v1",
+            **{key: deepcopy(snapshot.get(key)) for key in (
+                "snapshot_id", "snapshot_index", "source_fingerprint", "config_version",
+                "current_status", "available_budget", "budget_usage", "search_history")},
+            "candidate_count": len(snapshot.get("available_branches") or []),
+            "phase_versions": {method: item.get("version") for method, item in
+                               (snapshot.get("current_convex_hull") or {}).items()},
+            "memory_version": ((snapshot.get("decision_context") or {}).get("long_term_human_advice") or {}).get("version")}
 
 
 def _state_fingerprint(state):

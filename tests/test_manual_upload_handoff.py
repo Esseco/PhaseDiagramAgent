@@ -146,7 +146,7 @@ def test_waiting_reply_tells_user_to_submit_and_return_results():
             "upload_root": str(task_dir.parent.parent),
         },
     }, Path("state.json"))
-    assert "没有提交作业" in reply
+    assert "尚未本机提交" in reply
     assert "GPU.sh" in reply
-    assert "result.json" in reply and "task.finished.json" in reply
-    assert "不会重复准备或提交" in reply
+    assert "results" in reply
+    assert "未回传任务保持等待" in reply

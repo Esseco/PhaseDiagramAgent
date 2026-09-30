@@ -114,7 +114,7 @@ def run_qbc_dft_decision_flow(
             current = update_state_snapshot(current, config_version=config_version)
             return {**response, "state": current, "idempotent_replay": False}
     validation = validate_dft_agent_decisions(proposal, metrics["metrics"], current, config=config, config_version=config_version, remaining_budget=remaining)
-    if not validation["valid"]:
+    if not validation["valid"] or validation["rejected"]:
         response = {"status": "rejected", "mode": config["mode"], "execution_mode": execution_mode, "metrics": metrics, "proposal": proposal, "agent_proposal": agent_proposal, "human_feedback": policy["human_feedback"], "final_action": policy["final_action"], "tool_validation": tool_validation, "validation": validation, "submissions": [], "retrain": None, "execution_result": None}
     elif not policy["execute"]:
         response = {"status": "planned_only", "mode": config["mode"], "execution_mode": execution_mode, "metrics": metrics, "proposal": proposal, "agent_proposal": agent_proposal, "human_feedback": policy["human_feedback"], "final_action": policy["final_action"], "tool_validation": tool_validation, "validation": validation, "submissions": [], "retrain": None, "execution_result": None}

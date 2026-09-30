@@ -76,13 +76,13 @@ class LocalProjectLauncherTests(unittest.TestCase):
             session = json.loads((target.parent / "config_session.json").read_text(encoding="utf-8"))
             self.assertEqual(session["setup_stage"], "json_ready")
             self.assertEqual(session["status"], "draft")
-            self.assertTrue((target.parent / "search_config.draft.json").is_file())
+            self.assertTrue((target.parent / "search_config.project.json").is_file())
             self.assertIn("项目长期记忆：无", describe_project(target))
             with patch("run.deepseek_credentials.load_deepseek_api_key", return_value=None):
                 handler = create_open_webui_runtime(target)
             self.assertIsInstance(handler, ConfigurationChatHandler)
             self.assertEqual(handler.workflow_kwargs["config_session"]["setup_stage"], "json_ready")
-            self.assertEqual(handler.editable_config_path, target.parent / "search_config.draft.json")
+            self.assertEqual(handler.editable_config_path, target.parent / "search_config.project.json")
             self.assertEqual(register_project(target, registry=registry), [str(target)])
             with self.assertRaises(FileExistsError):
                 create_project(target.parent, registry=registry)
@@ -106,7 +106,7 @@ class LocalProjectLauncherTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "占用"):
                     start_agent(target)
 
-    def test_reuses_only_same_project_with_valid_connection_token(self):
+    def test_never_reattaches_background_agent_even_with_valid_token(self):
         with tempfile.TemporaryDirectory() as directory:
             target = create_project(Path(directory) / "a", registry=Path(directory) / "registry.json")
             existing = object()
@@ -114,12 +114,13 @@ class LocalProjectLauncherTests(unittest.TestCase):
                  patch("run.local_project_launcher._existing_agent", return_value=existing), \
                  patch("run.local_project_launcher.local_service_tokens", return_value=("a" * 24, "b" * 24)), \
                  patch("run.local_project_launcher._agent_accepts_token", return_value=True):
-                self.assertEqual(start_agent(target), (existing, "a" * 24, True))
+                with self.assertRaisesRegex(RuntimeError, "占用"):
+                    start_agent(target)
             with patch("run.local_project_launcher._port_is_free", return_value=False), \
                  patch("run.local_project_launcher._existing_agent", return_value=existing), \
                  patch("run.local_project_launcher.local_service_tokens", return_value=("a" * 24, "b" * 24)), \
                  patch("run.local_project_launcher._agent_accepts_token", return_value=False):
-                with self.assertRaisesRegex(RuntimeError, "不匹配"):
+                with self.assertRaisesRegex(RuntimeError, "占用"):
                     start_agent(target)
 
     def test_distinct_local_tokens_are_required(self):

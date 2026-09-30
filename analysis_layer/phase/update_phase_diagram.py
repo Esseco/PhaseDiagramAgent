@@ -39,6 +39,7 @@ def update_phase_diagram(
             and item.get("status", "completed") == "completed"
             and (method != "mlip" or str(item.get("model_version") or item.get("source_version") or "unknown") == model_version)
         ]
+        selected.sort(key=lambda item: (str(item.get("record_id") or ""), str(item.get("structure_id") or "")))
         normalized, rejected = [], []
         for item in selected:
             try:
@@ -81,7 +82,10 @@ def update_phase_diagram(
             path = directory / f"{filename}.json"
             legacy_paths = [root / f"{filename}.json"]
             if method == "mlip":
-                legacy_paths.insert(0, root / "mlip" / directory.name / f"{filename}.json")
+                legacy_paths.insert(0, root / directory.parent.name / f"{filename}.json")
+                legacy_paths.insert(0, root / "mlip" / directory.parent.name / f"{filename}.json")
+            else:
+                legacy_paths.insert(0, root / "dft" / f"{filename}.json")
             if not path.is_file():
                 # Keep unchanged historical snapshots in place; do not duplicate them.
                 path = next((candidate for candidate in legacy_paths if candidate.is_file()), path)
@@ -92,11 +96,17 @@ def update_phase_diagram(
                     stored["path"] = str(path)
                     snapshot.clear()
                     snapshot.update(stored)
+                    archive = snapshot.get("archive_csv_path")
+                    if archive and Path(archive).is_file():
+                        from analysis_layer.phase.publish_current_csv import publish_current_csv
+                        publish_current_csv(snapshot, archive)
                     continue
             directory.mkdir(parents=True, exist_ok=True)
             csv_path = directory / f"{filename}.csv"
-            export_phase_diagram_csv(snapshot, csv_path)
-            snapshot["csv_path"] = str(csv_path)
+            if snapshot.get("status") == "completed" and snapshot.get("entries"):
+                export_phase_diagram_csv(snapshot, csv_path)
+                from analysis_layer.phase.publish_current_csv import publish_current_csv
+                publish_current_csv(snapshot, csv_path)
             snapshot["path"] = str(path)
             path.write_text(
                 json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True)

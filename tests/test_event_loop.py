@@ -137,7 +137,7 @@ def test_public_workflow_uses_event_loop_and_effective_config(tmp_path):
     result = run_workflow(
         None, {}, {"state_path": str(tmp_path / "state.json"), "seed": 3}, session,
         agent_client=lambda _: {"tool": "pause_search", "parameters": {}, "budget": 0, "reason": "done"},
-        max_steps=3,
+        max_steps=3, execution_mode="autonomous",
     )
     assert result["status"] == "paused"
     assert result["steps_executed"] == 1
@@ -158,6 +158,7 @@ def test_pending_task_is_recovered_and_settled_before_next_agent_action():
         agent_client=lambda _: {
             "tool": "run_calculation_stage", "stage": "deep_search",
             "task_key": "K1", "parameters": {}, "budget": 4,
+            "target_ids": ["S1"],
             "reason": "search",
         },
         execution_mode="autonomous", max_steps=5,

@@ -9,6 +9,7 @@ from pathlib import Path
 import traceback
 
 from execution_layer.remote.integrity import file_checksum
+from execution_layer.cost.runtime_observation import start_timer, runtime_observation
 
 
 TERMINAL_STATUSES = {"completed", "failed", "timeout", "cancelled"}
@@ -21,6 +22,7 @@ def run_single_task(task_path="task.json", *, executor):
     result_path = directory / "result.json"
     task["result_path"] = str(result_path)
     task["calculation_directory"] = str(directory)
+    timer = start_timer()
     try:
         result = executor(task)
         if not isinstance(result, dict) or result.get("status") not in TERMINAL_STATUSES:
@@ -35,6 +37,7 @@ def run_single_task(task_path="task.json", *, executor):
                 "protocol_version", "input_file_version"):
         if task.get(key) is not None:
             payload[key] = task[key]
+    payload["runtime_observation"] = runtime_observation(timer, task, payload)
     _write(result_path, payload)
     marker = {key: payload.get(key) for key in ("task_id", "task_key", "batch_id",
               "config_version", "model_version", "task_checksum", "protocol_version",

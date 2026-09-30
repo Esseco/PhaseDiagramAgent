@@ -15,10 +15,16 @@ def prepare_dft_upload_batches(*, action, context):
              if row.get("stage") in {"dft_relax", "dft_single_point"}
              and row.get("status") == "pending" and not row.get("slurm_batch_id")
              and (not requested or row.get("task_id") in requested)]
-    if any(row["stage"] != "dft_relax" for row in tasks):
-        raise ValueError("当前 Py-Code 接口只到结构优化；DFT 单点方案需要重新确认")
-    runner = ManualUploadBatchRunner(root, worker_command=[],
-        dispatcher=lambda task: prepare_pycode_relax(task, manager=context["manager"]))
+    def dispatch(task):
+        from pathlib import Path
+        import re
+        result = prepare_pycode_relax(task, manager=context["manager"])
+        if task.get("reviewed_submit_script"):
+            script = re.sub(r"(?m)^#SBATCH --job-name=.*$", "#SBATCH --job-name=DFT-" + task["task_id"],
+                            task["reviewed_submit_script"])
+            Path(task["work_directory"]).joinpath("submit_gpu.sh").write_text(script, encoding="utf-8", newline="\n")
+        return result
+    runner = ManualUploadBatchRunner(root, worker_command=[], dispatcher=dispatch)
     # Restrict the existing runner to this approved preparation request.
     select = runner._select
     ids = {row["task_id"] for row in tasks}

@@ -1,6 +1,7 @@
 """Describe proposed workload using initial estimates calibrated by actual costs."""
 
 from __future__ import annotations
+from analysis_layer.cost.calibrate_relative_cost import calibrate_relative_cost
 
 
 def estimate_proposal_cost(action, state):
@@ -16,16 +17,25 @@ def estimate_proposal_cost(action, state):
                        "initial_cost": float(action.get("budget", 0) or 0)})
     elif tool == "select_dft_candidates":
         decisions = params.get("decisions") or []
+        if not isinstance(decisions, list) or any(not isinstance(row, dict) for row in decisions):
+            return {"workload": [], "estimated_total_cost": None,
+                    "error": "invalid_dft_decisions_format", "cost_unit": "relative_cost"}
         for name, stage in (("DFT_SINGLE_POINT", "dft_single_point"), ("DFT_RELAX", "dft_relax")):
             count = sum(row.get("action") == name for row in decisions)
             if count:
                 base = _stage_unit(state, stage)
                 stages.append({"stage": stage, "tasks": count, "initial_cost": count * base})
+        preview = params.get("dft_input_preview") or {}
+        if preview.get("relative_cost") is not None:
+            stages = preview.get("workload") or [{"stage": "dft_relax", "tasks": preview["task_count"],
+                       "initial_cost": preview["relative_cost"]}]
     elif tool == "run_calculation_stage":
         stages.append({"stage": action.get("stage"), "tasks": max(1, len(action.get("target_ids") or [])), "initial_cost": float(action.get("budget", 0) or 0)})
     total = 0.0
     for row in stages:
         factor, samples = _calibration(state, row["stage"])
+        if tool == "select_dft_candidates" and params.get("dft_input_preview"):
+            factor = 1.0  # Preview already uses the configured scientific cost model.
         row["calibration_factor"] = factor; row["history_samples"] = samples
         row["estimated_cost"] = float(row["initial_cost"]) * factor
         total += row["estimated_cost"]
@@ -41,7 +51,5 @@ def _stage_unit(state, stage):
 
 
 def _calibration(state, stage):
-    ratios = [float(row["actual_cost"]) / float(row["planned_cost"]) for row in state.get("cost_history", []) if row.get("stage") == stage and float(row.get("planned_cost", 0) or 0) > 0 and row.get("status") == "completed"]
-    if not ratios: return 1.0, 0
-    observed = sum(ratios[-10:]) / len(ratios[-10:])
-    return max(.25, min(4.0, .3 + .7 * observed)), len(ratios[-10:])
+    """Compatibility for callers of the previous private helper."""
+    return calibrate_relative_cost(state, stage)

@@ -192,7 +192,7 @@ class OpenSSHJobScheduler:
                 "job_id": str(job_id), "stdout": output}
 
     def _call(self, script, argument):
-        remote_command = " ".join(shlex.quote(value) for value in (script, str(argument)))
+        remote_command = " ".join(shlex.quote(str(value)) for value in (script, argument))
         result = self.runner([self.ssh, self.host, remote_command], check=True,
                              capture_output=True, text=True)
         return result.stdout

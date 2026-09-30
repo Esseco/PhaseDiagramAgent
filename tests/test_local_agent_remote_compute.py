@@ -73,3 +73,15 @@ def test_secret_is_not_uploaded(tmp_path):
     with pytest.raises(ValueError, match="secret field"):
         sync_tasks(path, local_batch_root=tmp_path / "local", remote_batch_root=tmp_path / "remote",
                    transport=VerifiedLocalMirrorTransport())
+
+
+def test_worker_does_not_publish_completion_when_final_structure_is_missing(tmp_path):
+    runner = RemoteBatchRunner(tmp_path / "local", worker_command=["worker"])
+    output = runner.prepare(_state([_task(1, "deep_search")]))
+    manifest_path = Path(output["batch"]["manifest_path"])
+    entry = json.loads(manifest_path.read_text(encoding="utf-8"))[0]
+    with pytest.raises(FileNotFoundError):
+        run_remote_task(manifest_path, 0, executor=lambda task: {
+            "status": "completed", "outputs": {"structure_path": "final.vasp"}})
+    published = (manifest_path.parent / entry["result_path"]).resolve()
+    assert not published.with_name("task.finished.json").exists()

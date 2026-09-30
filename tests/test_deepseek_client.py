@@ -37,6 +37,27 @@ def completion(content, *, finish_reason="stop", prompt_tokens=10, completion_to
 
 
 class DeepSeekClientTest(unittest.TestCase):
+    def test_large_dft_retry_does_not_reduce_output_budget(self):
+        client = create_deepseek_client(api_key="test", thinking="disabled")
+        payload = {"allowed_tools": ["select_dft_candidates"],
+                   "state": {"qbc_candidates": [{}] * 100}}
+        with patch("decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+                   side_effect=[FakeResponse(completion('{"reply":', finish_reason="length")),
+                                FakeResponse(completion('{"reply":"ok"}'))]) as request:
+            self.assertEqual(client(payload)["reply"], "ok")
+        budgets = [json.loads(call.args[0].data)["max_tokens"] for call in request.call_args_list]
+        self.assertGreater(budgets[0], 1600)
+        self.assertGreaterEqual(budgets[1], budgets[0])
+
+    def test_length_finish_is_retried_even_if_json_parses(self):
+        client = create_deepseek_client(api_key="test", thinking="disabled")
+        with patch("decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+                   side_effect=[FakeResponse(completion('{}', finish_reason="length")),
+                                FakeResponse(completion('{"reply":"complete"}'))]) as request:
+            result = client({})
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(result["reply"], "complete")
+
     def test_empty_json_output_is_retried_and_usage_counts_both_calls(self):
         client = create_deepseek_client(api_key="test-secret-do-not-print", thinking="disabled")
         with patch(

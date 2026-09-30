@@ -45,7 +45,7 @@ def test_full_plan_above_cap_enters_targeted_revision(tmp_path):
 
     handler = RunWorkflowChatHandler({"state_path": str(path)},
         config_revision_factory=lambda revised: seen.setdefault("state", revised) and Delegate())
-    assert handler([{"role": "user", "content": "完整运行"}]) == "revision-started"
+    assert handler([{"role": "user", "content": "完整运行"}]).endswith("revision-started")
     assert seen["steps"] == 9540
     assert seen["state"]["mc_budget_intent"]["steps"] == 9540
 
@@ -67,7 +67,7 @@ def test_pending_mc_feedback_above_confirmed_cap_enters_targeted_revision(tmp_pa
         config_revision_factory=revision_factory)
     reply = handler([{"role": "user", "content": "按 5000 步预算"}])
 
-    assert reply == "revision-started"
+    assert reply.endswith("revision-started")
     assert seen["state"]["mc_budget_intent"]["steps"] == 5000
     assert seen["steps"] == 5000
 

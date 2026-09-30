@@ -4,7 +4,7 @@ from copy import deepcopy
 
 def restore_generation_gate(state, manager):
     current = deepcopy(state)
-    if current.get("dedup_gate") is not None:
+    if current.get("dedup_gate") is not None or manager is None:
         return current
     records = manager.data.get("structures") or {}
     valid = set()

@@ -12,7 +12,8 @@ def parse_vasp_result(directory, *, exit_code=0, parser=None):
     task = _read_json(root / "task.json")
     if int(exit_code) != 0:
         return _base(task, "failed", error=f"vasp exited with code {exit_code}")
-    vasprun_path = root / "vasprun.xml"
+    from monty.os.path import zpath
+    vasprun_path = Path(zpath(root / "vasprun.xml"))
     if not vasprun_path.is_file():
         return _base(task, "failed", error="vasprun.xml missing")
     try:
@@ -22,6 +23,15 @@ def parse_vasp_result(directory, *, exit_code=0, parser=None):
         else:
             parsed = parser(vasprun_path)
         converged = bool(parsed.converged)
+        # Export one portable uncompressed structure for the existing collector.
+        contcar = Path(zpath(root / "CONTCAR"))
+        exported = root / "CONTCAR"
+        if contcar.is_file() and contcar != exported:
+            import gzip
+            import shutil
+            with gzip.open(contcar, "rb") as source, exported.with_name("CONTCAR.part").open("wb") as target:
+                shutil.copyfileobj(source, target)
+            exported.with_name("CONTCAR.part").replace(exported)
         outputs = {
             "energy": float(parsed.final_energy),
             "energy_unit": "eV",
