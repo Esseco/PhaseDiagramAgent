@@ -74,6 +74,20 @@ def run_mace_worker(job: dict) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     parameters = dict(job.get("parameters") or {})
     operation = job["operation"]
+    if operation == "predict":
+        from ase.io import read
+        from mace.calculators import MACECalculator
+        atoms = read(job["structure_path"])
+        options = {"model_paths": job["model_path"],
+                   "device": parameters.get("device", "cpu"),
+                   "default_dtype": parameters.get("mace_default_dtype", "float64")}
+        head = parameters.get("mace_head")
+        if head:
+            options["head"] = head
+        atoms.calc = MACECalculator(**options)
+        return {"status": "completed", "energy": float(atoms.get_potential_energy()),
+                "forces": atoms.get_forces().tolist(), "energy_unit": "eV",
+                "forces_unit": "eV/angstrom", "geometry": "DFT_final_frame"}
     if operation == "relax":
         model_paths = [str(path) for path in (job.get("model_paths") or [])]
         if model_paths:

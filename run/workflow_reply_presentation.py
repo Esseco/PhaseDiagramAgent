@@ -23,6 +23,8 @@ def format_workflow_reply(result: dict, state_path, *, verbose=False) -> str:
             return "旧建议由模型回复失败产生，不是暂停决策。请重启 Agent 服务后说“继续”刷新；未执行任务。"
         # Preserve all approval limits, budget interceptions and sensitive warnings.
         text = _format_workflow_reply_verbose(result, state_path)
+        from run.evidence_reference_presentation import evidence_reference_lines
+        evidence_lines = evidence_reference_lines(proposal.get("raw_action") or {})
         labels = {"generate_branches": "生成 branch", "allocate_mc_bohb": "分配 MC",
                   "prepare_local_batch_files": "准备输入文件", "select_dft_candidates": "筛选 DFT"}
         tool = proposal.get("recommended_action")
@@ -62,7 +64,7 @@ def format_workflow_reply(result: dict, state_path, *, verbose=False) -> str:
                  if not line.startswith("完整参数与依据：")]
         lines = [line.replace("回复“同意”执行；回复“拒绝”取消；也可以直接提出修改意见。",
                               "回复“同意”执行、“拒绝”取消，或提出修改。") for line in lines]
-        return "\n".join(lines)
+        return "\n".join(lines + evidence_lines)
     if status == "awaiting_manual_submission":
         wait = result.get("manual_wait") or {}
         recovered = int(wait.get("recovered_count") or result.get("recovered_count") or 0)

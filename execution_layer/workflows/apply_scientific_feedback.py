@@ -61,7 +61,11 @@ def apply_scientific_feedback(
             continue
         collected = collect_calculation_results(manager, structure_id, result, ledger_path=None)
         _record_cost_observation(current, result, manager, structure_id)
-        _record_final_frame_error(current, result, manager, structure_id, final_frame_mlip_evaluator)
+        from analysis_layer.feedback.dft_result_products import record_dft_products
+        record_dft_products(current, result, final_frame_mlip_evaluator, manager)
+        if (result.get("outputs") or {}).get("training_ready") is not True:
+            # Legacy energy-only evidence is kept separate from paired E/F metrics.
+            _record_final_frame_error(current, result, manager, structure_id)
         processed.append(task_id)
         accepted.append(collected)
         phase_record = collected.get("phase_record")
@@ -76,6 +80,15 @@ def apply_scientific_feedback(
         cache_path=phase_identification_cache_path,
     )
     refresh_identified_phases(current)
+    # Preserve the existing cached classification for dataset/phase consumers.
+    phases = {r.get("source_task_id"): r for r in current.get("phase_records", [])}
+    for record in current.get("dft_dataset_records", []):
+        phase = phases.get(record.get("task_id"))
+        if phase:
+            record["actual_phase"] = phase.get("phase")
+            record["phase_identification"] = deepcopy(phase.get("phase_identification"))
+    from analysis_layer.feedback.dft_result_products import export_dft_products
+    export_dft_products(current, phase_diagram_directory)
     selected_model = active_model_version or current.get("active_model_version")
     if selected_model is not None:
         current["active_model_version"] = selected_model

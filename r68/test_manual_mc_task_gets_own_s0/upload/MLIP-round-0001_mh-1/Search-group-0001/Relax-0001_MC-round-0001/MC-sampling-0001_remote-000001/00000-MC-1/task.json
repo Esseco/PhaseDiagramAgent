@@ -1,0 +1,27 @@
+{
+  "batch_id": "remote-000001",
+  "calculation_directory": "00000-MC-1",
+  "config_version": null,
+  "input_file_version": "task-json-v1",
+  "model_version": "mh-1",
+  "parent_relax_round": 1,
+  "protocol_version": 1,
+  "result_path": "..\\results\\00000-MC-1\\result.json",
+  "search_group_index": 1,
+  "slurm_array_index": 0,
+  "stage": "deep_search",
+  "status": "pending",
+  "task_checksum": "e298af57cc0ac129489c5182e265ec01ab4c904c39bf7c2109eaa6352795c700",
+  "task_id": "MC-1",
+  "task_key": "mc-key",
+  "upload_operation_id": "bd44a5dc0665",
+  "worker_job": {
+    "model_path": "/remote/mh-1.model",
+    "operation": "mc",
+    "parameters": {
+      "full_na_structure": "full_na_structure.vasp"
+    },
+    "phase_references": {},
+    "structure_path": "initial.vasp"
+  }
+}

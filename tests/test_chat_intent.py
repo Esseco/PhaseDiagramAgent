@@ -11,7 +11,7 @@ def test_paraphrase_export():
 
 
 def test_no_approval_authority():
-    assert resolve_chat_intent("行吧", {}, agent_client=client("approve"))["intent"] == "other"
+    assert resolve_chat_intent("行吧", {}, agent_client=client("approve"))["intent"] == "unavailable"
 
 
 def test_question_not_request():
@@ -25,7 +25,7 @@ def test_redo_requires_stage_and_round():
         stage="mc", scope="current"))["intent"] == "redo_plan"
 
 
-def test_client_failure_keeps_original_route():
+def test_client_failure_is_explicit_and_does_not_guess_intent():
     def fail(payload):
         raise RuntimeError("offline")
-    assert resolve_chat_intent("进度呢", {}, agent_client=fail)["intent"] == "other"
+    assert resolve_chat_intent("进度呢", {}, agent_client=fail)["intent"] == "unavailable"

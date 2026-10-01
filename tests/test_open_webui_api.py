@@ -173,7 +173,8 @@ class OpenWebUIAPITest(unittest.TestCase):
 
             handler = RunWorkflowChatHandler({
                 "state_path": str(state_path),
-                "agent_client": lambda payload: payload,
+                "agent_client": lambda payload: ({"intent": "other"}
+                    if payload.get("mode") == "resolve_chat_intent" else payload),
             }, workflow=workflow)
             handler([{"role": "user", "content": "优先评估最近 DFT 误差"}])
             self.assertEqual(observed["user_instruction"], "优先评估最近 DFT 误差")
@@ -276,6 +277,13 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertTrue(first.state_path.exists())
             self.assertTrue((first.state_path.parent / "phase_data.json").exists())
             self.assertEqual(old_ledger.read_bytes(), before)
+            descriptor = first.state_path.parent / "open_webui_runtime.json"
+            self.assertTrue(descriptor.is_file())
+            restored = create_open_webui_runtime(descriptor)
+            self.assertEqual(restored.state_path, first.state_path)
+            for key in ("phase_diagram_directory", "approval_directory", "upload_batches_directory"):
+                self.assertEqual(restored.workflow_kwargs["run_config"][key],
+                                 first.workflow_kwargs["run_config"][key])
 
     def test_no_history_runs_directly(self):
         with tempfile.TemporaryDirectory() as directory:

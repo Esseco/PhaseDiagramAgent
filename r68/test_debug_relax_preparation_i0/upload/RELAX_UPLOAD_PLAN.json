@@ -1,0 +1,22 @@
+{
+  "instructions": "Upload every listed batch directory as a sibling under the same stage folder. Each task directory contains initial.vasp, task.json. Each batch root contains one run_mlip_batch.py. Submit GPU.sh once from the batch root; it runs the compatible Relax tasks and collects all results in the stage-level results/. The remote mace environment must import Process_PhaseDiagram and Process_AL_MC; the MACE model path in task.json must exist remotely.",
+  "branch_count": 1,
+  "task_count": 1,
+  "branches": [
+    {
+      "branch_id": "B-1",
+      "task_ids": [
+        "RELAX-f61b65f99b9e"
+      ],
+      "batch_directories": [
+        "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\r68\\test_debug_relax_preparation_i0\\upload\\MLIP-round-0001_mace-mh-1\\Search-group-0001\\Relax-0001\\Relax-submission-0001_remote-000001"
+      ],
+      "results_directories": [
+        "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\r68\\test_debug_relax_preparation_i0\\upload\\MLIP-round-0001_mace-mh-1\\Search-group-0001\\Relax-0001\\results"
+      ],
+      "task_directories": [
+        "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\r68\\test_debug_relax_preparation_i0\\upload\\MLIP-round-0001_mace-mh-1\\Search-group-0001\\Relax-0001\\Relax-submission-0001_remote-000001\\00000-RELAX-f61b65f99b9e"
+      ]
+    }
+  ]
+}

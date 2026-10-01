@@ -1,0 +1,55 @@
+{
+  "batch_id": "remote-000001",
+  "branch_id": "B-1",
+  "calculation_directory": "00000-RELAX-5fd519b1672d",
+  "config_version": "v1",
+  "generation_cycle": 0,
+  "input_file_version": "task-json-v1",
+  "model_version": "mace-mh-1",
+  "object_id": "S-B-1-0",
+  "parameters": {},
+  "parent_decision_id": null,
+  "planned_relative_cost": 0.12349394331872465,
+  "protocol_version": 1,
+  "result_path": "..\\results\\00000-RELAX-5fd519b1672d\\result.json",
+  "screening_basis": "electrostatic_top10_random3_layer_occupied",
+  "search_group_index": 1,
+  "slurm_array_index": 0,
+  "stage": "relax_and_feature",
+  "status": "pending",
+  "structure_id": "S-B-1-0",
+  "task_checksum": "37cd325da34d8ca8aa504992d0edf840ebcbebd0c52fc3a78d122dda077a97d5",
+  "task_id": "RELAX-5fd519b1672d",
+  "task_key": "relax-screen:mace-mh-1:44136fa355b3:S-B-1-0",
+  "upload_operation_id": "5d039b33c053",
+  "worker_job": {
+    "boundary": {
+      "P": [
+        "O3"
+      ]
+    },
+    "branch": {
+      "P": "O3",
+      "branch_id": "B-1",
+      "structure_ids": [
+        "S-B-1-0",
+        "S-B-1-1"
+      ]
+    },
+    "checkpoint": null,
+    "model_path": "/remote/model",
+    "model_paths": [],
+    "model_version": "mace-mh-1",
+    "operation": "relax",
+    "output_directory": "00000-RELAX-5fd519b1672d",
+    "parameters": {
+      "device": "cuda",
+      "mace_head": "omat_pbe",
+      "main_model_index": 0,
+      "save_relax_traj": false
+    },
+    "phase_references": {},
+    "segment_budget": null,
+    "structure_path": "initial.vasp"
+  }
+}

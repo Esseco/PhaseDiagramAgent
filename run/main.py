@@ -116,7 +116,7 @@ def run_workflow(
         pre_reconciled["state"], combined_results, manager=manager,
         ledger_path=effective_config.get("ledger_path"),
         phase_diagram_directory=effective_config.get("phase_diagram_directory"),
-        final_frame_mlip_evaluator=runtime_adapters.get("final_frame_mlip_evaluator"),
+        final_frame_mlip_evaluator=_dft_comparison_evaluator(runtime_adapters, effective_config),
         active_model_version=(effective_config.get("mlip") or {}).get("version")
             or (effective_config.get("mlip") or {}).get("name"),
         phase_references=phase_references,
@@ -257,3 +257,10 @@ def _save_runner_state(state, state_path):
     if state_path is None:
         return
     write_json(state_path, state)
+
+
+def _dft_comparison_evaluator(adapters, config):
+    if "final_frame_mlip_evaluator" in adapters:
+        return adapters["final_frame_mlip_evaluator"]
+    from execution_layer.workflows.create_dft_comparison_evaluator import create_dft_comparison_evaluator
+    return create_dft_comparison_evaluator(config)

@@ -67,17 +67,28 @@ def _to_atoms(record, labels):
     if record.get("status") != "completed" or record.get("converged") is not True or record.get("checks_passed", True) is not True:
         raise ValueError("DFT 记录未完成、未收敛或未通过检查")
     structure = record.get("structure")
+    if record.get("training_ready") is False:
+        raise ValueError(record.get("training_error") or "DFT training labels unavailable")
+    if isinstance(structure, dict):
+        from pymatgen.core import Structure
+        structure = Structure.from_dict(structure)
     atoms = structure.copy() if isinstance(structure, Atoms) else AseAtomsAdaptor.get_atoms(structure)
     energy, forces = record.get("energy"), np.asarray(record.get("forces"), dtype=float)
-    if energy is None or forces.shape != (len(atoms), 3):
+    if energy is None or not np.isfinite(float(energy)) or forces.shape != (len(atoms), 3) or not np.isfinite(forces).all():
         raise ValueError("缺少能量或 forces shape 不正确")
+    if record.get("forces_unit", "eV/angstrom") != "eV/angstrom":
+        raise ValueError("forces unit must be eV/angstrom")
     atoms.info[labels.get("energy_key", "REF_energy")] = float(energy)
     atoms.arrays[labels.get("forces_key", "REF_forces")] = forces
     atoms.info["config_type"] = str(record.get("config_type", "Default"))
     atoms.info["source"] = str(record.get("source_path", record.get("structure_id", "unknown")))
-    if labels.get("include_stress") and record.get("stress") is not None:
+    if labels.get("include_stress"):
+        if record.get("stress") is None:
+            raise ValueError("stress labels requested but missing")
+        if record.get("stress_unit", "eV/angstrom^3") != "eV/angstrom^3":
+            raise ValueError("stress unit must be eV/angstrom^3")
         stress = np.asarray(record["stress"], dtype=float)
-        if stress.shape not in {(3, 3), (6,), (9,)}:
+        if stress.shape not in {(3, 3), (6,), (9,)} or not np.isfinite(stress).all():
             raise ValueError("stress shape 必须为 3x3、6 或 9")
         atoms.info[labels.get("stress_key", "REF_stress")] = stress.reshape(-1)
     return atoms

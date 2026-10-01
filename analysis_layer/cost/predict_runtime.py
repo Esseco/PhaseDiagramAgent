@@ -9,6 +9,9 @@ def _positive(value):
 
 def predict_runtime(stage, *, atom_count, state, backend=None, hardware=None,
                     mc_steps=None, patience=None, maximum=None):
+    if stage == "deep_search" and not _positive(mc_steps):
+        return {"status": "insufficient_parameters", "samples": 0,
+                "reason": "positive_mc_steps_required"}
     if not _positive(atom_count):
         return {"status": "insufficient_samples", "samples": 0}
     rows = []

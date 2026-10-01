@@ -26,11 +26,12 @@ def resolve_chat_intent(message, state, *, agent_client=None):
                 (row.get("agent_proposal") or {}).get("recommended_action") for row in pending.values()],
                 "has_mc_regeneration_plan": bool(state.get("pending_mc_regeneration"))},
         })
-    except Exception:
-        return {"intent": "other"}
+    except Exception as error:
+        return {"intent": "unavailable", "reason": "intent_client_failed",
+                "error_type": type(error).__name__}
     allowed = {"export_phase_csv", "status", "continue", "redo_plan", "other", "clarify"}
     if not isinstance(response, dict) or response.get("intent") not in allowed:
-        return {"intent": "other"}
+        return {"intent": "unavailable", "reason": "invalid_intent_response"}
     if response["intent"] in {"other", "clarify"}:
         return {"intent": response["intent"]}
     confidence = response.get("confidence")

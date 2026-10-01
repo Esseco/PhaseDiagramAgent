@@ -47,7 +47,11 @@ def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: 
                     raise ValueError(f"unsupported generate_branches parameters: {sorted(unsupported)}")
                 action = _apply_generation_defaults(action, state, config or {})
             action = _ensure_task_key(action, state)
-            return normalize_action({**action, "decision_source": "llm_agent", "decision_context": decision_context})
+            from analysis_layer.state.decision_evidence_catalog import check_decision_evidence_refs
+            evidence_check = check_decision_evidence_refs(action.get("evidence_refs") or [],
+                decision_context.get("evidence_catalog") or {})
+            return normalize_action({**action, "decision_source": "llm_agent",
+                "decision_context": decision_context, "evidence_reference_check": evidence_check})
         except Exception as error:
             failed_usage = getattr(error, "llm_usage", None)
             returned_action = locals().get("action")

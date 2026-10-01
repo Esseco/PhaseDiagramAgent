@@ -290,6 +290,12 @@ def _record_recovered_dft(state: dict[str, Any], recovered_results: list[dict[st
                 "energy": result.get("energy", outputs.get("energy")),
                 "converged": result.get("converged", outputs.get("converged")),
                 "checks_passed": result.get("checks_passed", outputs.get("checks_passed", True)),
+                **{key: deepcopy(outputs[key]) for key in (
+                    "structure", "forces", "forces_unit", "stress", "stress_unit",
+                    "stress_convention", "training_schema", "training_ready",
+                    "training_error", "training_frame_index", "training_energy_kind",
+                ) if key in outputs},
+                **({"energy": outputs["training_energy"]} if "training_energy" in outputs else {}),
             }
         )
         known.add(result.get("task_id"))

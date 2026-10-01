@@ -46,6 +46,13 @@ def parse_vasp_result(directory, *, exit_code=0, parser=None):
             "structure_path": str(root / "CONTCAR") if (root / "CONTCAR").is_file() else None,
         }
         result = _base(task, "completed" if converged else "failed")
+        if converged:
+            from scientific_layer.dft.vasp_training_labels import final_training_labels
+            try:
+                outputs.update(final_training_labels(parsed))
+                outputs["energy"] = outputs["training_energy"]
+            except (KeyError, TypeError, ValueError) as error:
+                outputs.update(training_ready=False, training_error=str(error))
         result.update({"converged": converged, "outputs": outputs})
         if not converged:
             result["error"] = "VASP calculation did not converge"
