@@ -99,6 +99,8 @@ def ensure_phase_identification(
                 "branch_id": branch_id,
                 "outputs": {
                     "structure_path": record.get("structure_path"),
+                    "structure": record.get("structure"),
+                    "final_frame_valid": record.get("final_frame_valid"),
                     "actual_phase": record.get("phase") if record.get("phase_identification_status") == "identified" else None,
                     "phase_identification": record.get("phase_identification") or {},
                 },

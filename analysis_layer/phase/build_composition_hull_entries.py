@@ -56,9 +56,11 @@ def build_composition_hull_entries(records):
         hull_formed = a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0])
         gap_per_o2 = max(0.0, formed - hull_formed)
         gap = gap_per_o2 * units / composition.num_atoms
-        check = check_na_layer_uniformity(row.get("structure_path"), row["composition"])
+        check = check_na_layer_uniformity(row.get("structure_path"), row["composition"],
+                                          structure_data=row.get("structure"))
         entries.append({"record_id": row.get("record_id"), "structure_id": row.get("structure_id"),
             "structure_path": row.get("structure_path"), "phase": row.get("phase"),
+            "structure": row.get("structure"),
             "phase_identification_status": row.get("phase_identification_status"),
             "structure_sha256": row.get("structure_sha256"),
             "composition": row["composition"], "original_energy": row["original_energy"],

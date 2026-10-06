@@ -7,6 +7,7 @@ import shlex
 import shutil
 from execution_layer.mc_batch_policy import mc_batch_limit
 from execution_layer.remote.integrity import payload_checksum, verify_result
+from execution_layer.state.task_waiting import active_pending_tasks, awaiting_task_result
 
 DFT_STAGES = {"dft_single_point", "dft_relax"}
 PROTOCOL_VERSION = 1
@@ -50,7 +51,9 @@ class RemoteBatchRunner:
             task.setdefault("protocol_version", PROTOCOL_VERSION)
             task.setdefault("input_file_version", "task-json-v1")
             relative_dir = Path(f"{index:05d}-{task['task_id']}"); task_dir = directory / relative_dir; task_dir.mkdir()
-            relative_result = Path("..") / "results" / relative_dir / "result.json"
+            from execution_layer.remote.result_directory_name import result_directory_name
+            result_folder = result_directory_name(task_dir, task.get("stage"))
+            relative_result = Path("..") / "results" / result_folder / "result.json"
             task.update({"calculation_directory": str(relative_dir), "result_path": str(relative_result)})
             if task.get("stage") not in DFT_STAGES and self.task_preparer: task = self.task_preparer(task)
             worker_job = task.get("worker_job") or {}
@@ -116,7 +119,7 @@ class RemoteBatchRunner:
                  "upload_directory": str(directory), "results_directory": str(results_directory),
                  "job_id": None}
         current.setdefault("slurm_batches", []).append(batch)
-        current["pending_tasks"] = [row for row in tasks if row.get("status") in {"pending", "running"}]
+        current["pending_tasks"] = active_pending_tasks(tasks)
         return {"status": "prepared", "state": current, "batch": deepcopy(batch)}
 
     def collect_results(self, state):
@@ -133,12 +136,18 @@ class RemoteBatchRunner:
                   "details_preview": []}
         for task in state.get("tasks") or []:
             task_id = task.get("task_id")
-            if not task_id or task_id in processed:
+            previously_processed = task_id in processed
+            if not task_id or (previously_processed and task.get("stage") not in DFT_STAGES):
                 continue
-            report["considered_count"] += 1
+            if not previously_processed:
+                report["considered_count"] += 1
             task_dir, snapshot, location_error = _locate_task_directory(task, directories)
             result = _task_result_path(task, task_dir)
             marker = result.with_name("task.finished.json") if result else None
+            # Already received jobs are not newly missing returns. A re-extracted
+            # DFT JSON may supplement magnetism, but still needs full verification.
+            if previously_processed and (result is None or not result.is_file() or not marker.is_file()):
+                continue
             if result is None or not result.is_file():
                 report["missing_result_count"] += 1
                 _add_collection_detail(report, task_id, "result_missing")
@@ -164,6 +173,17 @@ class RemoteBatchRunner:
             payload = checked["result"]
             if payload.get("status") not in {"completed", "failed", "timeout", "cancelled"}:
                 continue
+            if task.get("stage") in DFT_STAGES:
+                outputs = payload.get("outputs") or {}
+                if outputs.get("training_file"):
+                    from execution_layer.remote.integrity import file_checksum
+                    training = result.parent / "training.json"
+                    if (Path(str(outputs["training_file"])).name != "training.json"
+                            or not training.is_file()
+                            or outputs.get("training_checksum") != file_checksum(training)):
+                        report["invalid_count"] += 1
+                        _add_collection_detail(report, task_id, "training_file_missing_or_checksum_mismatch")
+                        continue
             if task.get("stage") in {"relax_and_feature", "deep_search"} and payload.get("status") == "completed":
                 from execution_layer.remote.resolve_local_relax_structure import resolve_local_relax_structure
                 payload = resolve_local_relax_structure(payload, result.parent)
@@ -173,7 +193,7 @@ class RemoteBatchRunner:
                     continue
             elif task.get("stage") in DFT_STAGES and payload.get("status") == "completed":
                 outputs = payload.get("outputs") or {}
-                raw_structure = outputs.get("structure_path")
+                raw_structure = outputs.get("structure_path") if outputs.get("structure") is None else None
                 if raw_structure:
                     local_structure = result.parent / Path(str(raw_structure).replace("\\", "/")).name
                     if not local_structure.is_file():
@@ -188,7 +208,18 @@ class RemoteBatchRunner:
                             _add_collection_detail(report, task_id, "final_structure_checksum_mismatch")
                             continue
                     payload["outputs"] = {**outputs, "structure_path": str(local_structure.resolve())}
-            recovered.append(_compact_result_for_state(payload, result))
+            compact = _compact_result_for_state(payload, result)
+            if previously_processed:
+                from execution_layer.state.dft_result_refresh import validated_magnetic_refresh
+                refresh = validated_magnetic_refresh(task, compact)
+                if refresh["status"] == "unchanged":
+                    continue
+                if refresh["status"] == "rejected":
+                    report["invalid_count"] += 1
+                    _add_collection_detail(report, task_id, refresh["reason"])
+                    continue
+                report["metadata_refresh_count"] = report.get("metadata_refresh_count", 0) + 1
+            recovered.append(compact)
         report["recovered_count"] = len(recovered)
         if report["invalid_count"] or report["missing_structure_count"]:
             report["status"] = "needs_attention" if not recovered else "partial"
@@ -204,7 +235,7 @@ class RemoteBatchRunner:
         gate = state.get("dedup_gate") or {}
         valid_after_dedup = set(gate.get("valid_structure_ids") or [])
         for task in tasks:
-            if task.get("status") != "pending" or task.get("slurm_batch_id"): continue
+            if task.get("status") != "pending" or task.get("slurm_batch_id") or not awaiting_task_result(task): continue
             if gate and gate.get("status") != "ready" and task.get("stage") != "offline_check_dedup":
                 continue
             if gate.get("status") == "ready" and task.get("stage") != "offline_check_dedup" and valid_after_dedup:
@@ -384,6 +415,14 @@ def _locate_task_directory(task, indexed):
 
 
 def _task_result_path(task, task_directory):
+    if task_directory is not None and task.get("stage") in DFT_STAGES:
+        from execution_layer.remote.result_directory_name import result_directory_name
+        directory = Path(task_directory)
+        name = result_directory_name(directory, task["stage"])
+        if name != directory.name:
+            numbered = directory.parent.parent / "results" / name / "result.json"
+            if numbered.is_file():
+                return numbered
     value = task.get("result_path")
     if value:
         path = Path(value)

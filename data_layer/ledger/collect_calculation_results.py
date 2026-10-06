@@ -12,6 +12,7 @@ def collect_calculation_results(
     result: dict[str, Any],
     *,
     ledger_path: str | None = None,
+    refresh_existing: bool = False,
 ) -> dict[str, Any]:
     """完成项写 stage_history；其他状态只写 calculation_attempts。"""
     structure = manager.data["structures"].get(structure_id)
@@ -41,6 +42,10 @@ def collect_calculation_results(
         "result_path": result.get("result_path"),
         "model_version": result.get("model_version", result.get("calculation_version")),
         "parameters": copy.deepcopy(result.get("parameters") or {}),
+        "checks_passed": result.get("checks_passed", True),
+        "spin_state_check": copy.deepcopy((result.get("outputs") or {}).get("spin_state_check")),
+        "magnetic_check": copy.deepcopy((result.get("outputs") or {}).get("magnetic_check")),
+        "magnetic_moments": copy.deepcopy((result.get("outputs") or {}).get("magnetic_moments")),
         "budget": copy.deepcopy(result.get("budget") or {}),
     }
     same_task = next(
@@ -59,42 +64,50 @@ def collect_calculation_results(
         attempts[same_task] = attempt
     result_id = None
     phase_record = None
-    if status == "completed":
+    if status == "completed" and result.get("checks_passed", True) is True:
         outputs = result.get("outputs") or {}
-        result_id = manager.record_result(
-            structure_id=structure_id,
-            stage=stage,
-            converged=result.get("converged"),
-            convergence_info=outputs.get("convergence_info"),
-            mlip_name=outputs.get("mlip_name"),
-            mlip_version=outputs.get("mlip_version"),
-            mlip_relax_version=outputs.get("mlip_relax_version"),
-            mlip_energy=outputs.get("energy")
-            if stage in {"relax_and_feature", "deep_search"}
-            else None,
-            dft_code=outputs.get("dft_code"),
-            dft_version=outputs.get("dft_version"),
-            dft_settings=outputs.get("dft_settings"),
-            dft_energy=outputs.get("energy")
-            if stage in {"dft_single_point", "dft_relax"}
-            else None,
-            energy_unit=outputs.get("energy_unit"),
-            ehull=outputs.get("ehull"),
-            ehull_unit=outputs.get("ehull_unit"),
-            hull_reference_version=outputs.get("hull_reference_version"),
-            result_path=result.get("result_path"),
-            metadata={
-                "task_id": result.get("task_id"),
-                "budget": copy.deepcopy(result.get("budget") or {}),
-                "model_version": result.get("model_version", result.get("calculation_version")),
-                "actual_cost": result.get("actual_cost"),
-                "features": outputs.get("features"),
-                "branch_score": outputs.get("branch_score"),
-                "source_phase": outputs.get("source_phase"),
-                "actual_phase": outputs.get("actual_phase"),
-                "phase_identification": outputs.get("phase_identification"),
-            },
-        )
+        existing = next((row for row in (structure.get("stage_history") or {}).get(stage, [])
+                         if (row.get("metadata") or {}).get("task_id") == result.get("task_id")), None) if refresh_existing else None
+        if existing:
+            result_id = existing["result_id"]
+        else:
+            result_id = manager.record_result(
+                structure_id=structure_id,
+                stage=stage,
+                converged=result.get("converged"),
+                convergence_info=outputs.get("convergence_info"),
+                mlip_name=outputs.get("mlip_name"),
+                mlip_version=outputs.get("mlip_version"),
+                mlip_relax_version=outputs.get("mlip_relax_version"),
+                mlip_energy=outputs.get("energy")
+                if stage in {"relax_and_feature", "deep_search"}
+                else None,
+                dft_code=outputs.get("dft_code"),
+                dft_version=outputs.get("dft_version"),
+                dft_settings=outputs.get("dft_settings"),
+                dft_energy=outputs.get("energy")
+                if stage in {"dft_single_point", "dft_relax"}
+                else None,
+                energy_unit=outputs.get("energy_unit"),
+                ehull=outputs.get("ehull"),
+                ehull_unit=outputs.get("ehull_unit"),
+                hull_reference_version=outputs.get("hull_reference_version"),
+                result_path=result.get("result_path"),
+                metadata={
+                    "task_id": result.get("task_id"),
+                    "budget": copy.deepcopy(result.get("budget") or {}),
+                    "model_version": result.get("model_version", result.get("calculation_version")),
+                    "actual_cost": result.get("actual_cost"),
+                    "features": outputs.get("features"),
+                    "branch_score": outputs.get("branch_score"),
+                    "source_phase": outputs.get("source_phase"),
+                    "actual_phase": outputs.get("actual_phase"),
+                    "phase_identification": outputs.get("phase_identification"),
+                    "checks_passed": result.get("checks_passed", True),
+                    "spin_state_check": copy.deepcopy(outputs.get("spin_state_check")),
+                    "magnetic_check": copy.deepcopy(outputs.get("magnetic_check")),
+                },
+            )
         phase_record = _phase_record(manager, structure_id, result_id, stage, result)
     if ledger_path is not None:
         manager.save(ledger_path)
@@ -108,6 +121,8 @@ def collect_calculation_results(
 
 
 def _phase_record(manager, structure_id, result_id, stage, result):
+    if result.get("checks_passed", True) is not True:
+        return None
     outputs = result.get("outputs") or {}
     energy = outputs.get("energy")
     if energy is None or (stage != "deep_search" and result.get("converged") is not True):
@@ -138,6 +153,8 @@ def _phase_record(manager, structure_id, result_id, stage, result):
         "record_id": result_id,
         "structure_id": structure_id,
         "structure_path": outputs.get("structure_path") or outputs.get("final_structure_path"),
+        "structure": copy.deepcopy(outputs.get("structure")),
+        "final_frame_valid": outputs.get("final_frame_valid"),
         "phase": outputs.get("actual_phase") if identified else None,
         "source_phase": branch.get("P"),
         "phase_identification_status": "identified" if identified else "unknown",
@@ -147,6 +164,9 @@ def _phase_record(manager, structure_id, result_id, stage, result):
         "energy": float(energy),
         "energy_unit": unit,
         "energy_method": method,
+        "checks_passed": result.get("checks_passed", True),
+        "spin_state_check": copy.deepcopy(outputs.get("spin_state_check")),
+        "magnetic_moments": copy.deepcopy(outputs.get("magnetic_moments")),
         "source_version": source_version,
         "model_version": source_version if method == "mlip" else None,
         "source_task_id": result.get("task_id"),

@@ -8,6 +8,7 @@ atomate dispatcher; no second VASP input implementation is provided here.
 from __future__ import annotations
 
 from copy import deepcopy
+from execution_layer.state.task_waiting import active_pending_tasks, awaiting_task_result
 import json
 from pathlib import Path
 import shlex
@@ -121,7 +122,7 @@ class SlurmBatchRunner:
             })
             batch["job_id"] = batch["scheduler_job_id"]
         current.setdefault("slurm_batches", []).append(batch)
-        current["pending_tasks"] = [row for row in tasks if row.get("status") in ACTIVE_STATUSES]
+        current["pending_tasks"] = active_pending_tasks(tasks)
         return {"status": batch["status"], "state": current, "batch": deepcopy(batch)}
 
     def collect_results(self, state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -148,7 +149,7 @@ class SlurmBatchRunner:
         reservations = state.get("budget_reservations") or {}
         selected, cost, anchor_key, batch_limit = [], 0.0, None, self.max_batch_tasks
         for task in tasks:
-            if task.get("status") != "pending" or task.get("slurm_batch_id"):
+            if task.get("status") != "pending" or task.get("slurm_batch_id") or not awaiting_task_result(task):
                 continue
             reservation = reservations.get(task.get("task_key")) or {}
             if reservation.get("status") not in {"reserved", "submitted"}:

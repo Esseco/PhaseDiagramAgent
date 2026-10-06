@@ -14,7 +14,8 @@ def choose_debug_next_action(state, manager, config, *, allowed_tools, user_mess
         return None
     dft_pending = [row for row in state.get("tasks") or []
                    if row.get("stage") in {"dft_relax", "dft_single_point"}
-                   and row.get("status") == "pending" and not row.get("slurm_batch_id")]
+                   and row.get("status") == "pending" and not row.get("slurm_batch_id")
+                   and row.get("recovery_wait_waived") is not True]
     if dft_pending:
         digest = hashlib.sha256(json.dumps(sorted(row["task_id"] for row in dft_pending)).encode()).hexdigest()[:16]
         return {"tool": "prepare_local_batch_files", "task_key": f"prepare-dft-inputs:{digest}",

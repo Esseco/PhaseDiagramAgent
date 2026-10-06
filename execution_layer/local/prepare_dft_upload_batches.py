@@ -18,7 +18,11 @@ def prepare_dft_upload_batches(*, action, context):
     def dispatch(task):
         from pathlib import Path
         import re
-        result = prepare_pycode_relax(task, manager=context["manager"])
+        from execution_layer.workflows.comparison_model_registry import original_round_model
+        model, digest, _ = original_round_model(state, config, task.get("model_version"))
+        if digest:
+            model["model_sha256"] = digest
+        result = prepare_pycode_relax(task, manager=context["manager"], comparison_model=model)
         if task.get("reviewed_submit_script"):
             script = re.sub(r"(?m)^#SBATCH --job-name=.*$", "#SBATCH --job-name=DFT-" + task["task_id"],
                             task["reviewed_submit_script"])

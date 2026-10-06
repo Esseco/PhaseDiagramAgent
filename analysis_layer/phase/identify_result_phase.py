@@ -1,4 +1,4 @@
-"""Identify a completed final structure once per file content, with a persistent cache."""
+"""Identify a completed final structure once per structure content."""
 
 from __future__ import annotations
 
@@ -20,12 +20,14 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
     branch_id = current.get("branch_id") or (
         manager.data.get("structures", {}).get(structure_id) or {}).get("branch_id")
     source_phase = (manager.data.get("branches", {}).get(branch_id) or {}).get("P")
-    file_path = outputs.get("structure_path") or outputs.get("final_structure_path")
-    path = Path(file_path) if file_path else None
-    if path is None or not path.is_file():
+    try:
+        from scientific_layer.structures.load_result_structure import load_result_structure
+        structure, digest = load_result_structure(outputs)
+    except FileNotFoundError:
         evidence = {"status": "unknown", "reason": "final_structure_missing"}
+    except Exception as error:
+        evidence = {"status": "unknown", "reason": f"{type(error).__name__}: {error}"}
     else:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
         scope = _classification_scope(manager, phase_references)
         cache_key = f"{scope}:{digest}"
         prior = outputs.get("phase_identification") or {}
@@ -38,12 +40,10 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
             evidence = deepcopy(cache[cache_key])
         else:
             try:
-                from pymatgen.core import Structure
                 from scientific_layer.structures.identify_branch import (
                     calculate_x, identify_phase, identify_supercell)
                 from scientific_layer.structures.identify_layered_phase_fast import identify_layered_phase_fast
                 from scientific_layer.structures.boundary_utils import allowed_phases, allowed_phases_at_x
-                structure = Structure.from_file(path)
                 mobile = (((manager.data.get("system_config") or {}).get("species") or {})
                           .get("mobile") or ["Na"])[0]
                 if any(site.is_ordered and site.specie.symbol == mobile for site in structure):

@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 
 from execution_layer.remote.integrity import file_checksum
+from execution_layer.remote.result_directory_name import result_directory_name
 
 
 def export_batch_result(task_directory, results_directory):
@@ -24,11 +25,25 @@ def export_batch_result(task_directory, results_directory):
             or marker.get("status") != result.get("status")):
         raise ValueError(f"任务身份不一致：{task_dir}")
 
-    destination = Path(results_directory) / task_dir.name
+    destination = Path(results_directory) / result_directory_name(task_dir, result.get("stage"))
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "task.finished.json").unlink(missing_ok=True)
     outputs = result.get("outputs") or {}
+    if outputs.get("mlip_result_file"):
+        from execution_layer.remote.dft_mlip_pair import load_pair
+        load_pair(result, task_dir)
+        _copy(task_dir / "mlip_result.json", destination / "mlip_result.json")
+    training_file = outputs.get("training_file")
+    if training_file:
+        source = (task_dir / training_file).resolve()
+        if task_dir not in source.parents or source.name != "training.json":
+            raise ValueError("Training file must be training.json within task directory")
+        if not source.is_file() or outputs.get("training_checksum") != file_checksum(source):
+            raise ValueError("Training file missing or checksum mismatch")
+        _copy(source, destination / "training.json")
     structure = outputs.get("structure_path") or outputs.get("final_structure_path")
+    if result.get("stage") in {"dft_single_point", "dft_relax"} and outputs.get("structure") is not None:
+        structure = None
     if structure:
         source = Path(str(structure).replace("\\", "/"))
         if not source.is_absolute():

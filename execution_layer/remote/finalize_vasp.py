@@ -19,14 +19,24 @@ def resolve_calculation_directory(root):
         if not entry.get("directory"):
             raise ValueError("Workflow checkpoint has no current calculation directory")
         directory = (root / entry["directory"]).resolve()
-        if root not in directory.parents:
+        if root not in directory.parents and directory != root:
             raise ValueError("Calculation directory is outside this task")
-        return directory
-    outputs = {path.parent for path in (root / "runs").rglob("vasprun.xml*")
-               if path.name in {"vasprun.xml", "vasprun.xml.gz"}}
+        if any((directory / name).is_file() for name in (
+                "vasprun.xml", "vasprun.xml.gz", "vasprun.xml.bz2", "vasprun.xml.xz")):
+            return directory
+        outputs = _vasp_directories(directory)
+        if len(outputs) > 1:
+            raise ValueError("Multiple nested calculations in current checkpoint; refusing ambiguous result")
+        return next(iter(outputs)) if outputs else directory
+    outputs = _vasp_directories(root)
     if len(outputs) > 1:
         raise ValueError("Multiple attempts without checkpoint; refusing ambiguous result")
     return next(iter(outputs)) if outputs else root
+
+
+def _vasp_directories(root):
+    return {path.parent for path in root.rglob("vasprun.xml*")
+               if path.name in {"vasprun.xml", "vasprun.xml.gz", "vasprun.xml.bz2", "vasprun.xml.xz"}}
 
 
 def finalize_vasp(directory, *, exit_code=0, calculation_directory=None, runtime=None):
@@ -65,6 +75,12 @@ def finalize_vasp(directory, *, exit_code=0, calculation_directory=None, runtime
         if epoch is not None and 0 < epoch <= time.time():
             result["runtime_observation"] = runtime_observation(
                 (time.monotonic() - (time.time() - epoch), epoch), task, result)
+    from scientific_layer.dft.write_training_dataset import write_training_dataset
+    write_training_dataset(root, result)
+    comparison_config = root / "comparison_model.json"
+    if comparison_config.is_file() and result.get("status") == "completed":
+        from execution_layer.remote.predict_dft_final_frame import write_prediction
+        write_prediction(root, result, json.loads(comparison_config.read_text(encoding="utf-8")))
     result_path = root / "result.json"; _write(result_path, result)
     marker = {key: result.get(key) for key in (*keys, "task_checksum", "status")}
     marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})

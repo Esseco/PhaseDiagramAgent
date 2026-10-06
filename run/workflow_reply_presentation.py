@@ -11,7 +11,18 @@ def _is_model_failure_proposal(proposal):
 
 
 def format_workflow_reply(result: dict, state_path, *, verbose=False) -> str:
+    text = _workflow_reply_body(result, state_path, verbose=verbose)
+    from analysis_layer.feedback.dft_magnetic_tables import magnetic_chat_summary
+    question = (result.get("dft_recovery_question") or {}) if isinstance(result, dict) else {}
+    task_ids = set(question.get("recovered_task_ids") or []) if question else None
+    summary = magnetic_chat_summary((result.get("state") or {}), task_ids=task_ids, verbose=verbose) if isinstance(result, dict) else ""
+    return summary + "\n\n" + text if summary else text
+
+
+def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
     """Keep routine chat concise; full evidence stays in existing records."""
+    if isinstance(result, dict) and result.get("status") == "awaiting_dft_recovery_decision":
+        return _dft_recovery_question_reply(result)
     if verbose or not isinstance(result, dict):
         return _format_workflow_reply_verbose(result, state_path)
     events = result.get("events") or []
@@ -73,6 +84,11 @@ def format_workflow_reply(result: dict, state_path, *, verbose=False) -> str:
         stages = wait.get("waiting_by_stage") or {}
         summary = "、".join(f"{names.get(stage, stage)} {count} 个" for stage, count in sorted(stages.items()))
         lines = ([f"已回收 {recovered} 个结果。"] if recovered else [])
+        for row in wait.get("dft_recovery_rounds") or []:
+            if row["pending_task_ids"]:
+                lines.append(f"{row['scope'].get('model_version') or '未知模型'} 的 DFT："
+                             f"已回收 {row['recovered_tasks']}/{row['expected_tasks']}（{row['recovery_ratio']:.1%}），"
+                             f"成功 {row['successful_tasks']}、失败 {row['failed_tasks']}。")
         lines.append(f"等待结果：{summary or str(wait.get('waiting_task_count', 0)) + ' 个任务'}。")
         collection = wait.get("result_collection") or {}
         issues = int(collection.get("invalid_count", 0)) + int(collection.get("missing_structure_count", 0))
@@ -95,6 +111,25 @@ def format_workflow_reply(result: dict, state_path, *, verbose=False) -> str:
     text = _format_workflow_reply_verbose(result, state_path)
     return "\n".join(line for line in text.splitlines() if not line.startswith((
         "详细记录：", "完整参数与结果：", "完整记录：", "示例目录：", "结构路径与详细结果：")))
+
+
+def _dft_recovery_question_reply(result):
+    question = result.get("dft_recovery_question") or {}
+    state = result.get("state") or {}
+    scope = question.get("scope") or {}
+    version = scope.get("model_version") or "未知模型"
+    model_round = ((state.get("upload_layout") or {}).get("model_rounds") or {}).get(version)
+    label = f"第 {model_round} 轮（{version}）" if model_round is not None else f"模型 {version}"
+    lines = [f"{label}：DFT 已回收 {question.get('recovered_tasks', 0)}/{question.get('expected_tasks', 0)}"
+             f"（{question.get('recovery_ratio', 0):.1%}）。",
+             f"成功 {question.get('successful_tasks', 0)}、失败 {question.get('failed_tasks', 0)}；"
+             f"未回传 {len(question.get('pending_task_ids') or [])} 个。"]
+    if state.get("round_summary_csv_path"):
+        lines.append(f"轮次记录：`{state['round_summary_csv_path']}`")
+    lines.extend(["还要继续回收剩余结果吗？",
+                  "回复“继续回收”则等待；回复“不再回收”或“否”，则基于已有结果提出下一步方案。",
+                  "不等待不会取消超算作业，也不会把缺失结果标为完成。"])
+    return "\n".join(lines)
 
 
 def _format_workflow_reply_verbose(result: dict, state_path) -> str:

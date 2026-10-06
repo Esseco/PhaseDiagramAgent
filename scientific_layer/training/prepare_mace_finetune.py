@@ -64,6 +64,9 @@ def _group_key(record, config):
 
 
 def _to_atoms(record, labels):
+    from scientific_layer.dft.spin_acceptance import spin_standard_passed
+    if not spin_standard_passed(record):
+        raise ValueError("DFT Fe/Mn spin standard not passed")
     if record.get("status") != "completed" or record.get("converged") is not True or record.get("checks_passed", True) is not True:
         raise ValueError("DFT 记录未完成、未收敛或未通过检查")
     structure = record.get("structure")

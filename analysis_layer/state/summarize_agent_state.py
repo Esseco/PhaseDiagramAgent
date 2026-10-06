@@ -1,4 +1,5 @@
 """生成供规则或 LLM 阅读的最小状态摘要。"""
+from execution_layer.state.task_waiting import active_pending_tasks
 
 
 def summarize_agent_state(state: dict) -> dict:
@@ -24,7 +25,8 @@ def summarize_agent_state(state: dict) -> dict:
         "known_target_ids": sorted(set(state.get("known_target_ids", []))),
         "coverage_gaps": state.get("coverage_gaps", []),
         "candidate_ids": [item.get("candidate_id") for item in state.get("candidates", []) if item.get("candidate_id")],
-        "active_task_keys": [item.get("task_key") for item in tasks if item.get("status") in {"pending", "running"}],
+        "active_task_keys": [item.get("task_key") for item in active_pending_tasks(tasks)],
+        "waived_dft_wait_task_ids": [item.get("task_id") for item in tasks if item.get("recovery_wait_waived") is True],
         "completed_task_keys": [item.get("task_key") for item in tasks if item.get("status") == "completed"],
         "score_results": state.get("score_results", {}),
         "allowed_actions": state.get("allowed_actions", ["generate", "run_stage", "select_dft", "wait"]),

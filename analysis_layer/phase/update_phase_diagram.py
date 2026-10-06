@@ -43,6 +43,10 @@ def update_phase_diagram(
         normalized, rejected = [], []
         for item in selected:
             try:
+                if method == "dft":
+                    from scientific_layer.dft.spin_acceptance import spin_standard_passed
+                    if item.get("checks_passed", True) is not True or not spin_standard_passed(item):
+                        raise ValueError("DFT quality/spin standard not passed")
                 if item.get("energy_unit") != "eV":
                     raise ValueError("相图记录 energy_unit 必须为 'eV'")
                 composition = Composition(item["composition"])
@@ -100,6 +104,8 @@ def update_phase_diagram(
                     if archive and Path(archive).is_file():
                         from analysis_layer.phase.publish_current_csv import publish_current_csv
                         publish_current_csv(snapshot, archive)
+                    elif not snapshot.get("entries"):
+                        _publish_empty_current_csv(snapshot, directory, filename)
                     continue
             directory.mkdir(parents=True, exist_ok=True)
             csv_path = directory / f"{filename}.csv"
@@ -107,6 +113,8 @@ def update_phase_diagram(
                 export_phase_diagram_csv(snapshot, csv_path)
                 from analysis_layer.phase.publish_current_csv import publish_current_csv
                 publish_current_csv(snapshot, csv_path)
+            elif not snapshot.get("entries"):
+                _publish_empty_current_csv(snapshot, directory, filename)
             snapshot["path"] = str(path)
             path.write_text(
                 json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True)
@@ -119,6 +127,18 @@ def update_phase_diagram(
         "reason": "active_model_version_required" if chosen is None else "no_results_for_active_model",
         "entries": []}
     return output
+
+
+def _publish_empty_current_csv(snapshot, directory, filename):
+    """Do not leave old, now-ineligible points in the discoverable current CSV."""
+    current = directory.parent / "phase_diagram.csv"
+    if not current.is_file():
+        return  # No bootstrap CSV for a system with no phase data yet.
+    archive = directory / f"{filename}.csv"
+    if not archive.is_file():
+        export_phase_diagram_csv({**snapshot, "entries": []}, archive)
+    from analysis_layer.phase.publish_current_csv import publish_current_csv
+    publish_current_csv(snapshot, archive)
 
 
 def _total_energy(item, composition, basis):
@@ -185,12 +205,13 @@ def _build_snapshot(method, records, rejected, basis, parent):
         diagram = PhaseDiagram(entries)
         for item, entry in zip(records, entries, strict=True):
             na_check = check_na_layer_uniformity(
-                item.get("structure_path"), item["composition"])
+                item.get("structure_path"), item["composition"], structure_data=item.get("structure"))
             snapshot["entries"].append(
                 {
                     "record_id": item.get("record_id"),
                     "structure_id": item.get("structure_id"),
                     "structure_path": item.get("structure_path"),
+                    "structure": item.get("structure"),
                     "phase": item.get("phase"),
                     "composition": item["composition"],
                     "original_energy": item["original_energy"],

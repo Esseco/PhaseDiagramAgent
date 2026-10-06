@@ -3,7 +3,7 @@ from pathlib import Path
 from scientific_layer.dft.incar_policy import layered_oxide_incar
 
 
-def prepare_pycode_relax(task, *, manager, generator=None):
+def prepare_pycode_relax(task, *, manager, generator=None, comparison_model=None):
     stages = {"dft_relax": "relax", "dft_single_point": "static"}
     if task.get("stage") not in stages:
         raise ValueError("Py-Code 接口只支持 DFT 优化或单点")
@@ -32,6 +32,12 @@ def prepare_pycode_relax(task, *, manager, generator=None):
     directory = Path(task["work_directory"])
     generator(directory, source, calculation=calculation, incar_settings=incar,
               kpoints_settings=kpoints, job_name=f"DFT-{calculation}")
+    if comparison_model:
+        import json
+        model = {key: comparison_model.get(key) for key in (
+            "version", "name", "model_path", "mace_head", "environment", "model_sha256") if comparison_model.get(key) is not None}
+        model.setdefault("version", task.get("model_version"))
+        (directory / "comparison_model.json").write_text(json.dumps(model, indent=2), encoding="utf-8")
     workflow = directory / "workflow.py"
     workflow.rename(directory / "atomate_relax.py")
     workflow.write_text('''"""Run one Py-Code relaxation and export the task result."""

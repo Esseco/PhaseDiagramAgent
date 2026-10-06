@@ -65,7 +65,7 @@ def run_active_learning_cycle(
     current = deepcopy(search["state"])
     if recovered_results:
         current = update_dft_action_results(current, recovered_results)
-        current = _record_recovered_dft(current, recovered_results)
+        current = _record_recovered_dft(current, recovered_results, manager=manager)
     if candidates is None:
         qbc_candidates, excluded_candidates = _ledger_candidates(manager, current)
         current["qbc_candidate_filter"] = {
@@ -274,12 +274,16 @@ def _remaining_dft_budget(state: dict[str, Any], config: dict[str, Any], explici
     return max(0.0, total - float(state.get("used_dft_cost", 0)) - float(state.get("reserved_dft_cost", 0)))
 
 
-def _record_recovered_dft(state: dict[str, Any], recovered_results: list[dict[str, Any]]) -> dict[str, Any]:
+def _record_recovered_dft(state: dict[str, Any], recovered_results: list[dict[str, Any]], *, manager=None) -> dict[str, Any]:
     current = deepcopy(state)
     records = current.setdefault("new_dft_records", [])
     known = {item.get("task_id") for item in records}
     for result in recovered_results:
         if result.get("stage") not in {"dft_single_point", "dft_relax"} or result.get("status") != "completed":
+            continue
+        from scientific_layer.dft.spin_acceptance import apply_dft_spin_standard
+        result = apply_dft_spin_standard(result, manager)
+        if result.get("checks_passed", True) is not True:
             continue
         if result.get("task_id") in known:
             continue
@@ -294,6 +298,7 @@ def _record_recovered_dft(state: dict[str, Any], recovered_results: list[dict[st
                     "structure", "forces", "forces_unit", "stress", "stress_unit",
                     "stress_convention", "training_schema", "training_ready",
                     "training_error", "training_frame_index", "training_energy_kind",
+                    "magnetic_moments", "magnetic_check", "spin_state_check",
                 ) if key in outputs},
                 **({"energy": outputs["training_energy"]} if "training_energy" in outputs else {}),
             }

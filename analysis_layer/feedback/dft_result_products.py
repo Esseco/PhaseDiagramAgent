@@ -1,15 +1,16 @@
 """Training records and round-scoped paired DFT/MLIP error products."""
 from copy import deepcopy
-import hashlib
-import json
-from pathlib import Path
 
 import numpy as np
 
+from analysis_layer.feedback.export_dft_products import export_dft_products
 
-def record_dft_products(state, result, evaluator=None, manager=None):
-    if result.get("stage") not in {"dft_single_point", "dft_relax"} or result.get("status") != "completed":
+
+def record_dft_products(state, result, evaluator=None, manager=None, *, refresh=False):
+    if result.get("stage") not in {"dft_single_point", "dft_relax"} or result.get("status") not in {"completed", "failed", "timeout"}:
         return
+    from scientific_layer.dft.spin_acceptance import apply_dft_spin_standard
+    result = apply_dft_spin_standard(result, manager)
     outputs = result.get("outputs") or {}
     task = next((t for t in state.get("tasks", []) if t.get("task_id") == result.get("task_id")), {})
     lineage = {key: result.get(key, task.get(key)) for key in (
@@ -24,7 +25,7 @@ def record_dft_products(state, result, evaluator=None, manager=None):
     record = {**lineage, "task_id": result.get("task_id"),
               "structure_id": result.get("structure_id"), "stage": result.get("stage"),
               "branch_id": branch_id,
-              "status": "completed", "converged": result.get("converged"),
+              "status": result.get("status"), "converged": result.get("converged"),
               "checks_passed": result.get("checks_passed", True),
               "energy": outputs.get("training_energy", outputs.get("energy")),
               "energy_unit": outputs.get("energy_unit"), "round_scope": scope,
@@ -32,20 +33,63 @@ def record_dft_products(state, result, evaluator=None, manager=None):
                   "structure", "composition", "atom_count", "forces", "forces_unit",
                   "stress", "stress_unit", "stress_convention", "training_ready",
                   "training_schema", "training_frame_index", "training_energy_kind",
-                  "actual_phase", "phase_identification", "structure_path") if key in outputs}}
-    state.setdefault("dft_dataset_records", []).append(record)
-    if outputs.get("training_ready") is True:
-        if record["task_id"] not in {r.get("task_id") for r in state.setdefault("new_dft_records", [])}:
-            state["new_dft_records"].append(deepcopy(record))
+                  "final_frame_index", "final_frame_valid", "magnetic_moments", "magnetic_check", "spin_state_check",
+                  "actual_phase", "phase_identification", "structure_path", "remote_mlip_prediction",
+                  "mlip_result_file", "mlip_result_checksum") if key in outputs}}
+    previous = next((row for row in state.get("dft_dataset_records", []) if row.get("task_id") == record["task_id"]), {})
+    previous_comparison = next((row for row in state.get("dft_mlip_comparisons", []) if row.get("task_id") == record["task_id"]), {})
+    _upsert_task_record(state, "dft_dataset_records", record)
+    from scientific_layer.dft.vasp_training_labels import training_records
+    examples = training_records(record, outputs)
+    history = state.setdefault("dft_training_records", [])
+    known = {r.get("data_id") for r in history}
+    if refresh:
+        # Retain original frame labels; only refresh task-level diagnostics.
+        previously_eligible = {row.get("data_id") for row in history if row.get("task_id") == record["task_id"]
+                               and row.get("checks_passed", True) is True}
+        pending = state.setdefault("new_dft_records", [])
+        previously_pending = {row.get("data_id") for row in pending if row.get("task_id") == record["task_id"]}
+        for frame in history:
+            if frame.get("task_id") == record["task_id"]:
+                for key in ("checks_passed", "actual_phase", "phase_identification", "magnetic_moments", "magnetic_check", "spin_state_check"):
+                    if key in record:
+                        frame[key] = deepcopy(record[key])
+        pending[:] = [row for row in pending if row.get("task_id") != record["task_id"]]
+        pending.extend(deepcopy(row) for row in history if row.get("task_id") == record["task_id"]
+                       and row.get("checks_passed", True) is True
+                       and (row.get("data_id") in previously_pending or row.get("data_id") not in previously_eligible))
+    for training_record in examples:
+        if training_record["data_id"] not in known:
+            history.append(training_record)
+            if training_record.get("checks_passed", True) is True:
+                state.setdefault("new_dft_records", []).append(deepcopy(training_record))
+            known.add(training_record["data_id"])
     comparison = {"task_id": record["task_id"], "round_scope": scope, "status": "not_evaluated"}
     try:
+        if record["checks_passed"] is not True:
+            raise ValueError("DFT quality/spin standard not passed; final-frame metrics excluded")
+        if result.get("status") != "completed" or result.get("converged") is not True:
+            raise ValueError("calculation not completed/converged; final-frame metrics excluded")
+        if outputs.get("final_frame_valid") is False:
+            raise ValueError("actual final frame invalid; final-frame metrics excluded")
+        if outputs.get("structure") is not None:
+            from scientific_layer.structures.load_result_structure import load_result_structure
+            load_result_structure(outputs)
         if outputs.get("training_ready") is not True:
             raise ValueError(outputs.get("training_error") or "portable DFT labels unavailable")
+        if refresh and previous_comparison.get("status") == "completed" and previous.get("mlip_prediction"):
+            record["mlip_prediction"] = deepcopy(previous["mlip_prediction"])
+            _upsert_task_record(state, "dft_mlip_comparisons", deepcopy(previous_comparison))
+            return
         if not callable(evaluator):
             raise ValueError("same-frame MLIP evaluator unavailable")
         predicted = evaluator(result=deepcopy(result), structure_id=record["structure_id"], manager=manager)
         if not isinstance(predicted, dict) or predicted.get("model_version") != record["model_version"]:
             raise ValueError("comparison requires matching explicit model_version")
+        binding = (state.get("model_registry") or {}).get(record["model_version"]) or {}
+        known_digest = binding.get("comparison_model_sha256")
+        if known_digest and predicted.get("model_sha256") != known_digest:
+            raise ValueError("original-round model fingerprint mismatch")
         if predicted.get("energy_unit") != "eV" or predicted.get("forces_unit") != "eV/angstrom":
             raise ValueError("comparison energy/force units missing or incompatible")
         n = int(record["atom_count"])
@@ -59,9 +103,17 @@ def record_dft_products(state, result, evaluator=None, manager=None):
                           force_abs_sum=float(np.abs(force_error).sum()),
                           force_square_sum=float((force_error**2).sum()), force_components=n*3)
         record["mlip_prediction"] = {"model_version": predicted["model_version"],
+                                     "model_sha256": predicted.get("model_sha256"),
+                                     "comparison_model_path": predicted.get("comparison_model_path"),
                                      "energy": float(predicted["energy"]), "energy_unit": "eV",
                                      "forces": forces.tolist(), "forces_unit": "eV/angstrom",
                                      "geometry": "DFT_final_frame"}
+        comparison["model_version"] = predicted["model_version"]
+        comparison["model_sha256"] = predicted.get("model_sha256")
+        if predicted.get("model_sha256"):
+            binding = state.setdefault("model_registry", {}).setdefault(record["model_version"], {
+                "model": {"version": record["model_version"]}, "status": "comparison_reference"})
+            binding.setdefault("comparison_model_sha256", predicted["model_sha256"])
         state.setdefault("final_frame_dft_errors", []).append({
             "task_id": record["task_id"], "structure_id": record["structure_id"],
             "model_version": record["model_version"], "error_ev_per_atom": abs(error)/n,
@@ -69,50 +121,15 @@ def record_dft_products(state, result, evaluator=None, manager=None):
             "comparison": "mlip_vs_dft_on_final_stable_structure"})
     except Exception as error:
         comparison["reason"] = f"{type(error).__name__}: {error}"
-    state.setdefault("dft_mlip_comparisons", []).append(comparison)
+    _upsert_task_record(state, "dft_mlip_comparisons", comparison)
+    if refresh and comparison["status"] != "completed":
+        state["final_frame_dft_errors"] = [row for row in state.get("final_frame_dft_errors", []) if row.get("task_id") != record["task_id"]]
 
 
-def export_dft_products(state, directory):
-    if directory is None:
-        return
-    groups = {}
-    for record in state.get("dft_dataset_records", []):
-        key = json.dumps(record["round_scope"], sort_keys=True)
-        groups.setdefault(key, []).append(record)
-    exports = {}
-    for key, records in groups.items():
-        identifier = hashlib.sha256(key.encode()).hexdigest()[:16]
-        version = str(records[0].get("model_version") or "unknown-model")
-        safe_version = "".join(c if c.isalnum() or c in "-_." else "_" for c in version)
-        if safe_version in {".", "..", ""}:
-            safe_version = "unknown-model"
-        root = Path(directory) / "dft_results" / safe_version / ("DFT-round-" + identifier)
-        comparisons = [row for row in state.get("dft_mlip_comparisons", []) if json.dumps(row["round_scope"], sort_keys=True) == key]
-        paired = [row for row in comparisons if row["status"] == "completed"]
-        metrics = {"round_scope": json.loads(key), "matched_structures": len(paired),
-                   "not_evaluated": [row for row in comparisons if row["status"] != "completed"]}
-        for field, name, unit in (("energy_error", "energy_total", "eV"),
-                                  ("energy_error_per_atom", "energy_per_atom", "eV/atom")):
-            values = np.asarray([row[field] for row in paired])
-            metrics[name] = {"mae": float(np.abs(values).mean()) if len(values) else None,
-                             "rmse": float(np.sqrt((values**2).mean())) if len(values) else None,
-                             "mae_unit": unit, "rmse_unit": unit}
-        count = sum(row["force_components"] for row in paired)
-        metrics["forces"] = {"mae": sum(row["force_abs_sum"] for row in paired)/count if count else None,
-                             "rmse": float(np.sqrt(sum(row["force_square_sum"] for row in paired)/count)) if count else None,
-                             "mae_unit": "eV/angstrom", "rmse_unit": "eV/angstrom",
-                             "components": count, "averaging": "atomic Cartesian components"}
-        payloads = {"training.json": [r for r in records if r.get("training_ready") is True],
-                    "dft_records.json": records, "mlip_dft_metrics.json": metrics}
-        for name, payload in payloads.items():
-            text = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
-            path = root / name
-            if path.is_file() and path.read_text(encoding="utf-8") == text:
-                continue
-            root.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_suffix(path.suffix + ".tmp")
-            temporary.write_text(text, encoding="utf-8")
-            temporary.replace(path)
-        exports[identifier] = {"directory": str(root), "round_scope": json.loads(key),
-                               "records": len(records), "matched_structures": len(paired)}
-    state["dft_result_exports"] = exports
+def _upsert_task_record(state, key, record):
+    rows = state.setdefault(key, [])
+    index = next((i for i, row in enumerate(rows) if row.get("task_id") == record.get("task_id")), None)
+    if index is None:
+        rows.append(record)
+    else:
+        rows[index] = record

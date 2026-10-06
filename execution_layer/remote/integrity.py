@@ -40,4 +40,12 @@ def verify_result(result_path, marker_path, expected: dict) -> dict:
         return {"valid": False, "reason": "task_checksum_mismatch"}
     if marker.get("result_checksum") != file_checksum(result_path):
         return {"valid": False, "reason": "result_checksum_mismatch"}
+    if result.get("stage") in {"dft_single_point", "dft_relax"}:
+        try:
+            from execution_layer.remote.dft_mlip_pair import load_pair
+            prediction = load_pair(result, result_path.parent)
+            if prediction is not None:
+                result.setdefault("outputs", {})["remote_mlip_prediction"] = prediction
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            return {"valid": False, "reason": f"mlip_pair_invalid:{error}"}
     return {"valid": True, "result": result, "marker": marker}

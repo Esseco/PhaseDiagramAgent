@@ -17,15 +17,19 @@ def update_mlip(
 ) -> dict[str, Any]:
     """仅使用完成、收敛且含真实 DFT 能量的数据；不自动激活模型。"""
     accepted, rejected = [], []
+    from scientific_layer.dft.spin_acceptance import spin_standard_passed
     for record in dft_records:
         valid = (
             record.get("status") == "completed"
             and record.get("converged") is True
             and record.get("energy") is not None
             and record.get("checks_passed", True) is True
+            and spin_standard_passed(record)
         )
         (accepted if valid else rejected).append(record)
-    dataset = _unique([*(historical_data or []), *accepted])
+    historical = [row for row in historical_data or []
+                  if row.get("checks_passed", True) is True and spin_standard_passed(row)]
+    dataset = _unique([*historical, *accepted])
     metadata = {
         "dataset_version": dataset_version,
         "candidate_model_version": candidate_model_version,

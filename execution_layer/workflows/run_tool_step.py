@@ -94,6 +94,24 @@ def run_tool_step(
     stored = current["pending_execution_policies"].get(pending_key)
     rejecting = isinstance(human_feedback, dict) and human_feedback.get("decision") == "reject"
     previous = ((stored or {}).get("agent_proposal") or {}).get("raw_action") or {}
+    from analysis_layer.state.post_dft_assessment import post_dft_assessment
+    closed_dft = post_dft_assessment(current, (context or {}).get("effective_config") or config)
+    if mode == "interactive" and closed_dft and closed_dft["status"] != "evaluated" and not rejecting:
+        eligible_ids = {row.get("task_id") for row in current.get("dft_dataset_records") or []
+                        if row.get("checks_passed") is True and row.get("status") == "completed"
+                        and row.get("converged") is True and row.get("training_ready") is True}
+        reasons = list(dict.fromkeys(str(row.get("reason")) for row in closed_dft["metrics"]["not_evaluated"]
+                                    if row.get("reason") and row.get("task_id") in eligible_ids))[:2]
+        return {"status": "not_configured", "state": current,
+                "reason": "DFT 回收已结束；本轮原模型误差评估未完成 "
+                          f"（已配对 {closed_dft['paired_structures']}/{closed_dft['eligible_structures']}）。"
+                          "请补齐超算同帧 MLIP 预测并回传 mlip_result.json 后继续；未重复派发 DFT、未训练。"
+                          + ("原因：" + "；".join(reasons) if reasons else "")}
+    if mode == "interactive" and stored and not rejecting and closed_dft and previous.get("tool") in {
+            "select_dft_candidates", "allocate_mc_bohb", "prepare_local_batch_files"}:
+        current["pending_execution_policies"].pop(pending_key, None)
+        stored = None
+        human_feedback = None  # Never reuse approval of a superseded calculation plan.
     if mode == "interactive" and stored and _model_failure_action(previous) and not rejecting:
         if isinstance(human_feedback, dict) and human_feedback.get("decision") == "approve":
             return {"status": "rejected", "state": current,
@@ -232,7 +250,13 @@ def run_tool_step(
         effective = (context or {}).get("effective_config") or config
         model = effective.get("mlip") or {}
         version = model.get("version") or model.get("name") or current.get("active_model_version")
-        post_mc = second_round_completed(current, version)
+        from analysis_layer.state.post_dft_assessment import post_dft_assessment
+        assessment = post_dft_assessment(current, effective)
+        decision_state.setdefault("decision_context", {})["post_dft_assessment"] = assessment
+        mc_ids = sorted(str(row.get("task_id")) for row in current.get("tasks") or []
+                        if row.get("stage") == "deep_search" and row.get("model_version") == version)
+        consumed_mc = (current.get("post_dft_decided_mc_tasks") or {}).get(version)
+        post_mc = second_round_completed(current, version) and not assessment and mc_ids != consumed_mc
         if post_mc:
             from scientific_layer.qbc.post_mc_candidates import post_mc_candidates
             current["qbc_candidates"] = post_mc_candidates(current, version)
@@ -257,11 +281,15 @@ def run_tool_step(
             allowed_tools=allowed, user_message=(context or {}).get("user_message"),
         ) if mode == "interactive" and (mc_files_pending or not callable(agent_client) or
              continue_requested) else None)
+        if assessment:
+            safe_next = None
+            allowed = [tool for tool in allowed if tool in {
+                "generate_branches", "update_mlip", "check_convergence", "pause_search", "adjust_strategy"}]
         if post_mc:
             safe_next = None
             allowed = [tool for tool in allowed if tool not in {
                 "allocate_mc_bohb", "generate_branches", "run_calculation_stage", "prepare_local_batch_files"}]
-        if mode == "interactive" and has_mc_tasks and not post_mc and (mc_files_pending or continue_requested) and not safe_next:
+        if mode == "interactive" and has_mc_tasks and not post_mc and not assessment and (mc_files_pending or continue_requested) and not safe_next:
             return _mc_continuation_block(current, mode,
                 (context or {}).get("effective_config") or config)
         action = safe_next or propose_agent_tool_action(
@@ -273,7 +301,7 @@ def run_tool_step(
                                                        "iteration": current.get("iteration", 0)})
             return {"status": "not_configured", "state": current,
                     "reason": "模型未能返回完整有效方案，未暂停搜索或执行任务。请继续重试。原因：" + str(action.get("fallback_reason"))}
-        if mode == "interactive" and not post_mc and action.get("decision_source") == "rule":
+        if mode == "interactive" and not post_mc and not assessment and action.get("decision_source") == "rule":
             recovery = choose_debug_next_action(
                 current, (context or {}).get("manager"), (context or {}).get("effective_config") or config,
                 allowed_tools=allowed, user_message=(context or {}).get("user_message"),
@@ -729,6 +757,18 @@ def _apply_execution_result(current, action, execution, *, record_id, formal):
         merged["pending_execution_policies"] = deepcopy(current.get("pending_execution_policies") or {})
         current = merged
     payload_status = payload.get("status")
+    if action.get("tool") == "generate_branches" and payload_status not in {
+            "failed", "rejected", "not_configured", "awaiting_approval"}:
+        from analysis_layer.state.post_dft_assessment import post_dft_assessment
+        assessment = post_dft_assessment(current, current.get("confirmed_config") or {})
+        if assessment and payload_status in {"completed", "generated", "ready", "pending"}:
+            decided = current.setdefault("post_dft_decided_rounds", [])
+            if assessment["scope_key"] not in decided:
+                decided.append(assessment["scope_key"])
+            version = assessment["scope"].get("model_version")
+            current.setdefault("post_dft_decided_mc_tasks", {})[version] = sorted(
+                str(row.get("task_id")) for row in current.get("tasks") or []
+                if row.get("stage") == "deep_search" and row.get("model_version") == version)
     if not formal:
         return current, payload_status
     task_key = payload.get("task_key") or action.get("task_key")

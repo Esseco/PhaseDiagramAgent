@@ -108,6 +108,12 @@ def run_workflow(
             automatic_results = collector.collect_results(loaded_state)
     combined_results = [*(recovered_results or []), *automatic_results]
     pre_reconciled = reconcile_task_results(loaded_state, combined_results)
+    from execution_layer.workflows.comparison_model_registry import remember_comparison_models
+    remember_comparison_models(pre_reconciled["state"], effective_config)
+    if execution_mode == "interactive":
+        from execution_layer.state.dft_recovery_decision import update_dft_recovery_question
+        pre_reconciled["state"] = update_dft_recovery_question(
+            pre_reconciled["state"], runtime_adapters.get("dft_recovery_decision"))
     runtime_state_path = state_path or effective_config.get("state_path")
     phase_cache_path = runtime_adapters.get("phase_identification_cache_path")
     if phase_cache_path is None and runtime_state_path:
@@ -116,7 +122,7 @@ def run_workflow(
         pre_reconciled["state"], combined_results, manager=manager,
         ledger_path=effective_config.get("ledger_path"),
         phase_diagram_directory=effective_config.get("phase_diagram_directory"),
-        final_frame_mlip_evaluator=_dft_comparison_evaluator(runtime_adapters, effective_config),
+        final_frame_mlip_evaluator=_dft_comparison_evaluator(runtime_adapters, effective_config, pre_reconciled["state"]),
         active_model_version=(effective_config.get("mlip") or {}).get("version")
             or (effective_config.get("mlip") or {}).get("name"),
         phase_references=phase_references,
@@ -143,6 +149,15 @@ def run_workflow(
     rebuilding = is_relax_rebuild_request(runtime_adapters.get("user_message")) or any(
         (((row.get("agent_proposal") or {}).get("raw_action") or {}).get("parameters") or {}).get("rebuild_inputs")
         for row in feedback["state"].get("pending_execution_policies", {}).values())
+    recovery_question = feedback["state"].get("pending_dft_recovery_question")
+    if recovery_question and execution_mode == "interactive":
+        _save_runner_state(feedback["state"], state_path or effective_config.get("state_path"))
+        return {"status": "awaiting_dft_recovery_decision", "state": feedback["state"],
+                "dft_recovery_question": recovery_question, "steps_executed": 0, "submitted": False,
+                "scientific_feedback": {key: value for key, value in feedback.items() if key != "state"},
+                "recovered_count": recovered_count, "result_collection": collection_report,
+                "effective_config": effective_config, "config_version": snapshot["config_version"],
+                "reconciled": pre_reconciled["reconciled"]}
     if manual_wait and not rebuilding:
         wait_state = feedback["state"]
         _save_runner_state(wait_state, state_path or effective_config.get("state_path"))
@@ -154,6 +169,12 @@ def run_workflow(
             "submitted": False, "config_version": snapshot["config_version"],
             "effective_config": effective_config, "result_collection": collection_report,
         }
+    from analysis_layer.state.post_dft_assessment import post_dft_assessment
+    from execution_layer.workflows.refresh_dft_comparisons import refresh_dft_comparisons
+    assessment = post_dft_assessment(feedback["state"], effective_config)
+    feedback["state"] = refresh_dft_comparisons(
+        feedback["state"], assessment=assessment, manager=manager,
+        evaluator=_dft_comparison_evaluator(runtime_adapters, effective_config, feedback["state"]))
     result = run_event_loop(
         feedback["state"],
         config_session,
@@ -189,6 +210,8 @@ def run_workflow(
         result["status"] = "awaiting_manual_submission"
         result["manual_wait"] = manual_wait
     result["recovered_count"] = recovered_count
+    from analysis_layer.feedback.export_dft_products import export_dft_products
+    export_dft_products(result["state"], effective_config.get("phase_diagram_directory"))
     _save_runner_state(result["state"], state_path or effective_config.get("state_path"))
     result.update({
         "submitted": result["status"] not in {"rejected", "rejected_by_user", "awaiting_manual_submission"},
@@ -259,8 +282,8 @@ def _save_runner_state(state, state_path):
     write_json(state_path, state)
 
 
-def _dft_comparison_evaluator(adapters, config):
+def _dft_comparison_evaluator(adapters, config, state=None):
     if "final_frame_mlip_evaluator" in adapters:
         return adapters["final_frame_mlip_evaluator"]
     from execution_layer.workflows.create_dft_comparison_evaluator import create_dft_comparison_evaluator
-    return create_dft_comparison_evaluator(config)
+    return create_dft_comparison_evaluator(config, state=state)

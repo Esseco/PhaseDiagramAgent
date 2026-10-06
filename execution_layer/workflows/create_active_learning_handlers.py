@@ -91,6 +91,9 @@ def _generate_branches(*, action, context):
     state = deepcopy(context.get("event_state") or {})
     state.setdefault("generation_history", []).append({
         "task_key": action.get("task_key"), "quotas": deepcopy(quotas),
+        "model_version": state.get("active_model_version") or (config.get("mlip") or {}).get("version")
+            or (config.get("mlip") or {}).get("name"),
+        "search_group_index": len(state.get("generation_history") or []) + 1,
         "registered_ids": [item.get("structure_id") for item in result["registered"]],
         "coverage": deepcopy(result["coverage"]),
         "summary": deepcopy(result["summary"]),

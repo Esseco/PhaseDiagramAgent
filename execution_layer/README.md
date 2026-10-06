@@ -63,9 +63,11 @@ MLIP batch 使用 `scientific_layer.mlip.slurm_executor`。主控侧通过
 `scientific_layer.mlip.slurm_executor:execute_mlip_task`。MLIP-MC 和 MLIP-Relax 共用
 同一 GPU profile 与 worker 协议。
 
-回收发生在下一次 Agent 决策之前。`apply_scientific_feedback.py` 先将终态结果写入
-`PhaseDataManager`，再更新分离的 MLIP/DFT 相图、Ehull、覆盖、收益和 Agent 状态摘要，
+回收发生在下一次 Agent 决策之前。`apply_scientific_feedback.py` 先识别/复用最终结构的相，
+再做 DFT 层状 Fe/Mn 自旋验收、写入 `PhaseDataManager`，并更新分离的 MLIP/DFT 相图、Ehull、覆盖、收益和 Agent 状态摘要，
 因此 Agent 不会基于上一版相图做下一步选择。
+同一 DFT task 的补磁矩 JSON 经原身份、校验和和不变的最终科学标签验证后，只刷新诊断与科学可用性；
+不重复结算预算、追加阶段历史或执行已完成的同帧模型预测。参见 `scientific_layer/dft/TRAINING_RESULTS.md`。
 `state_manager.py` 是唯一 Agent 状态边界：在决策前后生成版本化 snapshot，Agent 只读
 snapshot，不读取 manager/数据库或可变的完整 workflow state。Action 经统一 schema
 规范化后，仍依次经过 Execution Policy、权限、冻结参数和预算校验再派发。

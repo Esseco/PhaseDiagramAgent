@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def check_na_layer_uniformity(structure_path, composition, *, target_layers=3):
+def check_na_layer_uniformity(structure_path, composition, *, target_layers=3, structure_data=None):
     """Return an observed result or an explicit reason it is unavailable."""
     rule = f"Process_Vasp.structure.check_layer_equal(Na, target_layers={target_layers})"
     if not (composition or {}).get("Na"):
         return {"uniform": None, "status": "not_applicable", "rule": rule}
     try:
-        if not structure_path or not Path(structure_path).is_file():
+        if structure_data is None and (not structure_path or not Path(structure_path).is_file()):
             return {"uniform": None, "status": "missing_final_structure", "rule": rule}
     except (OSError, TypeError, ValueError):
         return {"uniform": None, "status": "invalid_structure_path", "rule": rule}
@@ -21,7 +21,7 @@ def check_na_layer_uniformity(structure_path, composition, *, target_layers=3):
     except ImportError:
         return {"uniform": None, "status": "py_code_unavailable", "rule": rule}
     try:
-        structure = Structure.from_file(str(structure_path))
+        structure = Structure.from_dict(structure_data) if structure_data is not None else Structure.from_file(str(structure_path))
         uniform = check_layer_equal(
             structure, element="Na", target_layers=target_layers, EL_Equal=True)
     except Exception as error:

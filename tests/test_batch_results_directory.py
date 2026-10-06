@@ -108,3 +108,40 @@ def test_array_worker_calculates_in_input_folder_and_exports_result(tmp_path):
     assert run_slurm_array_task(manifest_path, 0, executor=executor)["status"] == "completed"
     assert (stage / "results" / task_dir.name / "final.vasp").is_file()
     assert (stage / "results" / task_dir.name / "task.finished.json").is_file()
+
+
+def test_numbered_dft_results_and_visible_training_file(tmp_path):
+    from types import SimpleNamespace
+    from pymatgen.core import Structure, Lattice
+    stage = tmp_path / "DFT-single-point"
+    submission = stage / "DFT-single-point-submission-0006_remote-000029"
+    task_dir = submission / "00000-DFT-B"
+    task_dir.mkdir(parents=True)
+    task = {"task_id": "DFT-B", "task_key": "dft-b", "structure_id": "S1",
+            "batch_id": "remote-000029", "task_checksum": "input-b", "model_version": "m1",
+            "protocol_version": 1, "input_file_version": "task-json-v1", "stage": "dft_single_point"}
+    (task_dir / "task.json").write_text(json.dumps(task))
+    (task_dir / "vasprun.xml").write_text("stub")
+    structure = Structure(Lattice.cubic(4), ["Na", "O"], [[0, 0, 0], [.5, .5, .5]])
+    parsed = SimpleNamespace(converged=True, final_energy=-8., vasp_version="6",
+        ionic_steps=[{"structure": structure, "e_0_energy": -8., "forces": [[0, 0, 0]]*2}])
+    with patch("pymatgen.io.vasp.outputs.Vasprun", return_value=parsed):
+        finalize_vasp(task_dir)
+    exported = stage / "results" / submission.name
+    assert not (exported / "CONTCAR").exists()
+    assert not (exported / "final_structure.vasp").exists()
+    training = json.loads((exported / "training.json").read_text())
+    assert len(training) == 1 and training[0]["energy"] == -8.
+    assert training[0]["data_id"] == "DFT-B:frame:0"
+    result = json.loads((exported / "result.json").read_text())
+    assert result["outputs"]["training_frame_count"] == 1
+    assert result["outputs"]["training_checksum"] == file_checksum(exported / "training.json")
+    state = {"tasks": [{**task, "status": "pending", "input_path": str(task_dir / "task.json"),
+                       "result_path": str(stage / "results" / task_dir.name / "result.json")}],
+             "slurm_batches": [{"batch_id": task["batch_id"], "upload_directory": str(submission)}]}
+    runner = RemoteBatchRunner(tmp_path / "unused", worker_command=[])
+    assert runner.collect_results_with_report(state)["report"]["recovered_count"] == 1
+    (exported / "training.json").write_text("tampered")
+    bad = runner.collect_results_with_report(state)
+    assert bad["report"]["invalid_count"] == 1
+    assert bad["report"]["recovered_count"] == 0

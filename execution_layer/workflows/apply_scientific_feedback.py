@@ -39,7 +39,7 @@ def apply_scientific_feedback(
     current.setdefault("phase_diagrams_by_model", {})
     current.setdefault("reward_states", {})
     current.setdefault("rewards", [])
-    accepted, rejected, feedback_rows = [], [], []
+    accepted, rejected, feedback_rows, refreshed = [], [], [], []
     if manager is None:
         rejected = [
             {"task_id": row.get("task_id"), "reason": "manager_unavailable"}
@@ -47,10 +47,40 @@ def apply_scientific_feedback(
         ]
         current["agent_state_summary"] = summarize_agent_state(current)
         return {"state": current, "recorded": [], "rejected": rejected, "feedback_count": 0}
+    from execution_layer.state.dft_result_refresh import DFT_STAGES, validated_magnetic_refresh
+    candidates = {}
     for incoming in recovered_results or []:
+        task_id = incoming.get("task_id")
+        prior = next((row for row in current.get("tasks", []) if row.get("task_id") == task_id), None)
+        if task_id in processed:
+            if incoming.get("stage") not in DFT_STAGES or prior is None:
+                continue
+            checked = validated_magnetic_refresh(prior, incoming)
+            if checked["status"] == "rejected":
+                rejected.append({"task_id": task_id, "reason": checked["reason"]})
+                continue
+            result = checked.get("result", deepcopy(prior))
+        else:
+            result = {**deepcopy(prior or {}), **deepcopy(incoming)}
+        if prior is not None:
+            current["tasks"][current["tasks"].index(prior)] = result
+        else:
+            current.setdefault("tasks", []).append(result)
+        candidates[task_id] = result
+    # Classification is cached by final geometry; reassess legacy DFT records
+    # when phase/scope or captured magnetism changes, even without a new return.
+    current, _ = ensure_phase_identification(
+        current, manager, phase_references=phase_references,
+        cache_path=phase_identification_cache_path,
+    )
+    processed = current.setdefault("feedback_processed_task_ids", [])
+    for task in current.get("tasks", []):
+        if task.get("task_id") in candidates or (task.get("task_id") in processed and task.get("stage") in DFT_STAGES):
+            candidates[task.get("task_id")] = task
+    for incoming in candidates.values():
         result = deepcopy(incoming)
         task_id = result.get("task_id")
-        if not task_id or task_id in processed or result.get("status") not in TERMINAL:
+        if not task_id or result.get("status") not in TERMINAL:
             continue
         structure_id = result.get("structure_id") or result.get("object_id")
         if structure_id not in manager.data.get("structures", {}):
@@ -59,26 +89,35 @@ def apply_scientific_feedback(
         if result.get("stage") not in getattr(manager, "stages", manager.STAGES):
             rejected.append({"task_id": task_id, "reason": "unknown_stage"})
             continue
-        collected = collect_calculation_results(manager, structure_id, result, ledger_path=None)
-        _record_cost_observation(current, result, manager, structure_id)
+        from scientific_layer.dft.spin_acceptance import apply_dft_spin_standard
+        result = apply_dft_spin_standard(result, manager)
+        from execution_layer.workflows.dft_feedback_refresh import assessment_changed, sync_dft_assessment
+        is_refresh = task_id in processed
+        if is_refresh and (result.get("stage") not in DFT_STAGES or not assessment_changed(current, result)):
+            continue
+        if result.get("stage") in DFT_STAGES:
+            sync_dft_assessment(current, result, manager)
+        collected = collect_calculation_results(manager, structure_id, result, ledger_path=None, refresh_existing=is_refresh)
+        if not is_refresh:
+            _record_cost_observation(current, result, manager, structure_id)
         from analysis_layer.feedback.dft_result_products import record_dft_products
-        record_dft_products(current, result, final_frame_mlip_evaluator, manager)
-        if (result.get("outputs") or {}).get("training_ready") is not True:
+        record_dft_products(current, result, final_frame_mlip_evaluator, manager, refresh=is_refresh)
+        if not is_refresh and (result.get("outputs") or {}).get("training_ready") is not True:
             # Legacy energy-only evidence is kept separate from paired E/F metrics.
             _record_final_frame_error(current, result, manager, structure_id)
-        processed.append(task_id)
-        accepted.append(collected)
+        if is_refresh:
+            refreshed.append(task_id)
+        else:
+            processed.append(task_id)
+            accepted.append(collected)
         phase_record = collected.get("phase_record")
         if phase_record and phase_record["record_id"] not in {
             row.get("record_id") for row in current["phase_records"]
         }:
             current["phase_records"].append(phase_record)
-            feedback_rows.append({**result, "phase_record": phase_record})
+            if not is_refresh:
+                feedback_rows.append({**result, "phase_record": phase_record})
 
-    current, _ = ensure_phase_identification(
-        current, manager, phase_references=phase_references,
-        cache_path=phase_identification_cache_path,
-    )
     refresh_identified_phases(current)
     # Preserve the existing cached classification for dataset/phase consumers.
     phases = {r.get("source_task_id"): r for r in current.get("phase_records", [])}
@@ -118,11 +157,12 @@ def apply_scientific_feedback(
             _record_rewards(current, previous, diagrams, feedback_rows)
     current["coverage"] = coverage(manager.data, manager.stages, manager.stage_labels)
     current["agent_state_summary"] = summarize_agent_state(current)
-    if ledger_path is not None and accepted:
+    if ledger_path is not None and (accepted or refreshed):
         manager.save(ledger_path)
     return {
         "state": current, "recorded": accepted, "rejected": rejected,
         "feedback_count": len(feedback_rows),
+        "metadata_refreshed_task_ids": refreshed,
     }
 
 
@@ -180,6 +220,8 @@ def _record_cost_observation(state, result, manager, structure_id):
 
 def _record_final_frame_error(state, result, manager, structure_id, evaluator=None):
     if result.get("status") != "completed" or result.get("stage") not in {"dft_single_point", "dft_relax"}:
+        return
+    if result.get("checks_passed", True) is not True:
         return
     outputs = result.get("outputs") or {}
     dft_energy = outputs.get("energy")

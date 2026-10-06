@@ -4,6 +4,7 @@ from copy import deepcopy
 
 from execution_layer.budget.settle_budget import settle_budget
 from execution_layer.cost.extract_gpu_accounting import extract_gpu_accounting
+from execution_layer.state.task_waiting import active_pending_tasks
 
 
 TERMINAL_STATUSES = {"completed", "failed", "timeout", "cancelled"}
@@ -25,6 +26,16 @@ def reconcile_task_results(state: dict | None, recovered_results=None) -> dict:
             continue
         existing_index = next((index for index, item in enumerate(tasks) if item.get("task_id") == task_id), None)
         if task_id in processed and status in TERMINAL_STATUSES:
+            if existing_index is not None:
+                from execution_layer.state.dft_result_refresh import validated_magnetic_refresh
+                refresh = validated_magnetic_refresh(tasks[existing_index], result)
+                if refresh["status"] == "refresh":
+                    tasks[existing_index] = refresh["result"]
+                    reconciled.append({"status": "metadata_refreshed", "task_id": task_id})
+                    continue
+                if refresh["status"] == "rejected":
+                    reconciled.append({"status": "rejected", "task_id": task_id, "reason": refresh["reason"]})
+                    continue
             reconciled.append({"status": "already_processed", "task_id": task_id})
             continue
         if existing_index is None:
@@ -107,7 +118,7 @@ def reconcile_task_results(state: dict | None, recovered_results=None) -> dict:
             if reservation is not None:
                 reservation["status"] = "submitted" if status == "pending" else "running"
             reconciled.append({"status": status, "task_id": task_id, "task_key": task_key})
-    current["pending_tasks"] = [item for item in tasks if item.get("status") in ACTIVE_STATUSES]
+    current["pending_tasks"] = active_pending_tasks(tasks)
     if current.get("tiered_mc_state"):
         from scientific_layer.mc.second_round_state import reconciled_mc_state
         current["tiered_mc_state"] = reconciled_mc_state(current)

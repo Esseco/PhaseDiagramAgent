@@ -13,7 +13,7 @@ from run.run_active_learning_cycle import _record_recovered_dft
 
 def test_json_recovery_to_training_xyz(tmp_path):
     structure = Structure(Lattice.cubic(4), ["Na", "O"], [[0, 0, 0], [.5, .5, .5]])
-    labels = final_training_labels(SimpleNamespace(ionic_steps=[{
+    labels = final_training_labels(SimpleNamespace(converged=True, ionic_steps=[{
         "structure": structure, "e_0_energy": -8.,
         "forces": [[.1, .2, .3], [-.1, -.2, -.3]], "stress": np.eye(3) * 10,
     }]))

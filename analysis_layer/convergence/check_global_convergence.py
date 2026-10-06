@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from execution_layer.state.task_waiting import awaiting_task_result
 
 
 REQUIRED_RULES = (
@@ -25,8 +26,7 @@ def check_global_convergence(state: dict[str, Any], *, rules: dict[str, Any] | N
     if required <= 0 or minimum_checks < 0:
         return {"status": "needs_confirmed_convergence_rules", "converged": False,
                 "criteria_satisfied": False, "reason": "confirmed_thresholds_invalid"}
-    active = [item for item in state.get("tasks", [])
-              if item.get("status") in {"pending", "running", "submitted", "unknown"}]
+    active = [item for item in state.get("tasks", []) if awaiting_task_result(item)]
     if active:
         return {"status": "tasks_awaiting_results", "converged": False,
                 "criteria_satisfied": False, "reason": "tasks_in_progress_or_unknown",
@@ -53,6 +53,9 @@ def check_global_convergence(state: dict[str, Any], *, rules: dict[str, Any] | N
     if not errors_known: missing.append("final_frame_dft_error")
     coverage = state.get("coverage") or state.get("coverage_summary")
     coverage_risk = _coverage_risk(coverage)
+    coverage_risk["unreturned_dft_wait_waived_task_ids"] = [
+        t.get("task_id") for t in state.get("tasks", []) if t.get("recovery_wait_waived") is True
+        and t.get("status") in {"pending", "running", "submitted", "unknown"}]
     if all(checks.values()):
         accepted = state.get("user_accepted_convergence") is True
         return {"status": "finished" if accepted else "numerical_criteria_satisfied",

@@ -1,6 +1,7 @@
 """Summarize prepared tasks that still need manual supercomputer execution."""
 
 from pathlib import Path
+from execution_layer.state.task_waiting import active_pending_tasks
 
 
 ACTIVE_STATUSES = {"pending", "running"}
@@ -14,7 +15,7 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
                                 "dft_single_point", "dft_relax"}
         and row.get("batch_id") and row.get("input_path")
     ]
-    waiting = [row for row in tasks if row.get("status") in ACTIVE_STATUSES]
+    waiting = active_pending_tasks(tasks)
     if not waiting:
         return None
 
@@ -25,6 +26,7 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
                     for stage in {row.get("stage") for row in waiting}}
     relax_only = set(stage_counts) == {"relax_and_feature"}
     return {
+        "dft_recovery_rounds": _dft_recovery_rounds(state),
         "task_count": len(waiting),
         "waiting_task_count": len(waiting),
         "waiting_by_stage": stage_counts,
@@ -40,3 +42,8 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
                              (Path(next(iter(upload_roots))) / "RELAX_UPLOAD_PLAN.json").is_file()
                              else None),
     }
+
+
+def _dft_recovery_rounds(state):
+    from analysis_layer.state.dft_round_status import dft_recovery_rounds
+    return dft_recovery_rounds(state)

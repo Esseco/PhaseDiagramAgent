@@ -54,6 +54,23 @@ def test_model_mismatch_not_counted_but_training_preserved():
     assert len(state["new_dft_records"]) == 1
 
 
+def test_rmse_aggregates_squared_errors_not_frame_rmse(tmp_path):
+    from pathlib import Path
+    state = {"tasks": [{"task_id": name, "upload_operation_id": "round1"} for name in ("T1", "T2")]}
+    record_dft_products(state, result(), predict)
+    second = deepcopy(result())
+    second["task_id"] = "T2"
+    def other_prediction(**kwargs):
+        return {**predict(), "energy": -5., "forces": [[.4]*3]*2}
+    record_dft_products(state, second, other_prediction)
+    export_dft_products(state, tmp_path)
+    directory = Path(next(iter(state["dft_result_exports"].values()))["directory"])
+    metrics = json.loads((directory / "mlip_dft_metrics.json").read_text())
+    assert metrics["energy_total"]["mae"] == 2
+    assert metrics["energy_total"]["rmse"] == pytest.approx(np.sqrt(5))
+    assert metrics["forces"]["rmse"] == pytest.approx(np.sqrt(.1))
+
+
 def test_default_evaluator_refuses_wrong_epoch():
     evaluator = create_dft_comparison_evaluator({"mlip": {"version": "m2"}})
     with pytest.raises(ValueError, match="version"):
@@ -86,3 +103,7 @@ def test_official_feedback_is_idempotent(tmp_path):
     assert len(second["state"]["new_dft_records"]) == 1
     assert len(second["state"]["dft_mlip_comparisons"]) == 1
     assert second["state"]["dft_result_exports"]
+    directory = next(iter(second["state"]["dft_result_exports"].values()))["directory"]
+    from pathlib import Path
+    assert all((Path(directory) / name).is_file() for name in (
+        "energy_comparison.csv", "force_comparison.csv", "metrics.csv"))

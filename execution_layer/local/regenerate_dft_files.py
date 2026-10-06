@@ -46,7 +46,11 @@ def regenerate_dft_files(state, message, *, manager, upload_root):
         for task,directory,snapshot in selected:
             target = Path(temporary)/task['task_id']
             request = {**deepcopy(snapshot),'work_directory':str(target)}
-            prepare_pycode_relax(request,manager=manager)
+            from execution_layer.workflows.comparison_model_registry import original_round_model
+            model, digest, _ = original_round_model(state, state.get('confirmed_config') or {}, request.get('model_version'))
+            if digest:
+                model['model_sha256'] = digest
+            prepare_pycode_relax(request,manager=manager,comparison_model=model)
             script = task.get('reviewed_submit_script') or snapshot.get('reviewed_submit_script')
             if script:
                 script = re.sub(r'(?m)^#SBATCH --job-name=.*$', '#SBATCH --job-name=DFT-'+task['task_id'],script)
