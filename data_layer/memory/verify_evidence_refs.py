@@ -3,6 +3,7 @@
 
 def verify_evidence_refs(state, refs, *, scope):
     indexes = {
+        "training_handoff": {str(i) for i, _ in enumerate(state.get("training_handoff_history") or [])},
         "training_report": {str(row.get("report_id")) for row in state.get("training_result_reports") or []},
         "round_budget_outcome": {str(row.get("record_id")) for row in state.get("action_records") or []
                                  if (row.get("final_action") or {}).get("round_budget_review")},

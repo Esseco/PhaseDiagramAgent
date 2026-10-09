@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+import os
 from pathlib import Path
 from copy import deepcopy
 from execution_layer.step_runner.build_status_summary import build_status_summary
@@ -44,9 +45,20 @@ class RunWorkflowChatHandler:
             raise ValueError("execution_mode 必须是 interactive 或 autonomous")
         self.execution_mode = execution_mode
         self.conversation_id = None
+        self.recent_dialogue = []
 
     def __call__(self, messages, *, conversation_id=None):
-        reply = self._respond(messages, conversation_id=conversation_id)
+        # Studio often transports only the newest user turn. Keep a small local
+        # tail rather than repeatedly sending the full session or summarizing it.
+        with self.lock:
+            supplied = list(messages)
+            if len(supplied) == 1 and self.conversation_id in {None, conversation_id}:
+                supplied = [*self.recent_dialogue, *supplied]
+            reply = self._respond(supplied, conversation_id=conversation_id)
+            if _open_webui_metadata_reply(_latest_user_message(messages)) is None:
+                self.recent_dialogue = [*self.recent_dialogue,
+                    {'role':'user','content':str(_latest_user_message(messages))[:450]},
+                    {'role':'assistant','content':str(reply)[:450]}][-4:]
         if _open_webui_metadata_reply(_latest_user_message(messages)) is not None:
             return reply
         if str(reply).startswith("当前项目状态："):
@@ -78,6 +90,21 @@ class RunWorkflowChatHandler:
                     return location
             if self.config_delegate is None and _is_status_command(user_message):
                 return format_status_reply(state)
+            if self.config_delegate is None:
+                from execution_layer.local.review_candidate_command import review_candidate_command
+                review = review_candidate_command(user_message, state)
+                if review is not None:
+                    write_json(self.state_path, review["state"])
+                    return review["reason"]
+            from run.configuration_chat import _is_config_json_import_command
+            if self.config_delegate is None and _is_config_json_import_command(user_message):
+                if not callable(self.config_revision_factory):
+                    return "配置重新读取入口未配置；仍保留当前已确认版本，未执行计算。"
+                try:
+                    self.config_delegate = self.config_revision_factory(state)
+                except (OSError, TypeError, ValueError) as error:
+                    return f"无法进入配置检查：{error}。未执行计算。"
+                return self.config_delegate(messages, conversation_id=conversation_id)
             from execution_layer.state.dft_recovery_decision import classify_dft_recovery_reply
             recovery_decision = classify_dft_recovery_reply(user_message, state)
             if recovery_decision is not None and self.config_delegate is None:
@@ -103,7 +130,18 @@ class RunWorkflowChatHandler:
                 from run.chat_intent_routing import normalize_chat_intent
                 intent_result = normalize_chat_intent(
                     user_message, state, agent_client=self.workflow_kwargs.get("agent_client"),
-                    messages=messages)
+                    messages=messages, enable_context=True, single_pass=True)
+                if 'candidate_command' in intent_result:
+                    review = review_candidate_command(intent_result['candidate_command'], state)
+                    if review is not None:
+                        write_json(self.state_path, review['state'])
+                        return review['reason']
+                if intent_result.get('message') in {'读取配置 JSON', '读取配置 JSON 并继续'}:
+                    if not callable(self.config_revision_factory):
+                        return '配置读取入口未配置，未执行计算。'
+                    self.config_delegate = self.config_revision_factory(state)
+                    return self.config_delegate([{'role':'user','content':intent_result['message']}],
+                                                conversation_id=conversation_id)
                 if "reply" in intent_result:
                     return intent_result["reply"]
                 user_message = intent_result["message"]
@@ -436,7 +474,7 @@ class RunWorkflowChatHandler:
                     if decision == "approve" and _is_sensitive_proposal(stored_proposal):
                         return (
                             "该建议属于敏感操作。请在本机审批页确认具体影响后批准："
-                            "http://127.0.0.1:8765/phase/approval"
+                            f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
                         )
                     from execution_layer.policy.file_approval import proposal_hash
                     state_version = build_status_summary(
@@ -452,7 +490,7 @@ class RunWorkflowChatHandler:
                     return format_workflow_reply(outcome.get("result") or {}, self.state_path)
                 if _is_sensitive_confirmation(user_message):
                     return ("聊天消息不能批准或拒绝动作。请打开本地审批页核对计划、路径、版本和影响："
-                            "http://127.0.0.1:8765/phase/approval")
+                            f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval")
                 feedback = {"decision": decision, "comment": user_message}
             else:
                 from decision_layer.agent.resolve_explicit_generation_request import _requested_branch_batch_size

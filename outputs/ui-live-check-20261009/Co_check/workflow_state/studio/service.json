@@ -1,0 +1,9 @@
+{
+  "pid": 34060,
+  "process_started": 1791515034.3086643,
+  "runtime_config": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\outputs\\ui-live-check-20261009\\Co_check\\agent_runtime.json",
+  "project_name": "Co_check",
+  "control_port": 8766,
+  "studio_port": 2025,
+  "status": "ready"
+}

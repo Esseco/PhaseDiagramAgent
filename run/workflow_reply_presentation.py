@@ -1,5 +1,6 @@
 """Render workflow responses without HTTP, runtime assembly or state writes."""
 
+import os
 from pathlib import Path
 
 from run.chat_approval_rules import is_sensitive_proposal as _is_sensitive_proposal
@@ -11,7 +12,7 @@ def _is_model_failure_proposal(proposal):
 
 
 def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
-    if result.get("status") == "training_results_received":
+    if result.get("status") in {"training_results_received", "training_handoff"}:
         return result["reason"]
     if verbose is None:
         from run.response_preferences import detailed_response
@@ -301,7 +302,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         if _is_sensitive_proposal(proposal):
             lines.extend([
                 "该建议涉及敏感操作，仍需在本机审批页确认具体影响：",
-                "http://127.0.0.1:8765/phase/approval",
+                f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval",
             ])
         return "\n".join(lines)
     status = result.get("status") or "unknown"

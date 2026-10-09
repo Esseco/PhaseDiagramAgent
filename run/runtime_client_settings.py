@@ -11,6 +11,8 @@ CONFIG_INTENT_PROMPT = (
 def search_client_settings(settings):
     return {
         "proposal_harness": settings.get("proposal_harness", "legacy"),
+        "deepagents_max_tokens": int(settings.get("deepagents_max_tokens", 4096)),
+        "deepagents_recursion_limit": int(settings.get("deepagents_recursion_limit", 8)),
         "model": settings.get("model", "deepseek-v4-pro"),
         "base_url": settings.get("base_url", "https://api.deepseek.com"),
         "max_tokens": int(settings.get("max_tokens", 800)),

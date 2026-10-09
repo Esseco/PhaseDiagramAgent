@@ -57,6 +57,14 @@ def _collect_workflow_results(frame):
     }
 
 
+def _advance_training_workflow(frame, *, graph=None):
+    from execution_layer.local.training_handoff import advance_training_handoffs
+    current, waits = advance_training_handoffs(frame['pre_reconciled']['state'], frame['effective_config'],
+        state_path=frame.get('state_path') or frame['effective_config'].get('state_path'), graph=graph)
+    frame['pre_reconciled']['state'] = current
+    return {**frame, 'loaded_state': current, 'training_handoffs': waits}
+
+
 def _analyze_workflow_results(frame):
     pre_reconciled = frame["pre_reconciled"]
     combined_results = frame["combined_results"]
@@ -121,7 +129,15 @@ def _workflow_wait_gate(frame):
     manual_wait = frame["manual_wait"]
     rebuilding = frame["rebuilding"]
     runtime_path = state_path or effective_config.get("state_path")
-    if frame.get("training_returns"):
+    if frame.get("training_handoffs"):
+        from data_layer.memory.collect_memory_candidates import collect_memory_candidates
+        feedback["state"] = collect_memory_candidates(feedback["state"])
+        _save_runner_state(feedback["state"], runtime_path)
+        return {"status": "training_handoff", "state": feedback["state"],
+                "training_handoffs": frame["training_handoffs"],
+                "reason": "\n".join(row["reason"] for row in frame["training_handoffs"]),
+                "steps_executed": 0, "submitted": False}
+    if frame.get("training_returns") and "training_handoffs" not in frame:
         from execution_layer.local.recover_remote_training import training_result_message
         _save_runner_state(feedback["state"], runtime_path)
         return {"status": "training_results_received", "state": feedback["state"],

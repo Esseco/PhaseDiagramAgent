@@ -1,0 +1,11 @@
+{
+  "dependencies": [
+    "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram"
+  ],
+  "graphs": {
+    "phase_chat": "orchestration.studio_chat_graph:graph"
+  },
+  "http": {
+    "app": "run.studio_runtime:app"
+  }
+}

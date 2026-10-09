@@ -28,7 +28,9 @@ DEFAULT_PROJECT_SETTINGS = {
     "phase_diagram_directory": "analysis_outputs",
     "approval_directory": "workflow_state/approvals",
     "local_action_directory": "workflow_state/approved_batches",
-    "execution_mode": "debug",
+    "execution_mode": "automatic",
+    "run_steps_per_click": 10,
+    "resume_existing_project": True,
     "deepseek": {"model": "deepseek-flash", "base_url": "https://api.deepseek.com",
                  "max_tokens": 2400, "timeout": 60, "configuration_thinking": "disabled",
                  "thinking": "enabled"},
@@ -67,6 +69,9 @@ def register_project(path: Path, *, registry: Path | None = None) -> list[str]:
             old_state, old_ledger = _data_paths(old_path)
             if old_state == new_state or old_ledger == new_ledger:
                 raise ValueError("两个项目指向同一 state 或台账；请为新项目选择独立工作区")
+            if target.parent == old_path.resolve().parent:
+                raise ValueError("每个文件夹只能注册一个项目配置")
+    validate_project_paths(target)
     if str(target) not in projects:
         projects.append(str(target))
         registry.parent.mkdir(parents=True, exist_ok=True)
@@ -74,6 +79,32 @@ def register_project(path: Path, *, registry: Path | None = None) -> list[str]:
         temporary.write_text(json.dumps(projects, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         temporary.replace(registry)
     return projects
+
+
+def validate_project_paths(path):
+    """Writable runtime and confirmed science storage must stay in this folder."""
+    path = Path(path).resolve()
+    root = path.parent
+    settings = _load_config(path)
+    keys = ("state_path", "ledger_path", "config_session_path", "editable_config_draft_path",
+            "approval_directory", "local_action_directory", "new_runs_directory",
+            "phase_diagram_directory", "branch_energy_pool_ledger_path")
+    for key in keys:
+        if settings.get(key):
+            target = _resolve(root, settings[key])
+            if not target.is_relative_to(root):
+                raise ValueError(f"项目写入路径 {key} 超出项目文件夹：{target}")
+    session = _load_optional_json(_resolve(root, settings.get("config_session_path", "parameters/config_session.json")))
+    for config in (session.get("config") or {}, (session.get("confirmed_snapshot") or {}).get("config") or {},
+                   {"storage": settings.get("runtime_storage_override") or {}}):
+        if settings.get("local_path_relocations"):
+            from config_layer.session.relocate_workspace_paths import relocate_workspace_paths
+            config = relocate_workspace_paths(config, settings["local_path_relocations"], root)
+        storage = config.get("storage") or {}
+        if storage.get("workspace_root"):
+            owner = _resolve(root, storage["workspace_root"])
+            if owner != root:
+                raise ValueError("配置工作区必须与项目文件夹一致；请先核对旧项目路径")
 
 
 def create_project(workspace_root: Path, *, registry: Path | None = None) -> Path:
@@ -103,11 +134,17 @@ def create_project(workspace_root: Path, *, registry: Path | None = None) -> Pat
     from config_layer.session.save_config_session import save_config_session
     from run.configuration_chat import BOOTSTRAP_HINTS
     config = default_layered_search_config()
+    # New projects must not inherit the previous chemistry or an HPC model path.
+    config["mlip"]["model_path"] = None
+    config["system"]["constraints"]["TM_ratio"] = {}
     storage = default_workspace_storage(root)
     session = create_config_draft(config, require_workspace_path=True)
     session["bootstrap_hints"] = BOOTSTRAP_HINTS
-    create_project_config_json(draft_path, config, bootstrap_hints=BOOTSTRAP_HINTS,
+    create_project_config_json(draft_path, config, bootstrap_hints={**BOOTSTRAP_HINTS,
+        "local_initial_structure_directory": str(root / "structures" / "reference_structures")},
                                 workspace_defaults=storage)
+    from config_layer.session.split_project_config import split_project_file
+    split_project_file(draft_path)
     session = apply_config_revision(
         session, {"storage": storage},
         reasons={"storage": "用户在本地启动器中选择了此独立项目工作区。"},
@@ -132,8 +169,16 @@ def describe_project(path: Path) -> str:
     long_term = memory.get("long_term") or {}
     recent = memory.get("short_term") or {}
     workspace = ((session.get("config") or {}).get("storage") or {}).get("workspace_root") or root
+    tasks = state.get("tasks") or []
+    tasks = list(tasks.values()) if isinstance(tasks, dict) else tasks
+    counts = {}
+    for task in tasks:
+        status = task.get("status", "unknown")
+        counts[status] = counts.get(status, 0) + 1
     return (f"工作区：{workspace}\n"
             f"配置：{'已确认' if session.get('status') == 'confirmed' else '待确认'}\n"
+            f"模式：{'自动推进' if config.get('execution_mode') == 'automatic' else '逐步调试'}\n"
+            f"任务：{counts or '尚未生成'}\n"
             f"项目长期记忆：{'有（人工审核）' if long_term else '无'}\n"
             f"项目短期记忆：{'有（运行状态）' if recent else '无'}\n"
             "记忆由本项目审核管理；Studio只提供对话与调试入口。")
@@ -255,13 +300,24 @@ def _process_is_running(process) -> bool:
     return process.is_running()
 
 
-def start_agent(path: Path, *, port: int = 8765) -> tuple[object, str, bool]:
-    """Start one launcher-owned Agent; never reconnect to a background process."""
+def start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, bool]:
+    """Start an isolated project service, or open its verified existing instance."""
+    from run.project_service import available_port, read_service
     path = path.resolve()
     config = _load_config(path)
+    if path.is_file():
+        validate_project_paths(path)
+    existing = read_service(path)
+    if existing:
+        import psutil
+        process = psutil.Process(existing["pid"])
+        process.studio_port = existing["studio_port"]
+        process.control_port = existing["control_port"]
+        return process, local_service_tokens()[0], True
     timeout = config.get("agent_startup_timeout_seconds", 45)
     if type(timeout) not in {int, float} or not 5 <= timeout <= 600:
         raise ValueError("agent_startup_timeout_seconds 必须在 5–600 秒之间")
+    port = port if port is not None else available_port(config.get("control_port", 8765))
     if not _port_is_free(port):
         raise RuntimeError(
             f"端口 {port} 已被占用。Agent 不再接回后台进程；请关闭原启动窗口或结束旧 Agent 后重试。"
@@ -270,7 +326,7 @@ def start_agent(path: Path, *, port: int = 8765) -> tuple[object, str, bool]:
     env = os.environ.copy()
     env["OPENWEBUI_TOOL_TOKEN"] = tool_token
     env["OPENWEBUI_CONTROL_TOKEN"] = control_token
-    ui_port = config.get("studio_port", 2024)
+    ui_port = available_port(config.get("studio_port", 2024), excluded={port})
     if type(ui_port) is not int or not 1 <= ui_port <= 65535 or ui_port == port:
         raise ValueError("agent_web_port 必须是与控制端口不同的有效端口")
     if not _port_is_free(ui_port):
@@ -298,111 +354,25 @@ def start_agent(path: Path, *, port: int = 8765) -> tuple[object, str, bool]:
                     request = Request(f"http://127.0.0.1:{ui_port}/info")
                     with urlopen(request, timeout=0.5) as ui_response:
                         if ui_response.status == 200:
+                            process.studio_port = ui_port
+                            process.control_port = port
+                            if type(process.pid) is int:
+                                import psutil
+                                from run.project_service import write_service
+                                write_service(path, {"pid": process.pid,
+                                    "process_started": psutil.Process(process.pid).create_time(),
+                                    "runtime_config": str(path), "project_name": path.parent.name,
+                                    "control_port": port, "studio_port": ui_port, "status": "ready"})
                             return process, tool_token, False
         except OSError:
             time.sleep(0.2)
-    process.terminate()
+    _stop_owned_process(process)
     raise RuntimeError(f"Agent 未能在 {timeout:g} 秒内就绪；已停止本次启动，请查看 {log_path}")
 
 
 def main() -> None:
-    registry = registry_path()
-    app = tk.Tk()
-    app.title("相图搜索 Agent · 项目启动")
-    app.geometry("760x390")
-    selected = tk.StringVar()
-    details = tk.StringVar(value="请选择项目；新聊天不会自动建立新项目。")
-    running = {"process": None, "owned": False}
-    projects = [item for item in read_project_registry(registry) if Path(item).is_file()]
-    ttk.Label(app, text="选择项目（每个项目有独立工作区、state 和台账）").pack(pady=10)
-    chooser = ttk.Combobox(app, textvariable=selected, values=projects, state="readonly", width=100)
-    chooser.pack(padx=15)
-    ttk.Label(app, textvariable=details, justify="left", wraplength=720).pack(padx=18, pady=18)
-
-    def refresh() -> None:
-        if selected.get():
-            try:
-                details.set(describe_project(Path(selected.get())))
-            except (OSError, ValueError, KeyError) as error:
-                details.set(f"项目配置需要检查：{error}")
-
-    def add_project() -> None:
-        path = filedialog.askopenfilename(title="选择已有项目的 agent_runtime.json",
-                                         filetypes=[("JSON", "*.json")])
-        if path:
-            try:
-                projects[:] = register_project(Path(path), registry=registry)
-                chooser.configure(values=projects)
-                selected.set(str(Path(path).resolve()))
-                refresh()
-            except (OSError, ValueError, KeyError) as error:
-                messagebox.showerror("无法添加项目", str(error))
-
-    def new_project() -> None:
-        root = filedialog.askdirectory(title="选择新项目工作区根目录")
-        if root:
-            try:
-                path = create_project(Path(root), registry=registry)
-                projects[:] = read_project_registry(registry)
-                chooser.configure(values=projects)
-                selected.set(str(path))
-                refresh()
-                messagebox.showinfo("配置文件已生成", f"请编辑 {path.parent / 'search_config.project.json'}；\n"
-                                    "然后在 Agent 对话中发送“读取配置 JSON 并继续”。")
-            except (OSError, ValueError) as error:
-                messagebox.showerror("无法新建项目", str(error))
-
-    def launch() -> None:
-        if not selected.get():
-            messagebox.showinfo("请选择项目", "先选择继续的项目，或新建独立项目。")
-            return
-        try:
-            project_config = _load_config(Path(selected.get()))
-            process, tool_token, reused = start_agent(Path(selected.get()))
-            running["process"] = process
-            running["owned"] = True
-            app.clipboard_clear()
-            app.clipboard_append(tool_token)
-            details.set(describe_project(Path(selected.get())) +
-                        "\nLangGraph Agent 已启动；关闭此窗口将停止服务。"
-                        "Studio 使用 LangSmith 登录；控制凭据已复制到剪贴板。")
-            webbrowser.open(f"https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:{project_config.get('studio_port', 2024)}")
-        except (OSError, ValueError, RuntimeError, KeyError) as error:
-            if running["owned"]:
-                stop(show_warning=False)
-            messagebox.showerror("启动失败", str(error))
-
-    def stop(*, show_warning: bool = True) -> bool:
-        process = running["process"]
-        if not _stop_owned_process(process):
-            if show_warning:
-                messagebox.showwarning("服务仍在退出", "Agent 未能停止；请检查 logs/agent_server.log")
-            return False
-        running["process"] = None
-        running["owned"] = False
-        refresh()
-        return True
-
-    def close() -> None:
-        if running["owned"]:
-            if not stop():
-                return
-        app.destroy()
-
-    row = ttk.Frame(app)
-    row.pack(pady=4)
-    ttk.Button(row, text="继续所选项目", command=launch).pack(side="left", padx=5)
-    ttk.Button(row, text="新建独立项目", command=new_project).pack(side="left", padx=5)
-    ttk.Button(row, text="添加已有项目", command=add_project).pack(side="left", padx=5)
-    ttk.Button(row, text="配置 / API密钥", command=lambda: webbrowser.open("http://127.0.0.1:8765/phase/setup")).pack(side="left", padx=5)
-    ttk.Button(row, text="审批", command=lambda: webbrowser.open("http://127.0.0.1:8765/phase/approval")).pack(side="left", padx=5)
-    ttk.Button(row, text="停止本次 Agent", command=stop).pack(side="left", padx=5)
-    chooser.bind("<<ComboboxSelected>>", lambda _event: refresh())
-    if projects:
-        selected.set(projects[-1])
-        refresh()
-    app.protocol("WM_DELETE_WINDOW", close)
-    app.mainloop()
+    from run.project_dashboard import main as dashboard
+    dashboard()
 
 
 if __name__ == "__main__":

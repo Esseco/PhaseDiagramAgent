@@ -11,6 +11,8 @@ LABELS = {
     "__start__": "开始", "__end__": "返回本次结果",
     "initialize_confirmed_run": "加载已确认运行",
     "collect_and_reconcile": "回收与核对结果",
+    "batch_recovery": "Relax/MC/DFT回收汇合子图",
+    "training_lifecycle": "训练回收与原生暂停子图",
     "scientific_feedback": "分析科学反馈",
     "results_wait_gate": "判断是否等待回传",
     "assess_and_export_round": "评估本轮并更新输出",
@@ -68,6 +70,12 @@ def render_overview():
         "本文件由 `python -m orchestration.graph_overview` 从真实编译图生成；仅用于阅读，不是第二套执行流程。实线为固定连线，虚线为条件路由，并非所有路径都会执行。",
         "## 1. 本轮生命周期",
         mermaid_overview(lifecycle),
+        "## 计算阶段回收子图",
+        mermaid_overview(children["batch_recovery"]),
+        "各阶段并行检查已登记任务状态并汇合；部分回传暂停保存检查点，失败由现有审批重试入口处理。",
+        "## 训练回收与验证子图",
+        mermaid_overview(children["training_lifecycle"]),
+        "等待节点使用原生interrupt，检查点保存在项目workflow_state/langgraph_training.sqlite；继续时携带最新业务状态重新核对。",
         "## 2. 决策动作循环",
         mermaid_overview(iteration),
         "## 3. 审批与动作执行",
@@ -77,6 +85,7 @@ def render_overview():
         "## Studio 阅读方式",
         "聊天入口为 `phase_chat`。查看子图时按以下路径逐层定位；不同 Studio 版本的展开控件可能不同：",
         "1. `confirmed_local_chat` → `scientific_lifecycle`：回收、分析、等待和评估。\n"
+        "训练交接：`training_lifecycle` → `training_lifecycle`，展开检查、准备、验证与等待节点。\n"
         "2. `bounded_action_graph` → `bounded_action_iteration`：动作循环与持久化。\n"
         "3. `execute_validated_action` → `approved_scientific_action`：提案、审批、校验及具体工具。",
         "本总览不会替换 Studio 画布。实际审批与执行规则未修改；交互模式批准后通常只准备超算输入，由用户提交，再回传结果。等待、拒绝和失败均可能提前返回。",

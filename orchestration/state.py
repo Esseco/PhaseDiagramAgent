@@ -3,7 +3,7 @@ from typing import TypedDict, Literal
 
 
 class SearchWorkflowState(TypedDict, total=False):
-    phase: Literal["initialized", "collected", "analyzed", "wait_checked", "assessed", "acted", "finalized"]
+    phase: Literal["initialized", "collected", "training_checked", "batches_checked", "analyzed", "wait_checked", "assessed", "acted", "finalized"]
     response: dict
 
 

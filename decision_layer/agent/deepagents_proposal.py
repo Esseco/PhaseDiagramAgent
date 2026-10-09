@@ -25,6 +25,15 @@ def proposal_material(payload):
                    "single_point_max_per_round", "single_point_cost_per_round", "max_relax_fraction",
                    "minimum_new_dft_records", "finetune_enabled", "comparison_status"})
 
+    fields.update({"report_id", "source_model_version", "training_round", "evaluation_type",
+        "kfold_metrics", "energy_MAE_meV_per_atom", "energy_RMSE_meV_per_atom",
+        "force_MAE_meV_per_A", "force_RMSE_meV_per_A", "candidate_pool", "decision_outcomes",
+        "decision_id", "chosen_alternative", "alternatives", "expected_benefit", "expected_cost",
+        "required", "active_model_version", "training_reports", "existing_pool", "observed_budget_outcomes",
+        "instruction", "unlabelled_candidates", "qbc_available_count", "qbc_model_versions",
+        "training_report", "committee_count", "out_of_fold_structures", "report_status",
+        "observed_outcome", "uncertainty", "cost_basis", "benefit_basis", "choice", "revisit_when"})
+
     def summary(value):
         if isinstance(value, dict):
             return {key: summary(item) for key, item in value.items() if key in fields}
@@ -38,7 +47,7 @@ def proposal_material(payload):
             "decision_context": {key: summary(context[key]) for key in
                 ("current_phase_diagram", "relevant_approved_knowledge", "long_term_human_advice",
                  "coverage_gaps", "recent_experience", "task_stage_evidence", "post_dft_assessment",
-                 "qbc_candidates", "available_branches", "available_budget", "dft_selection_policy") if key in context}}
+                 "qbc_candidates", "available_branches", "available_budget", "dft_selection_policy", "training_result_reports", "round_budget_evidence") if key in context}}
     # Schemas are program-owned contracts, not scientific/raw filesystem data.
     material["output_contracts"] = deepcopy(payload.get("output_contracts") or {})
     if payload.get("validation_errors"):
@@ -93,10 +102,10 @@ def create_proposal_client(model, *, recursion_limit=16):
     return call
 
 
-def create_deepseek_proposal_client(*, api_key, model, base_url, timeout, max_tokens=8192):
+def create_deepseek_proposal_client(*, api_key, model, base_url, timeout, max_tokens=8192, recursion_limit=16):
     """Explicit opt-in provider factory; never chosen by existing default clients."""
     from langchain_openai import ChatOpenAI
     chat_model = ChatOpenAI(api_key=api_key, model=model, base_url=base_url,
         timeout=timeout, max_tokens=max_tokens, temperature=0, max_retries=0,
         extra_body={"thinking": {"type": "disabled"}})
-    return create_proposal_client(chat_model)
+    return create_proposal_client(chat_model, recursion_limit=recursion_limit)

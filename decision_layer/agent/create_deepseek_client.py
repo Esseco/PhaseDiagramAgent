@@ -22,15 +22,26 @@ def create_deepseek_client(
     *, api_key=None, model="deepseek-v4-pro", base_url="https://api.deepseek.com",
     max_tokens=800, timeout=60, system_prompt=None, thinking=None,
     routine_max_tokens=1600, reasoning_max_tokens=8192,
-    proposal_harness="legacy",
+    proposal_harness="legacy", deepagents_max_tokens=4096, deepagents_recursion_limit=8,
 ):
     key = api_key or os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         raise ValueError("需要 api_key 或 DEEPSEEK_API_KEY")
     if thinking not in {None, "enabled", "disabled"}:
         raise ValueError("thinking 必须是 enabled、disabled 或 None")
-    if proposal_harness not in {"legacy", "deepagents"}:
+    if proposal_harness not in {"legacy", "deepagents", "hybrid"}:
         raise ValueError("proposal_harness must be legacy or deepagents")
+    if proposal_harness == "hybrid":
+        from decision_layer.agent.hybrid_proposal import create_hybrid_client
+        legacy = create_deepseek_client(api_key=key, model=model, base_url=base_url,
+            max_tokens=max_tokens, timeout=timeout, system_prompt=system_prompt, thinking=thinking,
+            routine_max_tokens=routine_max_tokens, reasoning_max_tokens=reasoning_max_tokens)
+        def deep_factory():
+            from decision_layer.agent.deepagents_proposal import create_deepseek_proposal_client
+            return create_deepseek_proposal_client(api_key=key, model=model, base_url=base_url,
+                timeout=timeout, max_tokens=int(deepagents_max_tokens),
+                recursion_limit=int(deepagents_recursion_limit))
+        return create_hybrid_client(legacy, deep_factory)
     if proposal_harness == "deepagents":
         from decision_layer.agent.deepagents_proposal import create_deepseek_proposal_client
         return create_deepseek_proposal_client(api_key=key, model=model, base_url=base_url,
@@ -44,6 +55,8 @@ def create_deepseek_client(
         if not count and "select_dft_candidates" in (payload.get("allowed_tools") or []):
             count = len(context.get("qbc_candidates") or [])
         json_ceiling = max(int(routine_max_tokens), min(16384, 1024 + 100 * count))
+        if payload.get("mode") == "resolve_chat_intent":
+            json_ceiling = 512
         messages = [
             {
                 "role": "system",

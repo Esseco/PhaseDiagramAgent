@@ -104,8 +104,8 @@ def training_result_message(result):
              f"{float(metric['energy_RMSE_meV_per_atom']):.1f} meV/atom；受力 "
              f"{float(metric['force_MAE_meV_per_A']):.1f}/{float(metric['force_RMSE_meV_per_A']):.1f} meV/Å。")
     if result["issues"]:
-        return text + "\n模型清单需补齐超算绝对路径及SHA256；在超算inputs目录运行 python collect_training_results.py --manifest-only，回传models.json即可，无需重训或下载模型。"
-    return text + "\n下一步需接入远端模型独立验证接口，再进行激活审批；目前仅完成结果登记，不自动激活或重训。K折结果不等于全数据主模型的独立测试。"
+        return text + "\n模型清单需补齐超算绝对路径及SHA256；说“继续”生成GPU_manifest.sh，在超算原inputs目录通过 sbatch GPU_manifest.sh 提交计算节点；回传models.json即可，无需重训或下载模型。"
+    return text + "\n说“继续”检查独立验证数据与标准并准备计算节点验证作业；验证通过后单独审批激活，不自动激活或重训。K折结果不等于全数据主模型的独立测试。"
 
 
 def recover_remote_training(state):

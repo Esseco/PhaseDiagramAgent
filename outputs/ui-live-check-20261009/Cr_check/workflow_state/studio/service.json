@@ -1,0 +1,9 @@
+{
+  "pid": 14108,
+  "process_started": 1791515027.0086205,
+  "runtime_config": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\outputs\\ui-live-check-20261009\\Cr_check\\agent_runtime.json",
+  "project_name": "Cr_check",
+  "control_port": 8765,
+  "studio_port": 2024,
+  "status": "ready"
+}

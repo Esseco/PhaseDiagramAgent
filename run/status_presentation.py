@@ -28,11 +28,33 @@ def format_progress(state):
              brief_chat_state(state)]
     from execution_layer.local.recover_remote_training import inspect_training_results, training_result_message, INACTIVE
     returned = [inspect_training_results(job) for job in (state.get("remote_finetune_jobs") or {}).values()
-                if job.get("status") not in INACTIVE and not job.get("activated")]
+                if job.get("status") not in INACTIVE | {"results_received"} and not job.get("activated")]
     returned = [row for row in returned if row is not None]
+    handoffs = [job.get("training_handoff") for job in (state.get("remote_finetune_jobs") or {}).values()
+                if job.get("training_handoff") and job.get("status") not in INACTIVE and not job.get("activated")]
+    if handoffs:
+        return "\n".join([lines[0], *[row["reason"] for row in handoffs], "本次仅查看状态，未执行或批准。"])
     if returned:
         return "\n".join([lines[0], *[training_result_message(row) for row in returned],
                           "本次仅检查回传文件，未登记、分析或激活；说“继续”由Agent回收。"])
+    recovered = [job.get("returned_results") or {} for job in (state.get("remote_finetune_jobs") or {}).values()
+                 if job.get("status") == "results_received" and not job.get("activated")]
+    if recovered:
+        lines.append("已登记微调回收结果；下一步检查模型清单和验证记录，无需重复生成训练输入。")
+        for result in recovered:
+            issues = result.get("issues") or []
+            if issues:
+                lines.append("当前缺项：" + "；".join(str(issue) for issue in issues) + "。")
+            if result.get("kfold_metrics"):
+                lines.append("交叉验证指标已登记。")
+        if any(result.get("issues") for result in recovered):
+            lines.append("执行方案：补齐模型清单，无需重训。回复‘继续’，生成 GPU_manifest.sh 和 collect_training_results.py；上传至超算本轮原 inputs 目录，执行 sbatch GPU_manifest.sh，完成后回传 results/models.json，再回复‘继续’检查验证条件。")
+        else:
+            lines.append("执行方案：回复‘继续’，检查独立验证数据与标准并准备验证作业；验证通过后单独审批激活。")
+        if pending:
+            lines.append(f"另有待审批方案 {len(pending)} 个；该方案不代表微调尚未回收。重新训练方案需核对必要性后再处理。")
+        lines.append("本次仅查看记录，未重复训练、批准或激活模型。")
+        return "\n".join(lines)
     if len(pending) == 1:
         record_id, record = next(iter(pending.items()))
         proposal = record.get("agent_proposal") or {}

@@ -166,6 +166,10 @@ def compose_runtime(config_path=None, *, chat_handler_factory,
     from run.default_run_config import default_run_config
     if ledger_path.is_file():
         manager = PhaseDataManager.load(ledger_path)
+        from scientific_layer.structures.boundary_utils import json_safe
+        expected_boundary = (effective_config.get("system") or {}).get("boundary")
+        if expected_boundary is not None and json_safe(manager.boundary) != json_safe(expected_boundary):
+            raise ValueError("项目台账的体系边界与已确认配置不同；请使用独立项目文件夹，不能混用不同体系的台账。")
         saved_system = manager.data.get("system_config") or {}
         saved_space = saved_system.get("configuration_space") or {}
         active_space = (effective_config.get("system") or {}).get("configuration_space") or {}
@@ -282,7 +286,7 @@ def compose_runtime(config_path=None, *, chat_handler_factory,
         return runtime_factory(config_file)
 
     handler = chat_handler_factory(
-        kwargs, history_prompt=_has_history(state, manager),
+        kwargs, history_prompt=_has_history(state, manager) and not settings.get("resume_existing_project", False),
         new_run_factory=new_run, deepseek_model_switcher=model_switcher,
         execution_mode=execution_mode, config_revision_factory=start_config_revision,
         config_intent_client=intent_client,
@@ -290,5 +294,9 @@ def compose_runtime(config_path=None, *, chat_handler_factory,
     if settings.get("knowledge_library_root"):
         handler.knowledge_library_root = str(_resolve_path(settings["knowledge_library_root"], base))
     handler.runtime_config_path = config_file
+    steps = settings.get("run_steps_per_click", 1)
+    if type(steps) is not int or not 1 <= steps <= 50:
+        raise ValueError("run_steps_per_click 必须为 1–50 的整数")
+    handler.steps_per_turn = steps if execution_mode == "autonomous" else 1
     return handler
 

@@ -82,6 +82,8 @@ def prepare_llm_request(payload):
 
 def needs_deep_reasoning(payload):
     """No LLM call is needed to classify its own reasoning budget."""
+    if payload.get("mode") in {"resolve_chat_intent", "read_only_conversation"}:
+        return False
     if payload.get("decision_kind") in {"strategy", "dft_selection", "model_update", "convergence"}:
         return True
     state = payload.get("state") or {}

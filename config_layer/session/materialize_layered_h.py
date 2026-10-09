@@ -60,4 +60,5 @@ def materialize_layered_h(config: dict) -> dict:
     constraints["phases"] = phases
     constraints["TM_ratio"] = deepcopy(boundary.get("TM_ratio"))
     result["system"] = system
-    return result
+    from config_layer.session.synchronize_system_scope import synchronize_system_scope
+    return synchronize_system_scope(result)

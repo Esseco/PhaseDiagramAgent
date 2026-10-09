@@ -1,7 +1,7 @@
 """Summarize prepared tasks that still need manual supercomputer execution."""
 
 from pathlib import Path
-from execution_layer.state.task_waiting import active_pending_tasks
+from execution_layer.state.task_waiting import awaiting_task_result
 
 
 ACTIVE_STATUSES = {"pending", "running"}
@@ -15,7 +15,7 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
                                 "dft_single_point", "dft_relax"}
         and row.get("batch_id") and row.get("input_path")
     ]
-    waiting = active_pending_tasks(tasks)
+    waiting = [row for row in tasks if awaiting_task_result(row)]
     if not waiting:
         return None
 

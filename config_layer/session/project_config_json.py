@@ -87,6 +87,8 @@ def create_project_config_json(path, config: dict | None = None, *, bootstrap_hi
 
 def expand_project_config(document: dict, *, source: Path, baseline_config: dict | None = None) -> dict:
     """Expand a sparse project document into the existing complete config schema."""
+    from config_layer.session.split_project_config import combine_project_documents
+    document = combine_project_documents(document, source)
     if document.get("profile") != PROFILE_ID:
         raise ValueError(f"配置体系 {document.get('profile')!r} 与当前 {PROFILE_ID!r} 不兼容。")
     profile_changed = document.get("profile_digest") != profile_digest()
@@ -109,7 +111,7 @@ def expand_project_config(document: dict, *, source: Path, baseline_config: dict
     _check_secrets(project)
     _check_secrets(overrides)
     allowed_optional = {"system": {"boundary", "H_generation", "phase_reference_directory"},
-                        "run": {"generation_options"}, "root": {"storage"}}
+                        "run": {"generation_options"}, "root": {"storage", "remote_training_validation", "remote_training_job_template"}}
     merged = _merge(defaults, project, "config", allowed_optional)
     merged = _merge(merged, overrides, "config", allowed_optional)
     system = merged.get("system", {})
@@ -126,7 +128,15 @@ def expand_project_config(document: dict, *, source: Path, baseline_config: dict
         merged["storage"] = default_workspace_storage(source.parent)
     from config_layer.session.resolve_workspace_paths import resolve_workspace_paths
     resolve_workspace_paths(merged, base_directory=source.parent)
-    return merged
+    validation = merged.get("remote_training_validation") or {}
+    if validation.get("data_path"):
+        data_path = Path(validation["data_path"]).expanduser()
+        validation["data_path"] = str(data_path if data_path.is_absolute() else (source.parent / data_path).resolve())
+    if merged.get("remote_training_job_template"):
+        template_path = Path(merged["remote_training_job_template"]).expanduser()
+        merged["remote_training_job_template"] = str(template_path if template_path.is_absolute() else (source.parent / template_path).resolve())
+    from config_layer.session.synchronize_system_scope import synchronize_system_scope
+    return synchronize_system_scope(merged)
 
 
 def write_project_config_patch(path, patch: dict, *, expected_hash: str | None = None,
@@ -134,6 +144,9 @@ def write_project_config_patch(path, patch: dict, *, expected_hash: str | None =
     """Apply an explicitly authorized, non-secret patch to the short JSON file."""
     from config_layer.session.load_editable_config_json import _strip_jsonc_comments
     target = Path(path)
+    from config_layer.session.split_project_config import read_document, patch_split_project
+    if "run_config_file" in read_document(target):
+        return patch_split_project(target, patch, expected_hash=expected_hash, baseline_config=baseline_config)
     source = target.read_bytes()
     if expected_hash is not None and hashlib.sha256(source).hexdigest() != expected_hash:
         raise ValueError("配置文件已被其他编辑修改，请重新读取")
@@ -188,7 +201,8 @@ def write_project_config_patch(path, patch: dict, *, expected_hash: str | None =
         actual = effective
         for part in dotted_path.split("."):
             actual = actual[part]
-        if actual != value:
+        from config_layer.session.split_project_config import normalized_patch_value
+        if actual != normalized_patch_value(dotted_path, value, target):
             raise ValueError(f"写入后生效值不一致：{dotted_path}")
     if not changes and not profile_changed:
         return []

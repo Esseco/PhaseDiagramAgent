@@ -16,6 +16,8 @@ def collect_memory_candidates(state):
     from analysis_layer.state.round_budget_evidence import budget_decision_outcomes
     updated["training_result_reports"] = training_result_evidence(updated)
     sources = []
+    for index, outcome in enumerate(updated.get("training_handoff_history") or []):
+        sources.append(("training_handoff", str(index), outcome, tuple(outcome)))
     for report in updated["training_result_reports"]:
         if report.get("report_id"):
             source = {**report, "model_version": report.get("source_model_version")}

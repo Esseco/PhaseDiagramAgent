@@ -1,0 +1,27 @@
+{
+  "agent_web_port": 7932,
+  "config_session_path": "parameters/config_session.json",
+  "editable_config_draft_path": "parameters/search_config.project.json",
+  "state_path": "workflow_state/state.json",
+  "ledger_path": "workflow_state/ledgers/phase_data.json",
+  "new_runs_directory": "open_webui_runs",
+  "phase_diagram_directory": "analysis_outputs",
+  "approval_directory": "workflow_state/approvals",
+  "local_action_directory": "workflow_state/approved_batches",
+  "execution_mode": "automatic",
+  "run_steps_per_click": 10,
+  "resume_existing_project": true,
+  "deepseek": {
+    "model": "deepseek-flash",
+    "base_url": "https://api.deepseek.com",
+    "max_tokens": 2400,
+    "timeout": 60,
+    "configuration_thinking": "disabled",
+    "thinking": "enabled"
+  },
+  "manual_upload": {
+    "enabled": false,
+    "submit": false
+  },
+  "runtime_adapters": {}
+}

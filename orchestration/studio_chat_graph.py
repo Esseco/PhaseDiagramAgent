@@ -13,8 +13,10 @@ class StudioContext(TypedDict, total=False):
     response_detail: Literal["brief", "detailed"]
 
 
-class StudioState(TypedDict):
+class StudioState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
+    project_name: str
+    project_directory: str
 
 
 def user_text(messages):
@@ -77,7 +79,9 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
         with use_scientific_graph(science), response_detail(detail):
             reply = sender(text, thread)
         record_execution_return(path, execution_identity, "completed")
-        return {"messages": [AIMessage(content=reply)]}
+        project = Path(os.environ.get("PHASE_AGENT_RUNTIME_CONFIG", ".")).resolve().parent
+        return {"messages": [AIMessage(content=reply)],
+                "project_name": project.name, "project_directory": str(project)}
 
     graph = StateGraph(StudioState, context_schema=StudioContext)
     graph.add_node("confirmed_local_chat", chat)

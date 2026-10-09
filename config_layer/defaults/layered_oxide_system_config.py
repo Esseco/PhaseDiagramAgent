@@ -35,4 +35,7 @@ def layered_oxide_system_config(*, boundary=None, phase_references=None) -> dict
         from scientific_layer.structures.boundary_utils import allowed_phases
         config["constraints"]["phases"] = sorted(allowed_phases(boundary.get("P", config["constraints"]["phases"])))
         config["constraints"]["TM_ratio"] = deepcopy(boundary.get("TM_ratio", config["constraints"]["TM_ratio"]))
+        elements = sorted(config["constraints"]["TM_ratio"])
+        config["species"]["substitutional"] = elements
+        config["occupancy_rules"]["substitutional_sites"] = "/".join(elements)
     return config

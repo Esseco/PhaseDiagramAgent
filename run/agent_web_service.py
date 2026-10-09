@@ -18,7 +18,9 @@ class DeferredControl:
                     raise ValueError("配置尚未确认，请先在聊天中完成配置")
                 seen.add(id(handler))
                 handler = getattr(handler, "delegate", None)
-            return getattr(LocalAgentControl(handler), name)(*args, **kwargs)
+            from run.studio_runtime import _message_lock
+            with _message_lock:
+                return getattr(LocalAgentControl(handler), name)(*args, **kwargs)
         return call
 
 
@@ -42,8 +44,12 @@ def create_control_server(handler, runtime_config, *, port):
                                    _make_deepseek_key_setup, _load_json_object)
     tool_token, control_token = local_service_tokens()
     settings = _load_json_object(runtime_config, "Agent runtime configuration")
+    def chat(*args, **kwargs):
+        from run.studio_runtime import _message_lock
+        with _message_lock:
+            return handler(*args, **kwargs)
     return create_server(
-        handler, api_key=tool_token, port=port,
+        chat, api_key=tool_token, port=port,
         local_control=DeferredControl(handler),
         control_api_key=control_token,
         deepseek_key_setup=_make_deepseek_key_setup(handler, runtime_config),

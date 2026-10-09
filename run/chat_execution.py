@@ -50,5 +50,5 @@ def run_workflow_turn(handler, invocation_id, human_feedback, user_message, *, a
         user_contextualized_agent.decision_backend = handler.decision_backend
     return workflow(
         **kwargs, execution_mode=handler.execution_mode, human_feedback=human_feedback,
-        max_steps=1, invocation_id=invocation_id, state_path=str(handler.state_path),
+        max_steps=getattr(handler, "steps_per_turn", 1), invocation_id=invocation_id, state_path=str(handler.state_path),
     )

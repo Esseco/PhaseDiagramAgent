@@ -54,7 +54,7 @@ class LocalAgentControl:
                          "proposal_hash": proposal_hash(proposal)})
         return validate_control_response(PendingResponse,
             {"pending": rows, "count": len(rows), "state_version": state_version,
-             "approval_url": "http://127.0.0.1:8765/phase/approval"})
+             "approval_url": f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"})
 
     def tasks(self):
         state = read_json(self.state_path, {}) or {}

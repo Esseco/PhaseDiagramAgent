@@ -1,0 +1,32 @@
+{
+  "_format": "phase-search-run-overrides-v1",
+  "_scope": "run",
+  "_help": "运行中参数：预算、采样、MC、微调和验证。未填写的项继承锁定模板；后续阶段缺项到使用时再询问。不要在此覆盖初始环境、边界或结构。",
+  "config": {
+    "budgets": {
+      "total_relative_cost": 20000.0
+    },
+    "convergence": {
+      "hull_change_tolerance": 0.003,
+      "stable_model_update_epochs": 2,
+      "final_energy_mae_tolerance": 0.003,
+      "minimum_recent_dft_checks": 1,
+      "coverage_is_hard_condition": false
+    },
+    "run": {
+      "initial_states_per_branch": 4,
+      "seed": 42
+    },
+    "remote_training_validation": {
+      "data_path": "independent.xyz",
+      "data_version": "v1",
+      "criteria": {},
+      "ranking_pairs": [
+        [
+          0,
+          1
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "active_model_version": "base",
+  "memory_candidates": [
+    {
+      "candidate_id": "MCAND-00d533618589cd29",
+      "config_version": null,
+      "evidence_refs": [
+        "training_handoff:0"
+      ],
+      "facts": {
+        "job_key": "j",
+        "missing": [
+          "未参与本轮训练的DFT独立验证extxyz文件(data_path)",
+          "独立验证数据版本(data_version)",
+          "验证标准criteria.max_energy_mae",
+          "验证标准criteria.max_critical_failure_fraction",
+          "验证标准criteria.max_near_hull_ranking_reversals",
+          "同组成近凸包结构索引对ranking_pairs",
+          "旧模型的超算绝对路径及SHA256"
+        ],
+        "reason": "清单已齐；独立验证还需要：未参与本轮训练的DFT独立验证extxyz文件(data_path)；独立验证数据版本(data_version)；验证标准criteria.max_energy_mae；验证标准criteria.max_critical_failure_fraction；验证标准criteria.max_near_hull_ranking_reversals；同组成近凸包结构索引对ranking_pairs；旧模型的超算绝对路径及SHA256。配置remote_training_validation后继续；K折或全量训练数据不作为独立测试，不重复训练。",
+        "stage": "validation_prerequisites_required",
+        "submitted": false,
+        "training_fingerprint": "0c4b7c30a95a114553c5fb7ac54661781cca1eafad272e51ed06044139e46fe6"
+      },
+      "kind": "training_handoff",
+      "model_version": "base",
+      "reference": "0",
+      "status": "candidate"
+    },
+    {
+      "candidate_id": "MCAND-15e02787fbb2c61c",
+      "config_version": null,
+      "evidence_refs": [
+        "training_report:training-report:42118dca5df85486"
+      ],
+      "facts": {
+        "activated": false,
+        "committee_count": 1,
+        "job_id": "j",
+        "limitation": "Fold validation can select checkpoints; final full-data members and QBC need independent checks. No automatic activation.",
+        "metrics": {
+          "energy_MAE_meV_per_atom": 1.0,
+          "energy_RMSE_meV_per_atom": 1.0,
+          "force_MAE_meV_per_A": 2.0,
+          "force_RMSE_meV_per_A": 2.0
+        },
+        "model_files_verified": false,
+        "model_version": "base",
+        "report_id": "training-report:42118dca5df85486",
+        "source": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\outputs\\ui-verification-20261009\\test_gate_persists_handoff_and0\\MLIP-finetune-round-0001\\results",
+        "source_model_version": "base",
+        "status": "completed_report_not_model_validation",
+        "structures": 1,
+        "workflow_status": "inputs_prepared"
+      },
+      "kind": "training_report",
+      "model_version": "base",
+      "reference": "training-report:42118dca5df85486",
+      "status": "candidate"
+    }
+  ],
+  "remote_finetune_jobs": {
+    "j": {
+      "directory": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\outputs\\ui-verification-20261009\\test_gate_persists_handoff_and0\\MLIP-finetune-round-0001",
+      "original_model_version": "base",
+      "report": {
+        "committees": [
+          {
+            "model_id": "com_1"
+          }
+        ]
+      },
+      "status": "inputs_prepared",
+      "training_handoff": {
+        "missing": [
+          "未参与本轮训练的DFT独立验证extxyz文件(data_path)",
+          "独立验证数据版本(data_version)",
+          "验证标准criteria.max_energy_mae",
+          "验证标准criteria.max_critical_failure_fraction",
+          "验证标准criteria.max_near_hull_ranking_reversals",
+          "同组成近凸包结构索引对ranking_pairs",
+          "旧模型的超算绝对路径及SHA256"
+        ],
+        "reason": "清单已齐；独立验证还需要：未参与本轮训练的DFT独立验证extxyz文件(data_path)；独立验证数据版本(data_version)；验证标准criteria.max_energy_mae；验证标准criteria.max_critical_failure_fraction；验证标准criteria.max_near_hull_ranking_reversals；同组成近凸包结构索引对ranking_pairs；旧模型的超算绝对路径及SHA256。配置remote_training_validation后继续；K折或全量训练数据不作为独立测试，不重复训练。",
+        "stage": "validation_prerequisites_required",
+        "submitted": false,
+        "training_fingerprint": "0c4b7c30a95a114553c5fb7ac54661781cca1eafad272e51ed06044139e46fe6"
+      }
+    }
+  },
+  "training_handoff_history": [
+    {
+      "job_key": "j",
+      "missing": [
+        "未参与本轮训练的DFT独立验证extxyz文件(data_path)",
+        "独立验证数据版本(data_version)",
+        "验证标准criteria.max_energy_mae",
+        "验证标准criteria.max_critical_failure_fraction",
+        "验证标准criteria.max_near_hull_ranking_reversals",
+        "同组成近凸包结构索引对ranking_pairs",
+        "旧模型的超算绝对路径及SHA256"
+      ],
+      "reason": "清单已齐；独立验证还需要：未参与本轮训练的DFT独立验证extxyz文件(data_path)；独立验证数据版本(data_version)；验证标准criteria.max_energy_mae；验证标准criteria.max_critical_failure_fraction；验证标准criteria.max_near_hull_ranking_reversals；同组成近凸包结构索引对ranking_pairs；旧模型的超算绝对路径及SHA256。配置remote_training_validation后继续；K折或全量训练数据不作为独立测试，不重复训练。",
+      "stage": "validation_prerequisites_required",
+      "submitted": false,
+      "training_fingerprint": "0c4b7c30a95a114553c5fb7ac54661781cca1eafad272e51ed06044139e46fe6"
+    }
+  ],
+  "training_result_reports": [
+    {
+      "activated": false,
+      "committee_count": 1,
+      "evaluation_type": null,
+      "job_id": "j",
+      "limitation": "Fold validation can select checkpoints; final full-data members and QBC need independent checks. No automatic activation.",
+      "metrics": {
+        "energy_MAE_meV_per_atom": 1.0,
+        "energy_RMSE_meV_per_atom": 1.0,
+        "force_MAE_meV_per_A": 2.0,
+        "force_RMSE_meV_per_A": 2.0
+      },
+      "model_files_verified": false,
+      "report_id": "training-report:42118dca5df85486",
+      "source": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\outputs\\ui-verification-20261009\\test_gate_persists_handoff_and0\\MLIP-finetune-round-0001\\results",
+      "source_model_version": "base",
+      "status": "completed_report_not_model_validation",
+      "structures": 1,
+      "workflow_status": "inputs_prepared"
+    }
+  ]
+}

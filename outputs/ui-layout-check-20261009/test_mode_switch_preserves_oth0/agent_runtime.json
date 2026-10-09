@@ -1,0 +1,10 @@
+{
+  "state_path": "state.json",
+  "ledger_path": "ledger.json",
+  "deepseek": {
+    "model": "existing"
+  },
+  "execution_mode": "automatic",
+  "resume_existing_project": true,
+  "run_steps_per_click": 10
+}

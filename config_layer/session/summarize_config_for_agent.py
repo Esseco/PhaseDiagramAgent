@@ -28,7 +28,15 @@ def summarize_config_for_agent(config: dict, *, source_path, source_hash,
                 "min_det": min(determinants) if determinants else None,
                 "max_det": max(determinants) if determinants else None,
             }
+    from config_layer.session.split_project_config import read_document, run_config_path
+    try:
+        document = read_document(source_path)
+        run_source = str(run_config_path(source_path, document)) if "run_config_file" in document else None
+    except (OSError, ValueError):
+        run_source = None
     return {
+        "initial_config_path": str(source_path),
+        "run_config_path": run_source,
         "source_path": str(source_path),
         "source_sha256": source_hash,
         "boundary_P": boundary.get("P"),

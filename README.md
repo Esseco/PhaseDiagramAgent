@@ -1,185 +1,120 @@
-# Agent-driven materials search
+# Agent 驱动的材料相图搜索
 
-项目以 Agent 为流程调度者：QBC、凸包和覆盖率只提供可验证的科学观测；Agent 在已确认的边界、合法操作、冻结参数和预算内提出 action；所有 action 经过 Execution Policy 和执行层校验后才会派发。
+Agent 在已确认的结构边界与预算内推荐 branch、MC、DFT 和模型更新方案。QBC、凸包、覆盖率与误差提供决策证据；执行层检查权限、参数、版本及预算。科学计算在超算计算节点运行，本地负责对话、输入准备、结果分析和流程恢复。
 
-## 目录
+## 快速开始
 
-```text
-orchestration/      LangGraph图定义、节点适配、状态与Runtime上下文
-config_layer/       defaults/ schema/ session/ runtime/
-decision_layer/     agent/ strategy/ calculation/ scoring/ qbc_selection/
-execution_layer/    policy/ state/ budget/ dispatch/ workflows/ slurm/
-scientific_layer/   structures/ mlip/ mc/ dft/ qbc/ bohb/ features/ training/
-data_layer/         ledger/ memory/ state/ models/
-analysis_layer/     phase/ convergence/ feedback/ state/ cost/
-run/                唯一正式启动入口
-experiments/        不写正式状态的独立方法比较
-tests/              单元测试和跨层集成测试
-docs/               架构、科学接口和文件布局说明
-```
-
-开发导航先看 [项目架构索引](docs/PROJECT_STRUCTURE.md)；编排细节见 [LangGraph架构](docs/LANGGRAPH_ARCHITECTURE.md)。
-
-阅读主动学习流程先看 [科学流程总览](docs/SCIENTIFIC_FLOW_OVERVIEW.md)：按生命周期、动作循环、审批执行三层查看，不需要把所有工具铺在同一张图上。
-
-运行时查看 [本地科学流程面板](http://127.0.0.1:2024/phase/flow)：当前epoch、待办、方案及折叠技术子图；只读，不改变Studio执行图。
-
-超算结果只回传分析必需文件；模型和大日志留在远端，具体清单见 [轻量结果回传](docs/LIGHTWEIGHT_RESULT_TRANSFER.md)。
-
-新计算批次按每轮inputs与results分离，本地处理产品在analysis_outputs；见 [每轮传输布局](docs/ROUND_TRANSFER_LAYOUT.md)。
-
-对话问答与任务推进分开，默认只回答所问；规则与边界见 [对话路由](docs/CONVERSATION_ROUTING.md)。
-
-## 本地启动
-
-默认使用 py1，依赖统一在 `requirements.txt`。Studio 使用标准 `langgraph dev`，工作区环境设置见 [启动说明](docs/STUDIO_LOCAL.md)。也可运行：
+默认本地环境为 `py1`。在源码目录启动，项目数据目录可以独立存放：
 
 ```powershell
-python -m run.studio_service --runtime-config 'E:\0-FM-PhaseDiagram\agent_runtime.json'
+conda activate py1
+Set-Location 'E:\jupyter notebook\1-AL_for_PhaseDiagram\Process_PhaseDiagram'
+python -m run.local_project_launcher
 ```
 
-根目录不再保留重复的 `.cmd` 启动器。安装本地依赖用 `python -m pip install -r requirements.txt`；不用于修改超算科学环境。
+启动器中选择已有 `agent_runtime.json`，或新建独立项目并选择包含初始结构的目录。启动器是项目选择窗口，Studio 提供后续对话和图调试。
 
-## 超算分步模式
+已有项目也可直接启动：
 
-输入与分析输出使用同一 `epochN_实际模型版本` 登记。提交与回传在 `submissions`，分析在 `analysis_outputs`；参数在 `parameters`，流程状态在 `workflow_state`，记忆在 `agent_memory`，母结构与候选在 `structures`。查找文件先查看 `analysis_outputs/output_index.md`，跨轮次总览见 `analysis_outputs/round_summary.csv`。完整布局见 [工作区布局](docs/WORKSPACE_LAYOUT.md)。
+```powershell
+python -m run.studio_service --runtime-config 'E:\0-PhaseDiagram\O3-2ele-NaFeMn\agent_runtime.json'
+```
 
-计算节点无公网时使用 `python -m run.step_runner`。登录节点只执行 `advise`、
-`confirm`、`submit` 和只读 `status`；计算节点只执行 `recover`、`prepare` 以及正式科学
-作业。双方通过原子写入的 JSON 摘要、动作计划、manifest 和结果文件通信，不要求任何
-常驻服务。
+依赖见 [requirements.txt](requirements.txt)；本地安装不改变超算科学环境。各项目使用独立数据目录；同时运行多个服务还需要各自独立端口，当前控制服务默认端口为 8765。
+
+## 配置与日常对话
+
+| 文件 | 用途 |
+| --- | --- |
+| `agent_runtime.json` | 项目启动绑定、服务与路径设置 |
+| `parameters/search_config.project.json` | 初始配置：两端环境、边界、体系组成、母结构、模型与计算设置 |
+| `parameters/run_config.project.json` | 运行配置：预算、采样、MC、微调、验证、收敛与策略 |
+| `parameters/snapshots/` | 每次确认后的完整有效配置版本 |
+
+初始必要信息齐全即可进入搜索建议。缺项、冲突或歧义由 Agent 再次询问；后续阶段缺少的阈值到使用时检查。新项目自动生成两份科学配置；旧单文件仍兼容。
+
+可手动编辑配置，也可直接告诉 Agent“修改运行配置：把入选上限改为……”。手动保存后说“读取配置 JSON”进行检查，或“读取配置 JSON 并继续”在检查通过后推进。任一文件变化都会使旧审核失效，历史作业仍保留原配置版本。
+
+- **查看状态**：只查看，不推进。
+- **继续**：核对回传并推进到下一处需要介入的位置。
+- **激活候选 `<版本>` 原因：`<理由>`**：独立验证通过后单独批准模型。
+- **拒绝候选 `<版本>` 原因：`<理由>`**：记录审阅拒绝。
+
+日常对话支持上下文语义识别，表中的命令是便捷入口，并非唯一可接受措辞。普通路由只用一次轻量调用，发送有界事实和最近问答；见 [自然语言与上下文预算](docs/NATURAL_LANGUAGE_CONTEXT.md)。
+
+本地普通环境默认 py1；本地/远端科学环境分别配置，远端名称由用户提供，不从本地猜测。超算模型路径只作为本地元数据，不在本地加载。详情见 [初始与运行配置](docs/initial_and_run_configuration.md)。
+
+## 搜索与模型更新
 
 ```text
-compute: recover → login: advise → login: confirm → compute: prepare
-→ login: submit → compute: scientific jobs → compute: recover
+Agent推荐branch → 合法性/覆盖/成本检查 → Relax与凸包预筛 → 分档MC
+→ Agent挑选DFT → 计算节点执行 → 回传与分析
+→ 比较补DFT、继续搜索或模型更新的预期收益与成本
 ```
 
-默认分组为 Relax 100 个 task/job、MC 10 个 task/job、DFT 1 个 task/job。配置位于已确认
-快照的 `supercomputer.batch_sizes`，因此修改会产生新的配置版本。同组 task 必须具有
-相同 stage、模型版本、参数和资源 profile。详情见 [分步运行说明](run/README.md)。
+覆盖率和误差是证据，不直接决定进入下一轮。Agent 比较边际收益、成本和不确定性，再提出方案；已选择动作的实际结果与成本进入事实记忆，不虚构未执行方案的收益。见 [轮次预算比较](docs/round_budget_review.md)。
 
-## 调用流程
+初始单模型无法提供委员会QBC。微调采用分组K折评估和全数据训练的最终committee；K折误差不等于最终主模型的独立测试。只有模型独立验证通过、用户单独批准激活后才进入新 epoch；同模型多轮MC不增加epoch。
+
+## 超算作业与结果回传
+
+Agent 生成输入和Slurm脚本，你在超算提交。登录节点负责提交/查询；计算、模型评估及模型文件SHA256均在计算节点执行。模型和大日志留在超算，只回传本地分析必需文件。
+
+| 作业 | 提交入口 | 回传 |
+| --- | --- | --- |
+| Relax / MC | `inputs` 内批次 `GPU.sh` | 对应 `results` |
+| DFT | 对应单任务脚本 | 对应 `results` |
+| 微调 | 训练轮 `inputs/GPU.sh`，一次 | 指标/逐点CSV、模型清单、完成标记 |
+| 补清单 | 原训练轮 `inputs/GPU_manifest.sh` | `results/models.json` |
+| 独立验证 | 原训练轮 `inputs/GPU_validation.sh` | 指定的验证JSON |
+
+回传后说“继续”。默认每个作业分组：Relax最多100个task、MC最多10个模拟、DFT一个结构；分组大小与累计预算上限分别管理。
+
+详细说明：[训练交接](docs/training_handoff.md)、[轻量回传](docs/LIGHTWEIGHT_RESULT_TRANSFER.md)、[每轮传输布局](docs/ROUND_TRANSFER_LAYOUT.md)。无常驻服务的分步模式见 [run/README.md](run/README.md)。
+
+## LangGraph 与恢复
+
+Studio 的 `phase_chat` 进入科学主图，主图包含决策动作、审批执行和 `training_lifecycle` 子图。训练交接有独立的回收、清单检查、作业准备、验证登记与等待节点。
+
+等待清单、验证结果、配置补齐和激活决定使用原生 `interrupt`；项目 `workflow_state/langgraph_training.sqlite` 保存检查点。重启后“继续”携带最新业务状态重新核对文件，不直接执行旧检查点中的建议。作业文件生成保持幂等，模型激活仍使用独立审批。
+
+`workflow_state/state.json` 是业务状态事实源；检查点记录恢复位置。其他搜索阶段沿用现有状态与审批恢复机制，本项目并未把全部科学计算都改成一个全局检查点流程。
+
+Relax、MC与DFT现有回收器完成核对后，回收子图并行汇总部分回传、等待和失败；项目保存 `langgraph_batches.sqlite` 与节点追踪 `node_trace.jsonl`。重试仍需现有审批，不自动追加超算作业。见 [阶段回收与追踪](docs/BATCH_RECOVERY_AND_TRACE.md)。
+
+查看 [真实科学图总览](docs/SCIENTIFIC_FLOW_OVERVIEW.md)、[LangGraph架构](docs/LANGGRAPH_ARCHITECTURE.md) 和 [Studio启动说明](docs/STUDIO_LOCAL.md)。实际HPC推理需通过提交作业验证。
+
+## 数据与记忆
+
+项目数据与源码分开保存：
 
 ```text
-confirmed config + persisted state
-→ state_manager 生成只读 state_t snapshot
-→ decision_layer 仅依据 snapshot 提出统一 action
-→ execution_layer Execution Policy
-→ 版本/冻结参数/权限/预算校验
-→ scientific_layer 计算后端
-→ data_layer 持久化任务与结果
-→ analysis_layer 生成反馈摘要和收敛证据
-→ state_manager 生成 state_{t+1}
-→ Agent 进入下一轮
+parameters/       初始/运行配置与版本快照
+structures/       母结构和候选结构
+submissions/      epoch下的提交inputs与原始results
+analysis_outputs/ 相图、误差、训练数据与诊断
+workflow_state/   状态、台账、审批和检查点
+agent_memory/     项目记忆视图
+logs/             服务日志
+history_backups/  历史备份
 ```
 
-QBC 只计算委员会分歧，不选择 DFT action。DFT、重训练、继续、暂停和停止均由 Agent 提议。
+优先查看项目的 `analysis_outputs/output_index.md` 和 `round_summary.csv`。事实、交接和动作收益进入记忆候选；长期经验经过审阅，不自动把一次建议晋升为长期规则。详见 [工作区布局](docs/WORKSPACE_LAYOUT.md) 与 [决策记忆](data_layer/DECISION_MEMORY.md)。
 
-默认闭环使用“Agent 推荐 branch → 合法/覆盖/成本预筛 → Relax/Hull 预筛 → 分档 MC
-→ 近 hull DFT 单点优先验证 → 有效数据达到门槛后模型更新 → 下一模型版本相图反馈”。
-这一路径准确称为 Relax/Hull 预筛加分档 MC，不称为 BOHB。每批决策冻结 MLIP 版本和
-凸包版本；模型相关能量池隔离保存。Relax 三初态能量标准差只是弱探索项，不是 QBC。
-相图参考采用明确的 eV/O2 口径，模型误差采用 eV/atom；用户提供的金属电压参考只记录
-数值和来源，不由程序替用户判断可靠性。
+## 开发导航
 
-一次 epoch 只表示一次通过独立验证并激活的 MLIP 更新。同一模型下多个 MC 搜索段不增加
-epoch。连续两个模型更新 epoch 的 MAE、允许相稳定区间和 hull 变化达到数值阈值后，
-状态为“数值达标、等待用户接受”；相×SOC 覆盖作为透明证据报告，不是自动硬收敛条件。
-预算耗尽、证据不足、数值达标待确认和用户确认后的结束是不同状态。
+| 目录 | 职责 |
+| --- | --- |
+| orchestration | LangGraph图、节点与运行上下文 |
+| config_layer | 默认配置、校验、会话与有效配置 |
+| decision_layer | Agent建议、策略与评分 |
+| execution_layer | 审批、预算、任务、回收与作业生成 |
+| scientific_layer | 结构、MLIP、MC、DFT、QBC与训练 |
+| data_layer | 台账、模型状态与记忆 |
+| analysis_layer | 相图、误差、覆盖、成本与反馈 |
+| run | 正式启动及对话入口 |
+| tests / experiments | 回归测试与独立方法比较 |
 
-Agent 上下文区分人工长期知识和短期运行记忆。长期层只由人工显式修订；短期层从
-当前相图、覆盖、QBC、预算、收益、失败任务和近期 action 自动重建，不会自动晋升为
-长期知识。使用方法见 [决策记忆](data_layer/DECISION_MEMORY.md)。
+程序接口从 `from run import run_workflow` 进入；`run_active_learning_cycle.py` 为旧调用兼容。新增后端通过adapter/handler接入，不绕过权限、预算和模型版本校验。
 
-## 运行
-
-### Studio 对话模式
-
-首次启动进入配置专用对话：Agent 修改的只是草稿，用户发送“确认配置”后才保存配置版本快照；确认本身不启动任何计算。母结构路径和超算端 mh-1 模型路径作为待审核候选，超算模型不会在本地加载。
-
-使用 Studio 连接本地 Agent。项目实现了内部消息传输
-服务入口 `run.agent_api`；聊天只负责呈现和传递真实用户消息，proposal、
-审批、预算和计算仍由现有工作流控制。启动和配置步骤见
-[Studio 启动说明](docs/STUDIO_LOCAL.md)。
-
-默认解释器为：
-
-```text
-C:\ProgramData\anaconda3\envs\py1\python.exe
-```
-
-Linux/WSL 对应路径通常为：
-
-```text
-/mnt/c/ProgramData/anaconda3/envs/py1/python.exe
-```
-
-正式入口：
-
-```python
-from run import default_run_config, run_workflow
-
-result = run_workflow(
-    manager,
-    phase_references,
-    default_run_config(),
-    confirmed_config_session,
-    dispatcher=dispatcher,
-    agent_client=agent_client,
-    execution_mode="interactive",  # 或 autonomous/dry_run/replay
-    invocation_id="cycle-0001",
-    max_steps=20,
-    handlers={
-        "update_mlip": model_update_handler,
-    },
-    task_runner=slurm_runner,  # 可选：回收上一批并按预算生成/提交下一批
-)
-```
-
-首次配置先询问本地工作区根目录并展示派生保存路径；只有用户回复“确认存储路径”后，
-才在该目录生成带注释的设置 JSON。用户编辑并导入后，Agent 检查草稿；只有用户发送“确认配置”后
-才保存版本快照。这两个确认都不会启动计算。通常机器侧只需传入 `mlip.model_path` 指向 `mace-mh-1`。未填写 DFT 参数时，
-atomate 使用自身默认 static/structure-optimization 配置。初始单模型不报告 QBC
-不确定性；后续四成员 committee 固定第 0 个模型执行 Relax/MC，四个成员共同计算 QBC。
-
-`generate_branches`、`allocate_mc_bohb`、`select_dft_candidates` 和
-`run_calculation_stage` 已由正式入口提供默认 handler。Agent 选择本轮 Branch 批次并
-给出 MC 总预算；Hyperband 分配 fidelity。BOHB 选择模型仅保留为关闭的实验接口。QBC 只生成不确定性
-指标；Agent 提交分类式 DFT 决策，默认 handler 复用统一校验和预算事务生成 DFT
-子任务。`dispatcher` 或 `stage_context_factory` 提供实际计算适配器。模型更新仍可
-通过显式 handler 注入。
-
-`run_active_learning_cycle.py` 仅用于旧状态/旧调用方兼容，不再是公开入口；新代码从 `from run import run_workflow` 启动。
-
-`run_workflow` 从 confirmed snapshot 构建唯一 effective config。调用方传入的
-DFT 参数、预算、随机种子等受控字段会被忽略；运行时只接受路径、后端环境、模型
-文件位置和 API adapter 等机器相关设置。事件循环会在批准等待、异步任务、暂停、
-预算耗尽、失败或收敛时返回，并可从 `state_path` 恢复。
-
-真实后端环境保持原配置：主控使用 `py1`；MACE Relax、MC 和训练作业使用 `mace` 环境；atomate/DFT 通过原 adapter 或 dispatcher 注入。入口不会自行启动昂贵计算。
-
-## 扩展位置
-
-- 新体系或边界：`config_layer/`
-- 新 Agent/规则策略：`decision_layer/`
-- 新工具、handler、预算事务或调度方式：`execution_layer/`
-- 新结构生成策略：`scientific_layer/structures/`
-- 层氧候选超胞枚举：`scientific_layer/structures/enumerate_layered_oxide_supercells.py`；仅输出建议 H，不自动更改边界
-- 新特征或代理模型：`scientific_layer/features/` 或 `scientific_layer/surrogate_models/`
-- 新计算后端：`scientific_layer/mlip/`、`mc/`、`dft/`
-- 新 QBC/BOHB/训练算法：对应 scientific 子目录
-- 新分析指标：`analysis_layer/`
-- 新离线比较或示例：`experiments/`
-
-测试：
-
-```bash
-C:\ProgramData\anaconda3\envs\py1\python.exe -m pytest -q
-```
-## 项目与数据目录
-
-目录管理说明见 [docs/ROOT_LAYOUT.md](docs/ROOT_LAYOUT.md)；架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，DFT 接口见 [docs/DFT_INTERFACE.md](docs/DFT_INTERFACE.md)。日志集中到工作目录 logs，历史备份集中到 backups；现有配置与任务结果路径不变。
-
-综合相图的校正范围、来源和目录见 [docs/COMBINED_PHASE_DIAGRAM.md](docs/COMBINED_PHASE_DIAGRAM.md)。
-
-Agent生成策略与目标区域分配见 [docs/GENERATION_ALLOCATION.md](docs/GENERATION_ALLOCATION.md)。
+进一步阅读：[架构索引](docs/PROJECT_STRUCTURE.md)、[对话路由](docs/CONVERSATION_ROUTING.md)。开发默认使用py1；运行与修改遵循 [AGENTS.md](AGENTS.md)。

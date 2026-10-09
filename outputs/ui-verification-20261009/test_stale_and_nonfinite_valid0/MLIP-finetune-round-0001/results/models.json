@@ -1,0 +1,1 @@
+[{"model_id": "com_1", "source_model_version": "base", "is_main_model": true, "is_committee_member": true, "training_round": "MLIP-finetune-round-0001", "remote_model_path": "/hpc/com_1.model", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]

@@ -1,7 +1,9 @@
 """Check missing, conflicts and ambiguity without launching work."""
 
 
-def validate_search_config(config: dict) -> dict:
+def validate_search_config(config: dict, *, stage="full") -> dict:
+    if stage not in {"full", "startup"}:
+        raise ValueError("unknown_configuration_stage")
     missing, conflicts, ambiguities = [], [], []
     required = ["system", "frozen_parameters", "generation_actions", "calculation", "budgets", "dft", "convergence", "agent"]
     missing.extend(name for name in required if name not in config)
@@ -75,4 +77,10 @@ def validate_search_config(config: dict) -> dict:
         conflicts.append("duplicate_frozen_parameter")
     if (config.get("budgets") or {}).get("total_relative_cost") is None:
         ambiguities.append("budgets.total_relative_cost")
-    return {"valid": not missing and not conflicts and not ambiguities, "missing": sorted(set(missing)), "conflicts": sorted(set(conflicts)), "ambiguities": sorted(set(ambiguities)), "hard_constraints": ["system.constraints", "frozen_parameters", "budgets", "dft.parameters", "convergence"], "adjustable_suggestions": ["branch_partition_suggestions", "generation_actions.quotas", "mc_policy.agent_adjustable"]}
+    deferred = []
+    if stage == "startup":
+        later = ("convergence", "mlip_finetune", "mc_policy", "budgets.total_relative_cost")
+        deferred = sorted({item for item in missing + ambiguities if item.startswith(later)})
+        missing = [item for item in missing if item not in deferred]
+        ambiguities = [item for item in ambiguities if item not in deferred]
+    return {"deferred_stage_fields": deferred, "validation_stage": stage, "valid": not missing and not conflicts and not ambiguities, "missing": sorted(set(missing)), "conflicts": sorted(set(conflicts)), "ambiguities": sorted(set(ambiguities)), "hard_constraints": ["system.constraints", "frozen_parameters", "budgets", "dft.parameters", "convergence"], "adjustable_suggestions": ["branch_partition_suggestions", "generation_actions.quotas", "mc_policy.agent_adjustable"]}

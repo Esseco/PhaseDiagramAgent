@@ -15,6 +15,9 @@ def apply_config_revision(session: dict, patch: dict, *, reasons=None, author="u
         old = deepcopy(target.get(parts[-1])); target[parts[-1]] = deepcopy(new_value)
         permission = classify_config_permission(path, updated["config"])
         changes.append({"path": path, "old": old, "new": deepcopy(new_value), "reason": (reasons or {}).get(path), "constraint_type": "hard" if permission == "hard_constraint" else "adjustable" if permission == "adjustable_policy" else "unclassified"})
+    if any(path.startswith("system.boundary") for path in patch):
+        from config_layer.session.synchronize_system_scope import synchronize_system_scope
+        updated["config"] = synchronize_system_scope(updated["config"])
     updated["draft_revision"] += 1
     updated["dialogue"].append({"type": "config_revision", "author": author, "revision": updated["draft_revision"], "changes": changes})
     return updated

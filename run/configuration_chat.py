@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from copy import deepcopy
+import os
 from pathlib import Path
 
 from config_layer.schema.validate_search_config import validate_search_config
@@ -21,7 +22,7 @@ from scientific_layer.structures.boundary_utils import allowed_phases
 
 
 CONFIG_AGENT_SYSTEM_PROMPT = """你是材料相图搜索项目的首次配置助手，不是计算执行器。
-首次配置必须分别确认python_environments.local_python、local_mlip、remote_python、remote_mlip。本地普通环境默认py1、本地MLIP默认py-mace仅为本地候选；超算环境必须由用户提供，禁止复制本地名称或猜测。remote_python是远端DFT/提取所用环境，remote_mlip是远端Relax/MC/MLIP预测环境；可填current表示用户提交脚本已激活的环境。环境信息不明确时集中询问，不运行科学计算。后续模型版本变化不改变两端环境归属。
+首次配置只需要确认本地/超算环境、搜索边界、初始母结构、模型路径及必要计算设置，即可进入搜索建议。预算、采样、MC、微调、独立验证与收敛的后续缺项到使用该阶段时再集中询问，不要求启动前逐项填写。初始配置与运行配置分别保存在两个文件；Agent按参数所属范围写入相应文件，不用运行建议改写初始边界。首次配置必须分别确认python_environments.local_python、local_mlip、remote_python、remote_mlip。本地普通环境默认py1、本地MLIP默认py-mace仅为本地候选；超算环境必须由用户提供，禁止复制本地名称或猜测。remote_python是远端DFT/提取所用环境，remote_mlip是远端Relax/MC/MLIP预测环境；可填current表示用户提交脚本已激活的环境。环境信息不明确时集中询问，不运行科学计算。后续模型版本变化不改变两端环境归属。
 Relax每个提交作业最多100个结构，MC每个提交作业最多10个模拟（每个branch的MC结果仍独立），DFT一个作业一个结构；这是supercomputer.batch_sizes或运行时stage_batch_sizes的分组限制，超出就拆分作业。budgets.stage_limits.max_tasks是独立的累计预算限制，不能把它解释为每个作业上限，也不能因入选branch增加自动建议增改它。用户说每个作业/每个任务弛豫数量时，应修改分组大小。generation_actions.max_det_H不存在，不得新增该字段。
 只修改当前用户明确指定的参数，其他参数原值保留。不要为满足数量而擅自调整候选配额、预算、策略、相边界或全局结构限制；关联调整只能提出建议。没有“候选/生成量/总配额”等限定时，“300个branch”按入选上限run.batch_size理解，不是run.total_quota。本轮det(H)上限属于生成动作max_det_H，不得写入budgets.structure_limits.max_det_H；只有明确首轮配置才用system.H_generation.first_round_max_det_H，明确全局边界才改全局字段。读取配置不能恢复旧默认覆盖用户已确认值。
 editable_field_catalog 是程序提供的真实配置字段目录。用户只需说中文含义和目标值，你负责从目录定位字段，不得要求用户提供内部字段路径。目录包含被精简摘要省略的参数；摘要未展示不等于字段不存在。初态数量对应 run.initial_states_per_branch，入选上限对应 run.batch_size，候选生成量对应 run.total_quota；初态规则不属于DFT。用户明确要求修改且值明确时直接返回patch和write_requested=true。确有多个不同语义字段时只集中问一个必要问题。不得声称已写入，写入是否成功由程序返回。
@@ -32,7 +33,7 @@ editable_field_catalog 是程序提供的真实配置字段目录。用户只需
 当 mode 为 configuration_json_review 时，只检查并解释用户刚导入的 JSON 配置，patch 必须为空；列出有具体字段和值作为证据的缺项、冲突或歧义。readiness 是程序检查的权威结果；若它 ready=true 且你没有发现可定位的新问题，应令 ready_for_search=true。可选阈值、空配额、尚未接通的远端提交接口不阻止仅生成搜索建议。不要猜测问题、重复索要已确认信息或擅自填值。
 程序已经读取了 verified_config_source.source_path，并在导入时解析母结构、生成合法 H、计算允许相并集和校验结果。你只能依据程序提供的 verified_config_source 和本次 draft_config 讨论事实；不得引用旧对话中的配置值，不得声称程序无法读取文件，不得要求用户手抄已生成的 H 矩阵。生成失败时程序会给出具体错误，你不要猜测生成结果。boundary.P 的允许相是端点与中间相的并集；H 的四相键属于这个并集。超算调度器未接通不会阻止只生成搜索建议，但不能提交作业。
 以下均是已定义的非阻塞口径，不得要求用户逐项重复确认：parameter_source=atomate_defaults 时空 dft.parameters 表示采用 atomate 默认值；空 generation_actions.quotas 和 focus_regions 表示由调度策略动态决定；阶段 max_cost 是各阶段独立安全上限，不要求求和小于总预算，实际累计仍受 total_relative_cost 约束；用户写入配置文件的收敛阈值视为已选择值；空 scheduler 命令只表示暂不能远端提交，不阻止配置确认和搜索建议。generated_H=false 且 readiness.status=file_not_imported 只表示尚未执行导入，不能称为 H 缺失或要求再次确认生成参数。
-本项目初次配置的重点是本地母结构路径、体系 boundary、远端 MACE 模型路径、预算、DFT/atomate 参数和收敛标准。科学计算 MLIP 默认是 mace-mh-1；calculation.mlip_version、mlip.name 和 bohb.scope.mlip_version 默认保持一致。不要询问用户选择 MLIP 版本，也不要与 DeepSeek Agent 模型混淆。用户只需提供超算端 mlip.model_path；路径缺失时只问该路径。仅当用户明确提出更换 MLIP 时才讨论其他版本。
+本项目初次配置的重点是两端环境、本地母结构路径、体系 boundary、远端 MACE 模型路径和必要DFT/atomate设置。运行预算及后续收敛、微调、验证配置在运行配置文件中，可沿用已列明的默认值；未设置的后续阶段项不要阻止初次搜索建议。科学计算 MLIP 默认是 mace-mh-1；calculation.mlip_version、mlip.name 和 bohb.scope.mlip_version 默认保持一致。不要询问用户选择 MLIP 版本，也不要与 DeepSeek Agent 模型混淆。用户只需提供超算端 mlip.model_path；路径缺失时只问该路径。仅当用户明确提出更换 MLIP 时才讨论其他版本。
 首次配置先收集工作区根路径和 Agent 模型版本（DeepSeek V4.1 Flash 或 V4 Pro）；允许同一条消息或分别提供。只展示这两项和设置 JSON 路径，等待用户回复“确认”。确认后将工作区根路径视为已确认的锁定事实；后续必须从 setup_facts 读取，绝不能再次索要或要求重复确认该路径。确认前不得创建设置 JSON/工作区目录或修改运行时模型。确认后更新本地运行时模型（若用户选择切换）、生成带注释的 JSON，并区分列出必填项和建议检查项。用户编辑 JSON 后可发送“读取配置 JSON”进行审核；仅审核模式通过后，等待用户简短回复“同意”，再保存配置快照并进入搜索 run。用户也可发送“读取配置 JSON 并继续”，这表示仅在 Agent 与程序检查均通过时条件确认继续；此时直接保存快照并进入搜索 Agent，不再要求第二次同意。两种方式都只进入搜索建议阶段，不派发科学计算。不得在此之前派发科学计算。DeepSeek 模型属于本地 Agent 运行时，不写入科学搜索配置。
 每次配置对话都必须结合 conversation_context 中最近的问答理解短答（例如“是的”是对紧邻前一条助手问题的回答），不可丢失上下文、重复询问已确认字段或把一个确认泛化成其他问题。若紧邻问题是在确认 calculation.mlip_version 与 bohb.scope.mlip_version 使用 mace-mh-1，用户回答肯定，则将两字段记为 mace-mh-1 并告知已记录；不得转而重问工作区路径。
 配置 JSON 输出后说明工作区和主要文件位置，并分别列出必填项与建议检查项；用户可调整 storage.paths。只有 Agent 和程序检查通过，且用户已明确回复“同意”或使用“读取配置 JSON 并继续”作条件确认后，才进入搜索建议流程；不会因此自动提交计算。
@@ -66,7 +67,7 @@ def configuration_readiness(session: dict, *, base_directory, phase_references_p
     """Return missing/conflicting facts required before confirming first-run config."""
     config = session.get("config") or {}
     try:
-        audit = validate_search_config(config)
+        audit = validate_search_config(config, stage="startup")
     except (TypeError, ValueError, KeyError, AttributeError) as error:
         audit = {"missing": [], "conflicts": [f"配置字段格式无效：{error}"], "ambiguities": []}
     missing = list(audit.get("missing") or [])
@@ -288,7 +289,7 @@ class ConfigurationChatHandler:
         if session.get("status") != "confirmed" and session.get("setup_stage") == "json_ready":
             session = self._sync_editable_source(session)
         if session.get("status") == "confirmed":
-            if _is_config_revision_request(message):
+            if _is_config_revision_request(message) or _is_config_json_import_command(message):
                 updated = deepcopy(session)
                 updated["status"] = "draft"
                 updated["setup_stage"] = "json_ready"
@@ -628,6 +629,9 @@ class ConfigurationChatHandler:
                 bootstrap_hints=session.get("bootstrap_hints"),
                 workspace_defaults=storage,
             )
+            if draft_path.name.endswith(".project.json"):
+                from config_layer.session.split_project_config import split_project_file
+                split_project_file(draft_path)
         except (OSError, TypeError, ValueError) as error:
             reply = (
                 f"设置 JSON 写入失败：{type(error).__name__}: {error}。"
@@ -663,8 +667,15 @@ class ConfigurationChatHandler:
         self.workspace_root_default = root
         self.editable_config_path = draft_path
 
+        from config_layer.session.split_project_config import read_document, run_config_path
+        try:
+            split_document = read_document(draft_path) if draft_path.name.endswith(".project.json") else {}
+        except (OSError, ValueError):
+            split_document = {}  # Preserve unreadable pre-existing drafts for explicit import diagnostics.
+        run_note = (f"\n运行配置：{run_config_path(draft_path, split_document)}。"
+                    if "run_config_file" in split_document else "")
         if created:
-            status = f"已在确认的工作区生成带注释的设置 JSON：{draft_path}。"
+            status = f"已在确认的工作区生成初始配置 JSON：{draft_path}。" + run_note
         else:
             status = f"该位置已有设置文件，未覆盖：{draft_path}。"
         reply = (
@@ -728,7 +739,7 @@ class ConfigurationChatHandler:
             config = materialize_layered_h(config)
             if mother_structure_digest(config) != mother_digest_before:
                 raise ValueError("母结构文件在生成 H 期间发生变化，请确认文件稳定后重新读取")
-            audit = validate_search_config(config)
+            audit = validate_search_config(config, stage="startup")
             imported_config_hash = self._editable_config_hash()
             if source_hash_before != imported_config_hash:
                 raise ValueError("配置文件在读取或生成 H 期间发生变化，请保存后重新读取")
@@ -1006,8 +1017,9 @@ class ConfigurationChatHandler:
         if self.editable_config_path is None:
             return None
         try:
-            return hashlib.sha256(self.editable_config_path.read_bytes()).hexdigest()
-        except OSError:
+            from config_layer.session.split_project_config import editable_project_hash
+            return editable_project_hash(self.editable_config_path)
+        except (OSError, ValueError, TypeError):
             return None
 
     def _confirm(self, session):
@@ -1064,7 +1076,7 @@ class ConfigurationChatHandler:
     @staticmethod
     def _unavailable_message():
         return ("当前是配置对话模式；尚未确认配置，也不会运行计算。"
-                "本地 DeepSeek API 尚未启用。请打开本机设置页 http://127.0.0.1:8765/phase/setup，"
+                f"本地 DeepSeek API 尚未启用。请打开本机设置页 http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/setup，"
                 "粘贴 API Key 并测试连接；成功后无需重启服务。密钥只保存在本机系统凭据库。")
 
 
@@ -1093,7 +1105,7 @@ def _config_json_command_mode(message):
     """Accept short commands and clear natural-language requests to re-read the file."""
     normalized = re.sub(r"[\s,，;；。.!！？?、:：]", "", str(message).strip().lower())
     continue_commands = {
-        "读取配置json并继续", "读取配置json检查通过后继续", "读取配置json审核通过后继续",
+        "读取配置json并继续", "读取初始配置并继续", "读取运行配置并继续", "读取配置json检查通过后继续", "读取配置json审核通过后继续",
         "读取配置json如果没问题就继续", "读取配置json没问题就继续",
         "读取配置json如检查通过则继续", "readconfigjsonandcontinue",
         "readconfigjsoncontinueifvalid",
@@ -1102,6 +1114,7 @@ def _config_json_command_mode(message):
         return "continue"
     review_commands = {
         "读取配置json", "检查配置json", "审查配置json",
+        "读取初始配置", "读取运行配置", "读取初始配置json", "读取运行配置json",
         "读取配置", "检查配置", "审查配置", "重新读取配置",
         "readconfigjson", "reviewconfigjson",
     }

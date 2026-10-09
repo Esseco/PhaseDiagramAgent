@@ -8,13 +8,15 @@ from starlette.responses import HTMLResponse
 from starlette.routing import Route
 
 _handler = None
+_message_lock = threading.RLock()
 
 
 def send_project_message(text, thread_id):
     if _handler is None:
         raise RuntimeError("Studio project runtime has not started")
     from run.agent_api import _chat_content
-    return _chat_content(_handler([{"role": "user", "content": text}], conversation_id=thread_id))
+    with _message_lock:
+        return _chat_content(_handler([{"role": "user", "content": text}], conversation_id=thread_id))
 
 
 @asynccontextmanager
@@ -28,7 +30,7 @@ async def lifespan(app):
     if _handler is not None:
         raise RuntimeError("Studio runtime already owns a project handler")
     handler = create_agent_runtime(config)
-    control = create_control_server(handler, config, port=8765)
+    control = create_control_server(handler, config, port=int(os.environ.get("PHASE_CONTROL_PORT", "8765")))
     worker = threading.Thread(target=control.serve_forever, daemon=True)
     _handler = handler
     worker.start()

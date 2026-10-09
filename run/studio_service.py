@@ -9,11 +9,11 @@ import socket
 from urllib.request import urlopen
 
 
-def preflight(config_path, port):
+def preflight(config_path, port, control_port=8765):
     path = Path(config_path).resolve()
     if not path.is_file():
         raise ValueError(f"Runtime configuration does not exist: {path}")
-    for number in (8765, port):
+    for number in (control_port, port):
         with socket.socket() as listener:
             try:
                 listener.bind(("127.0.0.1", number))
@@ -32,20 +32,32 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=2024)
     parser.add_argument("--parent-pid", type=int)
     args = parser.parse_args(argv)
-    if args.control_port != 8765 or not 1 <= args.port <= 65535 or args.port == args.control_port:
-        parser.error("Studio gateway currently requires control port 8765 and a different valid Studio port")
-    config_path, cli = preflight(args.runtime_config, args.port)
+    if not all(1 <= p <= 65535 for p in (args.port, args.control_port)) or args.port == args.control_port:
+        parser.error("Studio 和控制端口必须有效且不同")
+    from run.project_service import project_lock
+    with project_lock(args.runtime_config):
+        run_service(args)
+
+
+def run_service(args):
+    from run.project_service import prepare_studio_config, write_service
+    from run.local_project_launcher import validate_project_paths
+    import psutil
+    config_path, cli = preflight(args.runtime_config, args.port, args.control_port)
+    validate_project_paths(config_path)
+    graph_config = prepare_studio_config(config_path)
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["LANGSMITH_TRACING"] = "false"
     env["PHASE_AGENT_RUNTIME_CONFIG"] = str(config_path)
+    env["PHASE_CONTROL_PORT"] = str(args.control_port)
     env["PHASE_STUDIO_RECEIPT_PATH"] = str(Path(args.runtime_config).resolve().parent /
                                            "workflow_state" / "studio_gateway" / "gateway.json")
     child = None
     try:
-        child = subprocess.Popen([str(cli), "dev", "--host", "127.0.0.1", "--port", str(args.port),
+        child = subprocess.Popen([str(cli), "dev", "--config", str(graph_config), "--host", "127.0.0.1", "--port", str(args.port),
                                   "--no-browser", "--no-reload"], env=env,
-                                 cwd=Path(__file__).resolve().parent.parent,
+                                 cwd=graph_config.parent,
                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         import psutil
         deadline = time.monotonic() + 90
@@ -60,6 +72,9 @@ def main(argv=None):
                 except OSError:
                     pass
                 if ready:
+                    write_service(config_path, {"pid": os.getpid(), "process_started": psutil.Process().create_time(),
+                        "runtime_config": str(config_path), "project_name": config_path.parent.name,
+                        "control_port": args.control_port, "studio_port": args.port, "status": "ready"})
                     print(f"READY: Studio API http://127.0.0.1:{args.port}", flush=True)
                     print(f"Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:{args.port}", flush=True)
                     print("Graph: phase_chat; keep this terminal open. Ctrl+C stops both services.", flush=True)
@@ -71,6 +86,7 @@ def main(argv=None):
     except KeyboardInterrupt:
         print("Studio stopped.", flush=True)
     finally:
+        write_service(config_path, {"status": "stopped"})
         if child and child.poll() is None:
             child.terminate()
             child.wait(timeout=15)

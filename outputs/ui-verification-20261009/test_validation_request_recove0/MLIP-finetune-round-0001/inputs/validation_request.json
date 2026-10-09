@@ -1,0 +1,38 @@
+{
+  "training_fingerprint": "0c4b7c30a95a114553c5fb7ac54661781cca1eafad272e51ed06044139e46fe6",
+  "data_sha256": "0275fca08c216c77b2a122787b6491a6796ab293e4097e5d62162c0ed4910f08",
+  "training_sha256": "c2fb788c7deedbeaa296e424d4c2921b871a4f6cb4cf393c1c1105653ab399b4",
+  "data_version": "independent-v1",
+  "old_model": {
+    "version": "base",
+    "model_path": "/hpc/base.model",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "new_model": {
+    "model_id": "com_1",
+    "source_model_version": "base",
+    "is_main_model": true,
+    "is_committee_member": true,
+    "training_round": "MLIP-finetune-round-0001",
+    "remote_model_path": "/hpc/com_1.model",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_path": "/hpc/com_1.model",
+    "version": "remote-j-0c4b7c30a95a",
+    "dataset_version": "MLIP-finetune-round-0001"
+  },
+  "criteria": {
+    "max_energy_mae": 0.01,
+    "max_critical_failure_fraction": 0,
+    "max_near_hull_ranking_reversals": 0,
+    "max_force_rmse": 0.1
+  },
+  "ranking_pairs": [
+    [
+      0,
+      1
+    ]
+  ],
+  "energy_key": "REF_energy",
+  "forces_key": "REF_forces",
+  "request_id": "7dbd3315afbad379dc693c0a"
+}
