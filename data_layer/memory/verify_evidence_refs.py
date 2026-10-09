@@ -3,6 +3,10 @@
 
 def verify_evidence_refs(state, refs, *, scope):
     indexes = {
+        "training_report": {str(row.get("report_id")) for row in state.get("training_result_reports") or []},
+        "round_budget_outcome": {str(row.get("record_id")) for row in state.get("action_records") or []
+                                 if (row.get("final_action") or {}).get("round_budget_review")},
+        "decision_outcome": {str(row.get("record_id")) for row in state.get("action_records") or []},
         "task": {str(row.get("task_id")) for row in state.get("tasks") or []},
         "failed_task": {str(row.get("task_id")) for row in state.get("tasks") or []
                         if row.get("status") in {"failed", "timeout"}},

@@ -1,6 +1,0 @@
-{
-  "job_id": "mock-000001",
-  "script_path": "outputs/remote-dry-run/mock-remote/batches/remote-000001/submit.sbatch",
-  "status": "submitted",
-  "submission_token": "submit:remote-000001:724ec7dfa9597a2835e3cc62a9e8279d58dac4ced1577d86bf267f5101532497"
-}

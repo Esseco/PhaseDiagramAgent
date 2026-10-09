@@ -37,8 +37,8 @@ def test_relax_101_tasks_use_two_jobs(tmp_path):
     assert set(first["batch"]["task_ids"]).isdisjoint(second["batch"]["task_ids"])
     first_directory = Path(first["batch"]["upload_directory"])
     second_directory = Path(second["batch"]["upload_directory"])
-    assert first_directory.parts[-4:-2] == ("MLIP-round-0001_mh-1", "Search-group-0001")
-    assert first_directory.parent.name == "Relax-0001"
+    assert first_directory.parts[-5:-3] == ("epoch0_mh-1", "Search-group-0001")
+    assert first_directory.parent.parent.name == "Relax-0001"
     assert first_directory.name == "Relax-submission-0001_remote-000001"
     assert first_directory.parent == second_directory.parent
     assert second_directory.name == "Relax-submission-0002_remote-000002"
@@ -64,8 +64,8 @@ def test_mc_21_tasks_use_three_jobs_without_splitting_branches(tmp_path):
     second = runner.prepare(first["state"])
     third = runner.prepare(second["state"])
     assert [len(row["batch"]["task_ids"]) for row in (first, second, third)] == [9, 9, 3]
-    assert Path(first["batch"]["upload_directory"]).parts[-3] == "Search-group-0001"
-    assert Path(first["batch"]["upload_directory"]).parent.name == "Relax-0001_MC-round-0001"
+    assert Path(first["batch"]["upload_directory"]).parts[-4] == "Search-group-0001"
+    assert Path(first["batch"]["upload_directory"]).parent.parent.name == "Relax-0001_MC-round-0001"
     assert Path(second["batch"]["upload_directory"]).name == "MC-sampling-0002_remote-000002"
     assert Path(third["batch"]["upload_directory"]).name == "MC-sampling-0003_remote-000003"
     script = Path(first["batch"]["upload_directory"], "GPU.sh").read_text(encoding="utf-8")
@@ -84,7 +84,7 @@ def test_two_mc_allocations_have_separate_results_and_never_mix(tmp_path):
     assert first["batch"]["task_ids"] == ["T-0"]
     assert second["batch"]["task_ids"] == ["T-1"]
     assert first["batch"]["results_directory"] != second["batch"]["results_directory"]
-    assert Path(second["batch"]["upload_directory"]).parent.name == "Relax-0001_MC-round-0002"
+    assert Path(second["batch"]["upload_directory"]).parent.parent.name == "Relax-0001_MC-round-0002"
 
 
 def test_new_model_version_starts_a_new_mlip_round(tmp_path):
@@ -104,7 +104,7 @@ def test_new_model_version_starts_a_new_mlip_round(tmp_path):
     second = runner.prepare(state)
     assert second["batch"]["mlip_round"] == 2
     assert second["batch"]["submission_index"] == 1
-    assert "MLIP-round-0002_mh-2" in Path(second["batch"]["upload_directory"]).parts
+    assert "epoch1_mh-2" in Path(second["batch"]["upload_directory"]).parts
 
 
 def test_batch_continues_after_one_failed_task(tmp_path):

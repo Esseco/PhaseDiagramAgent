@@ -11,7 +11,9 @@ from execution_layer.local.prepare_local_batch_files import prepare_local_batch_
 def create_workflow_handlers(
     extra_handlers=None, *, stage_registry=None, candidates_provider=None, qbc_evaluator=None
 ):
+    from execution_layer.workflows.request_strategy_revision import request_strategy_revision
     handlers = {
+        "adjust_strategy": request_strategy_revision,
         "check_convergence": _check_convergence,
         "pause_search": _pause_search,
         "restart_failed_task": _restart_failed_task,
@@ -32,8 +34,9 @@ def _update_mlip(*, action, context):
     state = context.get("event_state") or {}
     parameters = action.get("parameters") or {}
     trigger = {**parameters, "action": parameters.get("action", "RETRAIN_MLIP")}
+    input_only = parameters.get("prepare_inputs_only") is True and trigger["action"] == "RETRAIN_MLIP"
     if trigger["action"] == "RETRAIN_MLIP":
-        if (config.get("mlip_finetune") or {}).get("enabled") is not True:
+        if not input_only and (config.get("mlip_finetune") or {}).get("enabled") is not True:
             return {"status": "not_configured", "reason": "微调未启用；请先修订并确认配置。", "state": state}
         from analysis_layer.state.post_dft_assessment import post_dft_assessment
         assessment = post_dft_assessment(state, config)
@@ -49,6 +52,10 @@ def _update_mlip(*, action, context):
         if len(valid) < minimum:
             return {"status": "insufficient_new_data", "reason": f"新增合格数据 {len(valid)}/{minimum}；未训练。", "state": state}
     handler = context.get("model_update_handler")
+    if input_only or (trigger["action"] == "RETRAIN_MLIP" and not callable(handler)
+            and not callable(context.get("mlip_trainer"))):
+        from execution_layer.workflows.prepare_remote_finetune import prepare_remote_finetune
+        return prepare_remote_finetune(state, config)
     if not callable(handler):
         from execution_layer.workflows.create_model_update_handler import create_model_update_handler
         handler = create_model_update_handler(
@@ -62,6 +69,8 @@ def _update_mlip(*, action, context):
 
 def _check_convergence(*, action, context):
     state = context.get("event_state") or {}
+    if (state.get("model_refresh") or {}).get("partial"):
+        return {"status": "not_converged", "reason": "partial_model_refresh_not_global_convergence_evidence"}
     rules = (context.get("effective_config") or {}).get("convergence") or {}
     result = check_global_convergence(state, rules=_normalize_rules(rules))
     if result.get("status") == "finished":

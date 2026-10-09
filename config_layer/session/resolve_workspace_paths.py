@@ -8,17 +8,17 @@ from config_layer.session.validate_workspace_root import validate_workspace_root
 
 
 DEFAULT_WORKSPACE_PATHS = {
-    "config_snapshots": "config_snapshots",
-    "state": "current/state.json",
-    "ledger": "current/phase_data.json",
-    "branch_energy_pool_ledger": "current/branch_energy_pools.json",
-    "structures": "current/candidate_structures",
-    "phase_diagrams": "current/phase_diagrams",
-    "qbc_results": "current/qbc/qbc_results.json",
-    "work": "current/work",
-    "approvals": "current/approvals",
-    "approved_batches": "current/approved_batches",
-    "upload_batches": "upload_batches",
+    "config_snapshots": "parameters/snapshots",
+    "state": "workflow_state/state.json",
+    "ledger": "workflow_state/ledgers/phase_data.json",
+    "branch_energy_pool_ledger": "workflow_state/ledgers/branch_energy_pools.json",
+    "structures": "structures/candidate_structures",
+    "phase_diagrams": "analysis_outputs",
+    "qbc_results": "workflow_state/cache/qbc/qbc_results.json",
+    "work": "workflow_state/work",
+    "approvals": "workflow_state/approvals",
+    "approved_batches": "workflow_state/approved_batches",
+    "upload_batches": "submissions",
     "new_runs": "open_webui_runs",
 }
 

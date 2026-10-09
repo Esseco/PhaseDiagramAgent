@@ -8,7 +8,7 @@ from config_layer.session.create_config_draft import create_config_draft
 from execution_layer.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
 from execution_layer.dispatch.create_tool_registry import create_tool_registry
 from run.main import run_workflow
-from run.open_webui_api import format_workflow_reply
+from run.agent_api import format_workflow_reply
 
 
 def _confirmed_session():

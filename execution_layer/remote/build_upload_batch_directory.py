@@ -18,7 +18,7 @@ STAGE_NAMES = {
 
 def build_upload_batch_directory(root, state, *, batch_id, stage, model_version,
                                  operation_id=None, segment_index=None, search_group_index=None,
-                                 parent_relax_round=None):
+                                 parent_relax_round=None, model_refresh_round=None, refresh_operation=None):
     """Return and register a stable, readable directory for one new batch."""
     layout = state.setdefault("upload_layout", {})
     model_rounds = layout.setdefault("model_rounds", {})
@@ -37,7 +37,7 @@ def build_upload_batch_directory(root, state, *, batch_id, stage, model_version,
              if int(row.get("mlip_round") or 0) == mlip_round
              and row.get("calculation_group") == group]
     submission_index = max((int(row.get("submission_index") or 0) for row in prior), default=0) + 1
-    round_directory = f"MLIP-round-{mlip_round:04d}_{_safe(model_label)}"
+    round_directory = f"epoch{mlip_round-1}_{_safe(model_label)}"
     batch_directory = f"{prefix}-{submission_index:04d}_{batch_id}"
     stage_directory = Path(root) / round_directory / group
     if search_group_index is not None:
@@ -49,6 +49,14 @@ def build_upload_batch_directory(root, state, *, batch_id, stage, model_version,
         "submission_index": submission_index,
         "model_label": model_label,
     }
+    if model_refresh_round is not None:
+        if refresh_operation not in {"relax", "predict"}:
+            raise ValueError("invalid model refresh operation")
+        label = "Relax" if refresh_operation == "relax" else "Single-point"
+        stage_directory = Path(root) / round_directory / f"Model-refresh-{int(model_refresh_round):04d}" / label
+        metadata.update(model_refresh_round=int(model_refresh_round), refresh_operation=refresh_operation,
+                        operation_directory=str(stage_directory))
+        return stage_directory / "inputs" / batch_directory, metadata
     if search_group_index is not None:
         metadata['search_group_index'] = metadata_group
     if operation_id:
@@ -86,7 +94,7 @@ def build_upload_batch_directory(root, state, *, batch_id, stage, model_version,
         stage_directory /= label
         metadata.update(operation_id=operation_id, operation_index=operation_index,
                         operation_directory=str(stage_directory))
-    return stage_directory / batch_directory, metadata
+    return stage_directory / "inputs" / batch_directory, metadata
 
 
 def _safe(value):

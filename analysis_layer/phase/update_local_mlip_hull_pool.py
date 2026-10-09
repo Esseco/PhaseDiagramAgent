@@ -29,7 +29,9 @@ def update_local_mlip_hull_pool(state, *, config, path):
                 (output.get("phase_identification") or {}).get("status") != "identified"):
             continue
         path_value = output.get("structure_path")
-        if ((task.get("stage") != "deep_search" and task.get("converged") is not True)
+        evaluated_refresh = (task.get("model_refresh_id") and output.get("single_point_completed") is True
+                             and (task.get("parameters") or {}).get("model_refresh_operation") == "predict")
+        if ((task.get("stage") != "deep_search" and task.get("converged") is not True and not evaluated_refresh)
                 or not path_value
                 or not Path(path_value).is_file() or not output.get("composition")):
             continue
@@ -39,6 +41,7 @@ def update_local_mlip_hull_pool(state, *, config, path):
                      "composition": output["composition"], "energy": output.get("energy"),
                      "energy_unit": output.get("energy_unit"),
                      "converged": task.get("converged"),
+                     "single_point_completed": bool(evaluated_refresh),
                      "search_completed": task.get("stage") == "deep_search",
                      "model_version": task_version,
                      "stage": task.get("stage"),

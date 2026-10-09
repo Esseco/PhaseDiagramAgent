@@ -31,7 +31,7 @@ def test_migrates_flat_batch_and_rewrites_saved_paths(tmp_path):
     saved = json.loads(state_path.read_text(encoding="utf-8"))
     batch = saved["slurm_batches"][0]
     target = Path(batch["upload_directory"])
-    assert target.parts[-3:] == ("MLIP-round-0001_mace-mh-1", "Relax-screening",
+    assert target.parts[-4:] == ("epoch0_mace-mh-1", "Relax-screening", "inputs",
                                  "Relax-submission-0001_remote-000001")
     assert target.is_dir() and not source.exists()
     assert Path(saved["tasks"][0]["input_path"]).is_file()

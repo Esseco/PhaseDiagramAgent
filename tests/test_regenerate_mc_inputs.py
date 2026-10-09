@@ -6,7 +6,7 @@ import pytest
 
 from execution_layer.local import regenerate_mc_inputs as module
 from execution_layer.remote.build_upload_batch_directory import build_upload_batch_directory
-from run.open_webui_api import RunWorkflowChatHandler
+from run.agent_api import RunWorkflowChatHandler
 from execution_layer.budget.stratify_mc_actions import (
     interleave_mc_strata, summarize_mc_interception,
 )

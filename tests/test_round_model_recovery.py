@@ -17,7 +17,7 @@ from execution_layer.remote.summarize_manual_upload_wait import summarize_manual
 from execution_layer.workflows.comparison_model_registry import remember_comparison_models
 from execution_layer.workflows.create_dft_comparison_evaluator import create_dft_comparison_evaluator
 from run.main import run_workflow
-from run.open_webui_api import RunWorkflowChatHandler
+from run.agent_api import RunWorkflowChatHandler
 from run.workflow_reply_presentation import format_workflow_reply
 
 

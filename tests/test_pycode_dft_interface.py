@@ -69,7 +69,14 @@ def test_real_pycode_generator_supports_static(tmp_path):
     assert json.loads((directory / "workflow.json").read_text())["calculation"] == "static"
     script = (directory / "workflow.py").read_text()
     compile(script, "workflow.py", "exec")
-    assert 'from atomate_runner import main' in script
-    runner = (directory / "atomate_runner.py").read_text()
+    assert ('from atomate_runner import main' in script
+            or 'from Process_Vasp.workflows.atomate_runner import main' in script)
+    runner_path = directory / "atomate_runner.py"
+    if not runner_path.is_file():
+        import inspect
+        from pathlib import Path
+        from Process_Vasp.workflows import atomate_runner
+        runner_path = Path(inspect.getfile(atomate_runner))
+    runner = runner_path.read_text(encoding="utf-8")
     assert '"static": ["static"]' in runner
     compile(runner, "atomate_runner.py", "exec")

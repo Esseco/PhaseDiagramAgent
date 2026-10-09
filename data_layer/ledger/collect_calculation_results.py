@@ -125,7 +125,10 @@ def _phase_record(manager, structure_id, result_id, stage, result):
         return None
     outputs = result.get("outputs") or {}
     energy = outputs.get("energy")
-    if energy is None or (stage != "deep_search" and result.get("converged") is not True):
+    evaluated_refresh = (stage == "relax_and_feature" and result.get("model_refresh_id")
+                         and (result.get("parameters") or {}).get("model_refresh_operation") == "predict"
+                         and outputs.get("single_point_completed") is True)
+    if energy is None or (stage != "deep_search" and result.get("converged") is not True and not evaluated_refresh):
         return None
     unit = outputs.get("energy_unit")
     if unit != "eV":

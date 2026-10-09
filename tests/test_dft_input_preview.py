@@ -1,6 +1,6 @@
 from execution_layer.workflows.preview_dft_inputs import preview_dft_inputs
 from config_layer.defaults.default_dft_decision_config import default_dft_decision_config
-from run.open_webui_api import format_workflow_reply
+from run.agent_api import format_workflow_reply
 
 
 def test_empty_plan_cannot_be_approved():

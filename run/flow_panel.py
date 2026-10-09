@@ -1,0 +1,51 @@
+"""Local read-only lifecycle dashboard, separate from Studio execution layout."""
+from collections import Counter
+from html import escape
+
+
+def render_flow_panel(state):
+    from run.status_presentation import format_progress
+    from run.plan_queries import pending_plan_reply
+    from orchestration.scientific_graph import scientific_graph
+    from orchestration.graph_overview import LABELS
+    from analysis_layer.state.model_epoch import model_epoch_label
+
+    model = state.get("active_model_version") or "未记录"
+    epoch = escape(model_epoch_label(state, model))
+    cards = []
+    for title, stages in [("候选 branch", None), ("Relax", {"relax_and_feature"}),
+                          ("MC 搜索", {"deep_search"}),
+                          ("DFT 校验", {"dft_single_point", "dft_relax"}),
+                          ("模型微调", None)]:
+        if title == "候选 branch":
+            branches = state.get("branches") or []
+            text = f"累计登记 {len(branches)} 个 branch"
+        elif title == "模型微调":
+            counts = Counter(job.get("status", "unknown") for job in
+                             (state.get("remote_finetune_jobs") or {}).values())
+            text = "；".join(f"{key}: {value}" for key, value in counts.items()) or "未登记训练任务"
+        else:
+            counts = Counter(row.get("status", "unknown") for row in state.get("tasks") or []
+                             if row.get("stage") in stages)
+            text = "；".join(f"{key}: {value}" for key, value in counts.items()) or "未登记任务"
+        cards.append(f'<article><h3>{title}</h3><p>{escape(text)}</p></article>')
+    graph = scientific_graph()
+    layers = [("本轮生命周期", graph)] + [(name, child) for name, child in graph.get_subgraphs(recurse=True)]
+    technical = []
+    for name, child in layers:
+        topology = child.get_graph()
+        rows = [f"{LABELS.get(edge.source, edge.source)} → {LABELS.get(edge.target, edge.target)}"
+                + ("（条件路由）" if edge.conditional else "") for edge in topology.edges]
+        technical.append(f'<details><summary>{escape(name)}</summary><pre>{escape(chr(10).join(rows))}</pre></details>')
+    return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>科学流程 · {epoch}</title>
+<style>body{{font:16px/1.65 system-ui;background:#f3f5f8;color:#182b3a;margin:0}}main{{max-width:1120px;margin:32px auto;padding:0 20px}}section,article,details{{background:white;border:1px solid #dce3ea;border-radius:12px;padding:18px;margin:12px 0}}.stages{{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}}h1,h2,h3{{margin:0 0 12px}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}}.note{{color:#556879}}summary{{cursor:pointer;font-weight:600}}a{{color:#17669a}}</style></head>
+<body><main><h1>科学流程 · {epoch}</h1>
+<p class="note">只读面板 · <a href="/phase/flow">刷新已登记状态</a> · 不回收、不分析、不执行任务</p>
+<section><h2>当前阶段与下一步</h2><pre>{escape(format_progress(state))}</pre></section>
+<h2>科学阶段</h2><p class="note">候选 → Relax → MC → DFT → 评估与决策 → 微调或继续搜索。以下为累计记录，不代表本轮全部完成；MC、DFT和训练可有多个轮次。</p>
+<div class="stages">{''.join(cards)}</div>
+<section><h2>当前方案</h2><pre>{escape(pending_plan_reply(state))}</pre></section>
+<section><h2>新模型下一步</h2><p>回传 → 独立验证 → 单独批准激活 → 分档刷新已有结构 → 更新相图 → 下一轮决策。</p><p class="note">这是阅读顺序，不是自动执行授权；实际状态以上方记录为准。</p></section>
+<h2>技术子图（按需展开）</h2>{''.join(technical)}
+<p class="note">技术连线来自真实编译图。Studio仍用于聊天和执行调试；本面板不替换或修改它的布局。</p></main></body></html>'''

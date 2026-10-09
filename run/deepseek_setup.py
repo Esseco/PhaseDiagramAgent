@@ -15,9 +15,9 @@ def setup_page(*, model: str, configured: bool) -> str:
 <body><main><h1>启用相图 Agent</h1><p>输入 DeepSeek API Key 并测试连接。密钥只保存在这台电脑的 Windows 凭据管理器中，不写入配置文件或上传到超算。</p>
 <p class=\"muted\">当前 Agent 模型：<code>{model_label}</code></p><p id=\"state\">{status}</p>
 <form id=\"setup\" autocomplete=\"off\"><label for=\"key\">DeepSeek API Key</label><input id=\"key\" type=\"password\" autocomplete=\"off\" required minlength=\"16\" placeholder=\"粘贴 API Key\"><button id=\"submit\" type=\"submit\">测试并启用</button></form>
-<p id=\"message\" role=\"status\"></p><p class=\"muted\">页面不会主动把密钥写入浏览器存储；浏览器密码管理器行为取决于其设置。连接成功后返回 Open WebUI 即可继续对话。此页面仅允许本机访问。</p></main>
+<p id=\"message\" role=\"status\"></p><p class=\"muted\">页面不会主动把密钥写入浏览器存储；浏览器密码管理器行为取决于其设置。连接成功后返回 Studio 即可继续对话。此页面仅允许本机访问。</p></main>
 <script>const form=document.getElementById('setup'), key=document.getElementById('key'), button=document.getElementById('submit'), message=document.getElementById('message');
-form.addEventListener('submit',async event=>{{event.preventDefault();button.disabled=true;message.textContent='正在测试连接…';try{{const response=await fetch('/phase/setup/key',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{api_key:key.value}})}});const result=await response.json();if(!response.ok)throw new Error(result.error?.message||'设置失败');key.value='';message.textContent='连接成功，Agent 已启用。可返回 Open WebUI 对话。';document.getElementById('state').textContent='已保存；密钥不会回显。';}}catch(error){{message.textContent=error.message;}}finally{{button.disabled=false;}}}});</script></body></html>"""
+form.addEventListener('submit',async event=>{{event.preventDefault();button.disabled=true;message.textContent='正在测试连接…';try{{const response=await fetch('/phase/setup/key',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{api_key:key.value}})}});const result=await response.json();if(!response.ok)throw new Error(result.error?.message||'设置失败');key.value='';message.textContent='连接成功，Agent 已启用。可返回 Studio 对话。';document.getElementById('state').textContent='已保存；密钥不会回显。';}}catch(error){{message.textContent=error.message;}}finally{{button.disabled=false;}}}});</script></body></html>"""
 
 
 def test_and_save_api_key(api_key: str, *, settings: dict, activate_client) -> dict:

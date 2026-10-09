@@ -57,8 +57,8 @@ def test_dft_selection_uses_one_round_across_sp_and_relax(tmp_path):
         stage='dft_relax', model_version='model', operation_id='selection-a')
     later, two = build_upload_batch_directory(tmp_path, state, batch_id='remote-000003',
         stage='dft_single_point', model_version='model', operation_id='selection-b')
-    assert single.parent.name == relax.parent.name == 'DFT-round-0001_selection-a'
-    assert later.parent.name == 'DFT-round-0002_selection-b'
+    assert single.parent.parent.name == relax.parent.parent.name == 'DFT-round-0001_selection-a'
+    assert later.parent.parent.name == 'DFT-round-0002_selection-b'
     assert one['operation_index'] == same['operation_index'] == 1
     assert two['operation_index'] == 2
 
@@ -71,7 +71,7 @@ def test_relax_and_two_mc_rounds_share_branch_generation_group(tmp_path):
         model_version='model', operation_id='mc1', segment_index=0, search_group_index=1)
     mc2, _ = build_upload_batch_directory(tmp_path, state, batch_id='r3', stage='deep_search',
         model_version='model', operation_id='mc2', segment_index=1, search_group_index=1)
-    assert relax.parent.parent == mc1.parent.parent == mc2.parent.parent
-    assert relax.parent.name == 'Relax-0001'
-    assert mc1.parent.name == 'Relax-0001_MC-round-0001'
-    assert mc2.parent.name == 'Relax-0001_MC-round-0002'
+    assert relax.parent.parent.parent == mc1.parent.parent.parent == mc2.parent.parent.parent
+    assert relax.parent.parent.name == 'Relax-0001'
+    assert mc1.parent.parent.name == 'Relax-0001_MC-round-0001'
+    assert mc2.parent.parent.name == 'Relax-0001_MC-round-0002'

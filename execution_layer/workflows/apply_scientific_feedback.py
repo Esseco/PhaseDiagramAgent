@@ -147,6 +147,7 @@ def apply_scientific_feedback(
             parent_versions={**{name: row.get("version") for name, row in previous.items()},
                              **{f"mlip:{name}": row.get("version") for name, row in previous_models.items()}},
             active_model_version=active_model_version or current.get("active_model_version"),
+            output_state=current,
         )
         diagrams = output["diagrams"]
         current["phase_diagrams_by_model"].update(output["mlip_by_version"])
@@ -157,6 +158,8 @@ def apply_scientific_feedback(
             _record_rewards(current, previous, diagrams, feedback_rows)
     current["coverage"] = coverage(manager.data, manager.stages, manager.stage_labels)
     current["agent_state_summary"] = summarize_agent_state(current)
+    from analysis_layer.feedback.export_dft_products import publish_output_catalog
+    publish_output_catalog(current, phase_diagram_directory)
     if ledger_path is not None and (accepted or refreshed):
         manager.save(ledger_path)
     return {

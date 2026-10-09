@@ -181,7 +181,7 @@ def migrate(state_path, round_directory, *, apply=False, search_groups=False):
         return {'status': 'validated_only', **summary}
     if any(path.read_bytes() != raw for path, raw in originals.items()):
         raise RuntimeError('项目文档在预检期间变化，停止迁移')
-    backup = project_root / 'layout_backups' / datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+    backup = project_root / 'backups' / 'upload_layout' / datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     backup.mkdir(parents=True, exist_ok=False)
     for path in updates:
         saved = backup / path.relative_to(project_root)

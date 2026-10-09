@@ -1,21 +1,43 @@
 """Read-only conversation state presentation, separate from HTTP/workflow."""
 from execution_layer.state.task_waiting import active_pending_tasks
 
+
+def waiting_training_job(state):
+    jobs = [job for job in (state.get("remote_finetune_jobs") or {}).values()
+            if job.get("status") in {"inputs_prepared", "submitted", "running"}
+            and not job.get("activated")
+            and job.get("original_model_version") == state.get("active_model_version")]
+    return jobs[-1] if jobs else None
+
+
 def brief_chat_state(state, *, configuring=False):
     """One factual state line, without re-listing files or scientific evidence."""
     if configuring:
         return "当前：配置修订中，等待确认。"
+    returned = [job.get("returned_results") for job in (state.get("remote_finetune_jobs") or {}).values()
+                if job.get("status") == "results_received" and not job.get("activated")]
+    if returned:
+        return "当前：微调结果已回收，等待模型清单补齐或独立验证；未激活。"
+    refresh = state.get("model_refresh") or {}
+    if refresh and refresh.get("status") != "completed":
+        return ("当前：新模型结构刷新方案待确认。" if refresh.get("status") == "approval_required" else
+                f"当前：新模型结构刷新第{int(refresh.get('wave', 0))+1}批，等待输入准备或结果回传。")
     if state.get("pending_dft_recovery_question"):
         return "当前：DFT 部分结果已回收，等待是否继续回收的确认。"
     pending = state.get("pending_execution_policies") or {}
     if pending:
-        names = {"select_dft_candidates": "DFT 输入方案", "allocate_mc_bohb": "MC 分配方案",
+        names = {"update_mlip": "微调训练输入方案",
+                 "select_dft_candidates": "DFT 输入方案", "allocate_mc_bohb": "MC 分配方案",
                  "prepare_local_batch_files": "输入准备方案", "generate_branches": "branch 生成方案"}
         if len(pending) == 1:
             proposal = next(iter(pending.values())).get("agent_proposal") or {}
             tool = proposal.get("recommended_action") or (proposal.get("raw_action") or {}).get("tool")
             return f"当前：{names.get(tool, '操作方案')}待确认。"
         return f"当前：{len(pending)} 个方案待确认。"
+    training = waiting_training_job(state)
+    if training:
+        return ("当前：微调输入已准备，等待超算提交与训练结果。" if training.get("status") == "inputs_prepared"
+                else "当前：微调训练等待结果回传。")
     tasks = state.get("tasks") or []
     active = active_pending_tasks(tasks)
     if active:
@@ -32,7 +54,7 @@ def brief_chat_state(state, *, configuring=False):
     if assessment:
         if assessment["status"] != "evaluated":
             return "当前：DFT 回收结束，本轮原模型误差评估待补齐。"
-        return "当前：DFT 本轮误差已评估，等待微调或新 branch 方案。"
+        return "当前：DFT 本轮误差已评估，等待微调、补DFT、新branch或收敛/停止建议。"
     failed = sum(row.get("status") in {"failed", "timeout"} for row in tasks)
     if failed:
         return f"当前：无运行中任务，{failed} 个任务失败/超时待处理。"

@@ -93,17 +93,39 @@ def test_closed_dft_routes_to_llm_not_old_mc_dft(monkeypatch):
     state["tasks"].append({"task_id": "mc", "stage": "deep_search", "model_version": "m1",
                            "segment_index": 1, "status": "completed"})
     state["mc_second_round_allocations"] = [{"model_version": "m1", "task_ids": ["mc"]}]
+    state["pending_execution_policies"] = {"old-branch": {"agent_proposal": {
+        "raw_action": {"tool": "generate_branches", "_post_dft_review_version": 1,
+                       "_post_dft_scope_key": "different-round"}}}}
     seen = []
     def proposal(snapshot, **kw):
         seen.append((snapshot, kw))
+        from tests.test_post_dft_review import review
+        assessment_review = review()
+        assessment_review["choice"] = "convergence"
         return {"tool": "check_convergence", "task_key": "review-round", "target_ids": [],
-                "parameters": {}, "budget": 0., "reason": "review evidence", "decision_source": "llm"}
+                "parameters": {}, "budget": 0., "reason": "review evidence", "decision_source": "llm",
+                "post_dft_review": assessment_review}
     monkeypatch.setattr("execution_layer.workflows.run_tool_step.propose_agent_tool_action", proposal)
     result = run_tool_step(state, session, registry=create_tool_registry(create_workflow_handlers()),
         agent_client=lambda **kw: None, execution_mode="interactive",
+        invocation_id="old-branch", human_feedback={"decision": "approve"},
         context={"effective_config": {"mlip": {"version": "m1"}}, "user_message": "继续"})
     assert result["status"] == "awaiting_approval"
     assert seen[0][0]["decision_context"]["post_dft_assessment"]["status"] == "evaluated"
     assert "generate_branches" in seen[0][1]["allowed_tools"]
     assert "update_mlip" in seen[0][1]["allowed_tools"]
-    assert "select_dft_candidates" not in seen[0][1]["allowed_tools"]
+    assert "select_dft_candidates" in seen[0][1]["allowed_tools"]
+    assert result["agent_proposal"]["raw_action"]["_post_dft_scope_key"] == post_dft_assessment(state)["scope_key"]
+
+
+def test_reply_reports_metrics_and_directory_before_next_proposal():
+    from run.workflow_reply_presentation import format_workflow_reply
+    state = {}
+    add_result(state)
+    assessment = post_dft_assessment(state)
+    state["dft_result_exports"] = {"round": {"round_scope": assessment["scope"], "directory": "outputs/m1/Search-group-0001/DFT-round-0001"}}
+    reply = format_workflow_reply({"status": "completed", "state": state}, "state.json")
+    assert "回收 1/1" in reply and "合格配对 1" in reply
+    assert "MAE/RMSE" in reply and "DFT-round-0001" in reply
+    assert reply.index("MAE/RMSE") < reply.index("已完成")
+    assert "当前微调未启用" not in reply

@@ -25,6 +25,10 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
     if any(key in action for key in ("energy", "ehull", "score", "converged")):
         errors.append("agent_supplied_numeric_result")
     parameters = action.get("parameters") or {}
+    from execution_layer.workflows.model_refresh_state import refresh_active
+    if refresh_active(state) and tool not in {"pause_search", "restart_failed_task"}:
+        if tool != "prepare_local_batch_files" or parameters.get("mode") != "model_refresh_inputs":
+            errors.append("new_model_structure_refresh_required")
     supplied_paths = _flatten_paths(parameters)
     for path in config.get("frozen_parameters") or []:
         if any(item == path or item.startswith(path + ".") or path.endswith("." + item) for item in supplied_paths):
@@ -82,10 +86,16 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
     if not ownership["allowed"]:
         errors.append(ownership["reason"])
     if tool == "adjust_strategy":
-        adjustment = validate_strategy_adjustment(parameters.get("patch") or {}, config, bounds=parameters.get("bounds"))
-        if adjustment["requires_user_confirmation"]:
-            errors.append("hard_constraint_change_requires_confirmation")
-        errors.extend(f"strategy_adjustment_rejected:{item}" for item in adjustment["rejected"])
+        if parameters.get("request_configuration_revision") is True:
+            from execution_layer.workflows.request_strategy_revision import _known_path
+            patch = parameters.get("patch") or {}
+            if not isinstance(patch, dict) or not patch or any(not _known_path(config, key) for key in patch):
+                errors.append("invalid_configuration_revision_request")
+        else:
+            adjustment = validate_strategy_adjustment(parameters.get("patch") or {}, config, bounds=parameters.get("bounds"))
+            if adjustment["requires_user_confirmation"]:
+                errors.append("hard_constraint_change_requires_confirmation")
+            errors.extend(f"strategy_adjustment_rejected:{item}" for item in adjustment["rejected"])
     return {"valid": not errors, "errors": errors, "config_version": snapshot["config_version"]}
 
 

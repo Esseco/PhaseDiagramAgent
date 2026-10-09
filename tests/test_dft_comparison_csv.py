@@ -9,6 +9,7 @@ from pymatgen.core import Lattice, Structure
 import pytest
 
 from analysis_layer.feedback.dft_result_products import record_dft_products, export_dft_products
+from analysis_layer.feedback.export_dft_products import dft_product_path
 
 
 def add_result(state, *, task_id="T1", version="m1", operation="abcdef", round_index=1,
@@ -56,13 +57,15 @@ def test_layout_reuses_model_and_upload_round_labels(tmp_path):
     original = phase.stat().st_mtime_ns
     export_dft_products(state, tmp_path)
     root = product_root(state)
-    assert root == tmp_path / "m1/dft_rounds/Search-group-0001/DFT-round-0001_abcdef"
-    assert set(p.name for p in root.iterdir()) == {
+    assert root == tmp_path / "epoch0_m1/Search-group-0001/DFT-round-0001_abcdef"
+    assert set(p.name for p in root.rglob("*") if p.is_file()) == {
         "training.json", "dft_records.json", "mlip_dft_metrics.json",
-        "energy_comparison.csv", "force_comparison.csv", "magnetic_moments.csv", "metrics.csv"}
+        "energy_comparison.csv", "force_comparison.csv", "magnetic_moments.csv", "metrics.csv",
+        "energy_parity.png", "energy_parity.pdf", "energy_parity.svg",
+        "force_parity.png", "force_parity.pdf", "force_parity.svg", "parity_metrics.json"}
     assert not (tmp_path / "dft_results").exists()
     assert phase.stat().st_mtime_ns == original
-    assert len(read_csv(tmp_path / "m1/round_metrics.csv")) == 3
+    assert len(read_csv(tmp_path / "epoch0_m1/round_metrics.csv")) == 3
 
 
 def test_parity_rows_units_sign_species_and_final_frame(tmp_path):
@@ -70,7 +73,7 @@ def test_parity_rows_units_sign_species_and_final_frame(tmp_path):
     add_result(state)
     export_dft_products(state, tmp_path)
     root = product_root(state)
-    energy = read_csv(root / "energy_comparison.csv")[0]
+    energy = read_csv(dft_product_path(root, "energy_comparison.csv"))[0]
     assert float(energy["dft_energy_eV"]) == -8
     assert float(energy["mlip_energy_eV"]) == -7
     assert float(energy["energy_error_eV"]) == 1
@@ -79,7 +82,7 @@ def test_parity_rows_units_sign_species_and_final_frame(tmp_path):
     assert energy["x_Na_per_O2"] == "2.0000000000"
     assert energy["frame_index"] == "0" and energy["phase"] == "O3"
     assert energy["structure_id"] == "S-T1" and energy["branch_id"] == "B-T1"
-    forces = read_csv(root / "force_comparison.csv")
+    forces = read_csv(dft_product_path(root, "force_comparison.csv"))
     assert len(forces) == 6
     assert [(r["atom_index"], r["element"], r["component"]) for r in forces] == [
         ("0", "Na", "x"), ("0", "Na", "y"), ("0", "Na", "z"),
@@ -87,7 +90,7 @@ def test_parity_rows_units_sign_species_and_final_frame(tmp_path):
     assert float(forces[1]["dft_force_eV_per_A"]) == -.2
     assert float(forces[1]["mlip_force_eV_per_A"]) == 0
     assert all(float(r["force_error_eV_per_A"]) == pytest.approx(.2) for r in forces)
-    assert (root / "energy_comparison.csv").read_bytes().startswith(b"\xef\xbb\xbf")
+    assert (dft_product_path(root, "energy_comparison.csv")).read_bytes().startswith(b"\xef\xbb\xbf")
 
 
 def test_json_csv_metrics_agree_with_recomputed_parity_errors(tmp_path):
@@ -96,12 +99,12 @@ def test_json_csv_metrics_agree_with_recomputed_parity_errors(tmp_path):
     add_result(state, task_id="T2", atoms=3, energy_error=3., force_error=.4)
     export_dft_products(state, tmp_path)
     root = product_root(state)
-    metrics = json.loads((root / "mlip_dft_metrics.json").read_text(encoding="utf-8"))
-    summary = {r["metric"]: r for r in read_csv(root / "metrics.csv")}
+    metrics = json.loads((dft_product_path(root, "mlip_dft_metrics.json")).read_text(encoding="utf-8"))
+    summary = {r["metric"]: r for r in read_csv(dft_product_path(root, "metrics.csv"))}
     for name, file, field in (("energy_total", "energy_comparison.csv", "energy_error_eV"),
                               ("energy_per_atom", "energy_comparison.csv", "energy_error_eV_per_atom"),
                               ("forces", "force_comparison.csv", "force_error_eV_per_A")):
-        errors = np.asarray([float(r[field]) for r in read_csv(root / file)])
+        errors = np.asarray([float(r[field]) for r in read_csv(dft_product_path(root, file))])
         assert float(summary[name]["mae"]) == pytest.approx(np.abs(errors).mean())
         assert float(summary[name]["rmse"]) == pytest.approx(np.sqrt(np.mean(errors**2)))
         assert metrics[name]["mae"] == float(summary[name]["mae"])
@@ -120,23 +123,23 @@ def test_missing_prediction_is_blank_not_zero_and_training_preserved(tmp_path):
     add_result(state, evaluator=False)
     export_dft_products(state, tmp_path)
     root = product_root(state)
-    energy = read_csv(root / "energy_comparison.csv")[0]
+    energy = read_csv(dft_product_path(root, "energy_comparison.csv"))[0]
     assert energy["dft_energy_eV"] == "-8.0"
     assert energy["mlip_energy_eV"] == energy["energy_error_eV"] == ""
     assert energy["comparison_status"] == "not_evaluated"
     assert "evaluator unavailable" in energy["reason"]
-    assert len(read_csv(root / "force_comparison.csv")) == 6
-    assert all(r["mlip_force_eV_per_A"] == "" for r in read_csv(root / "force_comparison.csv"))
+    assert len(read_csv(dft_product_path(root, "force_comparison.csv"))) == 6
+    assert all(r["mlip_force_eV_per_A"] == "" for r in read_csv(dft_product_path(root, "force_comparison.csv")))
     assert all(r["mae"] == r["rmse"] == "" and r["sample_count"] == "0"
-               for r in read_csv(root / "metrics.csv"))
-    assert len(json.loads((root / "training.json").read_text(encoding="utf-8"))) == 1
+               for r in read_csv(dft_product_path(root, "metrics.csv")))
+    assert len(json.loads((dft_product_path(root, "training.json")).read_text(encoding="utf-8"))) == 1
 
 
 def test_zero_error_remains_a_valid_number(tmp_path):
     state = {}
     add_result(state, energy_error=0, force_error=0)
     export_dft_products(state, tmp_path)
-    for row in read_csv(product_root(state) / "metrics.csv"):
+    for row in read_csv(dft_product_path(product_root(state), "metrics.csv")):
         assert row["mae"] == row["rmse"] == "0.0"
         assert row["status"] == "completed"
 
@@ -149,11 +152,11 @@ def test_partial_round_reports_pending_and_uses_only_recovered_pairs(tmp_path):
     state["tasks"].append(pending)
     export_dft_products(state, tmp_path)
     root = product_root(state)
-    metrics = json.loads((root / "mlip_dft_metrics.json").read_text(encoding="utf-8"))
+    metrics = json.loads((dft_product_path(root, "mlip_dft_metrics.json")).read_text(encoding="utf-8"))
     assert metrics["matched_structures"] == metrics["recovered_tasks"] == 1
     assert metrics["expected_tasks"] == 2 and metrics["pending_task_ids"] == ["T2"]
-    assert all(r["status"] == "partial" and r["pending_tasks"] == "1" for r in read_csv(root / "metrics.csv"))
-    assert len(read_csv(root / "energy_comparison.csv")) == 1
+    assert all(r["status"] == "partial" and r["pending_tasks"] == "1" for r in read_csv(dft_product_path(root, "metrics.csv")))
+    assert len(read_csv(dft_product_path(root, "energy_comparison.csv"))) == 1
 
 
 def test_unchanged_export_and_reordered_records_do_not_rewrite_or_infer(tmp_path, monkeypatch):
@@ -183,9 +186,9 @@ def test_new_round_does_not_rewrite_previous_round_and_summary_is_version_scoped
     export_dft_products(state, tmp_path)
     assert {p: p.stat().st_mtime_ns for p in old.iterdir()} == stamps
     assert len(state["dft_result_exports"]) == 3
-    assert len(read_csv(tmp_path / "m1/round_metrics.csv")) == 6
-    assert len(read_csv(tmp_path / "m2/round_metrics.csv")) == 3
-    assert {r["model_version"] for r in read_csv(tmp_path / "m1/round_metrics.csv")} == {"m1"}
+    assert len(read_csv(tmp_path / "epoch0_m1/round_metrics.csv")) == 6
+    assert len(read_csv(tmp_path / "epoch1_m2/round_metrics.csv")) == 3
+    assert {r["model_version"] for r in read_csv(tmp_path / "epoch0_m1/round_metrics.csv")} == {"m1"}
 
 
 @pytest.mark.parametrize("mutate", [
@@ -202,9 +205,9 @@ def test_invalid_saved_prediction_cannot_enter_plot_pairs_or_metrics(tmp_path, m
     add_result(state)
     mutate(state["dft_dataset_records"][0])
     export_dft_products(state, tmp_path)
-    row = read_csv(product_root(state) / "energy_comparison.csv")[0]
+    row = read_csv(dft_product_path(product_root(state), "energy_comparison.csv"))[0]
     assert row["comparison_status"] == "not_evaluated" and row["mlip_energy_eV"] == ""
-    assert all(r["sample_count"] == "0" for r in read_csv(product_root(state) / "metrics.csv"))
+    assert all(r["sample_count"] == "0" for r in read_csv(dft_product_path(product_root(state), "metrics.csv")))
 
 
 def test_windows_paths_and_registry_fallback_preserve_exact_round(tmp_path):
@@ -264,4 +267,4 @@ def test_same_numbered_rounds_in_different_search_groups_stay_separate(tmp_path)
     assert len(state["dft_result_exports"]) == 2
     assert {Path(row["directory"]).parent.name for row in state["dft_result_exports"].values()} == {
         "Search-group-0001", "Search-group-0002"}
-    assert len(read_csv(tmp_path / "m1/round_metrics.csv")) == 6
+    assert len(read_csv(tmp_path / "epoch0_m1/round_metrics.csv")) == 6

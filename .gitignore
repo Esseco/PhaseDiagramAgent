@@ -1,3 +1,10 @@
 #Python cache
 .pytest_cache/
 *.pyc
+__pycache__/
+r68/
+*.bak
+*.log
+logs/
+backups/
+.write_probe_codex

@@ -24,9 +24,7 @@ class OpenSSHTransport:
         "result.json", "task.finished.json", "final.vasp", "CONTCAR",
         "checkpoint.json", "checkpoint.json.gz", "log_index.json",
         "status_summary.json", "initial_relaxed.vasp",
-        "task.stdout.log", "task.stderr.log",
-        "status.json.gz", "settings.json.gz", "trace.json.gz",
-        "pool_summary.json.gz",
+        "training.json", "mlip_result.json", "remote_artifacts.json",
     }
 
     def __init__(self, host: str, *, ssh="ssh", scp="scp", runner: Callable = subprocess.run):

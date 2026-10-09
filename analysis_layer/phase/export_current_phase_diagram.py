@@ -7,9 +7,16 @@ from analysis_layer.phase.phase_snapshot_paths import phase_snapshot_directory
 
 
 def export_current_phase_diagram(state, *, directory=None, method="mlip"):
-    if method not in {"mlip", "dft"}:
-        raise ValueError("相图方法只能是 mlip 或 dft")
+    if method not in {"mlip", "dft", "combined"}:
+        raise ValueError("相图方法只能是 mlip、dft 或 combined")
     snapshot = (state.get("phase_diagrams") or {}).get(method) or {}
+    if method == "combined":
+        if snapshot.get("model_version") != state.get("active_model_version"):
+            raise ValueError("综合相图与当前模型不一致，请由 Agent 更新")
+        path = snapshot.get("csv_path")
+        if snapshot.get("status") in {"completed", "partial"} and path and Path(path).is_file():
+            return Path(path), len(snapshot.get("entries") or []), snapshot["version"]
+        raise ValueError("综合相图尚无已保存 CSV，请先由 Agent 回收并分析；导出命令不计算校正")
     if snapshot.get("status") != "completed" or not snapshot.get("entries"):
         raise ValueError(f"当前 {method.upper()} 相图尚无可导出的完整数据")
     if any("eform_per_O2" not in row or "ehull" not in row
@@ -24,12 +31,17 @@ def export_current_phase_diagram(state, *, directory=None, method="mlip"):
     stored_path = snapshot.get("csv_path")
     if stored_path and Path(stored_path).is_file():
         return Path(stored_path), len(snapshot["entries"]), version
+    archive_path = snapshot.get("archive_csv_path")
+    if archive_path and Path(archive_path).is_file():
+        from analysis_layer.phase.publish_current_csv import publish_current_csv
+        current = publish_current_csv(snapshot, archive_path)
+        return current, len(snapshot["entries"]), version
     if directory is None:
         if not snapshot.get("path"):
             raise ValueError("未配置相图输出目录")
         parent = Path(snapshot["path"]).parent
         if parent.name == "history":
-            directory = parent.parent.parent
+            directory = parent.parent.parent.parent if parent.parent.name == "phase_diagrams" else parent.parent.parent
         elif parent.name == "dft":
             directory = parent.parent
         elif parent.parent.name == "mlip":
@@ -38,7 +50,7 @@ def export_current_phase_diagram(state, *, directory=None, method="mlip"):
             directory = parent.parent
         else:
             directory = parent
-    target_dir = phase_snapshot_directory(directory, method, snapshot.get("model_version"))
+    target_dir = phase_snapshot_directory(directory, method, snapshot.get("model_version"), state=state)
     path = target_dir / f"phase_diagram_{method}_{version}.csv"
     if not path.is_file():
         export_phase_diagram_csv(snapshot, path)

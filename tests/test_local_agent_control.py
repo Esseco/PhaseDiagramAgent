@@ -15,7 +15,7 @@ from execution_layer.step_runner.file_protocol import write_json
 from execution_layer.workflows.accept_dedup_results import accept_dedup_results
 from execution_layer.workflows.prepare_dedup_batch import prepare_dedup_batch
 from run.local_agent_control import LocalAgentControl
-from run.open_webui_api import RunWorkflowChatHandler
+from run.agent_api import RunWorkflowChatHandler
 from analysis_layer.state.sanitize_untrusted_text import untrusted_text
 
 

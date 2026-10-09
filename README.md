@@ -5,6 +5,7 @@
 ## 目录
 
 ```text
+orchestration/      LangGraph图定义、节点适配、状态与Runtime上下文
 config_layer/       defaults/ schema/ session/ runtime/
 decision_layer/     agent/ strategy/ calculation/ scoring/ qbc_selection/
 execution_layer/    policy/ state/ budget/ dispatch/ workflows/ slurm/
@@ -14,9 +15,34 @@ analysis_layer/     phase/ convergence/ feedback/ state/ cost/
 run/                唯一正式启动入口
 experiments/        不写正式状态的独立方法比较
 tests/              单元测试和跨层集成测试
+docs/               架构、科学接口和文件布局说明
 ```
 
+开发导航先看 [项目架构索引](docs/PROJECT_STRUCTURE.md)；编排细节见 [LangGraph架构](docs/LANGGRAPH_ARCHITECTURE.md)。
+
+阅读主动学习流程先看 [科学流程总览](docs/SCIENTIFIC_FLOW_OVERVIEW.md)：按生命周期、动作循环、审批执行三层查看，不需要把所有工具铺在同一张图上。
+
+运行时查看 [本地科学流程面板](http://127.0.0.1:2024/phase/flow)：当前epoch、待办、方案及折叠技术子图；只读，不改变Studio执行图。
+
+超算结果只回传分析必需文件；模型和大日志留在远端，具体清单见 [轻量结果回传](docs/LIGHTWEIGHT_RESULT_TRANSFER.md)。
+
+新计算批次按每轮inputs与results分离，本地处理产品在analysis_outputs；见 [每轮传输布局](docs/ROUND_TRANSFER_LAYOUT.md)。
+
+对话问答与任务推进分开，默认只回答所问；规则与边界见 [对话路由](docs/CONVERSATION_ROUTING.md)。
+
+## 本地启动
+
+默认使用 py1，依赖统一在 `requirements.txt`。Studio 使用标准 `langgraph dev`，工作区环境设置见 [启动说明](docs/STUDIO_LOCAL.md)。也可运行：
+
+```powershell
+python -m run.studio_service --runtime-config 'E:\0-FM-PhaseDiagram\agent_runtime.json'
+```
+
+根目录不再保留重复的 `.cmd` 启动器。安装本地依赖用 `python -m pip install -r requirements.txt`；不用于修改超算科学环境。
+
 ## 超算分步模式
+
+输入与分析输出使用同一 `epochN_实际模型版本` 登记。提交与回传在 `submissions`，分析在 `analysis_outputs`；参数在 `parameters`，流程状态在 `workflow_state`，记忆在 `agent_memory`，母结构与候选在 `structures`。查找文件先查看 `analysis_outputs/output_index.md`，跨轮次总览见 `analysis_outputs/round_summary.csv`。完整布局见 [工作区布局](docs/WORKSPACE_LAYOUT.md)。
 
 计算节点无公网时使用 `python -m run.step_runner`。登录节点只执行 `advise`、
 `confirm`、`submit` 和只读 `status`；计算节点只执行 `recover`、`prepare` 以及正式科学
@@ -28,7 +54,7 @@ compute: recover → login: advise → login: confirm → compute: prepare
 → login: submit → compute: scientific jobs → compute: recover
 ```
 
-默认分组为 Relax 100 个 task/job、MC 20 个 task/job、DFT 1 个 task/job。配置位于已确认
+默认分组为 Relax 100 个 task/job、MC 10 个 task/job、DFT 1 个 task/job。配置位于已确认
 快照的 `supercomputer.batch_sizes`，因此修改会产生新的配置版本。同组 task 必须具有
 相同 stage、模型版本、参数和资源 profile。详情见 [分步运行说明](run/README.md)。
 
@@ -67,14 +93,14 @@ Agent 上下文区分人工长期知识和短期运行记忆。长期层只由�
 
 ## 运行
 
-### Open WebUI 对话模式
+### Studio 对话模式
 
 首次启动进入配置专用对话：Agent 修改的只是草稿，用户发送“确认配置”后才保存配置版本快照；确认本身不启动任何计算。母结构路径和超算端 mh-1 模型路径作为待审核候选，超算模型不会在本地加载。
 
-可用 Open WebUI 作为本地 Agent 的浏览器界面。项目实现了 OpenAI-compatible
-服务入口 `run.open_webui_api`；聊天只负责呈现和传递真实用户消息，proposal、
+使用 Studio 连接本地 Agent。项目实现了内部消息传输
+服务入口 `run.agent_api`；聊天只负责呈现和传递真实用户消息，proposal、
 审批、预算和计算仍由现有工作流控制。启动和配置步骤见
-[Open WebUI 集成说明](run/OPEN_WEBUI.md)。
+[Studio 启动说明](docs/STUDIO_LOCAL.md)。
 
 默认解释器为：
 
@@ -150,3 +176,10 @@ DFT 参数、预算、随机种子等受控字段会被忽略；运行时只接�
 ```bash
 C:\ProgramData\anaconda3\envs\py1\python.exe -m pytest -q
 ```
+## 项目与数据目录
+
+目录管理说明见 [docs/ROOT_LAYOUT.md](docs/ROOT_LAYOUT.md)；架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，DFT 接口见 [docs/DFT_INTERFACE.md](docs/DFT_INTERFACE.md)。日志集中到工作目录 logs，历史备份集中到 backups；现有配置与任务结果路径不变。
+
+综合相图的校正范围、来源和目录见 [docs/COMBINED_PHASE_DIAGRAM.md](docs/COMBINED_PHASE_DIAGRAM.md)。
+
+Agent生成策略与目标区域分配见 [docs/GENERATION_ALLOCATION.md](docs/GENERATION_ALLOCATION.md)。

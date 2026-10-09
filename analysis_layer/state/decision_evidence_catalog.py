@@ -36,6 +36,12 @@ def decision_evidence_catalog(context):
         if stage:
             catalog[f"cost_reference:{stage}"] = {"kind": "reference_cost_estimate",
                 "report": report, "instruction": "Reference estimate, not an individual measured sample or task quote."}
+    for row in (context.get("round_budget_evidence") or {}).get("training_reports") or []:
+        if row.get("report_id"):
+            catalog[row["report_id"]] = {"kind": "training_report", **row}
+    for row in (context.get("round_budget_evidence") or {}).get("observed_budget_outcomes") or []:
+        if row.get("decision_id"):
+            catalog["budget_outcome:" + row["decision_id"]] = {"kind": "round_budget_outcome", **row}
     return {"references": catalog,
         "instruction": "Use exact reference keys for proposal evidence_refs. Existence does not prove scientific adequacy; cite source versions and explain their relevance. Missing references must not be invented."}
 

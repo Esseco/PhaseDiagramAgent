@@ -5,6 +5,7 @@ from pathlib import Path
 
 from run.configuration_chat import BOOTSTRAP_HINTS, normalize_workspace_path, safe_config_filename
 from run.runtime_config_io import _resolve_path
+from config_layer.session.editable_config_location import editable_config_location
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,7 @@ class DraftWorkspacePaths:
     editable_config_path: Path | None
     editable_config_filename: str
     workspace_root: Path
+    editable_config_directory: str = ""
 
 
 def prepare_draft_workspace_paths(session, settings, *, base, resolved_session,
@@ -19,6 +21,13 @@ def prepare_draft_workspace_paths(session, settings, *, base, resolved_session,
     """Preserve existing recovery writes to session; never overwrite an editable file."""
     editable_path_setting = settings.get("editable_config_draft_path") or "search_config.project.json"
     editable_config_filename = safe_config_filename(Path(editable_path_setting).name)
+    # Absolute legacy settings continue to use their existing source; new
+    # workspace-relative locations retain the configured config/ subdirectory.
+    configured = Path(editable_path_setting)
+    editable_directory = "" if configured.is_absolute() else configured.parent.as_posix()
+    if editable_directory == ".":
+        editable_directory = ""
+    editable_config_location(workspace_root, Path(editable_directory) / editable_config_filename)
     setup_stage = session.get("setup_stage")
     if setup_stage == "json_ready":
         storage = (session.get("config") or {}).get("storage") or {}
@@ -27,7 +36,7 @@ def prepare_draft_workspace_paths(session, settings, *, base, resolved_session,
                 storage.get("workspace_root"), base_directory=base,
             )
             saved_path = session.get("editable_config_json_path")
-            preferred_path = workspace_root / editable_config_filename
+            preferred_path = editable_config_location(workspace_root, Path(editable_directory) / editable_config_filename)
             if preferred_path.is_file():
                 draft_candidate = preferred_path
                 if saved_path and str(saved_path) != str(preferred_path):
@@ -133,5 +142,5 @@ def prepare_draft_workspace_paths(session, settings, *, base, resolved_session,
             from config_layer.session.save_config_session import save_config_session
             save_config_session(session, resolved_session)
             editable_config_path = None
-    return DraftWorkspacePaths(editable_config_path, editable_config_filename, workspace_root)
+    return DraftWorkspacePaths(editable_config_path, editable_config_filename, workspace_root, editable_directory)
 

@@ -77,6 +77,35 @@ def test_changed_scientific_labels_not_metadata_refresh(key, value):
     assert output["reconciled"][0]["status"] == "rejected"
 
 
+def test_recomputed_lattice_angles_are_not_geometry_changes():
+    prior = raw_result()
+    incoming = deepcopy(prior)
+    lattice = incoming["outputs"]["structure"]["lattice"]
+    lattice["alpha"] += 2e-14
+    incoming["outputs"]["magnetic_moments"]["moments"][0] += .01
+    checked = validated_magnetic_refresh(prior, incoming)
+    assert checked["status"] == "refresh"
+    assert checked["result"]["outputs"]["structure"] == prior["outputs"]["structure"]
+
+
+@pytest.mark.parametrize("change", ["matrix", "coordinate", "species", "property"])
+def test_real_structure_changes_remain_rejected(change):
+    prior = raw_result()
+    incoming = deepcopy(prior)
+    structure = incoming["outputs"]["structure"]
+    if change == "matrix":
+        structure["lattice"]["matrix"][0][0] += 1e-12
+    elif change == "coordinate":
+        structure["sites"][0]["abc"][0] += 1e-12
+    elif change == "species":
+        structure["sites"][0]["species"][0]["element"] = "Na"
+    else:
+        structure["sites"][0]["properties"]["new_property"] = 1
+    checked = validated_magnetic_refresh(prior, incoming)
+    assert checked["status"] == "rejected"
+    assert checked["reason"] == "dft_refresh_structure_mismatch"
+
+
 def test_same_task_supplement_refreshes_once_no_charge_or_duplicate(tmp_path):
     manager = make_manager()
     manager.stage_labels = {}
@@ -156,12 +185,12 @@ def test_real_ledger_refresh_retains_result_id_and_revokes_science(tmp_path):
     good["structure_id"] = structure_id
     module = "execution_layer.workflows.apply_scientific_feedback."
     with patch(module + "ensure_phase_identification", side_effect=lambda state, *a, **kw: (deepcopy(state), {})):
-        first = apply_scientific_feedback({}, [good], manager=manager, phase_diagram_directory=tmp_path)
+        first = apply_scientific_feedback({}, [good], manager=manager, phase_diagram_directory=tmp_path, active_model_version="m1")
         first_id = first["state"]["phase_records"][0]["record_id"]
         bad = deepcopy(good)
         bad["outputs"]["magnetic_check"]["moments"] = [1, 1, 0, 0]
-        second = apply_scientific_feedback(first["state"], [bad], manager=manager, phase_diagram_directory=tmp_path)
-        again = apply_scientific_feedback(second["state"], [bad], manager=manager, phase_diagram_directory=tmp_path)
+        second = apply_scientific_feedback(first["state"], [bad], manager=manager, phase_diagram_directory=tmp_path, active_model_version="m1")
+        again = apply_scientific_feedback(second["state"], [bad], manager=manager, phase_diagram_directory=tmp_path, active_model_version="m1")
     history = manager.data["structures"][structure_id]["stage_history"]["dft_single_point"]
     assert len(history) == 1 and history[0]["result_id"] == first_id
     assert history[0]["metadata"]["checks_passed"] is False

@@ -1,4 +1,4 @@
-"""Small local project picker and one-click launcher for the Open WebUI Agent."""
+"""Project picker and one-click launcher for the LangGraph Agent."""
 
 from __future__ import annotations
 
@@ -8,29 +8,26 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
-import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import time
-from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 import webbrowser
 
 from run.local_service_tokens import local_service_tokens
-from run.open_webui_startup import effective_webui_config, load_startup_settings
 
 
-PROJECT_CONFIG_NAME = "open_webui_runtime.json"
+PROJECT_CONFIG_NAME = "agent_runtime.json"
 DEFAULT_PROJECT_SETTINGS = {
-    "open_webui_url": "http://127.0.0.1:3000",
-    "config_session_path": "config_session.json",
-    "editable_config_draft_path": "search_config.project.json",
-    "state_path": "current/state.json",
-    "ledger_path": "current/phase_data.json",
+    "agent_web_port": 7932,
+    "config_session_path": "parameters/config_session.json",
+    "editable_config_draft_path": "parameters/search_config.project.json",
+    "state_path": "workflow_state/state.json",
+    "ledger_path": "workflow_state/ledgers/phase_data.json",
     "new_runs_directory": "open_webui_runs",
-    "phase_diagram_directory": "current/phase_diagrams",
-    "approval_directory": "current/approvals",
-    "local_action_directory": "current/approved_batches",
+    "phase_diagram_directory": "analysis_outputs",
+    "approval_directory": "workflow_state/approvals",
+    "local_action_directory": "workflow_state/approved_batches",
     "execution_mode": "debug",
     "deepseek": {"model": "deepseek-flash", "base_url": "https://api.deepseek.com",
                  "max_tokens": 2400, "timeout": 60, "configuration_thinking": "disabled",
@@ -86,13 +83,14 @@ def create_project(workspace_root: Path, *, registry: Path | None = None) -> Pat
     root = workspace_root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     target = root / PROJECT_CONFIG_NAME
-    session_path = root / "config_session.json"
-    draft_path = root / "search_config.project.json"
-    if session_path.exists() or draft_path.exists():
+    session_path = root / DEFAULT_PROJECT_SETTINGS["config_session_path"]
+    draft_path = root / DEFAULT_PROJECT_SETTINGS["editable_config_draft_path"]
+    if any(path.exists() for path in (session_path, draft_path, root / "config_session.json", root / "search_config.project.json",
+                                    root / "config/config_session.json", root / "config/search_config.project.json")):
         raise FileExistsError("该目录已有配置会话或设置 JSON；请使用“添加已有项目”，不会覆盖原文件")
     try:
         with target.open("x", encoding="utf-8") as stream:
-            settings = {**DEFAULT_PROJECT_SETTINGS, **load_startup_settings()}
+            settings = dict(DEFAULT_PROJECT_SETTINGS)
             json.dump(settings, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
     except FileExistsError:
@@ -118,6 +116,8 @@ def create_project(workspace_root: Path, *, registry: Path | None = None) -> Pat
     session["setup_stage"] = "json_ready"
     session["editable_config_json_path"] = str(draft_path)
     save_config_session(session, session_path)
+    from analysis_layer.feedback.workspace_guide import publish_workspace_guide
+    publish_workspace_guide(root)
     register_project(target, registry=registry)
     return target
 
@@ -136,8 +136,7 @@ def describe_project(path: Path) -> str:
             f"配置：{'已确认' if session.get('status') == 'confirmed' else '待确认'}\n"
             f"项目长期记忆：{'有（人工审核）' if long_term else '无'}\n"
             f"项目短期记忆：{'有（运行状态）' if recent else '无'}\n"
-            "Open WebUI 账户记忆：由 Open WebUI 单独管理，可能跨聊天和项目；"
-            "建议关闭 phase-search-agent 模型的 Memory 注入。")
+            "记忆由本项目审核管理；Studio只提供对话与调试入口。")
 
 
 def _load_config(path: Path) -> dict:
@@ -145,14 +144,6 @@ def _load_config(path: Path) -> dict:
     if not isinstance(data, dict) or not all(data.get(key) for key in ("state_path", "ledger_path")):
         raise ValueError("运行时配置至少需要 state_path 和 ledger_path")
     return data
-
-
-def _open_webui_url(config: dict) -> str:
-    url = config.get("open_webui_url", "http://127.0.0.1:3000")
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("open_webui_url 必须是有效的 HTTP(S) 网页地址")
-    return url
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -180,61 +171,24 @@ def _port_is_free(port: int) -> bool:
         return connection.connect_ex(("127.0.0.1", port)) != 0
 
 
-def _webui_is_available(url: str) -> bool:
-    try:
-        with urlopen(url, timeout=2) as response:
-            return response.status < 500
-    except OSError:
-        return False
-
-
-def _ensure_webui(config: dict, workspace: Path, url: str, *, on_started=None) -> tuple[bool, subprocess.Popen | None]:
-    """Return readiness and the owned process, if this call started Open WebUI."""
-    if _webui_is_available(url):
-        return True, None
-    command = config.get("open_webui_start_command")
-    if command is None:
-        return False, None
-    if not isinstance(command, list) or not command or any(not isinstance(arg, str) or not arg for arg in command):
-        raise ValueError("open_webui_start_command 必须是非空命令参数列表，不使用 shell")
-    configured_environment = config.get("open_webui_environment") or {}
-    if (not isinstance(configured_environment, dict)
-            or any(not isinstance(key, str) or not isinstance(value, str)
-                   for key, value in configured_environment.items())):
-        raise ValueError("open_webui_environment 必须是字符串到字符串的 JSON 对象")
-    workdir = Path(config.get("open_webui_workdir") or workspace).expanduser().resolve()
-    if not workdir.is_dir():
-        raise ValueError(f"Open WebUI 工作目录不存在：{workdir}")
-    log_path = workspace / "open_webui_server.log"
-    environment = os.environ.copy()
-    environment.update(configured_environment)
-    timeout = config.get("open_webui_startup_timeout_seconds", 120)
-    if type(timeout) not in {int, float} or not 5 <= timeout <= 600:
-        raise ValueError("open_webui_startup_timeout_seconds 必须在 5–600 秒之间")
-    with log_path.open("a", encoding="utf-8") as stream:
-        process = subprocess.Popen(command, cwd=workdir, env=environment,
-                                   stdout=stream, stderr=subprocess.STDOUT,
-                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    if on_started is not None:
-        on_started(process)
-    deadline = time.monotonic() + float(timeout)
-    while time.monotonic() < deadline:
-        if _webui_is_available(url):
-            return True, process if process.poll() is None else None
-        exit_code = process.poll()
-        if exit_code not in (None, 0):
-            raise RuntimeError(f"Open WebUI 启动命令退出（代码 {exit_code}）；请查看 {log_path}")
-        time.sleep(0.5)
-    _stop_owned_process(process)
-    raise RuntimeError(f"Open WebUI 尚未在 {timeout:g} 秒内就绪；请查看 {log_path}")
-
-
 def _stop_owned_process(process, *, timeout: float = 5) -> bool:
     """Stop a process started by this launcher; never look up or kill by port/name."""
     if process is None:
         return True
     if process.poll() is not None:
         return True
+    children = []
+    if isinstance(process, subprocess.Popen):
+        import psutil
+        try:
+            children = psutil.Process(process.pid).children(recursive=True)
+        except psutil.NoSuchProcess:
+            return True
+        for child in reversed(children):
+            try:
+                child.terminate()
+            except psutil.NoSuchProcess:
+                pass
     try:
         process.terminate()
         process.wait(timeout=timeout)
@@ -260,7 +214,7 @@ def _existing_agent(port: int, selected: Path):
             return None
         process = psutil.Process(listeners[0].pid)
         command = process.cmdline()
-        if not any(arg in {"run.open_webui_api", "run/open_webui_api.py"} for arg in command):
+        if not any(arg in {"run.agent_api", "run/agent_api.py"} for arg in command):
             return None
         if "--runtime-config" in command:
             configured = command[command.index("--runtime-config") + 1]
@@ -316,9 +270,17 @@ def start_agent(path: Path, *, port: int = 8765) -> tuple[object, str, bool]:
     env = os.environ.copy()
     env["OPENWEBUI_TOOL_TOKEN"] = tool_token
     env["OPENWEBUI_CONTROL_TOKEN"] = control_token
-    command = [sys.executable, "-u", "-m", "run.open_webui_api", "--runtime-config", str(path),
-               "--port", str(port), "--parent-pid", str(os.getpid())]
-    log_path = path.parent / "agent_server.log"
+    ui_port = config.get("studio_port", 2024)
+    if type(ui_port) is not int or not 1 <= ui_port <= 65535 or ui_port == port:
+        raise ValueError("agent_web_port 必须是与控制端口不同的有效端口")
+    if not _port_is_free(ui_port):
+        raise RuntimeError(f"聊天端口 {ui_port} 已被占用；请先停止原服务")
+    env["PHASE_WEB_USERNAME"] = "phase"
+    env["PHASE_WEB_PASSWORD"] = tool_token
+    command = [sys.executable, "-u", "-m", "run.studio_service", "--runtime-config", str(path),
+               "--control-port", str(port), "--port", str(ui_port), "--parent-pid", str(os.getpid())]
+    log_path = path.parent / "logs" / "agent_server.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     stream = log_path.open("a", encoding="utf-8")
     try:
         process = subprocess.Popen(command, cwd=Path(__file__).resolve().parent.parent,
@@ -333,7 +295,10 @@ def start_agent(path: Path, *, port: int = 8765) -> tuple[object, str, bool]:
         try:
             with urlopen(f"http://127.0.0.1:{port}/health", timeout=0.5) as response:
                 if response.status == 200:
-                    return process, tool_token, False
+                    request = Request(f"http://127.0.0.1:{ui_port}/info")
+                    with urlopen(request, timeout=0.5) as ui_response:
+                        if ui_response.status == 200:
+                            return process, tool_token, False
         except OSError:
             time.sleep(0.2)
     process.terminate()
@@ -347,8 +312,7 @@ def main() -> None:
     app.geometry("760x390")
     selected = tk.StringVar()
     details = tk.StringVar(value="请选择项目；新聊天不会自动建立新项目。")
-    running = {"process": None, "webui_process": None, "owned": False,
-               "starting_webui": False, "closing": False}
+    running = {"process": None, "owned": False}
     projects = [item for item in read_project_registry(registry) if Path(item).is_file()]
     ttk.Label(app, text="选择项目（每个项目有独立工作区、state 和台账）").pack(pady=10)
     chooser = ttk.Combobox(app, textvariable=selected, values=projects, state="readonly", width=100)
@@ -363,7 +327,7 @@ def main() -> None:
                 details.set(f"项目配置需要检查：{error}")
 
     def add_project() -> None:
-        path = filedialog.askopenfilename(title="选择已有项目的 open_webui_runtime.json",
+        path = filedialog.askopenfilename(title="选择已有项目的 agent_runtime.json",
                                          filetypes=[("JSON", "*.json")])
         if path:
             try:
@@ -389,59 +353,20 @@ def main() -> None:
                 messagebox.showerror("无法新建项目", str(error))
 
     def launch() -> None:
-        if running["starting_webui"]:
-            return
         if not selected.get():
             messagebox.showinfo("请选择项目", "先选择继续的项目，或新建独立项目。")
             return
         try:
-            project_config = effective_webui_config(_load_config(Path(selected.get())))
-            open_webui_url = _open_webui_url(project_config)
+            project_config = _load_config(Path(selected.get()))
             process, tool_token, reused = start_agent(Path(selected.get()))
             running["process"] = process
             running["owned"] = True
             app.clipboard_clear()
             app.clipboard_append(tool_token)
             details.set(describe_project(Path(selected.get())) +
-                        "\nAgent 已启动，并绑定到当前启动窗口；关闭窗口将停止 Agent 及由本启动器启动的 Open WebUI。"
-                        "Open WebUI 连接密钥已复制到剪贴板；仅首次添加连接时粘贴。")
-            local_chat_url = "http://127.0.0.1:8765/phase/chat"
-            if not _webui_is_available(open_webui_url) and not project_config.get("open_webui_start_command"):
-                details.set(details.get() + "\nOpen WebUI 未运行；已打开本地对话页。连接密钥已复制，点“从剪贴板连接”即可对话。")
-                webbrowser.open(local_chat_url)
-                return
-            running["starting_webui"] = True
-            details.set(details.get() + "\n正在启动 Open WebUI；窗口仍可操作，请稍候……")
-
-            def finish_webui(ready, process, error):
-                running["starting_webui"] = False
-                if running["closing"]:
-                    if process is not None:
-                        _stop_owned_process(process)
-                    return
-                running["webui_process"] = process
-                if error is not None:
-                    details.set(details.get() + f"\nOpen WebUI 启动失败：{error}。已打开本地对话页。")
-                    webbrowser.open(local_chat_url)
-                elif ready:
-                    webbrowser.open(open_webui_url)
-                else:
-                    details.set(details.get() + "\nOpen WebUI 未响应；已打开本地对话页。")
-                    webbrowser.open(local_chat_url)
-
-            def start_webui_in_background():
-                try:
-                    ready, process = _ensure_webui(
-                        project_config, Path(selected.get()).resolve().parent,
-                        open_webui_url,
-                        on_started=lambda started: running.__setitem__("webui_process", started),
-                    )
-                    error = None
-                except (OSError, ValueError, RuntimeError) as failure:
-                    ready, process, error = False, None, failure
-                app.after(0, finish_webui, ready, process, error)
-
-            threading.Thread(target=start_webui_in_background, daemon=True).start()
+                        "\nLangGraph Agent 已启动；关闭此窗口将停止服务。"
+                        "Studio 使用 LangSmith 登录；控制凭据已复制到剪贴板。")
+            webbrowser.open(f"https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:{project_config.get('studio_port', 2024)}")
         except (OSError, ValueError, RuntimeError, KeyError) as error:
             if running["owned"]:
                 stop(show_warning=False)
@@ -451,24 +376,14 @@ def main() -> None:
         process = running["process"]
         if not _stop_owned_process(process):
             if show_warning:
-                messagebox.showwarning("服务仍在退出", "Agent 未能停止；请检查 agent_server.log")
-            return False
-        webui_process = running["webui_process"]
-        if not _stop_owned_process(webui_process):
-            if show_warning:
-                messagebox.showwarning(
-                    "服务仍在退出",
-                    "由本启动器启动的 Open WebUI 未能停止；请稍后重试，日志文件可能仍被占用。",
-                )
+                messagebox.showwarning("服务仍在退出", "Agent 未能停止；请检查 logs/agent_server.log")
             return False
         running["process"] = None
-        running["webui_process"] = None
         running["owned"] = False
         refresh()
         return True
 
     def close() -> None:
-        running["closing"] = True
         if running["owned"]:
             if not stop():
                 return
@@ -479,6 +394,8 @@ def main() -> None:
     ttk.Button(row, text="继续所选项目", command=launch).pack(side="left", padx=5)
     ttk.Button(row, text="新建独立项目", command=new_project).pack(side="left", padx=5)
     ttk.Button(row, text="添加已有项目", command=add_project).pack(side="left", padx=5)
+    ttk.Button(row, text="配置 / API密钥", command=lambda: webbrowser.open("http://127.0.0.1:8765/phase/setup")).pack(side="left", padx=5)
+    ttk.Button(row, text="审批", command=lambda: webbrowser.open("http://127.0.0.1:8765/phase/approval")).pack(side="left", padx=5)
     ttk.Button(row, text="停止本次 Agent", command=stop).pack(side="left", padx=5)
     chooser.bind("<<ComboboxSelected>>", lambda _event: refresh())
     if projects:

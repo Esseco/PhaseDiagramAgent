@@ -102,7 +102,7 @@ def test_phase_backfill_changes_version_without_rewriting_old_snapshot(tmp_path)
                 "energy": -4, "energy_unit": "eV"}]
     initial = update_phase_diagram(records, active_model_version="m1", output_directory=tmp_path)
     old = initial["diagrams"]["mlip"]
-    history_path = tmp_path / "m1" / "history" / f"phase_diagram_mlip_{old['version']}.json"
+    history_path = tmp_path / "m1" / "phase_diagrams" / "history" / f"phase_diagram_mlip_{old['version']}.json"
     old_text = history_path.read_text(encoding="utf-8")
     repeated = update_phase_diagram(records, active_model_version="m1", output_directory=tmp_path,
                                     parent_versions={"mlip:m1": old["version"]})

@@ -75,19 +75,8 @@ def run_mace_worker(job: dict) -> dict:
     parameters = dict(job.get("parameters") or {})
     operation = job["operation"]
     if operation == "predict":
-        from ase.io import read
-        from mace.calculators import MACECalculator
-        atoms = read(job["structure_path"])
-        options = {"model_paths": job["model_path"],
-                   "device": parameters.get("device", "cpu"),
-                   "default_dtype": parameters.get("mace_default_dtype", "float64")}
-        head = parameters.get("mace_head")
-        if head:
-            options["head"] = head
-        atoms.calc = MACECalculator(**options)
-        return {"status": "completed", "energy": float(atoms.get_potential_energy()),
-                "forces": atoms.get_forces().tolist(), "energy_unit": "eV",
-                "forces_unit": "eV/angstrom", "geometry": "DFT_final_frame"}
+        from scientific_layer.mlip.predict_structure import predict_structure
+        return predict_structure(job)
     if operation == "relax":
         model_paths = [str(path) for path in (job.get("model_paths") or [])]
         if model_paths:
@@ -126,6 +115,12 @@ def run_mace_worker(job: dict) -> dict:
             "mlip_version": job.get("model_version"),
             "qbc": {"status": "not_available_single_model", "member_count": 1},
         })
+        if (job.get("parameters") or {}).get("model_refresh_operation"):
+            from scientific_layer.mlip.predict_structure import predict_structure
+            final_job = {**job, "structure_path": str(structure_path)}
+            prediction = predict_structure(final_job)
+            prediction.pop("single_point_completed", None)
+            result.update(prediction)
         return result
 
     if operation != "mc":

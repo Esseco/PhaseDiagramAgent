@@ -21,6 +21,7 @@ from scientific_layer.structures.boundary_utils import allowed_phases
 
 
 CONFIG_AGENT_SYSTEM_PROMPT = """你是材料相图搜索项目的首次配置助手，不是计算执行器。
+首次配置必须分别确认python_environments.local_python、local_mlip、remote_python、remote_mlip。本地普通环境默认py1、本地MLIP默认py-mace仅为本地候选；超算环境必须由用户提供，禁止复制本地名称或猜测。remote_python是远端DFT/提取所用环境，remote_mlip是远端Relax/MC/MLIP预测环境；可填current表示用户提交脚本已激活的环境。环境信息不明确时集中询问，不运行科学计算。后续模型版本变化不改变两端环境归属。
 Relax每个提交作业最多100个结构，MC每个提交作业最多10个模拟（每个branch的MC结果仍独立），DFT一个作业一个结构；这是supercomputer.batch_sizes或运行时stage_batch_sizes的分组限制，超出就拆分作业。budgets.stage_limits.max_tasks是独立的累计预算限制，不能把它解释为每个作业上限，也不能因入选branch增加自动建议增改它。用户说每个作业/每个任务弛豫数量时，应修改分组大小。generation_actions.max_det_H不存在，不得新增该字段。
 只修改当前用户明确指定的参数，其他参数原值保留。不要为满足数量而擅自调整候选配额、预算、策略、相边界或全局结构限制；关联调整只能提出建议。没有“候选/生成量/总配额”等限定时，“300个branch”按入选上限run.batch_size理解，不是run.total_quota。本轮det(H)上限属于生成动作max_det_H，不得写入budgets.structure_limits.max_det_H；只有明确首轮配置才用system.H_generation.first_round_max_det_H，明确全局边界才改全局字段。读取配置不能恢复旧默认覆盖用户已确认值。
 editable_field_catalog 是程序提供的真实配置字段目录。用户只需说中文含义和目标值，你负责从目录定位字段，不得要求用户提供内部字段路径。目录包含被精简摘要省略的参数；摘要未展示不等于字段不存在。初态数量对应 run.initial_states_per_branch，入选上限对应 run.batch_size，候选生成量对应 run.total_quota；初态规则不属于DFT。用户明确要求修改且值明确时直接返回patch和write_requested=true。确有多个不同语义字段时只集中问一个必要问题。不得声称已写入，写入是否成功由程序返回。
@@ -32,7 +33,7 @@ editable_field_catalog 是程序提供的真实配置字段目录。用户只需
 程序已经读取了 verified_config_source.source_path，并在导入时解析母结构、生成合法 H、计算允许相并集和校验结果。你只能依据程序提供的 verified_config_source 和本次 draft_config 讨论事实；不得引用旧对话中的配置值，不得声称程序无法读取文件，不得要求用户手抄已生成的 H 矩阵。生成失败时程序会给出具体错误，你不要猜测生成结果。boundary.P 的允许相是端点与中间相的并集；H 的四相键属于这个并集。超算调度器未接通不会阻止只生成搜索建议，但不能提交作业。
 以下均是已定义的非阻塞口径，不得要求用户逐项重复确认：parameter_source=atomate_defaults 时空 dft.parameters 表示采用 atomate 默认值；空 generation_actions.quotas 和 focus_regions 表示由调度策略动态决定；阶段 max_cost 是各阶段独立安全上限，不要求求和小于总预算，实际累计仍受 total_relative_cost 约束；用户写入配置文件的收敛阈值视为已选择值；空 scheduler 命令只表示暂不能远端提交，不阻止配置确认和搜索建议。generated_H=false 且 readiness.status=file_not_imported 只表示尚未执行导入，不能称为 H 缺失或要求再次确认生成参数。
 本项目初次配置的重点是本地母结构路径、体系 boundary、远端 MACE 模型路径、预算、DFT/atomate 参数和收敛标准。科学计算 MLIP 默认是 mace-mh-1；calculation.mlip_version、mlip.name 和 bohb.scope.mlip_version 默认保持一致。不要询问用户选择 MLIP 版本，也不要与 DeepSeek Agent 模型混淆。用户只需提供超算端 mlip.model_path；路径缺失时只问该路径。仅当用户明确提出更换 MLIP 时才讨论其他版本。
-首次配置先收集工作区根路径和 Agent 模型版本（DeepSeek V4.1 Flash 或 V4 Pro）；允许同一条消息或分别提供。只展示这两项和设置 JSON 路径，等待用户回复“确认”。确认后将工作区根路径视为已确认的锁定事实；后续必须从 setup_facts 读取，绝不能再次索要或要求重复确认该路径。确认前不得创建设置 JSON/工作区目录或修改运行时模型。确认后更新本地运行时模型（若用户选择切换）、生成带注释的 JSON，并区分列出必填项和建议检查项。用户编辑 JSON 后可发送“读取配置 JSON”进行审核；仅审核模式通过后，等待用户简短回复“同意”，再保存配置快照并进入搜索 run。用户也可发送“读取配置 JSON 并继续”，这表示仅在 Agent 与程序检查均通过时条件确认继续；此时直接保存快照并进入搜索 Agent，不再要求第二次同意。两种方式都只进入搜索建议阶段，不派发科学计算。不得在此之前派发科学计算。DeepSeek 模型属于本地 Open WebUI 运行时，不写入科学搜索配置。
+首次配置先收集工作区根路径和 Agent 模型版本（DeepSeek V4.1 Flash 或 V4 Pro）；允许同一条消息或分别提供。只展示这两项和设置 JSON 路径，等待用户回复“确认”。确认后将工作区根路径视为已确认的锁定事实；后续必须从 setup_facts 读取，绝不能再次索要或要求重复确认该路径。确认前不得创建设置 JSON/工作区目录或修改运行时模型。确认后更新本地运行时模型（若用户选择切换）、生成带注释的 JSON，并区分列出必填项和建议检查项。用户编辑 JSON 后可发送“读取配置 JSON”进行审核；仅审核模式通过后，等待用户简短回复“同意”，再保存配置快照并进入搜索 run。用户也可发送“读取配置 JSON 并继续”，这表示仅在 Agent 与程序检查均通过时条件确认继续；此时直接保存快照并进入搜索 Agent，不再要求第二次同意。两种方式都只进入搜索建议阶段，不派发科学计算。不得在此之前派发科学计算。DeepSeek 模型属于本地 Agent 运行时，不写入科学搜索配置。
 每次配置对话都必须结合 conversation_context 中最近的问答理解短答（例如“是的”是对紧邻前一条助手问题的回答），不可丢失上下文、重复询问已确认字段或把一个确认泛化成其他问题。若紧邻问题是在确认 calculation.mlip_version 与 bohb.scope.mlip_version 使用 mace-mh-1，用户回答肯定，则将两字段记为 mace-mh-1 并告知已记录；不得转而重问工作区路径。
 配置 JSON 输出后说明工作区和主要文件位置，并分别列出必填项与建议检查项；用户可调整 storage.paths。只有 Agent 和程序检查通过，且用户已明确回复“同意”或使用“读取配置 JSON 并继续”作条件确认后，才进入搜索建议流程；不会因此自动提交计算。
 本地绝不能尝试打开/加载超算上的 MACE 模型。超算模型路径仅作为远端配置元数据。
@@ -53,6 +54,7 @@ RECOMMENDED_CONFIG_CHECKS = (
     "system.boundary.P 的 Na 含量→允许相映射、H_generation 尺寸与包含条件、TM_ratio 是否准确。",
     "母结构目录是否包含与相名一致的文件（例如 O3.vasp）；文件内容及相名映射是否正确。",
     "mlip.model_path 是否是超算端实际可访问的模型路径；本地 Agent 不会加载该模型。",
+    "python_environments 中本地Python/MLIP与超算Python/MLIP环境是否分别确认；超算环境不可沿用本机名称。",
     "总预算及 MC、DFT 子预算是否使用一致的项目成本单位，且子预算没有超过总预算。",
     "DFT 单点与弛豫的 user_incar_settings、赝势和计算参数来源是否符合你的既定流程。",
     "收敛阈值及单位是否符合预期（能量误差为 eV/atom；相图变化按配置口径）；覆盖率是否仅作为证据而非硬门槛。",
@@ -70,6 +72,13 @@ def configuration_readiness(session: dict, *, base_directory, phase_references_p
     missing = list(audit.get("missing") or [])
     conflicts = list(audit.get("conflicts") or [])
     ambiguities = list(audit.get("ambiguities") or [])
+    from config_layer.schema.python_environments import python_environment
+    for host in ("local", "remote"):
+        for mlip in (False, True):
+            try:
+                python_environment(config, host, mlip=mlip)
+            except ValueError as error:
+                missing.append(str(error))
     system = config.get("system") or {}
     awaiting_workspace = session.get("setup_stage") in {
         "awaiting_storage_path", "awaiting_storage_confirmation"
@@ -188,6 +197,7 @@ class ConfigurationChatHandler:
     def __init__(self, workflow_kwargs, *, config_session_path, base_directory,
                  phase_references_path=None, editable_config_path=None,
                  editable_config_filename="search_config.project.json",
+                 editable_config_directory="",
                  workspace_root_default=None, agent_client=None, runtime_factory=None,
                  current_deepseek_model="deepseek-v4-pro", deepseek_model_switcher=None):
         self.workflow_kwargs = dict(workflow_kwargs)
@@ -197,6 +207,7 @@ class ConfigurationChatHandler:
         self.phase_references_path = Path(phase_references_path) if phase_references_path else None
         self.editable_config_path = Path(editable_config_path) if editable_config_path else None
         self.editable_config_filename = safe_config_filename(editable_config_filename)
+        self.editable_config_directory = editable_config_directory
         session = workflow_kwargs.get("config_session") or {}
         selected_root = (
             session.get("pending_workspace_root")
@@ -392,11 +403,15 @@ class ConfigurationChatHandler:
             return f"配置助手暂时不可用：{diagnostic}\n配置草稿未更改；请修正提示的问题后重试。"
         return self._apply_agent_response(session, message, result, source_context=source_context)
 
+    def _editable_location(self, root):
+        from config_layer.session.editable_config_location import editable_config_location
+        return editable_config_location(root, Path(self.editable_config_directory) / self.editable_config_filename)
+
     def _sync_editable_source(self, session):
         """Follow the selected workspace's configured short file after migration."""
         if not self.editable_config_filename.endswith(".project.json"):
             return session
-        preferred = self.workspace_root_default / self.editable_config_filename
+        preferred = self._editable_location(self.workspace_root_default)
         if not preferred.is_file() or self.editable_config_path == preferred:
             return session
         updated = deepcopy(session)
@@ -550,7 +565,7 @@ class ConfigurationChatHandler:
         lines = [
             f"工作区根目录：{root}",
             f"Agent 模型版本：{_deepseek_model_label(model)}（`{model}`）",
-            f"设置 JSON：{root / self.editable_config_filename}",
+            f"设置 JSON：{self._editable_location(root)}",
         ]
         lines.append(
             "确认这两项后回复“确认”；如需修改，请重新发送正确的路径或模型版本。"
@@ -582,13 +597,13 @@ class ConfigurationChatHandler:
         from config_layer.session.resolve_workspace_paths import default_workspace_storage
 
         storage = default_workspace_storage(root)
-        draft_path = (root / self.editable_config_filename).resolve()
+        draft_path = self._editable_location(root)
         selected_model = session.get("pending_deepseek_model")
         if selected_model and selected_model != self.current_deepseek_model:
             if not callable(self.deepseek_model_switcher):
                 reply = (
                     "工作区路径有效，但本地运行时未配置 DeepSeek 模型切换接口；"
-                    "设置 JSON 尚未创建。请检查 run/open_webui_runtime.json 后重试。"
+                    "设置 JSON 尚未创建。请检查 run/agent_runtime.json 后重试。"
                 )
                 return self._save_and_report(self._with_turn(session, user_message, reply), reply)
             try:
@@ -1235,7 +1250,7 @@ def _deepseek_model_label(model):
 def _deepseek_model_change_reply(model):
     return (
         f"已将本地 Agent 切换为 {_deepseek_model_label(model)}（`{model}`），"
-        "并保存到本地 Open WebUI 运行时配置；从下一条消息起生效。"
+        "并保存到本地 Agent 运行时配置；从下一条消息起生效。"
         "搜索配置、API Key 和计算任务未修改。"
     )
 

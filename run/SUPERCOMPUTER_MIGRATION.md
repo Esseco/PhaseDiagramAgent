@@ -8,7 +8,7 @@ the inspected workspace, so no unseen staging code was copied or assumed.
 | Staging responsibility | Canonical root implementation | Status |
 |---|---|---|
 | Confirmed configuration gate | `config_layer/session`, `config_layer/runtime`, `run.main` | canonical |
-| Open WebUI proposal/approval | `run/open_webui_api.py`, `run/local_agent_control.py` | canonical |
+| Open WebUI proposal/approval | `run/agent_api.py`, `run/local_agent_control.py` | canonical |
 | Offline plan confirmation | `execution_layer/step_runner/confirm_action_plan.py` | canonical |
 | Split recover/advise/confirm/prepare/submit/status | `run/step_runner.py` | canonical |
 | Portable immutable batch | `execution_layer/remote/batch_runner.py` | canonical |

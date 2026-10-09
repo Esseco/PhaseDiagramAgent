@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 FIELDS = (
+    "epoch",
     "hull_version", "energy_method", "energy_basis_id", "source_version",
     "record_id", "structure_id", "phase", "phase_identification_status", "structure_sha256",
     "x_Na_per_O2", "composition", "is_composition_ground_state",
@@ -16,6 +17,9 @@ FIELDS = (
     "original_energy", "normalized_total_energy_eV", "ehull_eV_per_atom",
     "is_stable", "structure_path", "na_layer_uniform", "na_layer_status",
     "na_layer_rule", "model_version", "energy_eV_per_O2", "hull_energy_eV_per_O2", "ehull_eV_per_O2",
+    "mlip_energy_eV", "dft_energy_eV", "corrected_energy_eV", "energy_source",
+    "correction_status", "correction_eV_per_O2",
+    "refresh_coverage_status", "refreshed_structures", "deferred_structures",
 )
 
 
@@ -32,6 +36,12 @@ def export_phase_diagram_csv(snapshot: dict, path: str | Path) -> Path:
             sodium = composition.get("Na") or 0
             x = format(2 * float(sodium) / float(oxygen), ".10f") if oxygen else ""
             writer.writerow({
+                "epoch": snapshot.get("epoch"),
+                "refresh_coverage_status": ("partial" if snapshot["refresh_coverage"].get("partial") else "complete") if snapshot.get("refresh_coverage") else "",
+                "refreshed_structures": (snapshot.get("refresh_coverage") or {}).get("refreshed"),
+                "deferred_structures": (snapshot.get("refresh_coverage") or {}).get("deferred"),
+                **{key: entry.get(key) for key in ("mlip_energy_eV", "dft_energy_eV",
+                    "corrected_energy_eV", "energy_source", "correction_status", "correction_eV_per_O2")},
                 "hull_version": snapshot.get("version"),
                 "energy_method": snapshot.get("method"),
                 "energy_basis_id": snapshot.get("energy_basis_id"),

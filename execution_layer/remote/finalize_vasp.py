@@ -85,7 +85,10 @@ def finalize_vasp(directory, *, exit_code=0, calculation_directory=None, runtime
     marker = {key: result.get(key) for key in (*keys, "task_checksum", "status")}
     marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})
     _write(root / "task.finished.json", marker)
-    export_batch_result(root, root.parent.parent / "results")
+    stage = root.parent.parent
+    if stage.name == "inputs":
+        stage = stage.parent
+    export_batch_result(root, stage / "results")
     return result
 
 

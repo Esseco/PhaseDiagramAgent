@@ -1,3 +1,4 @@
+from analysis_layer.feedback.export_dft_products import dft_product_path
 """Scoped spin proxy changes scientific eligibility, never execution facts."""
 from copy import deepcopy
 import json
@@ -92,10 +93,10 @@ def test_bad_spin_preserved_but_not_hull_training_or_metrics(tmp_path, moments):
     export_dft_products(state, tmp_path / "diagrams")
     from pathlib import Path
     root = Path(next(iter(state["dft_result_exports"].values()))["directory"])
-    assert json.loads((root / "training.json").read_text()) == []
-    records = json.loads((root / "dft_records.json").read_text())
+    assert json.loads((dft_product_path(root, "training.json")).read_text()) == []
+    records = json.loads((dft_product_path(root, "dft_records.json")).read_text())
     assert records[0]["energy"] == -10
-    metrics = json.loads((root / "mlip_dft_metrics.json").read_text())
+    metrics = json.loads((dft_product_path(root, "mlip_dft_metrics.json")).read_text(encoding="utf-8"))
     assert metrics["recovered_tasks"] == 1 and metrics["matched_structures"] == 0
     assert metrics["energy_total"]["mae"] is None
 

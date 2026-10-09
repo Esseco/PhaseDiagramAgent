@@ -68,15 +68,26 @@ def export_batch_result(task_directory, results_directory):
         source = checkpoint_path if checkpoint_path.is_absolute() else task_dir / checkpoint_path
         if source.is_file() and task_dir in source.resolve().parents:
             _copy(source, destination / source.name)
-    for name in ("checkpoint.json", "checkpoint.json.gz", "status.json.gz",
-                 "settings.json.gz", "trace.json.gz", "task.stdout.log",
-                 "task.stderr.log"):
+    # Checkpoints still participate in the existing resume contract; do not
+    # discard them until remote-only restart has an explicit adapter.
+    for name in ("checkpoint.json", "checkpoint.json.gz"):
         source = task_dir / name
         if source.is_file():
             _copy(source, destination / name)
-    pool_summary = task_dir / "pool" / "pool_summary.json.gz"
-    if pool_summary.is_file():
-        _copy(pool_summary, destination / pool_summary.name)
+    remote_artifacts = []
+    for name in ("status.json.gz", "settings.json.gz", "trace.json.gz",
+                 "task.stdout.log", "task.stderr.log", "pool/pool_summary.json.gz"):
+        source = task_dir / name
+        if source.is_file():
+            remote_artifacts.append({"name": name, "remote_path": str(source.resolve()),
+                                     "size_bytes": source.stat().st_size,
+                                     "required_for_recovery": False})
+    if remote_artifacts:
+        manifest = destination / "remote_artifacts.json"
+        temporary = manifest.with_name(manifest.name + ".part")
+        temporary.write_text(json.dumps({"task_id": result.get("task_id"),
+            "artifacts": remote_artifacts}, indent=2), encoding="utf-8")
+        temporary.replace(manifest)
     _copy(result_path, destination / "result.json")
     # The completion marker is published last, after every required file.
     _copy(marker_path, destination / "task.finished.json")

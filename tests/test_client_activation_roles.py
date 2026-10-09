@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from execution_layer.step_runner.file_protocol import write_json
-from run.open_webui_api import RunWorkflowChatHandler, _make_deepseek_key_setup
+from run.agent_api import RunWorkflowChatHandler, _make_deepseek_key_setup
 
 
 def test_key_activation_preserves_search_and_intent_roles(tmp_path):

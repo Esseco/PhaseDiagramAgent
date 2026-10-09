@@ -16,7 +16,7 @@ from execution_layer.remote.resolve_local_relax_structure import resolve_local_r
 from execution_layer.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
 from execution_layer.workflows.create_active_learning_handlers import _allocate_mc_bohb
 from execution_layer.workflows.run_tool_step import run_tool_step
-from run.open_webui_api import format_workflow_reply
+from run.agent_api import format_workflow_reply
 from scientific_layer.mlip.slurm_executor import execute_mlip_task
 
 

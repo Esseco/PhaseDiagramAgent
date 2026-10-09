@@ -17,9 +17,9 @@ from run.runtime_config_io import (
 def compose_runtime(config_path=None, *, chat_handler_factory,
                     model_switcher_factory, runtime_factory):
     """Compose the built-in runtime from a local, non-secret JSON file."""
-    configured = config_path or os.environ.get("PHASE_SEARCH_OPENWEBUI_CONFIG") or "run/open_webui_runtime.json"
+    configured = config_path or os.environ.get("PHASE_AGENT_RUNTIME_CONFIG") or "run/agent_runtime.json"
     config_file = Path(configured).resolve()
-    settings = _load_json_object(config_file, "Open WebUI 运行时配置")
+    settings = _load_json_object(config_file, "Agent 运行时配置")
     _reject_secrets(settings)
     from config_layer.session.load_config_session import load_config_session
     from run.runtime_clients import create_optional_runtime_client
@@ -102,6 +102,7 @@ def compose_runtime(config_path=None, *, chat_handler_factory,
             workflow_kwargs, config_session_path=resolved_session, base_directory=base,
             phase_references_path=phase_path, editable_config_path=editable_config_path,
                 editable_config_filename=editable_config_filename,
+                editable_config_directory=draft_paths.editable_config_directory,
                 workspace_root_default=workspace_root,
             agent_client=agent_client,
             runtime_factory=lambda: runtime_factory(config_file),
@@ -117,6 +118,9 @@ def compose_runtime(config_path=None, *, chat_handler_factory,
 
     from config_layer.session.resolve_workspace_paths import resolve_workspace_paths
     effective_config = deepcopy(snapshot["config"])
+    if settings.get("local_path_relocations"):
+        from config_layer.session.relocate_workspace_paths import relocate_workspace_paths
+        effective_config = relocate_workspace_paths(effective_config, settings["local_path_relocations"], base)
     if settings.get("runtime_storage_override") is not None:
         effective_config["storage"] = deepcopy(settings["runtime_storage_override"])
     if "storage" not in effective_config:

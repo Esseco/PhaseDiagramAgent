@@ -33,8 +33,7 @@ def create_local_http_server(chat_handler, *, api_key: str, host="127.0.0.1", po
             elif self.path == "/phase/chat":
                 if not self._is_loopback_client():
                     self._json(403, error_formatter("forbidden", "local chat is local-only")); return
-                from run.local_chat_page import local_chat_page
-                self._html(200, local_chat_page())
+                self._json(410, error_formatter("chat_moved", "旧聊天页已移除，请从项目启动器打开 LangGraph 聊天页面"))
             elif self.path == "/v1/models" and self._authorized():
                 self._json(200, {"object": "list", "data": [
                     {"id": model_id, "object": "model", "created": 0, "owned_by": "local-project"}
@@ -89,6 +88,8 @@ def create_local_http_server(chat_handler, *, api_key: str, host="127.0.0.1", po
                     length = int(self.headers.get("Content-Length", "0"))
                     if length <= 0 or length > max_request_bytes: raise request_error("invalid body size")
                     body = json.loads(self.rfile.read(length).decode("utf-8"))
+                    from run.control_request_contracts import validate_control_request
+                    validate_control_request(self.path, body)
                     conversation = str(body.get("conversation_id") or "local-control")[:128]
                     if self.path == "/phase/propose":
                         response = local_control.propose(body.get("instruction", ""), conversation_id=conversation)
@@ -115,7 +116,7 @@ def create_local_http_server(chat_handler, *, api_key: str, host="127.0.0.1", po
                     else:
                         response = local_control.pause(body.get("reason", ""), conversation_id=conversation)
                     self._json(200, response)
-                except (ValueError, KeyError, request_error) as error:
+                except (UnicodeDecodeError, ValueError, KeyError, request_error) as error:
                     self._json(400, error_formatter("invalid_request", str(error)))
                 return
             if self.path != "/v1/chat/completions":
@@ -189,4 +190,3 @@ def create_local_http_server(chat_handler, *, api_key: str, host="127.0.0.1", po
             self.end_headers(); self.wfile.write(encoded)
 
     return ThreadingHTTPServer((host, int(port)), Handler)
-

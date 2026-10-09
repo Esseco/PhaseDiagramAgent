@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 from decision_layer.agent.resolve_chat_intent import resolve_chat_intent
-from run.open_webui_api import RunWorkflowChatHandler
+from run.agent_api import RunWorkflowChatHandler
 
 
 def test_service_failure_does_not_expose_error_text():

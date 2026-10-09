@@ -1,3 +1,4 @@
+from analysis_layer.feedback.export_dft_products import dft_product_path
 """Keep raw DFT magnetization on transport; assess only on scientific consumption."""
 from copy import deepcopy
 import csv
@@ -53,9 +54,9 @@ def test_analysis_preserves_raw_marks_good_bad_and_excludes_bad_task(tmp_path):
     export_dft_products(state, tmp_path)
     predictor.assert_not_called()
     root = Path(next(iter(state["dft_result_exports"].values()))["directory"])
-    saved = json.loads((root / "dft_records.json").read_text())
+    saved = json.loads((dft_product_path(root, "dft_records.json")).read_text())
     assert saved[0]["magnetic_moments"] == incoming["outputs"]["magnetic_moments"]
-    with (root / "magnetic_moments.csv").open(encoding="utf-8-sig", newline="") as stream:
+    with (dft_product_path(root, "magnetic_moments.csv")).open(encoding="utf-8-sig", newline="") as stream:
         rows = list(csv.DictReader(stream))
     assert [r["spin_assessment"] for r in rows] == ["reasonable", "out_of_range", "not_checked", "not_checked"]
     compact = format_workflow_reply({"state": state, "status": "completed"}, tmp_path / "state.json")

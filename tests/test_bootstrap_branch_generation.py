@@ -5,7 +5,7 @@ from unittest.mock import patch
 from execution_layer.workflows.create_active_learning_handlers import _generate_branches
 from scientific_layer.structures.generate_coverage_branches import generate_coverage_branches
 from scientific_layer.structures.select_candidates import select_candidates
-from run.open_webui_api import format_workflow_reply
+from run.agent_api import format_workflow_reply
 
 
 class BootstrapBranchGenerationTest(unittest.TestCase):

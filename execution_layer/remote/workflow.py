@@ -27,7 +27,8 @@ def sync_results(state_path, *, local_batch_root, remote_batch_root, transport):
         local, remote = _batch_locations(batch, local_batch_root, remote_batch_root)
         local_results = Path(batch.get("results_directory") or (local.parent / "results"))
         remote_batch = PurePosixPath(batch.get("remote_path") or remote)
-        remote_results = remote_batch.parent / "results"
+        remote_results = (remote_batch.parent.parent if remote_batch.parent.name == "inputs"
+                          else remote_batch.parent) / "results"
         key = (str(local_results.resolve()), str(remote_results))
         result_locations.setdefault(key, []).append(batch["batch_id"])
     for (local_results, remote_results), batch_ids in result_locations.items():

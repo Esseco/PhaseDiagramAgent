@@ -3,6 +3,7 @@
 from execution_layer.budget.estimate_stage_cost import estimate_dft_cost
 from execution_layer.budget.check_budget import check_budget
 from copy import deepcopy
+from decision_layer.agent.dft_contracts import dft_contract_errors
 
 
 def validate_dft_agent_decisions(proposal: dict, metrics: list[dict], state: dict, *, config: dict, config_version: str, remaining_budget: float) -> dict:
@@ -15,6 +16,15 @@ def validate_dft_agent_decisions(proposal: dict, metrics: list[dict], state: dic
     if not isinstance(decisions, list) or any(not isinstance(item, dict) for item in decisions):
         return {"valid": False, "errors": ["invalid_dft_decisions_format"],
                 "accepted": [], "rejected": [], "global_action": proposal.get("global_action")}
+    contract_errors = dft_contract_errors(decisions)
+    if contract_errors:
+        if str(proposal.get("source") or "").startswith("llm_agent"):
+            for item in decisions:
+                extra = set(item) - {"candidate_id", "action", "reason"}
+                if extra:
+                    errors.append(f"agent_decision_fields_forbidden:{','.join(sorted(extra))}")
+        return {"valid": False, "errors": errors + contract_errors, "accepted": [],
+                "rejected": [], "global_action": proposal.get("global_action")}
     relax_limit = max(1, int(len(decisions) * float((config.get("selection_policy") or {}).get(
         "max_relax_fraction", 0.10)))) if decisions else 0
     relax_accepted = 0

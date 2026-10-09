@@ -10,21 +10,101 @@ def _is_model_failure_proposal(proposal):
     return _model_failure_action((proposal or {}).get("raw_action") or {})
 
 
-def format_workflow_reply(result: dict, state_path, *, verbose=False) -> str:
+def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
+    if result.get("status") == "training_results_received":
+        return result["reason"]
+    if verbose is None:
+        from run.response_preferences import detailed_response
+        verbose = detailed_response()
+    events = result.get("events") or []
+    proposal = result.get("agent_proposal") or next((row.get("agent_proposal") for row in reversed(events)
+                                                    if row.get("agent_proposal")), {})
+    preview = ((proposal.get("raw_action") or {}).get("parameters") or {}).get("refresh_preview")
+    refresh = (result.get("state") or {}).get("model_refresh") or {}
+    if preview and result.get("status") == "awaiting_approval":
+        rows = preview["candidates"]
+        relax = sum(r["operation"] == "relax" for r in rows)
+        seconds = (preview.get("runtime_budget") or {}).get("serial_seconds")
+        timing = f"串行耗时粗估 {seconds/3600:.1f} 小时（不含排队）" if seconds is not None else "耗时暂无同类实测"
+        return (f"当前：{preview['new_model_version']} 已激活，结构刷新待批准。\n"
+                f"首批：弛豫 {relax}、单点 {len(rows)-relax}；暂缓 {preview['deferred']}。\n"
+                "标准：<1 meV/atom弛豫，1–10单点，>10按Na×相抽样10%。\n"
+                f"预计相对成本 {preview['initial_cost']:.1f}；最多追加一轮弛豫 "
+                f"{preview['maximum_supplemental_count']} 个、成本上限 {preview['maximum_supplemental_cost']:.1f}。\n"
+                "补充标准：新Ehull<1，或1–10且最大原子力>0.05 eV/Å；已弛豫项不再追加。\n"
+                f"未覆盖的分层 {len(preview['coverage_gaps'])} 个；{timing}，单点成本暂按弛豫上界。\n"
+                "同意将批准首批及上述上限内最多一轮补充输入生成；超限另行审批。\n"
+                "仅生成超算输入；你提交GPU.sh并回传results。不本机计算。")
+    if refresh and refresh.get("status") != "completed":
+        reason = result.get("reason") or next((e.get("reason") for e in reversed(events) if e.get("reason")), None)
+        if reason:
+            return "当前：新模型结构刷新。\n" + str(reason)
     text = _workflow_reply_body(result, state_path, verbose=verbose)
+    if not verbose and not result.get("post_dft_review") and result.get("status") in {
+        "confirmation_required", "awaiting_remote_training", "awaiting_manual_submission",
+        "failed", "rejected", "rejected_by_user", "not_configured", "prepared",
+        "already_prepared", "tasks_in_progress",
+    }:
+        # Follow-up replies report the transition, not the previous round again.
+        if result.get("status") == "failed":
+            return text
+        return text + f"\n完整记录：`{state_path}`"
     from analysis_layer.feedback.dft_magnetic_tables import magnetic_chat_summary
     question = (result.get("dft_recovery_question") or {}) if isinstance(result, dict) else {}
     task_ids = set(question.get("recovered_task_ids") or []) if question else None
     summary = magnetic_chat_summary((result.get("state") or {}), task_ids=task_ids, verbose=verbose) if isinstance(result, dict) else ""
-    return summary + "\n\n" + text if summary else text
+    from run.post_dft_presentation import post_dft_lines, post_dft_review_lines
+    assessment = post_dft_lines(result.get("state") or {}) if isinstance(result, dict) else ""
+    events = result.get("events") or []
+    proposal = result.get("agent_proposal") or next(
+        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")), {})
+    from analysis_layer.state.post_dft_assessment import post_dft_assessment
+    state = result.get("state") or {}
+    round_assessment = post_dft_assessment(state, state.get("confirmed_config") or {})
+    review_action = (proposal or {}).get("raw_action") or {"post_dft_review": result.get("post_dft_review")}
+    review = post_dft_review_lines(review_action, verbose=verbose,
+        finetune_enabled=round_assessment.get("finetune_enabled") if round_assessment else None)
+    if review and result.get("status") == "awaiting_approval":
+        text = "下一步建议（待批准）：\n" + text
+    if not verbose and assessment:
+        return _compact_post_dft_reply(assessment, summary, review, text)
+    return "\n\n".join(part for part in (assessment, summary, review, text) if part)
+
+
+def _compact_post_dft_reply(assessment, magnetic, review, action_text):
+    """Keep metrics and caveats visible; retain every detail in an expandable block."""
+    rows = assessment.splitlines()
+    visible = rows[:4]
+    visible.extend(line for line in rows[4:] if "提醒：" in line)
+    visible.extend(line.split(" CSV：", 1)[0] for line in rows[4:]
+                   if line.startswith("DFT 校正综合相图："))
+    review_rows = review.splitlines()
+    key_rows = [line for line in review_rows if line.startswith((
+        "本轮发现：", "微调取舍：", "收敛与停止：", "数据局限："))]
+    # The complete named tradeoff fields occur once in the expandable report.
+    key_rows = [line.replace("微调取舍：", "判断：", 1) for line in key_rows]
+    overview = "本轮总结：\n" + "\n".join(key_rows) if key_rows else ""
+    details = "\n\n".join(part for part in (assessment, review) if part)
+    expanded = ("<details>\n<summary>展开完整分析、备选方案与文件路径</summary>\n\n"
+                + details + "\n\n</details>")
+    return "\n\n".join(part for part in ("\n".join(visible), magnetic, overview,
+                                           expanded, action_text) if part)
 
 
 def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
     """Keep routine chat concise; full evidence stays in existing records."""
+    if isinstance(result, dict) and result.get("status") == "confirmation_required":
+        events = result.get("events") or []
+        reason = result.get("message") or result.get("reason") or next(
+            (event.get("reason") or ((event.get("execution") or {}).get("result") or {}).get("reason")
+             for event in reversed(events) if event.get("reason") or
+             ((event.get("execution") or {}).get("result") or {}).get("reason")), None)
+        return "操作仍需确认，当前未报告执行完成。" + (f"\n原因：{reason}" if reason else
+            "\n流程未提供具体原因，请查看完整记录中的审批与执行结果。")
     if isinstance(result, dict) and result.get("status") == "awaiting_dft_recovery_decision":
         return _dft_recovery_question_reply(result)
     if verbose or not isinstance(result, dict):
-        return _format_workflow_reply_verbose(result, state_path)
+        return _format_workflow_reply_verbose(result, state_path, verbose=True)
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
         (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")), {})
@@ -132,7 +212,7 @@ def _dft_recovery_question_reply(result):
     return "\n".join(lines)
 
 
-def _format_workflow_reply_verbose(result: dict, state_path) -> str:
+def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -> str:
     if not isinstance(result, dict):
         return str(result)
     events = result.get("events") or []
@@ -145,6 +225,9 @@ def _format_workflow_reply_verbose(result: dict, state_path) -> str:
             return ("Agent 返回了无效动作，本轮没有可批准的建议。"
                     "请拒绝旧建议后重新提出；不会执行空动作。")
         cost = proposal.get("estimated_cost") or {}
+        from execution_layer.policy.training_input_action import is_training_input_action
+        training_inputs = is_training_input_action(proposal.get("raw_action") or {
+            "tool": proposed_tool, "parameters": proposal.get("action_parameters") or {}})
         approval_files = next(
             (event.get("approval_files") for event in reversed(events)
              if event.get("approval_files")), {}
@@ -155,16 +238,37 @@ def _format_workflow_reply_verbose(result: dict, state_path) -> str:
             f"目的：{proposal.get('expected_purpose') or proposal.get('reason') or '未提供'}",
             f"预计相对成本：{cost.get('estimated_total_cost') if cost.get('estimated_total_cost') is not None else '待任务展开后估算'}",
         ]
+        if training_inputs:
+            lines = ["建议：微调模型，生成超算训练提交文件",
+                     "目的：按本轮分析准备committee、K折评估和全数据主模型训练输入。",
+                     "训练耗时：尚无训练实测，待估算；输入生成成本不代表超算训练成本。",
+                     "批准后仅生成输入与GPU.sh，由你上传提交；不本机训练、不自动激活模型。"]
         recovered_count = int(result.get("recovered_count") or 0)
+        runtime = cost.get("runtime_budget") or {}
+        if runtime.get("serial_seconds") is not None:
+            hours = runtime["serial_seconds"] / 3600
+            low, high = runtime["sample_range_seconds"]
+            lines.append(f"耗时粗估：串行累计约 {hours:.2g} 小时（观测范围 {low/3600:.2g}–{high/3600:.2g} 小时）；不含排队，并行后实际完成时间另计。")
+        elif proposed_tool in {"allocate_mc_bohb", "prepare_local_batch_files", "select_dft_candidates", "run_calculation_stage"}:
+            lines.append("耗时粗估：暂无足够实测或任务规模信息，暂无法估算；相对成本不代表小时。")
         if recovered_count:
             lines.insert(0, f"已校验并回收 {recovered_count} 个任务结果，结果与成本已入账。")
         if proposal.get("recommended_action") == "generate_branches":
             params = proposal.get("action_parameters") or (proposal.get("raw_action") or {}).get("parameters") or {}
             quotas = params.get("quotas")
-            strategy = ("、".join(f"{name} {count}" for name, count in quotas.items())
+            names = {"coverage": "补覆盖", "composition": "补Na组分", "competing_phase": "竞争相",
+                     "periodic_extension": "扩展超胞", "tm_ordering": "TM排布"}
+            strategy = ("、".join(f"{names.get(name, name)} {count}" for name, count in quotas.items())
                         if isinstance(quotas, dict) and quotas else
                         f"覆盖补充（预计 {params.get('total_quota', '按配置')} 个；具体分配由现有 branch 覆盖决定）")
-            lines.append(f"生成策略：{strategy}")
+            if verbose or not params.get("generation_plan"):
+                lines.append(f"生成策略：{strategy}")
+            plan = params.get("generation_plan") or []
+            for row in plan:
+                target = "全部合法相" if row["phase"] == "all" else row["phase"]
+                x = f"，Na/O₂ {row['na_min']:g}–{row['na_max']:g}" if row.get("na_min") is not None else ""
+                cap = f"，det(H)≤{row['max_det_H']}" if row.get("max_det_H") is not None else ""
+                lines.append(f"- {target}{x}{cap}：{names.get(row['strategy'], row['strategy'])}候选 {row['quota']}；{row['reason']}")
             if params.get("max_det_H") is not None:
                 lines.append(f"本轮超胞上限：det(H) ≤ {params['max_det_H']}")
             else:
@@ -172,6 +276,14 @@ def _format_workflow_reply_verbose(result: dict, state_path) -> str:
             initial_count = params.get("initial_states_per_branch")
             lines.append(f"入选上限：{params.get('batch_size', '按配置')} 个 branch；"
                          f"每个 branch 静电能前 10 中至多取 {initial_count if initial_count is not None else '按配置'} 个初态")
+            preview = params.get("generation_cost_preview") or {}
+            if preview:
+                lines.append(f"后续成本粗估上界：Relax+MC {preview['relax_mc_cost_upper']:.3g}；"
+                             f"若全部入选branch做单点DFT {preview['dft_cost_scenario_upper']:.3g}（情景，非授权）。")
+                seconds = preview.get("serial_seconds_upper")
+                lines.append(f"Relax+MC串行耗时粗估：{seconds/3600:.2g} 小时，不含排队。" if seconds is not None
+                             else "耗时：实测样本不足，暂不换算小时。")
+                lines.append("以上不含第二段MC及DFT优化；后续派发仍单独审批。")
         if proposal.get("recommended_action") == "allocate_mc_bohb":
             params = proposal.get("action_parameters") or (proposal.get("raw_action") or {}).get("parameters") or {}
             preview = params.get("budget_preview") or {}
@@ -232,8 +344,14 @@ def _format_workflow_reply_verbose(result: dict, state_path) -> str:
         return "当前运行已绑定最新确认配置，无需迁移；本次没有执行任何计算。"
     if status in {"configuration_revision_required", "configuration_version_mismatch"}:
         reason = result.get("reason") or next(
-            (event.get("reason") for event in reversed(events) if event.get("reason")), None)
+            (event.get("reason") or ((event.get("execution") or {}).get("result") or {}).get("reason")
+             for event in reversed(events) if event.get("reason") or ((event.get("execution") or {}).get("result") or {}).get("reason")), None)
         return f"{reason or '本轮要求超过已确认配置；请先修订配置。'}\n未执行生成或计算。"
+    if status == "awaiting_remote_training":
+        payload = (result.get("execution") or {}).get("result") or next(
+            (((event.get("execution") or {}).get("result") or {}) for event in reversed(events)
+             if ((event.get("execution") or {}).get("result") or {}).get("reason")), {})
+        return payload.get("reason") or result.get("reason") or "微调输入已准备，等待超算训练；未在本机训练或激活模型。"
     action = ((result.get("final_action") or {}).get("tool")
               or (proposal or {}).get("recommended_action")
               or next(((event.get("final_action") or {}).get("tool") for event in reversed(events)
@@ -428,4 +546,3 @@ def _proposal_directory(state_path, proposal):
     if not record_id:
         return None
     return str(Path(state_path).parent / "approvals" / str(record_id))
-

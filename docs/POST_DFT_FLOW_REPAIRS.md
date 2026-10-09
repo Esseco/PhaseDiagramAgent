@@ -1,0 +1,28 @@
+# 四路决策的执行边界
+
+主模型设置更新：正式主模型复用com_1（main_model_index=0），与committee共用一个训练任务；不生成main_final。默认4正式成员+5折共9个训练任务；results/models.json标注is_main_model和is_committee_member，不重复导出。已有10任务目录不会自动改写。
+
+训练设置更新：用户指定所有训练使用patience=20，保留配置值，不再覆盖为max_num_epochs+1；committee/最终模型的同数据validation仅作训练监视，早停不构成独立泛化评估。原先禁用早停的说明不再适用。
+
+LLM基于结果与记忆比较微调、补DFT、新branch、收敛/停止；代码不替代科学判断。
+生成策略必须使用现有五种注册名称和正JSON整数配额，校验反馈定位到具体项。
+方案参数失败时保留已完整通过分析字段校验的review，不能批准错误方案。
+微调输入方案的choice必须finetune。工具名/拼写别名可归一化；旧revise_strategy仅在input-only update_mlip、明确now和continue时视为等价执行标签，保留归一化记录。search、defer等真实科学冲突不能改写，交给LLM修正；错误同时显示期望值和实际值。
+
+新的微调方案使用update_mlip、parameters.prepare_inputs_only=true，展示“建议微调，生成超算训练提交文件”，普通批准只准备文件。正式训练、激活仍需敏感审批。兼容旧的单独mlip_finetune.enabled=true建议，但版本5刷新旧建议，不传递旧批准。其他配置修订仍走草稿。
+adjust_strategy可请求配置修订：request_configuration_revision=true、patch为现有点分路径。
+审批后在state.requested_config_revision保存草稿，确认配置仍不改变；配置对话中确认patch后，
+再批准迁移。仅申请过且明确批准的false→true微调启用变更可迁移，不放宽科学配置迁移规则。
+
+默认微调执行复用prepare_mace_finetune：只生成远端输入、分组train/valid/test数据、run_training.sh以及复用现有MLIP GPU模板的GPU.sh。Agent返回上传目录与提交说明；不提供硬编码真实数据的一次性生成入口。未登记的既有目录不可直接覆盖。
+沿用已配置committee；未配置时默认4成员。正式committee全部合格数据参与训练，不做可能遗漏结构的bootstrap抽样，成员保留不同seed和配置。主模型默认5折，按branch/framework/structure来源分组，同来源不跨折泄漏。目录main_cv_1等保存各折输入，main_final全部合格数据参与训练。最终模型和committee的valid_file同train_file仅满足MACE训练监视要求，不是独立验证；patience大于固定训练epoch上限，泛化评估只使用K折留出数据。
+
+旧配置缺少remote_mlip时，训练入口只复用实际远端GPU模板唯一明确的conda activate环境（现有mace），记录remote_environment.source；绝不从本机模型环境推断。明确remote_mlip配置优先，不修改确认配置。
+
+run_training.sh训练后自动运行便携collect_training_results.py。results/kfold_metrics.csv包含各折与合并留出样本能量/atom和逐分量力MAE/RMSE；energy_comparison.csv和force_comparison.csv保存eV单位逐点对比，力每原子3行。最终主模型与committee复制到results/models，models.json记录相对路径；training.finished.json只在完整评估和导出后写入。下载完整results即可取得模型和误差。缺失或歧义模型不伪造结果；本地模型回收/激活接口仍需独立审批。
+用户自行将完整目录上传，在目录内sbatch GPU.sh一次；复用现有集群资源模板，不提交作业、不本机训练。
+路径使用相对数据路径及已确认远端原模型/环境。模型回传后仍需独立验证适配器和单独激活审批。
+已有mlip_trainer/model_update_handler适配器继续沿用训练→验证→候选→审批链。
+没有远端模型回收/独立验证适配器时，不声称已完成训练或自动切换模型；这属于明确执行条件。
+
+补DFT只有成功产生新任务才消费来源DFT轮次，参数失败不消费；新结果进入其自己的轮次分析。

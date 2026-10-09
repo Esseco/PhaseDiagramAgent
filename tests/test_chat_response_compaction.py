@@ -1,6 +1,6 @@
 """Large internal records must not be returned to the conversation."""
 
-from run.open_webui_api import _chat_content, handle_chat_request
+from run.agent_api import _chat_content, handle_chat_request
 
 
 def test_large_candidate_json_is_not_echoed():

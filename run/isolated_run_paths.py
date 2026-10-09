@@ -34,10 +34,10 @@ def publish_run_descriptor(settings, session, paths, *, source_config):
             descriptor[key] = str(value if value.is_absolute() else
                                   (Path(source_config).parent / value).resolve())
     descriptor.update(state_path=str(paths["state"]), ledger_path=str(paths["ledger"]),
-        config_session_path=str(root / "config_session.json"),
+        config_session_path=str(root / "parameters/config_session.json"),
         runtime_storage_override=storage, source_runtime_config=str(source_config))
     local_session = deepcopy(session)
-    local_session["editable_config_json_path"] = str(root / "search_config.project.json")
-    write_json(root / "config_session.json", local_session)
-    write_json(root / "open_webui_runtime.json", descriptor)
-    return root / "open_webui_runtime.json"
+    local_session["editable_config_json_path"] = str(root / "parameters/search_config.project.json")
+    write_json(root / "parameters/config_session.json", local_session)
+    write_json(root / "agent_runtime.json", descriptor)
+    return root / "agent_runtime.json"

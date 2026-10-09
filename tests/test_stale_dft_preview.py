@@ -1,5 +1,5 @@
 from execution_layer.workflows.preview_dft_inputs import stale_dft_preview
-from run.open_webui_api import format_workflow_reply
+from run.agent_api import format_workflow_reply
 
 
 def test_old_preview_requires_refresh():

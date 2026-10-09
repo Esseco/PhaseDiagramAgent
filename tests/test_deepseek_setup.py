@@ -4,7 +4,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from run.open_webui_api import create_server
+from run.agent_api import create_server
 from run.deepseek_setup import setup_page, test_and_save_api_key as _test_and_save_api_key
 
 

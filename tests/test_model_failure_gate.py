@@ -2,7 +2,7 @@ from execution_layer.workflows.run_tool_step import run_tool_step, _model_failur
 from unittest.mock import patch
 from unittest.mock import Mock
 import json
-from run.open_webui_api import RunWorkflowChatHandler, format_workflow_reply
+from run.agent_api import RunWorkflowChatHandler, format_workflow_reply
 
 
 def test_history_resume_refreshes_failed_proposal(tmp_path):

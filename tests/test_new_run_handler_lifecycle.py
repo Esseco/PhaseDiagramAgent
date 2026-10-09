@@ -1,4 +1,4 @@
-from run.open_webui_api import RunWorkflowChatHandler
+from run.agent_api import RunWorkflowChatHandler
 
 
 def test_new_run_adopts_all_runtime_callbacks_without_replacing_lock(tmp_path):

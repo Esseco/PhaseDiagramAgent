@@ -31,7 +31,9 @@ def write_relax_upload_plan(state, upload_root):
         "Process_AL_MC; the MACE model path in task.json must exist remotely."
     ), "branch_count": len(grouped), "task_count": sum(len(row["task_ids"]) for row in grouped.values()),
         "branches": [grouped[key] for key in sorted(grouped)]}
-    path = root / "RELAX_UPLOAD_PLAN.json"
+    configured = (state.get("workspace_layout") or {}).get("submission_plan_path")
+    path = Path(configured) if configured else root / "RELAX_UPLOAD_PLAN.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)

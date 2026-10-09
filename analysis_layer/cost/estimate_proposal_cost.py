@@ -7,6 +7,13 @@ from analysis_layer.cost.calibrate_relative_cost import calibrate_relative_cost
 def estimate_proposal_cost(action, state):
     tool = action.get("tool"); params = action.get("parameters") or {}
     stages = []
+    if tool == "prepare_local_batch_files" and params.get("mode") == "model_refresh_inputs":
+        preview = params.get("refresh_preview") or {}
+        return {"workload": [{"stage": "relax_and_feature", "tasks": len(preview.get("candidates") or []),
+                              "maximum_supplemental_tasks": preview.get("maximum_supplemental_count"),
+                              "estimated_cost": float(action.get("budget", 0))}],
+                "estimated_total_cost": float(action.get("budget", 0)), "cost_unit": "relative_cost",
+                "calibration": preview.get("cost_calibration")}
     if tool == "allocate_mc_bohb":
         preview = params.get("budget_preview") or {}
         stages.append({"stage": "deep_search", "tasks": preview.get("selected_branch_count", "MC-selected"),

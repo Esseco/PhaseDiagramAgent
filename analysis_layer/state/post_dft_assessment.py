@@ -6,7 +6,7 @@ from analysis_layer.feedback.dft_comparison_tables import build_comparison_table
 def post_dft_assessment(state, config=None):
     config = config or {}
     model = config.get("mlip") or {}
-    version = model.get("version") or model.get("name") or state.get("active_model_version")
+    version = state.get("active_model_version") or model.get("version") or model.get("name")
     consumed = set(state.get("post_dft_decided_rounds") or [])
     rounds = [row for row in dft_recovery_rounds(state)
               if row["recovered_tasks"] and not row["pending_task_ids"]
@@ -26,8 +26,16 @@ def post_dft_assessment(state, config=None):
     paired = sum(item.get("comparison_status") == "completed" for item in energies)
     training = (config.get("mlip_finetune") or {}).get("training") or {}
     minimum = training.get("minimum_new_dft_records", ((config.get("qbc") or {}).get("retrain") or {}).get("minimum_new_dft_records", 10))
+    export = next((item for item in (state.get("dft_result_exports") or {}).values()
+                   if item.get("round_scope") == row["scope"]), {})
     return {**row, "status": "evaluated" if eligible and paired == len(eligible) else "evaluation_incomplete",
+            "parity_plots": export.get("parity_plots") or {},
+            "remote_finetune_jobs": [{key: job.get(key) for key in ("directory", "status", "original_model_version", "submitted", "activated")}
+                                     for job in (state.get("remote_finetune_jobs") or {}).values()],
             "eligible_structures": len(eligible), "paired_structures": paired, "metrics": metrics,
             "minimum_new_dft_records": minimum,
+            "combined_phase_diagram": {key: ((state.get("phase_diagrams") or {}).get("combined") or {}).get(key)
+                                       for key in ("status", "version", "model_version", "excluded_structures", "reason", "csv_path")},
             "finetune_enabled": (config.get("mlip_finetune") or {}).get("enabled") is True,
-            "instruction": "本轮DFT回收已结束：先分析本轮原模型的能量/受力MAE、RMSE、相/Na覆盖和记忆，再决定微调或生成新branch。缺失误差不能视为零，先说明并补齐模型/评估接口；数据数量门槛不是科学误差阈值。不得重复派发本轮旧DFT，不自动训练或激活模型。"}
+            "decision_requirement": "比较直接微调、已有结构池补DFT、新branch、收敛/停止四路，给出首选和其他方向暂不选的理由。人工经验将过大的受力误差视为重要微调依据；数据不足仍比较两条路径，补DFT与新branch按包含后续计算的预期增量收益和成本比较，覆盖和误差不作硬门槛。微调未启用只是执行条件。",
+            "instruction": "根据本轮与历史结果、原模型能量/力MAE及RMSE、相图变化、覆盖、收益、代表性、预算和记忆决策；不硬编码科学结论。区分科学收敛与预算/条件暂停，无新稳定相不等于收敛。参数错误不丢弃有效分析，不重复派发旧DFT，不自动训练或激活模型。"}

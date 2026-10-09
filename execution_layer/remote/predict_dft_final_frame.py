@@ -14,6 +14,9 @@ def write_prediction(root, result, model, *, predictor=None):
     try:
         if model.get("version", model.get("name")) != result.get("model_version"):
             raise ValueError("remote comparison model version mismatch")
+        environment = model.get("environment")
+        if not isinstance(environment, str) or not environment.strip():
+            raise ValueError("remote MLIP environment missing; configure remote_mlip, not the local environment")
         structure, digest = load_result_structure(result.get("outputs") or {})
         path = model.get("model_path")
         if not path or not Path(path).is_file():
@@ -27,7 +30,7 @@ def write_prediction(root, result, model, *, predictor=None):
             parameters["mace_head"] = model["mace_head"]
         evaluated = (predictor or run_mace_with_py_mace)(
             structure, model_path=path, operation="predict", work_directory=root / "mlip_comparison_work",
-            parameters=parameters, environment=model.get("environment") or "py-mace")
+            parameters=parameters, environment=environment.strip())
         if evaluated.get("status") != "completed":
             raise ValueError(evaluated.get("error") or "remote MLIP prediction failed")
         prediction.update({key: evaluated.get(key) for key in ("energy", "forces", "energy_unit", "forces_unit")})
@@ -82,7 +85,7 @@ def main():
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--model-version", required=True)
     parser.add_argument("--head", default="omat_pbe")
-    parser.add_argument("--environment", default="py-mace")
+    parser.add_argument("--environment", required=True, help="confirmed HPC conda name, or current")
     args = parser.parse_args()
     reports = supplement_results(args.results, {"version": args.model_version, "model_path": args.model_path,
         "mace_head": args.head, "environment": args.environment})

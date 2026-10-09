@@ -23,6 +23,7 @@ def update_phase_diagram(
     output_directory: str | Path | None = None,
     parent_versions: dict[str, str] | None = None,
     active_model_version: str | None = None,
+    output_state: dict | None = None,
 ) -> dict[str, Any]:
     """分别构建 mlip/dft 相图，保留原能量并保存可追踪版本。"""
     if energy_basis not in {"total", "per_atom", "per_formula_unit"}:
@@ -79,9 +80,24 @@ def update_phase_diagram(
             output["mlip_by_version"][model_version] = snapshot
         else:
             output["diagrams"][method] = snapshot
+        refresh = (output_state or {}).get("model_refresh") or {}
+        if method == "mlip" and model_version == refresh.get("new_model_version") and refresh.get("plan"):
+            plan = refresh["plan"]
+            successful = {t.get("input_structure_sha256") for t in (output_state or {}).get("tasks") or []
+                          if t.get("model_refresh_id") == plan["checksum"] and t.get("status") == "completed"
+                          and (t.get("converged") is True or (t.get("outputs") or {}).get("single_point_completed") is True)
+                          and t.get("checks_passed", True) is True}
+            refreshed_count = len(successful)
+            snapshot["refresh_coverage"] = {"refreshed": refreshed_count,
+                "deferred": max(0, plan["total_unique"]-refreshed_count),
+                "partial": refreshed_count < plan["total_unique"]}
         if output_directory is not None:
             root = Path(output_directory)
-            directory = phase_snapshot_directory(root, method, model_version)
+            output_version = model_version or active_model_version or (versions[0] if len(versions) == 1 else None)
+            directory = phase_snapshot_directory(root, method, output_version, state=output_state)
+            if output_state is not None:
+                from analysis_layer.state.model_epoch import model_epoch
+                snapshot["epoch"] = model_epoch(output_state, output_version)
             filename = f"phase_diagram_{method}_{snapshot['version']}"
             path = directory / f"{filename}.json"
             legacy_paths = [root / f"{filename}.json"]

@@ -10,7 +10,7 @@ from execution_layer.dispatch.create_tool_registry import create_tool_registry
 from execution_layer.policy.execution_policy import build_agent_proposal
 from execution_layer.step_runner.file_protocol import write_json
 from execution_layer.workflows.run_tool_step import run_tool_step
-from run.open_webui_api import RunWorkflowChatHandler
+from run.agent_api import RunWorkflowChatHandler
 
 
 def _pending_mc_state(maximum):

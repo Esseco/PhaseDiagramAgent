@@ -6,6 +6,7 @@ import numpy as np
 
 
 IDENTITY_FIELDS = (
+    "epoch",
     "model_version", "model_sha256", "search_group_index", "dft_round", "upload_operation_id",
     "parent_relax_round", "task_id", "structure_id", "branch_id", "stage",
     "frame_index", "phase", "x_Na_per_O2", "composition", "atom_count",
@@ -19,6 +20,7 @@ FORCE_FIELDS = (*IDENTITY_FIELDS, "atom_index", "element", "component",
                 "dft_force_eV_per_A", "mlip_force_eV_per_A", "force_error_eV_per_A",
                 "force_abs_error_eV_per_A")
 METRIC_FIELDS = (
+    "epoch",
     "model_version", "search_group_index", "dft_round", "upload_operation_id",
     "parent_relax_round", "metric", "mae", "rmse", "unit", "sample_count",
     "recovered_tasks", "expected_tasks", "pending_tasks", "matched_structures",
@@ -78,6 +80,8 @@ def comparison_metrics(energies, forces, scope):
     """JSON and CSV statistics share the same fully paired rows and weights."""
     paired = [row for row in energies if row["comparison_status"] == "completed"]
     metrics = {"round_scope": scope, "matched_structures": len(paired),
+               "evaluation_type": "original_round_model_same_frame",
+               "interpretation": "原轮次冻结模型同帧DFT比较；不混同训练误差或K折误差。独立测试还需确认结构未参与该模型训练。",
                "not_evaluated": [{"task_id": row["task_id"], "round_scope": scope,
                                   "status": row["comparison_status"], "reason": row["reason"]}
                                  for row in energies if row["comparison_status"] != "completed"]}

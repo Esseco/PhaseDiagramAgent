@@ -1,9 +1,10 @@
 """One simple factual row per saved MLIP version/round, using its own DFT pairs."""
 from analysis_layer.feedback.dft_comparison_tables import build_comparison_tables, comparison_metrics
 from analysis_layer.state.dft_round_status import dft_recovery_rounds
+from analysis_layer.state.model_epoch import model_epoch
 
 ROUND_SUMMARY_FIELDS = (
-    "mlip_round", "model_version", "model_sha256", "generation_batches",
+    "model_epoch", "mlip_round", "model_version", "model_sha256", "generation_batches",
     "branches_proposed", "branches_selected", "branches_registered", "branch_count_status",
     "relax_tasks", "relax_completed", "mc_branches", "mc_tasks", "mc_completed",
     "dft_selected_structures", "dft_tasks", "dft_recovered", "dft_successful", "dft_failed",
@@ -36,7 +37,8 @@ def summarize_model_rounds(state):
         metrics = comparison_metrics(energies, forces, {"model_version": version})
         gen_rows, unknown = _generations_for_model(generations, tasks, version)
         unknown = unknown or "generation_history" not in state
-        summary = {"mlip_round": saved_rounds.get(version), "model_version": version,
+        summary = {"model_epoch": model_epoch(state, version),
+                   "mlip_round": saved_rounds.get(version), "model_version": version,
                    "model_sha256": ((state.get("model_registry") or {}).get(version) or {}).get("comparison_model_sha256")
                        or next(iter(fingerprints), None), "generation_batches": len(gen_rows),
                    "branch_count_status": "unknown_legacy_lineage" if unknown else "recorded"}

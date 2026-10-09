@@ -16,6 +16,8 @@ def rollback_model(state, *, target_version, user_approved, reason):
                                                     new_model_version=target_version)
     current = refreshed["state"]
     current["active_model"] = deepcopy(registry[target_version]["model"])
+    if current.get("model_refresh"):
+        current.setdefault("model_refresh_history", []).append({**current.pop("model_refresh"), "status": "cancelled_by_rollback"})
     current["run_status"] = "paused"
     current.setdefault("model_rollback_history", []).append({
         "from_model_version": old, "to_model_version": target_version,

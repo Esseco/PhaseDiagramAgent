@@ -1,0 +1,11 @@
+# 跨体系统一训练与评估
+
+不按结构数量自动选择方法。所有体系固定来源分组5折，至少5个独立组，且每折训练元素覆盖该折留出结构元素；不满足时报告原因、等待补充数据，不偷偷改成3折或随机留出。来源按branch/framework/structure ID分组，用户提供的来源标识应保证相关帧不会跨组。
+
+正式committee全部合格数据参与训练；com_1是主模型，不另训main_final。默认4成员+5折评估共9任务。E0s estimated、AMSGrad、rms_forces_scaling、patience20保留已确认设置。
+
+K折留出集参与早停/模型选择，指标名为grouped_cross_validation，并非完全独立测试。正式成员同数据validation仅训练监视，训练指标不能冒充泛化误差。
+
+下一轮DFT回收复用原轮次冻结模型同帧对比链，evaluation_type=original_round_model_same_frame。只在确认样本未参与该冻结模型训练时，才能进一步解释为新数据/独立测试误差；不因回收成功自动宣称独立。旧CSV列和既有结果不改写。
+
+本次没有改变生产state、处理实际数据或生成输入。模型回收/激活仍须独立验证与批准。

@@ -249,10 +249,12 @@ def _document_for_effective_config(original, config):
 
 
 def _profile_migration_backup(target):
-    candidate = target.with_name(target.name + ".pre-profile-migration.bak")
+    backup_directory = target.parent / "backups" / "configs"
+    backup_directory.mkdir(parents=True, exist_ok=True)
+    candidate = backup_directory / (target.name + ".pre-profile-migration.bak")
     index = 1
     while candidate.exists():
-        candidate = target.with_name(target.name + f".pre-profile-migration-{index}.bak")
+        candidate = backup_directory / (target.name + f".pre-profile-migration-{index}.bak")
         index += 1
     return candidate
 

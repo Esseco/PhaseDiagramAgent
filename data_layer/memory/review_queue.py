@@ -40,7 +40,19 @@ def review_memory_update(state, proposal_id, *, approved, reviewer="user"):
                 record["maturity"] = "heuristic"
             record["approved_by_user"] = True
             records = updated.setdefault("decision_memory", {}).setdefault("records", [])
+            targets = set(record.get("supersedes") or [])
+            eligible = {row["knowledge_id"] for row in records
+                        if row.get("scope") == record.get("scope")
+                        and row.get("system_id") == record.get("system_id")
+                        and row.get("category") == record.get("category")
+                        and row.get("applicability", {}) == record.get("applicability", {})}
+            if targets - eligible:
+                raise ValueError("supersedes must reference existing knowledge with the same scope and applicability")
             if not any(row.get("knowledge_id") == record["knowledge_id"] for row in records):
+                for existing_record in records:
+                    if existing_record.get("knowledge_id") in targets:
+                        existing_record["status"] = "superseded"
+                        existing_record["superseded_by"] = record["knowledge_id"]
                 records.append(record)
                 updated["decision_memory"]["version"] = int(
                     updated["decision_memory"].get("version", 0)) + 1
@@ -75,8 +87,10 @@ def propose_knowledge_record(state, record, *, source="agent"):
     active = ((updated.get("decision_memory") or {}).get("records") or [])
     conflicts = [row["knowledge_id"] for row in active
                  if row.get("category") == normalized.get("category")
+                 and row.get("status") == "active"
                  and row.get("scope") == normalized["scope"]
                  and row.get("system_id") == normalized.get("system_id")
+                 and row.get("applicability", {}) == normalized.get("applicability", {})
                  and row.get("statement") != normalized["statement"]]
     proposal = {"proposal_id": proposal_id, "record": normalized, "source": source,
                 "status": "conflict_review" if conflicts else "pending_review",

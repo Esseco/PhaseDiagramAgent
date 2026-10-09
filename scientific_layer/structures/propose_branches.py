@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from fractions import Fraction
 
 from scientific_layer.structures.create_generation_registry import create_generation_registry
 from scientific_layer.structures.enumerate_legal_frameworks import enumerate_legal_frameworks
@@ -57,6 +58,31 @@ def propose_branches(manager: Any, phase_references: dict[str, Any], *, quotas: 
                    if det_H(manager.data["branches"][branch_id]["H"]) <= max_det_H]
         if not frameworks and any(quotas.values()):
             raise ValueError(f"det(H) ≤ {max_det_H} 下没有合法框架")
+    focus = (strategy_options or {}).get("_focus")
+    if focus:
+        target_phase = focus["phase"]
+        if target_phase != "all" and target_phase not in {row["P"] for row in frameworks}:
+            raise ValueError(f"目标相 {target_phase} 不在本轮合法框架内")
+        filtered = []
+        for framework in frameworks:
+            if focus.get("max_det_H") is not None and det_H(framework["H"]) > focus["max_det_H"]:
+                continue
+            if target_phase != "all" and framework["P"] != target_phase:
+                continue
+            xs = [x for x in framework["allowed_x"] if
+                  focus.get("na_min") is None or focus["na_min"] <= float(Fraction(normalize_fraction(x))) <= focus["na_max"]]
+            if xs:
+                filtered.append({**framework, "allowed_x": xs})
+        frameworks = filtered
+        if not frameworks:
+            raise ValueError("目标Na/O2范围内没有合法组分，不生成替代区域")
+        target_frameworks = {(r["P"], str(r["H"])): r for r in frameworks}
+        # Composition/T ordering/periodic extension require same-phase parents.
+        # Competing phase deliberately retains legal parents in other phases.
+        if not quotas.get("competing_phase"):
+            parents = [p for p in parents if (manager.data["branches"][p]["P"],
+                str(manager.data["branches"][p]["H"])) in target_frameworks]
+        allowed_frameworks = set(target_frameworks)
     context = {
         "manager": manager,
         "phase_references": phase_references,
@@ -77,6 +103,8 @@ def propose_branches(manager: Any, phase_references: dict[str, Any], *, quotas: 
         candidates.extend(candidate for candidate in produced
                           if (max_det_H is None or det_H(candidate["H"]) <= max_det_H)
                           and (candidate["P"], str(candidate["H"])) in allowed_frameworks
+                          and (not focus or focus.get("na_min") is None or
+                               focus["na_min"] <= float(Fraction(normalize_fraction(candidate["x"]))) <= focus["na_max"])
                           and (roles.get("x") != "fixed" or
                                normalize_fraction(candidate["x"]) == x_fixed))
     for candidate in candidates:

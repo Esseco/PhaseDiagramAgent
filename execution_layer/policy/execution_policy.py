@@ -17,7 +17,7 @@ EXECUTION_MODES = {"interactive", "autonomous", "dry_run", "replay"}
 HUMAN_DECISIONS = {"approve", "modify", "reject"}
 
 
-def build_agent_proposal(action: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+def build_agent_proposal(action: dict[str, Any], state: dict[str, Any], *, runtime_state=None) -> dict[str, Any]:
     """Create the stable proposal envelope shown and stored by the policy."""
     action = normalize_action(action)
     analysis = action.get("analysis") or action.get("current_state_analysis")
@@ -28,6 +28,8 @@ def build_agent_proposal(action: dict[str, Any], state: dict[str, Any]) -> dict[
             "decision_source": action.get("decision_source"),
         }
     cost_plan = estimate_proposal_cost(action, state)
+    from analysis_layer.cost.estimate_proposal_runtime import estimate_proposal_runtime
+    cost_plan["runtime_budget"] = estimate_proposal_runtime(action, runtime_state or state)
     raw_action = deepcopy(action)
     raw_action.pop("decision_context", None)
     return {

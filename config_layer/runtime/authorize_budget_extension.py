@@ -43,6 +43,21 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
         }
     old = current.get("confirmed_config")
     new = deepcopy(confirmed_snapshot["config"])
+    requested = current.get("requested_config_revision") or {}
+    if (requested.get("source_config_version") == old_version
+            and requested.get("patch") == {"mlip_finetune.enabled": True}
+            and (old or {}).get("mlip_finetune", {}).get("enabled") is False
+            and new.get("mlip_finetune", {}).get("enabled") is True
+            and _changed_paths(old, new) == ["mlip_finetune.enabled"]):
+        from execution_layer.state.task_waiting import awaiting_task_result
+        if any(awaiting_task_result(t) for t in current.get("tasks") or []) or current.get("pending_execution_policies"):
+            return {"status": "rejected_active_work", "state": current, "from": old_version, "to": new_version}
+        current["confirmed_config_version"] = new_version
+        current["confirmed_config"] = new
+        current.setdefault("config_migrations", []).append({"type": "approved_finetune_enablement",
+                                                             "from": old_version, "to": new_version})
+        current.pop("requested_config_revision", None)
+        return {"status": "extended", "state": current, "from": old_version, "to": new_version}
     normalized_old, compatibility, compatibility_rejection = (
         _normalize_legacy_mace_relax_defaults(current, old or {}, new, old_version)
     )

@@ -13,7 +13,8 @@ from execution_layer.cost.runtime_observation import start_timer, runtime_observ
 def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
     manifest = Path(manifest_path).resolve()
     entries = json.loads(manifest.read_text(encoding="utf-8"))
-    results_directory = manifest.parent.parent / "results"
+    batch = manifest.parent
+    results_directory = (batch.parent.parent if batch.parent.name == "inputs" else batch.parent) / "results"
     results_directory.mkdir(exist_ok=True)
     failures = []
     timer = start_timer()

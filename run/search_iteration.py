@@ -219,15 +219,16 @@ def run_search_iteration(
         for row in current["phase_records"]
     )
     if recovered_for_feedback or needs_phase_retry:
-        phase_cache_path = (Path(state_path).with_name("phase_identification_cache.json")
-                            if state_path is not None else None)
+        from config_layer.session.phase_cache_location import phase_cache_location
+        phase_cache_path = phase_cache_location(state_path) if state_path is not None else None
         current, _ = ensure_phase_identification(
             current, manager, phase_references=phase_references,
             cache_path=phase_cache_path,
         )
         old_diagrams = copy.deepcopy(current["phase_diagrams"])
         diagrams = update_phase_diagram(
-            current["phase_records"], output_directory=phase_diagram_directory
+            current["phase_records"], output_directory=phase_diagram_directory,
+            active_model_version=current.get("active_model_version"), output_state=current,
         )["diagrams"]
         current["phase_diagrams"] = diagrams
         for method in ("mlip", "dft"):

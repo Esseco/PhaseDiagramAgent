@@ -5,44 +5,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from run.local_project_launcher import (
-    _ensure_webui, _stop_owned_process, create_project, describe_project,
+    _stop_owned_process, create_project, describe_project,
     read_project_registry, register_project, start_agent,
 )
 from run.local_service_tokens import local_service_tokens
-from run.open_webui_api import create_open_webui_runtime
+from run.agent_api import create_agent_runtime
 from run.configuration_chat import ConfigurationChatHandler
 
 
 class LocalProjectLauncherTests(unittest.TestCase):
-    def test_existing_webui_is_not_owned_by_launcher(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with patch("run.local_project_launcher._webui_is_available", return_value=True), \
-                 patch("run.local_project_launcher.subprocess.Popen") as popen:
-                self.assertEqual(_ensure_webui({}, Path(directory), "http://127.0.0.1:3000"),
-                                 (True, None))
-                popen.assert_not_called()
-
-    def test_launcher_tracks_only_webui_process_it_started(self):
-        class FakeProcess:
-            def __init__(self):
-                self.running = True
-
-            def poll(self):
-                return None if self.running else 0
-
-        with tempfile.TemporaryDirectory() as directory:
-            process = FakeProcess()
-            config = {
-                "open_webui_start_command": ["open-webui", "serve"],
-                "open_webui_startup_timeout_seconds": 5,
-            }
-            with patch("run.local_project_launcher._webui_is_available",
-                       side_effect=[False, True]), \
-                 patch("run.local_project_launcher.subprocess.Popen", return_value=process):
-                ready, owned = _ensure_webui(config, Path(directory), "http://127.0.0.1:3000")
-            self.assertTrue(ready)
-            self.assertIs(owned, process)
-
     def test_stop_terminates_only_passed_owned_process(self):
         class FakeProcess:
             def __init__(self, running):
@@ -73,16 +44,16 @@ class LocalProjectLauncherTests(unittest.TestCase):
             registry = base / "registry.json"
             target = create_project(base / "project_a", registry=registry)
             self.assertEqual(read_project_registry(registry), [str(target)])
-            session = json.loads((target.parent / "config_session.json").read_text(encoding="utf-8"))
+            session = json.loads((target.parent / "parameters/config_session.json").read_text(encoding="utf-8"))
             self.assertEqual(session["setup_stage"], "json_ready")
             self.assertEqual(session["status"], "draft")
-            self.assertTrue((target.parent / "search_config.project.json").is_file())
+            self.assertTrue((target.parent / "parameters/search_config.project.json").is_file())
             self.assertIn("项目长期记忆：无", describe_project(target))
             with patch("run.deepseek_credentials.load_deepseek_api_key", return_value=None):
-                handler = create_open_webui_runtime(target)
+                handler = create_agent_runtime(target)
             self.assertIsInstance(handler, ConfigurationChatHandler)
             self.assertEqual(handler.workflow_kwargs["config_session"]["setup_stage"], "json_ready")
-            self.assertEqual(handler.editable_config_path, target.parent / "search_config.project.json")
+            self.assertEqual(handler.editable_config_path, target.parent / "parameters/search_config.project.json")
             self.assertEqual(register_project(target, registry=registry), [str(target)])
             with self.assertRaises(FileExistsError):
                 create_project(target.parent, registry=registry)
@@ -92,9 +63,9 @@ class LocalProjectLauncherTests(unittest.TestCase):
             root = Path(directory)
             registry = root / "registry.json"
             first = create_project(root / "a", registry=registry)
-            second = root / "b" / "open_webui_runtime.json"
+            second = root / "b" / "agent_runtime.json"
             second.parent.mkdir()
-            second.write_text(json.dumps({"state_path": str(first.parent / "current/state.json"),
+            second.write_text(json.dumps({"state_path": str(first.parent / "workflow_state/state.json"),
                                           "ledger_path": "other.json"}), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "同一 state"):
                 register_project(second, registry=registry)

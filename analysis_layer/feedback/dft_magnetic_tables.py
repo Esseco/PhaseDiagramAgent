@@ -1,7 +1,7 @@
 """Explain saved per-site magnetic evidence without rereading OUTCAR or running models."""
 import json
 
-MAGNETIC_FIELDS = ("model_version", "task_id", "structure_id", "frame_index", "atom_index",
+MAGNETIC_FIELDS = ("epoch", "search_group_index", "dft_round", "model_version", "task_id", "structure_id", "frame_index", "atom_index",
                    "element", "moment_mu_B", "moment_kind", "spin_assessment",
                    "expected_abs_min_mu_B", "expected_abs_max_mu_B", "reason")
 

@@ -4,6 +4,7 @@ DFT_STAGES = {"dft_single_point", "dft_relax"}
 
 def awaiting_task_result(task):
     return (task.get("status") in {"pending", "running", "submitted", "unknown"}
+            and not (task.get("model_refresh_id") and task.get("refresh_wait_waived") is True)
             and not (task.get("stage") in DFT_STAGES and task.get("recovery_wait_waived") is True))
 
 

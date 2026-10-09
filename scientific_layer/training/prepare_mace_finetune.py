@@ -84,6 +84,9 @@ def _to_atoms(record, labels):
     atoms.info[labels.get("energy_key", "REF_energy")] = float(energy)
     atoms.arrays[labels.get("forces_key", "REF_forces")] = forces
     atoms.info["config_type"] = str(record.get("config_type", "Default"))
+    for key in ("data_id", "task_id", "is_current_round"):
+        if key in record and record[key] is not None:
+            atoms.info[key] = record[key]
     atoms.info["source"] = str(record.get("source_path", record.get("structure_id", "unknown")))
     if labels.get("include_stress"):
         if record.get("stress") is None:

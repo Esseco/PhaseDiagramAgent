@@ -27,7 +27,7 @@ def test_new_data_updates_current_preserving_history(tmp_path):
     assert newer["version"] != first["version"]
     assert newer["csv_path"] == first["csv_path"]
     assert archive.read_bytes() == original
-    assert len(list((tmp_path / "m1" / "history").glob("*.csv"))) == 2
+    assert len(list((tmp_path / "m1" / "phase_diagrams" / "history").glob("*.csv"))) == 2
     assert not list((tmp_path / "dft").rglob("*.csv"))
 
 

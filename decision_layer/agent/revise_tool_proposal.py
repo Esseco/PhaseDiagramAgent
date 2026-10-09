@@ -103,7 +103,14 @@ def revise_tool_proposal(proposal, comment, *, state, allowed_tools, agent_clien
         "instruction": "Analyze the human comment and return a revised action with action_type, parameters, reason, expected_cost, target_ids, expected_purpose and current_state_analysis. Do not execute it.",
     }
     try:
-        action = agent_client(payload)
+        from decision_layer.agent.post_dft_review import request_validated_action
+        action = request_validated_action(agent_client, payload)
+        if not isinstance(action, dict):
+            raise TypeError("revised action must be a dict")
+        if (action.get("tool") or action.get("action_type")) == "generate_branches" and (
+                (original.get("parameters") or {}).get("generation_plan")):
+            from decision_layer.agent.generation_plan import validate_generation_plan
+            validate_generation_plan(action.get("parameters") or {})
         if not isinstance(action, dict):
             raise TypeError("revised action must be a dict")
         tool = action.get("tool") or action.get("action_type")

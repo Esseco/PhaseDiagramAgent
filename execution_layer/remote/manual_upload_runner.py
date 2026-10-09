@@ -123,7 +123,7 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
         guide_path = directory / "UPLOAD_AND_SUBMIT.md"
         guide_path.write_text(_guide(batch["batch_id"]), encoding="utf-8")
         script_path = directory / "GPU.sh" if mlip_batch else Path(task_directories[0]) / "GPU.sh"
-        results_directory = directory.parent / "results"
+        results_directory = (directory.parent.parent if directory.parent.name == "inputs" else directory.parent) / "results"
         batch.update({"upload_directory": str(directory), "script_path": str(script_path),
                       "results_directory": str(results_directory),
                       "task_directory": task_directories[0], "task_directories": task_directories,

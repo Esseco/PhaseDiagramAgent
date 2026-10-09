@@ -14,7 +14,7 @@ ENERGY_BASIS = 'total_eV_with_actual_cell_composition'
 
 def build_relax_hull(records, *, model_version, system_id=None):
     rows = [deepcopy(r) for r in records if r.get('model_version') == model_version
-            and (r.get('converged') is True or
+            and (r.get('converged') is True or r.get('single_point_completed') is True or
                  (r.get('stage') == 'deep_search' and r.get('search_completed') is True))
             and r.get('energy_unit') == 'eV'
             and r.get('energy') is not None and math.isfinite(float(r['energy']))]

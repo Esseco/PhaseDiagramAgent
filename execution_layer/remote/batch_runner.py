@@ -40,6 +40,8 @@ class RemoteBatchRunner:
             segment_index=selected[0].get("segment_index"),
             search_group_index=selected[0].get("search_group_index"),
             parent_relax_round=selected[0].get("parent_relax_round"),
+              model_refresh_round=selected[0].get("model_refresh_round"),
+              refresh_operation=(selected[0].get("parameters") or {}).get("model_refresh_operation"),
         )
         directory.parent.mkdir(parents=True, exist_ok=True)
         directory.mkdir(exist_ok=False)
@@ -53,7 +55,7 @@ class RemoteBatchRunner:
             relative_dir = Path(f"{index:05d}-{task['task_id']}"); task_dir = directory / relative_dir; task_dir.mkdir()
             from execution_layer.remote.result_directory_name import result_directory_name
             result_folder = result_directory_name(task_dir, task.get("stage"))
-            relative_result = Path("..") / "results" / result_folder / "result.json"
+            relative_result = (Path("../..") if directory.parent.name == "inputs" else Path("..")) / "results" / result_folder / "result.json"
             task.update({"calculation_directory": str(relative_dir), "result_path": str(relative_result)})
             if task.get("stage") not in DFT_STAGES and self.task_preparer: task = self.task_preparer(task)
             worker_job = task.get("worker_job") or {}
@@ -103,7 +105,7 @@ class RemoteBatchRunner:
                            "config_version": entry["config_version"], "model_version": entry["model_version"],
                            "task_checksum": checksum, "input_path": str(task_path),
                            "result_path": str((directory / relative_result).resolve())})
-        results_directory = directory.parent / "results"
+        results_directory = (directory.parent.parent if directory.parent.name == "inputs" else directory.parent) / "results"
         results_directory.mkdir(exist_ok=True)
         _write(directory / "manifest.json", manifest); checksum = payload_checksum(manifest)
         stage = selected[0].get("stage")
@@ -303,6 +305,8 @@ def _assign_upload_operations(state, tasks):
         for row in preview.get("allocations") or []:
             allocation_by_key[row.get("task_key")] = preview.get("allocation_checksum")
     for task in tasks:
+        if task.get("model_refresh_id"):
+            continue  # Refresh spans search groups and has its own explicit scope.
         if not task.get("slurm_batch_id") and not task.get("search_group_index"):
             groups = branch_groups.get(task.get("branch_id")) or set()
             group = structure_groups.get(task.get("structure_id"))
@@ -420,7 +424,10 @@ def _task_result_path(task, task_directory):
         directory = Path(task_directory)
         name = result_directory_name(directory, task["stage"])
         if name != directory.name:
-            numbered = directory.parent.parent / "results" / name / "result.json"
+            stage = directory.parent.parent
+            if stage.name == "inputs":
+                stage = stage.parent
+            numbered = stage / "results" / name / "result.json"
             if numbered.is_file():
                 return numbered
     value = task.get("result_path")

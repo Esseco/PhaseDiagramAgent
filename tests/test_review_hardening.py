@@ -47,7 +47,7 @@ def test_new_history_summaries_keep_full_current_and_legacy():
 
 
 def test_chat_compatibility_import():
-    from run.open_webui_api import brief_chat_state
+    from run.agent_api import brief_chat_state
     from run.chat_state_presentation import brief_chat_state as implementation
     assert brief_chat_state is implementation
 

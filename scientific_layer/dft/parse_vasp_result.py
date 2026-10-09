@@ -19,13 +19,19 @@ def parse_vasp_result(directory, *, exit_code=0, parser=None):
         xml_complete = True
         if parser is None:
             from pymatgen.io.vasp.outputs import Vasprun
-            from lxml.etree import XMLSyntaxError
             from xml.etree.ElementTree import ParseError
+            xml_errors = (ParseError,)
+            try:
+                from lxml.etree import XMLSyntaxError
+            except ImportError:
+                pass
+            else:
+                xml_errors += (XMLSyntaxError,)
             options = dict(parse_potcar_file=False, parse_dos=False,
                            parse_eigen=False, parse_projected_eigen=False)
             try:
                 parsed = Vasprun(str(vasprun_path), **options)
-            except (XMLSyntaxError, ParseError):
+            except xml_errors:
                 parsed = Vasprun(str(vasprun_path), exception_on_bad_xml=False, **options)
                 xml_complete = False
         else:

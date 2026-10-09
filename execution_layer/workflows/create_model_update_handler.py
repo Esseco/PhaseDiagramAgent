@@ -56,25 +56,16 @@ def create_model_update_handler(
                 activated_state["new_dft_records"] = []
                 _append_model_epoch(activated_state, stored["model"], stored["validation"],
                                     stored.get("old_model_version"))
-                candidates = _critical_refresh_candidates(
-                    _provide(candidate_provider, state=activated_state, manager=manager, config=config) or [])
-                if candidates and callable(reevaluation_predictor):
-                    from analysis_layer.feedback.reevaluate_candidates import reevaluate_candidates
-                    activation["reevaluation"] = reevaluate_candidates(
-                        candidates, stored.get("old_model") or {}, stored["model"], stored["validation"],
-                        predictor=reevaluation_predictor,
-                        thresholds=deepcopy((config.get("mlip_finetune") or {}).get("reevaluation") or {}),
-                        manager=manager)
-                else:
-                    activation["reevaluation"] = {"status": "not_configured",
-                                                  "reason": "critical_candidate_refresh_adapter_missing"}
+                activation["reevaluation"] = {"status": "awaiting_refresh_approval"}
             return {"status": activation["status"], "activation": activation,
                     "state": activation["state"], "validation": stored["validation"]}
         iteration = int(current.get("iteration", 0))
         dataset_version = f"dft-data-{iteration:06d}"
         candidate_version = f"mlip-candidate-{iteration:06d}"
         old_model = deepcopy(current.get("active_model") or config.get("mlip") or {})
-        historical = _provide(historical_data_provider, state=current, manager=manager, config=config) or []
+        from scientific_layer.training.cumulative_training_records import cumulative_training_records
+        historical = (_provide(historical_data_provider, state=current, manager=manager, config=config) or []
+                      if callable(historical_data_provider) else cumulative_training_records(current))
         finetune_config = deepcopy(config.get("mlip_finetune") or {})
         training_parameters = finetune_config.setdefault("training", {})
         if not training_parameters.get("foundation_model"):
@@ -143,18 +134,7 @@ def create_model_update_handler(
         current["last_trained_dataset_version"] = dataset_version
         _append_model_epoch(current, candidate_model, validation, old_model.get("version"))
         current["new_dft_records"] = []
-        candidates = _critical_refresh_candidates(
-            _provide(candidate_provider, state=current, manager=manager, config=config) or [])
-        if candidates and callable(reevaluation_predictor):
-            from analysis_layer.feedback.reevaluate_candidates import reevaluate_candidates
-            reevaluation = reevaluate_candidates(
-                candidates, old_model, candidate_model, validation,
-                predictor=reevaluation_predictor,
-                thresholds=deepcopy((config.get("mlip_finetune") or {}).get("reevaluation") or {}),
-                manager=manager)
-        else:
-            reevaluation = {"status": "not_configured",
-                            "reason": "critical_candidate_refresh_adapter_missing"}
+        reevaluation = {"status": "awaiting_refresh_approval"}
         result.update({"status": "activated", "reevaluation": reevaluation, "state": current})
         return result
 
@@ -178,8 +158,3 @@ def _append_model_epoch(state, model, validation, previous_version):
                  "hull_change": None, "ground_state_unchanged": None})
 
 
-def _critical_refresh_candidates(candidates):
-    """Refresh only structures explicitly marked critical by project analysis."""
-    return [row for row in candidates if row.get("critical_for_model_refresh") is True
-            or row.get("is_stable") is True
-            or row.get("phase_role") in {"endpoint", "intermediate", "near_hull_competitor"}]

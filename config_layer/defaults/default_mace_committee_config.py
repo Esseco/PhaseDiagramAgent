@@ -20,6 +20,7 @@ def default_mace_committee_config(*, foundation_model=None) -> dict:
         "enabled": False,
         "output_directory": "outputs/mace_committee",
         "seed": 2026,
+        "cross_validation": {"folds": 5},
         "group_keys": ["branch_id", "framework_id"],
         "split": {"train": 0.8, "valid": 0.1, "test": 0.1},
         "labels": {
@@ -32,6 +33,7 @@ def default_mace_committee_config(*, foundation_model=None) -> dict:
             "minimum_new_dft_records": 10,
             "multiheads_finetuning": False, "E0s": "estimated",
             "weight_decay": 0.0, "ema": True, "ema_decay": 0.999,
+            "amsgrad": True, "scaling": "rms_forces_scaling",
             "clip_grad": 1.0, "batch_size": 4, "max_num_epochs": 200,
             "patience": 20, "default_dtype": "float64", "device": "cuda",
         },

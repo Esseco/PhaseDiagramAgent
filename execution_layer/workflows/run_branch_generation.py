@@ -34,22 +34,41 @@ def run_branch_generation(
     strategy_options: dict[str, Any] | None = None,
     framework_enumerator: Any | None = None,
     max_det_H: int | None = None,
+    generation_plan: list[dict] | None = None,
 ) -> dict[str, Any]:
     """调度完整流程；不运行 MLIP 或 DFT。"""
-    proposed = propose_branches(
-        manager,
-        phase_references,
-        quotas=quotas,
-        seed=seed,
-        parent_branch_ids=parent_branch_ids,
-        site_mappings=site_mappings,
-        register=False,
-        registry=generation_registry,
-        system_config=system_config,
-        strategy_options=strategy_options,
-        framework_enumerator=framework_enumerator,
-        max_det_H=max_det_H,
-    )
+    def produce(allocated_quotas, allocated_seed, options):
+        return propose_branches(
+            manager,
+            phase_references,
+            quotas=allocated_quotas,
+            seed=allocated_seed,
+            parent_branch_ids=parent_branch_ids,
+            site_mappings=site_mappings,
+            register=False,
+            registry=generation_registry,
+            system_config=system_config,
+            strategy_options=options,
+            framework_enumerator=framework_enumerator,
+            max_det_H=max_det_H,
+        )
+    if generation_plan:
+        from decision_layer.agent.generation_plan import validate_generation_plan
+        validate_generation_plan({"generation_plan": generation_plan, "quotas": quotas,
+                                  "total_quota": sum(quotas.values())})
+        fixed_tm = (((system_config or manager.data.get("system_config") or {}).get("configuration_space") or {}).get("roles") or {}).get("T") == "fixed"
+        if fixed_tm and quotas.get("tm_ordering"):
+            raise ValueError("固定TM排布不能分配tm_ordering，需修订方案")
+        proposed = []
+        for index, row in enumerate(generation_plan):
+            row = dict(row)
+            if row.get("max_det_H") is not None:
+                row["max_det_H"] = min(row["max_det_H"], max_det_H) if max_det_H is not None else row["max_det_H"]
+            produced = produce({row["strategy"]: row["quota"]}, seed+index*10000,
+                               {**(strategy_options or {}), "_focus": row})
+            proposed.extend(produced)
+    else:
+        proposed = produce(quotas, seed, strategy_options)
     branch_dedup = deduplicate_candidates(
         proposed,
         manager=manager,

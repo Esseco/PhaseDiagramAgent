@@ -73,7 +73,9 @@ def build_decision_context(state, *, recent_limit=5):
     decision_action = scope["action"]
     relevant = retrieve_relevant_knowledge(
         state, system_id=system_id, action=decision_action,
-        model_version=state.get("active_model_version"), limit=8)
+        model_version=state.get("active_model_version"), limit=8,
+        query=" ".join([str(decision_action or ""), str(state.get("current_status") or ""),
+                        str(state.get("coverage_gaps") or "")]), token_budget=2000)
     from analysis_layer.cost.estimate_task_cost import estimate_task_cost
     budgets = (state.get("confirmed_config") or {}).get("budgets") or state.get("budget_limits") or None
     cost_reference = []
@@ -85,6 +87,8 @@ def build_decision_context(state, *, recent_limit=5):
                 **({"patience": 20, "max_mc_steps": 100} if stage == "deep_search" else {}))
             cost_reference.append(report)
     context = {
+        "model_refresh": {key: deepcopy((state.get("model_refresh") or {}).get(key))
+                          for key in ("status", "old_model_version", "new_model_version", "wave", "refreshed", "deferred", "partial")},
         "task_stage_evidence": _task_stage_evidence(state),
         "task_round_evidence": summarize_task_rounds(state),
         "model_round_summary": deepcopy((state.get("model_round_summary") or [])[-recent_limit:]),
@@ -110,10 +114,13 @@ def build_decision_context(state, *, recent_limit=5):
         "short_term_memory": deepcopy(memory.get("short_term") or {}),
         "relevant_approved_knowledge": [
             {key: deepcopy(row.get(key)) for key in
-             ("knowledge_id", "scope", "statement", "maturity", "evidence_refs", "source_project")}
+             ("knowledge_id", "scope", "statement", "maturity", "evidence_refs", "source_project", "retrieval_reason")}
             for row in relevant],
         "current_phase_diagram": phase_summary,
         "coverage_gaps": deepcopy((state.get("coverage_gaps") or [])[:10]),
+        "recent_generation_allocations": [{key: deepcopy(row.get(key)) for key in
+            ("model_version", "search_group_index", "quotas", "generation_plan", "summary")}
+            for row in (state.get("generation_history") or [])[-5:]],
         "available_branches": deepcopy(state.get("branch_candidates") or []),
         "qbc_candidates": deepcopy(state.get("qbc_candidates") or []),
         "recent_experience": {"limit": recent_limit, "rewards": rewards, "actions": actions},
@@ -127,6 +134,8 @@ def build_decision_context(state, *, recent_limit=5):
     from analysis_layer.state.decision_evidence_catalog import decision_evidence_catalog
     from analysis_layer.state.post_dft_assessment import post_dft_assessment
     context["post_dft_assessment"] = post_dft_assessment(state, state.get("confirmed_config") or {})
+    from analysis_layer.state.round_budget_evidence import round_budget_evidence
+    context["round_budget_evidence"] = round_budget_evidence(state)
     context["evidence_catalog"] = decision_evidence_catalog(context)
     return context
 

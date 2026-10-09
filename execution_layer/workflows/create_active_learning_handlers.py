@@ -52,7 +52,17 @@ def _prepare_dedup(*, action, context):
 
 def _generate_branches(*, action, context):
     config = context["effective_config"]; params = deepcopy(action.get("parameters") or {})
+    from analysis_layer.state.post_dft_assessment import post_dft_assessment
+    if post_dft_assessment(context.get("event_state") or {}, config) and not params.get("generation_plan"):
+        return {"status": "not_configured", "state": context.get("event_state") or {},
+                "reason": "DFT 后生成必须明确策略及目标相/Na分配；未生成结构。"}
     quotas = params.get("quotas")
+    if params.get("generation_plan"):
+        from analysis_layer.cost.generation_preflight import attach_generation_preflight
+        try:
+            attach_generation_preflight(action, context.get("event_state") or {}, context, config)
+        except ValueError as error:
+            return {"status": "not_configured", "state": context.get("event_state") or {}, "reason": str(error)}
     existing = context["manager"].data.get("branches") or {}
     from scientific_layer.structures.boundary_utils import allowed_phases
     required_phases = allowed_phases(context["manager"].boundary["P"])
@@ -78,25 +88,36 @@ def _generate_branches(*, action, context):
     )
     if not existing and first_round_cap is not None:
         options["max_det_H"] = first_round_cap
+    generation_directory = config["structure_directory"]
+    if config.get("upload_batches_directory"):
+        from execution_layer.remote.model_upload_directory import model_upload_directory
+        layout_state = deepcopy(context.get("event_state") or {})
+        version = layout_state.get("active_model_version") or (config.get("mlip") or {}).get("version") or (config.get("mlip") or {}).get("name")
+        group_index = len(layout_state.get("generation_history") or []) + 1
+        generation_directory = str(model_upload_directory(config["upload_batches_directory"], layout_state, version)
+                                   / f"Search-group-{group_index:04d}" / "Branch-0001")
     result = run_branch_generation(
         context["manager"], context["phase_references"],
-        structure_directory=config["structure_directory"], quotas=quotas,
+        structure_directory=generation_directory, quotas=quotas,
         batch_size=int(params.get("batch_size", config["batch_size"])),
         initial_states_per_branch=int(params.get("initial_states_per_branch", config["initial_states_per_branch"])),
         seed=int(params.get("seed", config["seed"])) +
              100_000 * len((context.get("event_state") or {}).get("generation_history") or []),
         ledger_path=config.get("ledger_path"),
         system_config=config.get("system_config"), **options,
+        generation_plan=params.get("generation_plan"),
     )
     state = deepcopy(context.get("event_state") or {})
     state.setdefault("generation_history", []).append({
         "task_key": action.get("task_key"), "quotas": deepcopy(quotas),
+        "generation_plan": deepcopy(params.get("generation_plan")),
         "model_version": state.get("active_model_version") or (config.get("mlip") or {}).get("version")
             or (config.get("mlip") or {}).get("name"),
         "search_group_index": len(state.get("generation_history") or []) + 1,
         "registered_ids": [item.get("structure_id") for item in result["registered"]],
         "coverage": deepcopy(result["coverage"]),
         "summary": deepcopy(result["summary"]),
+        "structure_directory": generation_directory,
     })
     state["coverage"] = deepcopy(result["coverage"])
     gate = state.get("dedup_gate") or {}
@@ -110,6 +131,11 @@ def _generate_branches(*, action, context):
 
 
 def _allocate_mc_bohb(*, action, context):
+    from decision_layer.agent.mc_contracts import mc_contract_errors
+    errors = mc_contract_errors(action.get("parameters", {}), fallback_budget=action.get("budget", 0))
+    if errors:
+        return {"status": "rejected", "state": deepcopy(context.get("event_state") or {}),
+                "reason": "invalid_mc_allocation_parameters", "errors": errors}
     config = context["effective_config"]; params = deepcopy(action.get("parameters") or {})
     state = deepcopy(context.get("event_state") or {})
     from scientific_layer.mc.second_round_state import (

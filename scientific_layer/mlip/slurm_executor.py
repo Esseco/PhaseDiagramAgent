@@ -47,7 +47,8 @@ def create_mlip_task_preparer(manager, phase_references, config):
             "object_id": structure_id,
             "branch_id": record["branch_id"],
             "worker_job": {
-                "operation": "mc" if current["stage"] == "deep_search" else "relax",
+                "operation": ("mc" if current["stage"] == "deep_search" else
+                              "predict" if (current.get("parameters") or {}).get("model_refresh_operation") == "predict" else "relax"),
                 "structure_path": str(structure_path),
                 "model_path": None if model_paths else str(model.get("model_path") or ""),
                 "model_paths": model_paths,

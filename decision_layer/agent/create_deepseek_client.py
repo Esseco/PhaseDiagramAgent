@@ -22,12 +22,19 @@ def create_deepseek_client(
     *, api_key=None, model="deepseek-v4-pro", base_url="https://api.deepseek.com",
     max_tokens=800, timeout=60, system_prompt=None, thinking=None,
     routine_max_tokens=1600, reasoning_max_tokens=8192,
+    proposal_harness="legacy",
 ):
     key = api_key or os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         raise ValueError("需要 api_key 或 DEEPSEEK_API_KEY")
     if thinking not in {None, "enabled", "disabled"}:
         raise ValueError("thinking 必须是 enabled、disabled 或 None")
+    if proposal_harness not in {"legacy", "deepagents"}:
+        raise ValueError("proposal_harness must be legacy or deepagents")
+    if proposal_harness == "deepagents":
+        from decision_layer.agent.deepagents_proposal import create_deepseek_proposal_client
+        return create_deepseek_proposal_client(api_key=key, model=model, base_url=base_url,
+            timeout=timeout, max_tokens=max(int(max_tokens), int(reasoning_max_tokens)))
 
     def call(payload: dict) -> dict:
         important = needs_deep_reasoning(payload)

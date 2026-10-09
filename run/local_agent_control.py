@@ -17,6 +17,10 @@ from data_layer.memory.publish_domain_skill import publish_domain_skill
 from execution_layer.policy.file_approval import proposal_hash
 from execution_layer.step_runner.build_status_summary import build_status_summary
 from execution_layer.step_runner.file_protocol import read_json, write_json
+from run.control_ui_contracts import (
+    StatusResponse, PendingResponse, TasksResponse, ConfigResponse, MemoryResponse, validate_control_response,
+)
+from run.control_request_contracts import validate_control_request
 
 
 class LocalAgentControl:
@@ -26,7 +30,8 @@ class LocalAgentControl:
 
     def status(self):
         state = read_json(self.state_path, {}) or {}
-        return build_status_summary(state, config_version=state.get("confirmed_config_version"))
+        return validate_control_response(StatusResponse,
+            build_status_summary(state, config_version=state.get("confirmed_config_version")))
 
     def pending(self):
         state = read_json(self.state_path, {}) or {}
@@ -47,14 +52,15 @@ class LocalAgentControl:
                          "model_version": state.get("active_model_version"),
                          "state_version": state_version,
                          "proposal_hash": proposal_hash(proposal)})
-        return {"pending": rows, "count": len(rows), "state_version": state_version,
-                "approval_url": "http://127.0.0.1:8765/phase/approval"}
+        return validate_control_response(PendingResponse,
+            {"pending": rows, "count": len(rows), "state_version": state_version,
+             "approval_url": "http://127.0.0.1:8765/phase/approval"})
 
     def tasks(self):
         state = read_json(self.state_path, {}) or {}
-        return {"tasks": [{key: row.get(key) for key in
+        return validate_control_response(TasksResponse, {"tasks": [{key: row.get(key) for key in
                 ("task_id", "task_key", "batch_id", "stage", "status", "model_version", "config_version")}
-                for row in state.get("tasks") or []]}
+                for row in state.get("tasks") or []]})
 
     def charts(self):
         state = read_json(self.state_path, {}) or {}
@@ -64,26 +70,29 @@ class LocalAgentControl:
         handler = (getattr(self.chat_handler, "config_delegate", None)
                    or self.chat_handler)
         session = handler.workflow_kwargs.get("config_session") or {}
-        return {"status": session.get("status"), "draft_revision": session.get("draft_revision"),
+        return validate_control_response(ConfigResponse, {"status": session.get("status"), "draft_revision": session.get("draft_revision"),
                 "config": deepcopy(session.get("config") or
                                    (session.get("confirmed_snapshot") or {}).get("config") or {}),
                 "confirmed_snapshot": deepcopy(session.get("confirmed_snapshot")),
                 "dialogue": deepcopy((session.get("dialogue") or [])[-20:]),
                 "readiness": (handler.configuration_readiness(session)
                               if callable(getattr(handler, "configuration_readiness", None))
-                              else None)}
+                              else None)})
 
     def memory(self):
         state = read_json(self.state_path, {}) or {}
-        return {"active": deepcopy((state.get("decision_memory") or {}).get("long_term") or {}),
+        return validate_control_response(MemoryResponse, {"active": deepcopy((state.get("decision_memory") or {}).get("long_term") or {}),
                 "records": deepcopy((state.get("decision_memory") or {}).get("records") or []),
                 "candidate_count": len(state.get("memory_candidates") or []),
-                "review_queue": deepcopy(state.get("memory_review_queue") or [])}
+                "review_queue": deepcopy(state.get("memory_review_queue") or [])})
 
     def propose_memory(self, record):
+        validate_control_request("/phase/memory/propose", {"record": record})
         state = read_json(self.state_path, {}) or {}
         result = propose_knowledge_record(state, record, source="agent_proposal")
         write_json(self.state_path, result["state"])
+        from data_layer.memory.publish_memory_views import publish_memory_views
+        publish_memory_views(result["state"], self.state_path)
         return {"status": result["proposal"]["status"],
                 "proposal_id": result["proposal"]["proposal_id"]}
 
@@ -106,10 +115,14 @@ class LocalAgentControl:
         result = propose_domain_skill_import(state, self._knowledge_root(), signature)
         if result["proposals"]:
             write_json(self.state_path, result["state"])
+            from data_layer.memory.publish_memory_views import publish_memory_views
+            publish_memory_views(result["state"], self.state_path)
         return {"status": "pending_review", "proposal_ids":
                 [row["proposal_id"] for row in result["proposals"]]}
 
     def publish_skill(self, draft_directory, *, approved, version="1.0.0"):
+        validate_control_request("/phase/memory/skills/publish", {
+            "draft_directory": draft_directory, "approved": approved, "version": version})
         state = read_json(self.state_path, {}) or {}
         root = Path(self.config().get("config", {}).get("storage", {}).get("workspace_root") or
                     self.state_path).resolve()
@@ -125,11 +138,15 @@ class LocalAgentControl:
                                     version=version)
 
     def propose(self, instruction, *, conversation_id="local-control"):
+        validate_control_request("/phase/propose", {"instruction": instruction, "conversation_id": conversation_id})
         return {"reply": self.chat_handler([{"role": "user", "content": str(instruction)}],
                                             conversation_id=conversation_id)}
 
     def decide(self, decision, *, plan_id, expected_state_version,
                expected_proposal_hash, comment="", conversation_id="local-control"):
+        validate_control_request("/phase/decision", {"decision": decision, "plan_id": plan_id,
+            "state_version": expected_state_version, "proposal_hash": expected_proposal_hash,
+            "comment": comment, "conversation_id": conversation_id})
         if decision not in {"approve", "reject", "confirm_sensitive"}:
             raise ValueError("decision must be approve/reject/confirm_sensitive")
         return self.chat_handler.review_pending(
@@ -137,10 +154,11 @@ class LocalAgentControl:
             expected_proposal_hash=expected_proposal_hash, comment=comment)
 
     def patch_config(self, patch, *, reasons=None, impacts=None):
+        validate_control_request("/phase/config/patch", {"patch": patch, "reasons": reasons, "impacts": impacts})
         session = self.chat_handler.workflow_kwargs.get("config_session") or {}
         if session.get("status") != "draft":
             raise ValueError("confirmed config cannot be edited; create a new draft")
-        patch = patch or {}
+        patch = deepcopy(patch)
         if not isinstance(patch, dict):
             raise ValueError("patch must be an object of dotted paths")
         for path, value in patch.items():
@@ -154,6 +172,7 @@ class LocalAgentControl:
                 "impacts": deepcopy(impacts or {})}
 
     def confirm_config(self, *, explicit=False):
+        validate_control_request("/phase/config/confirm", {"explicit": explicit})
         session = self.chat_handler.workflow_kwargs.get("config_session") or {}
         readiness_fn = getattr(self.chat_handler, "configuration_readiness", None)
         if explicit and callable(readiness_fn):
@@ -169,9 +188,12 @@ class LocalAgentControl:
                 "readiness": (readiness_fn(updated) if callable(readiness_fn) else None)}
 
     def review_memory(self, proposal_id, *, approved):
+        validate_control_request("/phase/memory/review", {"proposal_id": proposal_id, "approved": approved})
         state = read_json(self.state_path, {}) or {}
         result = review_memory_update(state, proposal_id, approved=approved, reviewer="local_approval_page")
         write_json(self.state_path, result["state"])
+        from data_layer.memory.publish_memory_views import publish_memory_views
+        publish_memory_views(result["state"], self.state_path)
         return {"status": result["status"], "proposal_id": proposal_id}
 
     def _save_session(self, session):
@@ -182,4 +204,5 @@ class LocalAgentControl:
         self.chat_handler.workflow_kwargs["config_session"] = session
 
     def pause(self, reason="user requested pause", *, conversation_id="local-control"):
+        validate_control_request("/phase/pause", {"reason": reason, "conversation_id": conversation_id})
         return self.propose(f"请提出 pause_search 批次计划。原因：{reason}", conversation_id=conversation_id)

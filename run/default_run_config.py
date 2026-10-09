@@ -16,11 +16,11 @@ def default_run_config() -> dict[str, Any]:
     """返回不包含机器路径和计算后端的默认配置。"""
     config = {
         "system_config": layered_oxide_system_config(),
-        "structure_directory": "outputs/candidate_structures",
-        "state_path": "outputs/search_state.json",
-        "ledger_path": "outputs/phase_data.json",
-        "branch_energy_pool_ledger_path": "outputs/branch_energy_pools.json",
-        "phase_diagram_directory": "outputs/phase_diagrams",
+        "structure_directory": "structures/candidate_structures",
+        "state_path": "workflow_state/state.json",
+        "ledger_path": "workflow_state/ledgers/phase_data.json",
+        "branch_energy_pool_ledger_path": "workflow_state/ledgers/branch_energy_pools.json",
+        "phase_diagram_directory": "analysis_outputs",
         "total_quota": 600,
         "batch_size": 250,
         "initial_states_per_branch": 3,
@@ -44,7 +44,7 @@ def default_run_config() -> dict[str, Any]:
             "energy_threshold": 0.02,
             "force_rms_threshold": 0.15,
             "force_max_threshold": 0.5,
-            "output_path": "outputs/qbc/qbc_results.json",
+            "output_path": "workflow_state/cache/qbc/qbc_results.json",
         },
         "dft": {"backend": "atomate", "parameter_source": "atomate_defaults", "parameters": {}},
         "deepseek": {

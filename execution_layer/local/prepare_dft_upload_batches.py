@@ -20,6 +20,8 @@ def prepare_dft_upload_batches(*, action, context):
         import re
         from execution_layer.workflows.comparison_model_registry import original_round_model
         model, digest, _ = original_round_model(state, config, task.get("model_version"))
+        from config_layer.schema.python_environments import remote_comparison_model
+        model = remote_comparison_model(model, config)
         if digest:
             model["model_sha256"] = digest
         result = prepare_pycode_relax(task, manager=context["manager"], comparison_model=model)

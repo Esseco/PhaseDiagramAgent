@@ -16,12 +16,15 @@ def activate_validated_model(state: dict, new_model: dict, validation: dict, *, 
                 "reason": "explicit_activation_approval_reason_required"}
     refreshed = mark_model_dependent_results_stale(state, old_model_version=old, new_model_version=new)
     updated = refreshed["state"]
+    from data_layer.models.require_structure_refresh import require_structure_refresh
+    require_structure_refresh(updated, old, new)
     registry = updated.setdefault("model_registry", {})
     if old and old not in registry:
         registry[old] = {"model": deepcopy(state.get("active_model") or {"version": old}),
                          "status": "historical_active"}
     registry[new] = {"model": deepcopy(new_model), "status": "active",
                      "validation": deepcopy(validation), "approval_reason": approval_reason.strip()}
+    updated["active_model"] = deepcopy(new_model)
     updated.setdefault("model_activation_history", []).append({
         "old_model_version": old, "new_model_version": new,
         "dft_data_version": new_model.get("dataset_version"),

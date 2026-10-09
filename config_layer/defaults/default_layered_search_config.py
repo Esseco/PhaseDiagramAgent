@@ -11,6 +11,8 @@ from config_layer.defaults.default_supercomputer_config import default_supercomp
 
 def default_layered_search_config(*, boundary=None, phase_references=None) -> dict:
     return {
+        "python_environments": {"local_python": "py1", "local_mlip": "py-mace",
+                                "remote_python": None, "remote_mlip": None},
         "system": layered_oxide_system_config(boundary=boundary, phase_references=phase_references),
         "frozen_parameters": ["system.constraints", "system.branch_schema", "budgets.total_relative_cost",
                               "dft.parameters", "convergence.final_energy_mae_tolerance",

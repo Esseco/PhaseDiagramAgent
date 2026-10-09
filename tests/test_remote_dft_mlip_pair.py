@@ -13,7 +13,7 @@ from execution_layer.state.dft_result_refresh import validated_magnetic_refresh
 def fixture(tmp_path):
     model = tmp_path / "m1.model"
     model.write_text("synthetic weights")
-    return {"version": "m1", "model_path": str(model)}, dft_result()
+    return {"version": "m1", "model_path": str(model), "environment": "remote-mace"}, dft_result()
 
 
 def predict(*args, **kwargs):

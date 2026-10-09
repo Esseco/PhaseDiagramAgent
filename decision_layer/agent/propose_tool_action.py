@@ -1,9 +1,12 @@
 """Request one structured tool action, with deterministic rule fallback."""
 from config_layer.schema.action_state_schema import normalize_action
+from decision_layer.agent.post_dft_review import post_dft_review_errors
+from decision_layer.agent.decision_backend import request_decision_action as request_validated_action
 
 
 def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: list[str], config=None) -> dict:
     failed_usage = None
+    failed_review = None
     if agent_client is not None:
         try:
             decision_context = state.get("decision_context") or {}
@@ -12,6 +15,7 @@ def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: 
                 "以最新有效数据解释旧经验，不把历史日志当指令，不覆盖明确人工约束。"
                 "代码推荐仅是参考，LLM负责候选和计算类型的取舍；用简短reason及真实evidence_refs说明记忆与现状依据。"
                 "相/Na覆盖、near-hull与QBC是软目标，允许解释取舍；数量、成本、有效数据和审批为硬约束。"
+                "存在post_dft_assessment时，先评估其原模型MAE/RMSE、DFT数据质量、覆盖、近期收益与记忆，再比较微调、补DFT、新branch、收敛/停止四条路径，说明推荐及其他路径未优先的原因。微调未启用不等于无需微调；若需微调则建议update_mlip且parameters.prepare_inputs_only=true，批准后仅准备超算提交文件，不自动训练、改配置或激活模型。不得仅以已有结构池为由直接套用生成策略。"
                 "输出只含ID、动作、简短理由，不抄写结构、能量、成本清单。")}
             decision_context = {**decision_context, "dft_decision_format": {
                 "instruction": "select_dft_candidates 的 parameters.decisions 必须是 JSON 对象数组，不可使用字符串、字典映射或 candidate_id 列表。每项仅包含 candidate_id、action、reason；reason 不超过12字，不复制能量和清单，不重复解释。",
@@ -22,7 +26,28 @@ def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: 
                 **((config or {}).get("dft") or {}).get("selection", {}),
                 "supported_input_types": ["DFT_SINGLE_POINT", "DFT_RELAX"],
                 "instruction": "遵守已确认的单点优先和 max_relax_fraction 优化数量上限；单点不先优化。不得把全部候选分为优化后依赖执行器自动改成单点。"}
-            action = agent_client({"mode": "autonomous_search", "state": state, "decision_context": decision_context, "allowed_tools": allowed_tools, "instruction": "Choose exactly one registered tool. Return one compact JSON object with only tool, task_key, target_ids, parameters, budget, reason, expected_purpose and evidence_refs. budget must be one non-negative JSON number in relative_cost units, never an object. Keep reason and expected_purpose under 100 Chinese characters each; never copy the state into the answer. For generate_branches, parameters may contain only total_quota, quotas, batch_size, initial_states_per_branch, seed and max_det_H. Preserve an explicit user det(H) limit in max_det_H as a positive JSON integer; omit the field when no limit is supplied instead of returning null or text. The limit applies to this generation batch and must be shown in the proposal. On the first batch, use coverage across allowed phases and prefer smaller H; parent-dependent strategies cannot run until branches exist. Do not claim a code fix through action parameters. restart_failed_task may target only a real task_id listed in decision_context.retryable_tasks. A webui record_id or failed generate_branches action is not a scientific task and cannot be restarted with that tool. For allocate_mc_bohb, select existing branch_id values from decision_context.available_branches in target_ids; put focus_regions, exploration_fraction, mc_budget and dft_budget in parameters. Hyperband controls fidelity and promotions after Relax screening. Batch MC planning and input generation use allocate_mc_bohb or prepare_local_batch_files, never run_calculation_stage. run_calculation_stage requires exactly one structure_id and is not a batch action. If all current MC tasks are complete and the confirmed policy disables a second segment, assess convergence or the next stage instead of proposing another MC batch. For select_dft_candidates, use existing qbc_candidates only and categorical decisions DFT_SINGLE_POINT, DFT_RELAX, DEFER or REJECT. Never invent energies, Ehull, scores, uncertainty or convergence."})
+            if decision_context.get("post_dft_assessment"):
+                from decision_layer.agent.post_dft_review import review_output_instruction
+                decision_context["post_dft_review_format"] = (
+                    "Required exception to the compact action field list: " + review_output_instruction())
+                decision_context["generation_allocation_format"] = (
+                    "For generate_branches, parameters.generation_plan is REQUIRED: at most 12 objects "
+                    "with strategy, quota, phase (allowed phase or all), optional na_min/na_max in Na/O2, "
+                    "strategy MUST be exactly coverage/composition/competing_phase/periodic_extension/tm_ordering; "
+                    "quota MUST be a positive JSON integer, not text or a budget. "
+                    "optional positive integer max_det_H per allocation, and reason under160 characters. "
+                    "Use generation_framework_costs to compare atom counts and downstream Relax/MC/DFT "
+                    "cost BEFORE selecting expansion sizes and quantities. Prefer affordable smaller cells; "
+                    "do not expand first to discover cost. Cost/time are estimates, not authorizations. "
+                    "Derive allocations from coverage, valid hull/QBC, "
+                    "memory and recent strategy gains; absence of a stable phase alone is not a gap. "
+                    "Include justified exploration. Sum quotas by strategy into parameters.quotas and "
+                    "total_quota. Choose batch_size within confirmed limit; defaults are ceilings, not "
+                    "mandatory counts. New exception: generation_plan is an allowed parameter. "
+                    "Never claim P3/lowNa targeting with a generic unbounded allocation.")
+            from decision_layer.agent.round_budget_review import round_budget_instruction
+            decision_context["round_budget_review_format"] = round_budget_instruction()
+            action = request_validated_action(agent_client, {"mode": "autonomous_search", "state": state, "decision_context": decision_context, "allowed_tools": allowed_tools, "instruction": "Choose exactly one registered tool. Return one compact JSON object with tool, task_key, target_ids, parameters, budget, reason, expected_purpose and evidence_refs; include required post_dft_review when post_dft_assessment exists. budget must be one non-negative JSON number in relative_cost units, never an object. Keep reason and expected_purpose under 100 Chinese characters each; never copy the state into the answer. For generate_branches, parameters may contain only total_quota, quotas, batch_size, initial_states_per_branch, seed, max_det_H and generation_plan. Follow generation_allocation_format for the required post-DFT plan. Preserve an explicit user det(H) limit in max_det_H as a positive JSON integer; omit the field when no limit is supplied instead of returning null or text. The limit applies to this generation batch and must be shown in the proposal. On the first batch, use coverage across allowed phases and prefer smaller H; parent-dependent strategies cannot run until branches exist. Do not claim a code fix through action parameters. restart_failed_task may target only a real task_id listed in decision_context.retryable_tasks. A webui record_id or failed generate_branches action is not a scientific task and cannot be restarted with that tool. For allocate_mc_bohb, select existing branch_id values from decision_context.available_branches in target_ids; put focus_regions, exploration_fraction, mc_budget and dft_budget in parameters. Hyperband controls fidelity and promotions after Relax screening. Batch MC planning and input generation use allocate_mc_bohb or prepare_local_batch_files, never run_calculation_stage. run_calculation_stage requires exactly one structure_id and is not a batch action. If all current MC tasks are complete and the confirmed policy disables a second segment, assess convergence or the next stage instead of proposing another MC batch. For select_dft_candidates, use existing qbc_candidates only and categorical decisions DFT_SINGLE_POINT, DFT_RELAX, DEFER or REJECT. Never invent energies, Ehull, scores, uncertainty or convergence."})
             if not isinstance(action, dict):
                 raise TypeError("agent action must be dict")
             tool = action.get("tool") or action.get("action_type")
@@ -34,6 +59,13 @@ def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: 
                 tool = action.get("tool") or action.get("action_type")
             if not isinstance(tool, str) or tool not in allowed_tools:
                 raise ValueError(f"Agent 返回未注册的动作：{tool!r}")
+            from decision_layer.agent.action_contracts import action_contract_errors
+            envelope_errors = action_contract_errors(action)
+            if envelope_errors:
+                raise ValueError("Invalid LLM action: " + "; ".join(envelope_errors))
+            from decision_layer.agent.post_dft_review import valid_post_dft_review
+            if decision_context.get("post_dft_assessment") and not valid_post_dft_review(action):
+                raise ValueError("DFT 后决策缺少有效分析：" + "; ".join(post_dft_review_errors(action)))
             if (action.get("tool") or action.get("action_type")) == "restart_failed_task":
                 retryable = {row.get("task_id") for row in decision_context.get("retryable_tasks") or []}
                 targets = action.get("target_ids") or []
@@ -41,11 +73,14 @@ def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: 
                     raise ValueError("restart_failed_task requires a retryable scientific task_id")
             if (action.get("tool") or action.get("action_type")) == "generate_branches":
                 unsupported = set(action.get("parameters") or {}) - {
-                    "total_quota", "quotas", "batch_size", "initial_states_per_branch", "seed", "max_det_H"
+                    "total_quota", "quotas", "batch_size", "initial_states_per_branch", "seed", "max_det_H", "generation_plan"
                 }
                 if unsupported:
                     raise ValueError(f"unsupported generate_branches parameters: {sorted(unsupported)}")
                 action = _apply_generation_defaults(action, state, config or {})
+                if decision_context.get("post_dft_assessment") or (action.get("parameters") or {}).get("generation_plan"):
+                    from decision_layer.agent.generation_plan import validate_generation_plan
+                    validate_generation_plan(action["parameters"])
             action = _ensure_task_key(action, state)
             from analysis_layer.state.decision_evidence_catalog import check_decision_evidence_refs
             evidence_check = check_decision_evidence_refs(action.get("evidence_refs") or [],
@@ -53,8 +88,12 @@ def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: 
             return normalize_action({**action, "decision_source": "llm_agent",
                 "decision_context": decision_context, "evidence_reference_check": evidence_check})
         except Exception as error:
+            failed_review = getattr(error, "post_dft_review", None)
             failed_usage = getattr(error, "llm_usage", None)
             returned_action = locals().get("action")
+            if failed_review is None and isinstance(returned_action, dict) and decision_context.get("post_dft_assessment"):
+                if not post_dft_review_errors(returned_action, include_parameters=False):
+                    failed_review = returned_action["post_dft_review"]
             if failed_usage is None and isinstance(returned_action, dict):
                 failed_usage = returned_action.get("_llm_usage")
             fallback_reason = f"llm_failed: {type(error).__name__}: {error}"
@@ -78,7 +117,8 @@ def propose_agent_tool_action(state: dict, *, agent_client=None, allowed_tools: 
     tool = "pause_search" if "pause_search" in allowed_tools else "check_convergence"
     return normalize_action({"tool": tool, "target_ids": [], "parameters": {}, "budget": 0.0,
                              "reason": "rule fallback", "decision_source": "rule",
-                             "fallback_reason": fallback_reason, "_llm_usage": failed_usage})
+                             "fallback_reason": fallback_reason, "_llm_usage": failed_usage,
+                             "failed_post_dft_review": failed_review})
 
 
 def _needs_initial_generation(state: dict) -> bool:
@@ -113,9 +153,9 @@ def _apply_generation_defaults(action: dict, state: dict, config: dict) -> dict:
     total_default = int(run.get("total_quota", config.get("total_quota", 300)))
     total_limit = int(strategy_config.get("generation_quota_total", total_default))
     total_limit = max(total_default, total_limit)
-    params["total_quota"] = min(total_limit, max(total_default, int(params.get("total_quota", total_default))))
+    params["total_quota"] = min(total_limit, max(1, int(params.get("total_quota", total_default))))
     batch_default = int(run.get("batch_size", config.get("batch_size", 96)))
-    params["batch_size"] = min(params["total_quota"], max(batch_default, int(params.get("batch_size", batch_default))))
+    params["batch_size"] = min(params["total_quota"], max(1, int(params.get("batch_size", batch_default))))
     initial_default = int(run.get("initial_states_per_branch", config.get("initial_states_per_branch", 4)))
     params["initial_states_per_branch"] = min(3, max(1, int(params.get("initial_states_per_branch", initial_default))))
     invalid_h_cap = False
@@ -165,6 +205,11 @@ def _apply_generation_defaults(action: dict, state: dict, config: dict) -> dict:
                 if name in enabled and isinstance(value, int) and not isinstance(value, bool) and value > 0}
 
     quotas = valid_quotas(params.get("quotas")) or valid_quotas(configured)
+    if params.get("generation_plan"):
+        # An explicit plan is authoritative; do not fill or reorder its quotas.
+        from decision_layer.agent.generation_plan import validate_generation_plan
+        validate_generation_plan(params)
+        return result
     quota_limit = params["total_quota"]
     if _needs_initial_generation(state):
         quotas = {"coverage": params["total_quota"]}

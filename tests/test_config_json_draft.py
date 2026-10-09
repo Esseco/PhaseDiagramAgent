@@ -222,7 +222,7 @@ class EditableConfigJsonTests(unittest.TestCase):
             root = Path(directory) / "workspace"
             config = {"storage": default_workspace_storage(root)}
             paths = resolve_workspace_paths(config, base_directory=directory)
-            self.assertEqual(paths["state"], root.resolve() / "current/state.json")
+            self.assertEqual(paths["state"], root.resolve() / "workflow_state/state.json")
             config["storage"]["paths"]["state"] = "../outside/state.json"
             with self.assertRaisesRegex(ValueError, "不能越出 workspace_root"):
                 resolve_workspace_paths(config, base_directory=directory)

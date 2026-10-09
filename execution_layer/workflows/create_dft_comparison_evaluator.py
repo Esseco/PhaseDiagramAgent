@@ -38,7 +38,8 @@ def create_dft_comparison_evaluator(config, *, state=None):
         evaluated = run_mace_with_py_mace(
             structure, model_path=path,
             operation="predict", parameters=parameters,
-            work_directory=Path(base).parent / "dft_comparisons" / key)
+            work_directory=Path(base).parent / "dft_comparisons" / key,
+            environment=(config.get("python_environments") or {}).get("local_mlip") or model.get("local_environment") or "py-mace")
         if evaluated.get("status") != "completed":
             raise ValueError(evaluated.get("error") or "MLIP prediction failed")
         return {**evaluated, "model_version": version, "model_sha256": digest,

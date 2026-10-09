@@ -1,3 +1,4 @@
+from analysis_layer.feedback.export_dft_products import dft_product_path
 import json
 from copy import deepcopy
 
@@ -33,7 +34,7 @@ def test_round_products_and_units(tmp_path):
     export_dft_products(state, tmp_path)
     directory = next(iter(state["dft_result_exports"].values()))["directory"]
     from pathlib import Path
-    metrics = json.loads((Path(directory) / "mlip_dft_metrics.json").read_text())
+    metrics = json.loads((dft_product_path(directory, "mlip_dft_metrics.json")).read_text(encoding="utf-8"))
     assert metrics["energy_total"]["mae"] == 1
     assert metrics["energy_per_atom"]["rmse"] == .5
     assert metrics["forces"]["mae"] == pytest.approx(.2)
@@ -42,9 +43,9 @@ def test_round_products_and_units(tmp_path):
         assert "mse" not in metrics[field] and "mse_unit" not in metrics[field]
         assert metrics[field]["rmse_unit"] == metrics[field]["mae_unit"]
     assert metrics["round_scope"]["upload_operation_id"] == "dft-1"
-    timestamp = (Path(directory) / "training.json").stat().st_mtime_ns
+    timestamp = (dft_product_path(directory, "training.json")).stat().st_mtime_ns
     export_dft_products(state, tmp_path)
-    assert (Path(directory) / "training.json").stat().st_mtime_ns == timestamp
+    assert (dft_product_path(directory, "training.json")).stat().st_mtime_ns == timestamp
 
 
 def test_model_mismatch_not_counted_but_training_preserved():
@@ -65,7 +66,7 @@ def test_rmse_aggregates_squared_errors_not_frame_rmse(tmp_path):
     record_dft_products(state, second, other_prediction)
     export_dft_products(state, tmp_path)
     directory = Path(next(iter(state["dft_result_exports"].values()))["directory"])
-    metrics = json.loads((directory / "mlip_dft_metrics.json").read_text())
+    metrics = json.loads(dft_product_path(directory, "mlip_dft_metrics.json").read_text(encoding="utf-8"))
     assert metrics["energy_total"]["mae"] == 2
     assert metrics["energy_total"]["rmse"] == pytest.approx(np.sqrt(5))
     assert metrics["forces"]["rmse"] == pytest.approx(np.sqrt(.1))
@@ -105,5 +106,5 @@ def test_official_feedback_is_idempotent(tmp_path):
     assert second["state"]["dft_result_exports"]
     directory = next(iter(second["state"]["dft_result_exports"].values()))["directory"]
     from pathlib import Path
-    assert all((Path(directory) / name).is_file() for name in (
+    assert all((dft_product_path(directory, name)).is_file() for name in (
         "energy_comparison.csv", "force_comparison.csv", "metrics.csv"))

@@ -39,7 +39,7 @@ def regenerate_dft_files(state, message, *, manager, upload_root):
         if result_path and Path(result_path).is_file():
             raise ValueError('已有回传结果，不覆盖')
         selected.append((task,directory,snapshot))
-    backup_root = root.parent/'dft_input_backups'/datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+    backup_root = root.parent/'backups'/'dft_inputs'/datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     # Generate everything before changing any existing input directory.
     with tempfile.TemporaryDirectory(prefix='dft-rebuild-') as temporary:
         staged = []
@@ -48,6 +48,8 @@ def regenerate_dft_files(state, message, *, manager, upload_root):
             request = {**deepcopy(snapshot),'work_directory':str(target)}
             from execution_layer.workflows.comparison_model_registry import original_round_model
             model, digest, _ = original_round_model(state, state.get('confirmed_config') or {}, request.get('model_version'))
+            from config_layer.schema.python_environments import remote_comparison_model
+            model = remote_comparison_model(model, state.get('confirmed_config') or {})
             if digest:
                 model['model_sha256'] = digest
             prepare_pycode_relax(request,manager=manager,comparison_model=model)

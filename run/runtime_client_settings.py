@@ -10,6 +10,7 @@ CONFIG_INTENT_PROMPT = (
 
 def search_client_settings(settings):
     return {
+        "proposal_harness": settings.get("proposal_harness", "legacy"),
         "model": settings.get("model", "deepseek-v4-pro"),
         "base_url": settings.get("base_url", "https://api.deepseek.com"),
         "max_tokens": int(settings.get("max_tokens", 800)),

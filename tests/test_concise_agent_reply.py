@@ -1,4 +1,4 @@
-from run.open_webui_api import format_workflow_reply
+from run.agent_api import format_workflow_reply
 
 
 def test_wait_omits_empty_diagnostics_and_task_list():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -24,7 +25,8 @@ def run_mace_with_py_mace(structure, *, model_path, operation, work_directory, p
     job_path, result_path = work / "mace_job.json", work / "mace_result.json"
     job_path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
     worker = Path(__file__).with_name("mace_worker.py")
-    completed = subprocess.run(["conda", "run", "-n", environment, "python", str(worker), str(job_path), str(result_path)], capture_output=True, text=True, check=False)
+    command = [sys.executable] if environment == "current" else ["conda", "run", "-n", environment, "python"]
+    completed = subprocess.run([*command, str(worker), str(job_path), str(result_path)], capture_output=True, text=True, check=False)
     if completed.returncode or not result_path.exists():
         return {"status": "failed", "error": completed.stderr or completed.stdout, "returncode": completed.returncode}
     result = json.loads(result_path.read_text(encoding="utf-8"))

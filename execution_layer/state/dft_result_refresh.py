@@ -6,6 +6,25 @@ DFT_STAGES = {"dft_single_point", "dft_relax"}
 MAGNETIC_KEYS = ("magnetic_moments", "magnetic_check")
 
 
+def _scientific_payload(value):
+    """Ignore only redundant lattice scalars, never actual geometry or labels.
+
+    pymatgen versions can derive slightly different angles from identical
+    matrices. Retain matrix, pbc, charge, ordered sites and all properties.
+    Recurse so ionic training-frame structures have the same comparison rule.
+    """
+    if isinstance(value, list):
+        return [_scientific_payload(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {key: _scientific_payload(item) for key, item in value.items()}
+    lattice = result.get("lattice")
+    if "sites" in result and isinstance(lattice, dict) and "matrix" in lattice:
+        result["lattice"] = {key: item for key, item in lattice.items()
+                             if key not in {"a", "b", "c", "alpha", "beta", "gamma", "volume"}}
+    return result
+
+
 def magnetic_evidence(row):
     outputs = row.get("outputs") or row
     raw = outputs.get("magnetic_moments") or outputs.get("magnetic_check") or {}
@@ -24,7 +43,7 @@ def validated_magnetic_refresh(prior, incoming):
     for key in ("structure", "structure_checksum", "energy", "energy_unit", "training_energy", "forces", "forces_unit",
                 "stress", "stress_unit", "stress_convention", "atom_count", "composition", "final_frame_index",
                 "training_frame_index", "final_frame_valid", "training_frames", "training_ready"):
-        if key in old and json.dumps(old[key], sort_keys=True) != json.dumps(new.get(key), sort_keys=True):
+        if key in old and json.dumps(_scientific_payload(old[key]), sort_keys=True) != json.dumps(_scientific_payload(new.get(key)), sort_keys=True):
             return {"status": "rejected", "reason": f"dft_refresh_{key}_mismatch"}
     prediction_changed = old.get("remote_mlip_prediction") != new.get("remote_mlip_prediction")
     if prediction_changed and new.get("remote_mlip_prediction") is not None:
