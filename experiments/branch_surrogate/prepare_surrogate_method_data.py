@@ -1,8 +1,8 @@
-"""Connect the fixed branch dataset to scientific_layer.surrogate_models feature outputs."""
+"""Connect the fixed branch dataset to phase_agent.science.surrogate_models feature outputs."""
 
-from scientific_layer.features.build_cost_record import build_cost_record
-from execution_layer.budget.select_comparable_cost import select_comparable_cost
-from execution_layer.budget.check_structure_cost_limits import check_structure_cost_limits
+from phase_agent.science.features.build_cost_record import build_cost_record
+from phase_agent.tools.budget.select_comparable_cost import select_comparable_cost
+from phase_agent.tools.budget.check_structure_cost_limits import check_structure_cost_limits
 
 
 def prepare_surrogate_method_data(dataset: dict, feature_table: dict | None, *, config: dict) -> dict:

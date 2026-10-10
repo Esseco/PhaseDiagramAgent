@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from analysis_layer.state.build_decision_context import build_decision_context
-from data_layer.memory.build_domain_skill_draft import build_domain_skill_draft
-from data_layer.memory.collect_memory_candidates import collect_memory_candidates
-from data_layer.memory.load_matching_domain_skills import load_matching_domain_skills
-from data_layer.memory.publish_domain_skill import publish_domain_skill
-from data_layer.memory.propose_domain_skill_import import propose_domain_skill_import
-from data_layer.memory.retrieve_relevant_knowledge import retrieve_relevant_knowledge
-from data_layer.memory.review_queue import propose_knowledge_record, review_memory_update
+from phase_agent.analysis.state.build_decision_context import build_decision_context
+from phase_agent.persistence.memory.build_domain_skill_draft import build_domain_skill_draft
+from phase_agent.persistence.memory.collect_memory_candidates import collect_memory_candidates
+from phase_agent.persistence.memory.load_matching_domain_skills import load_matching_domain_skills
+from phase_agent.persistence.memory.publish_domain_skill import publish_domain_skill
+from phase_agent.persistence.memory.propose_domain_skill_import import propose_domain_skill_import
+from phase_agent.persistence.memory.retrieve_relevant_knowledge import retrieve_relevant_knowledge
+from phase_agent.persistence.memory.review_queue import propose_knowledge_record, review_memory_update
 
 
 def _state():

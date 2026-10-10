@@ -2,8 +2,8 @@
 
 from copy import deepcopy
 
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from config_layer.runtime.authorize_budget_extension import authorize_budget_extension
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.runtime.authorize_budget_extension import authorize_budget_extension
 
 
 def _revision():

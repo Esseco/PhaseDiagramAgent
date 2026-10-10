@@ -1,4 +1,4 @@
-from execution_layer.remote.manual_upload_runner import ManualUploadBatchRunner
+from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
 
 
 def test_409_structures_produce_five_python_scripts(tmp_path):

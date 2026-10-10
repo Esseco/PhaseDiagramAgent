@@ -1,6 +1,6 @@
 import pytest
-from decision_layer.agent.mc_contracts import mc_contract_errors
-from execution_layer.workflows.create_active_learning_handlers import _allocate_mc_bohb
+from phase_agent.decisions.agent.mc_contracts import mc_contract_errors
+from phase_agent.tools.workflows.create_active_learning_handlers import _allocate_mc_bohb
 
 
 @pytest.mark.parametrize("params", [{"mc_budget": True}, {"mc_budget": "100"},

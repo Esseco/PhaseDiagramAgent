@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 import pytest
-from run.runtime_clients import create_optional_runtime_client
+from phase_agent.runtime.runtime_clients import create_optional_runtime_client
 
 
 def test_no_key_does_not_create_client():

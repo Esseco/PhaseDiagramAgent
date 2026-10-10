@@ -5,7 +5,7 @@ from ase import Atoms
 from ase.io import write
 from ase.calculators.calculator import Calculator, all_changes
 
-from scientific_layer.mlip.predict_structure import predict_structure
+from phase_agent.science.mlip.predict_structure import predict_structure
 
 
 def test_main_prediction_not_committee_average_and_geometry_cache_preserved(tmp_path, monkeypatch):

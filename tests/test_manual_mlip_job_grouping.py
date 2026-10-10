@@ -5,8 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from execution_layer.remote.manual_upload_runner import ManualUploadBatchRunner
-from execution_layer.remote.run_mlip_batch import run_mlip_batch
+from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
+from phase_agent.tools.remote.run_mlip_batch import run_mlip_batch
 
 
 def _prepared_task(source):
@@ -140,7 +140,7 @@ def test_batch_runner_accepts_legacy_windows_manifest_paths(tmp_path):
         (Path(cwd) / "task.finished.json").write_text("{}", encoding="utf-8")
         return SimpleNamespace(returncode=0)
 
-    with patch("execution_layer.remote.run_mlip_batch.subprocess.run", side_effect=fake_run):
+    with patch("phase_agent.tools.remote.run_mlip_batch.subprocess.run", side_effect=fake_run):
         failures = run_mlip_batch(root / "manifest.json", executor="fake.module:execute")
     assert failures == []
     assert observed["cwd"] == task_dir

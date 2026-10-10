@@ -1,6 +1,6 @@
-from analysis_layer.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from scientific_layer.mc.schedule_tiered_mc import schedule_tiered_mc
+from phase_agent.analysis.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.science.mc.schedule_tiered_mc import schedule_tiered_mc
 
 
 def test_local_pool_uses_only_recovered_matching_model(tmp_path):

@@ -1,4 +1,4 @@
-from analysis_layer.feedback.export_dft_products import dft_product_path
+from phase_agent.analysis.feedback.export_dft_products import dft_product_path
 import json
 from copy import deepcopy
 
@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 from pymatgen.core import Structure, Lattice
 
-from analysis_layer.feedback.dft_result_products import record_dft_products, export_dft_products
-from execution_layer.workflows.create_dft_comparison_evaluator import create_dft_comparison_evaluator
-from scientific_layer.dft.parse_vasp_result import parse_vasp_result
+from phase_agent.analysis.feedback.dft_result_products import record_dft_products, export_dft_products
+from phase_agent.tools.workflows.create_dft_comparison_evaluator import create_dft_comparison_evaluator
+from phase_agent.science.dft.parse_vasp_result import parse_vasp_result
 from types import SimpleNamespace
 
 
@@ -90,12 +90,12 @@ def test_vasp_parser_populates_portable_frame(tmp_path):
 
 def test_official_feedback_is_idempotent(tmp_path):
     from unittest.mock import patch
-    from execution_layer.workflows.apply_scientific_feedback import apply_scientific_feedback
+    from phase_agent.tools.workflows.apply_scientific_feedback import apply_scientific_feedback
     manager = SimpleNamespace(STAGES=["dft_single_point"], stages=["dft_single_point"],
                               stage_labels={}, data={"structures": {"S1": {}}, "branches": {}})
-    module = "execution_layer.workflows.apply_scientific_feedback."
-    with patch(module + "collect_calculation_results", return_value={"phase_record": None}), \
-         patch(module + "ensure_phase_identification", side_effect=lambda state, *a, **kw: (state, {})), \
+    module = "phase_agent.tools.workflows.apply_scientific_feedback."
+    with patch(module + "collect_calculation_results", return_value={"phase_record": None}),\
+         patch(module + "ensure_phase_identification", side_effect=lambda state, *a, **kw: (state, {})),\
          patch(module + "coverage", return_value={}):
         first = apply_scientific_feedback({}, [result()], manager=manager,
                     phase_diagram_directory=tmp_path, final_frame_mlip_evaluator=predict)

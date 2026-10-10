@@ -1,5 +1,5 @@
-from run.evidence_reference_presentation import evidence_reference_lines
-from run.workflow_reply_presentation import format_workflow_reply
+from phase_agent.runtime.evidence_reference_presentation import evidence_reference_lines
+from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
 
 def test_approval_reply_exposes_unknown_evidence_without_claiming_execution():

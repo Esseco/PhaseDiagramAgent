@@ -21,7 +21,7 @@ def fit_surrogate_method(method: str, train_rows: list[dict], *, surrogate_confi
     if not names:
         return _skip(method, "inconsistent or missing features")
     from sklearn.ensemble import RandomForestRegressor
-    from scientific_layer.surrogate_models.select_features import select_features
+    from phase_agent.science.surrogate_models.select_features import select_features
     started = time.perf_counter()
     X = [[_flat(row, kind).get(name) for name in names] for row in available]
     if any(value is None for line in X for value in line):

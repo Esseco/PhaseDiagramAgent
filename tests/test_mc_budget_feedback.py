@@ -2,15 +2,15 @@
 
 from types import SimpleNamespace
 
-from analysis_layer.phase.branch_relax_hull import build_relax_hull
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from decision_layer.agent.revise_tool_proposal import revise_tool_proposal
-from decision_layer.agent.resolve_mc_budget_feedback import resolve_mc_full_plan_steps
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
-from execution_layer.policy.execution_policy import build_agent_proposal
-from execution_layer.step_runner.file_protocol import write_json
-from execution_layer.workflows.run_tool_step import run_tool_step
-from run.agent_api import RunWorkflowChatHandler
+from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
+from phase_agent.decisions.agent.resolve_mc_budget_feedback import resolve_mc_full_plan_steps
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.tools.step_runner.file_protocol import write_json
+from phase_agent.tools.workflows.run_tool_step import run_tool_step
+from phase_agent.runtime.agent_api import RunWorkflowChatHandler
 
 
 def _pending_mc_state(maximum):
@@ -31,45 +31,33 @@ def test_full_plan_choice_reads_frozen_preview_only():
 
 
 def test_full_plan_above_cap_enters_targeted_revision(tmp_path):
-    path = tmp_path / "state.json"
-    state = _pending_mc_state(5000)
-    state["pending_execution_policies"]["review-1"]["agent_proposal"]["raw_action"]["parameters"] = {
-        "mc_budget": 5000, "budget_preview": {"full_plan_steps": 9540}}
-    write_json(path, state)
-    seen = {}
-
-    class Delegate:
-        def revise_mc_budget_limit(self, steps, **_):
-            seen["steps"] = steps
-            return "revision-started"
-
-    handler = RunWorkflowChatHandler({"state_path": str(path)},
-        config_revision_factory=lambda revised: seen.setdefault("state", revised) and Delegate())
-    assert handler([{"role": "user", "content": "完整运行"}]).endswith("revision-started")
-    assert seen["steps"] == 9540
-    assert seen["state"]["mc_budget_intent"]["steps"] == 9540
+    from tests.test_unified_react_dialogue import make_handler
+    calls, received = [], []
+    def model(payload):
+        calls.append(payload)
+        return {"kind": "configure", "answer": '完整方案超出配置上限，先修订预算。'}
+    handler = make_handler(tmp_path, model)
+    handler.config_revision_factory = lambda state: (
+        lambda messages, conversation_id=None: received.append(messages[-1]["content"]) or "revision-started")
+    assert handler([{"role": "user", "content": '完整运行'}]).endswith("revision-started")
+    assert len(calls) == 1
+    assert calls[0]["user_instruction"] == '完整运行'
+    assert received == ['完整运行']
 
 
 def test_pending_mc_feedback_above_confirmed_cap_enters_targeted_revision(tmp_path):
-    path = tmp_path / "state.json"
-    write_json(path, _pending_mc_state(1000))
-    seen = {}
-
-    def revision_factory(state):
-        seen["state"] = state
-        class Delegate:
-            def revise_mc_budget_limit(self, steps, **_):
-                seen["steps"] = steps
-                return "revision-started"
-        return Delegate()
-
-    handler = RunWorkflowChatHandler({"state_path": str(path)},
-        config_revision_factory=revision_factory)
-    reply = handler([{"role": "user", "content": "按 5000 步预算"}])
-
-    assert reply.endswith("revision-started")
-    assert seen["state"]["mc_budget_intent"]["steps"] == 5000
-    assert seen["steps"] == 5000
+    from tests.test_unified_react_dialogue import make_handler
+    calls, received = [], []
+    def model(payload):
+        calls.append(payload)
+        return {"kind": "configure", "answer": '需要修订配置中的MC预算。'}
+    handler = make_handler(tmp_path, model)
+    handler.config_revision_factory = lambda state: (
+        lambda messages, conversation_id=None: received.append(messages[-1]["content"]) or "revision-started")
+    assert handler([{"role": "user", "content": '按 5000 步预算'}]).endswith("revision-started")
+    assert len(calls) == 1
+    assert calls[0]["user_instruction"] == '按 5000 步预算'
+    assert received == ['按 5000 步预算']
 
 
 def test_pending_mc_feedback_within_cap_revises_current_action(tmp_path):

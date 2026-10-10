@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from execution_layer.local.migrate_analysis_outputs import migrate_analysis_outputs
+from phase_agent.tools.local.migrate_analysis_outputs import migrate_analysis_outputs
 
 
 def test_layout_migration_preserves_data_and_updates_references(tmp_path):

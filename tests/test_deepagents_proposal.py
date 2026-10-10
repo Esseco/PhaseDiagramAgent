@@ -1,7 +1,7 @@
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
-from decision_layer.agent.deepagents_proposal import create_proposal_client, proposal_material
+from phase_agent.decisions.agent.deepagents_proposal import create_proposal_client, proposal_material
 
 
 class OfflineModel(FakeMessagesListChatModel):
@@ -47,7 +47,7 @@ def test_contract_and_repair_material_preserved_without_raw_action():
 
 
 def test_proposal_passes_real_langgraph_contract():
-    from decision_layer.agent.decision_backend import request_decision_action
+    from phase_agent.decisions.agent.decision_backend import request_decision_action
     client = create_proposal_client(OfflineModel(responses=[AIMessage(content=
         '{"tool":"select_dft_candidates","parameters":{"decisions":[{"candidate_id":"a",'
         '"action":"DFT_SINGLE_POINT","reason":"near hull"}]},"budget":30}')]))

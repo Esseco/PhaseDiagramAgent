@@ -10,10 +10,10 @@ from unittest.mock import patch
 
 from pymatgen.core import Lattice, Structure
 
-from scientific_layer.structures.initialize_branch_structures import initialize_branch_structures
-from data_layer.ledger.register_candidate_batch import register_candidate_batch
-from scientific_layer.structures.identify_branch import extract_T
-from data_layer.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.science.structures.initialize_branch_structures import initialize_branch_structures
+from phase_agent.persistence.ledger.register_candidate_batch import register_candidate_batch
+from phase_agent.science.structures.identify_branch import extract_T
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
 
 
 class BranchGenerationFlowTest(unittest.TestCase):
@@ -60,7 +60,7 @@ class BranchGenerationFlowTest(unittest.TestCase):
         self.assertLessEqual(len(states), 3)
 
     def test_fixed_charge_retry_when_charge_balance_fails(self):
-        with patch("scientific_layer.structures.rank_na_orderings_by_electrostatics."
+        with patch("phase_agent.science.structures.rank_na_orderings_by_electrostatics."
                    "_assign_charge_balanced_average_tm_valence",
                    side_effect=ValueError("simulated charge assignment failure")):
             states = self.initialize()

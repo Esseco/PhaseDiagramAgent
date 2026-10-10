@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 from unittest.mock import patch
-from execution_layer.state.restore_generation_gate import restore_generation_gate
-from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
-from decision_layer.agent.propose_tool_action import propose_agent_tool_action
-from config_layer.defaults.default_budget_rules import default_budget_rules
+from phase_agent.tools.state.restore_generation_gate import restore_generation_gate
+from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
+from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
 
 
 def test_completed_generation_restores_gate_and_prepares_relax():

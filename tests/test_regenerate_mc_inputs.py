@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from execution_layer.local import regenerate_mc_inputs as module
-from execution_layer.remote.build_upload_batch_directory import build_upload_batch_directory
-from run.agent_api import RunWorkflowChatHandler
-from execution_layer.budget.stratify_mc_actions import (
+from phase_agent.tools.local import regenerate_mc_inputs as module
+from phase_agent.tools.remote.build_upload_batch_directory import build_upload_batch_directory
+from phase_agent.runtime.agent_api import RunWorkflowChatHandler
+from phase_agent.tools.budget.stratify_mc_actions import (
     interleave_mc_strata, summarize_mc_interception,
 )
 
@@ -119,7 +119,7 @@ def test_chat_request_only_proposes_and_dedicated_confirmation_executes(
     config = {"upload_batches_directory": str(tmp_path),
               "budgets": {"stage_limits": {"deep_search": {"max_cost": 10}}}}
     monkeypatch.setattr(
-        "config_layer.runtime.build_effective_run_config.build_effective_run_config",
+        "phase_agent.configuration.runtime.build_effective_run_config.build_effective_run_config",
         lambda *_: config)
     calls = []
 

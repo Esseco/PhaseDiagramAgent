@@ -1,6 +1,6 @@
 from pathlib import Path
-from analysis_layer.phase.phase_snapshot_paths import phase_snapshot_directory
-from analysis_layer.feedback.export_dft_products import export_dft_products
+from phase_agent.analysis.phase.phase_snapshot_paths import phase_snapshot_directory
+from phase_agent.analysis.feedback.export_dft_products import export_dft_products
 from tests.test_dft_comparison_csv import add_result
 
 
@@ -14,7 +14,7 @@ def test_shared_epoch_paths(tmp_path):
 
 def test_phase_csv_epoch_and_unchanged_reuse(tmp_path):
     import csv
-    from analysis_layer.phase.update_phase_diagram import update_phase_diagram
+    from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
     from tests.test_na_eform_phase_csv import record
     state = {"active_model_version": "m1", "upload_layout": {"model_rounds": {"m1": 1}}}
     records = [record("left", 0, -3), record("right", 1, -4)]
@@ -50,8 +50,8 @@ def test_comparison_csv_has_epoch_and_round(tmp_path):
 
 
 def test_missing_training_directory_blocks_without_generation(tmp_path):
-    from execution_layer.workflows.prepare_remote_finetune import prepare_remote_finetune
-    from config_layer.defaults.default_mace_committee_config import default_mace_committee_config
+    from phase_agent.tools.workflows.prepare_remote_finetune import prepare_remote_finetune
+    from phase_agent.configuration.defaults.default_mace_committee_config import default_mace_committee_config
     state = {}
     for i in range(10):
         add_result(state, task_id=f"T{i}")
@@ -68,8 +68,8 @@ def test_missing_training_directory_blocks_without_generation(tmp_path):
 
 
 def test_changed_training_plan_does_not_create_next_round(tmp_path):
-    from execution_layer.workflows.prepare_remote_finetune import prepare_remote_finetune
-    from config_layer.defaults.default_mace_committee_config import default_mace_committee_config
+    from phase_agent.tools.workflows.prepare_remote_finetune import prepare_remote_finetune
+    from phase_agent.configuration.defaults.default_mace_committee_config import default_mace_committee_config
     state = {}
     for i in range(10):
         add_result(state, task_id=f"T{i}")

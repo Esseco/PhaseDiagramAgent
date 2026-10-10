@@ -1,11 +1,11 @@
 import unittest
 
-from analysis_layer.convergence.check_global_convergence import check_global_convergence
-from analysis_layer.feedback.validate_branch_static_energies import validate_branch_static_energies
-from execution_layer.state.reconcile_task_results import reconcile_task_results
-from scientific_layer.mc.schedule_tiered_mc import schedule_tiered_mc
-from config_layer.runtime.validate_energy_conventions import validate_energy_conventions
-from decision_layer.scoring.rank_branch_relax_prescreen import rank_branch_relax_prescreen
+from phase_agent.analysis.convergence.check_global_convergence import check_global_convergence
+from phase_agent.analysis.feedback.validate_branch_static_energies import validate_branch_static_energies
+from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
+from phase_agent.science.mc.schedule_tiered_mc import schedule_tiered_mc
+from phase_agent.configuration.runtime.validate_energy_conventions import validate_energy_conventions
+from phase_agent.decisions.scoring.rank_branch_relax_prescreen import rank_branch_relax_prescreen
 
 
 POLICY = {

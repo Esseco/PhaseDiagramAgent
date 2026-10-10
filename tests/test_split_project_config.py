@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 import pytest
-from config_layer.session.project_config_json import create_project_config_json, write_project_config_patch
-from config_layer.session.load_editable_config_json import load_editable_config_json
-from config_layer.session.split_project_config import (
+from phase_agent.configuration.session.project_config_json import create_project_config_json, write_project_config_patch
+from phase_agent.configuration.session.load_editable_config_json import load_editable_config_json
+from phase_agent.configuration.session.split_project_config import (
     split_project_file, read_document, editable_project_hash, write_document, INITIAL_ROOTS)
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from config_layer.schema.validate_search_config import validate_search_config
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.schema.validate_search_config import validate_search_config
 
 
 def setup(tmp_path):
@@ -84,8 +84,8 @@ def test_startup_defers_later_thresholds_but_full_validation_requires_them():
 
 
 def test_chat_hash_covers_both_files(tmp_path):
-    from run.configuration_chat import ConfigurationChatHandler
-    from config_layer.session.create_config_draft import create_config_draft
+    from phase_agent.runtime.configuration_chat import ConfigurationChatHandler
+    from phase_agent.configuration.session.create_config_draft import create_config_draft
     initial, runtime, before = setup(tmp_path)
     handler = ConfigurationChatHandler({'state_path': str(tmp_path/'state.json'),
         'config_session': create_config_draft(before)}, config_session_path=tmp_path/'session.json',
@@ -115,8 +115,8 @@ def test_remote_validation_settings_are_editable_in_run_file(tmp_path):
     assert load_editable_config_json(initial, before)['remote_training_validation']['data_version'] == 'v1'
 
 def test_running_chat_import_enters_revision_without_llm_or_workflow(tmp_path):
-    from run.chat_application import RunWorkflowChatHandler
-    from execution_layer.step_runner.file_protocol import write_json
+    from phase_agent.runtime.chat_application import RunWorkflowChatHandler
+    from phase_agent.tools.step_runner.file_protocol import write_json
     path = tmp_path/'state.json'
     write_json(path, {'active_model_version': 'base'})
     calls = []
@@ -129,7 +129,7 @@ def test_running_chat_import_enters_revision_without_llm_or_workflow(tmp_path):
     assert calls and '已读取两份配置' in reply
 
 def test_new_project_leaves_unknown_chemistry_and_hpc_model_for_user(tmp_path):
-    from run.local_project_launcher import create_project
+    from phase_agent.runtime.local_project_launcher import create_project
     target = create_project(tmp_path/'project', registry=tmp_path/'registry.json')
     initial = target.parent/'parameters/search_config.project.json'
     doc = read_document(initial)

@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from pymatgen.core import Lattice, Structure
 
-from scientific_layer.dft.magnetic_diagnostics import diagnose_result_magnetism, extract_magnetic_diagnostics
-from analysis_layer.feedback.dft_result_products import record_dft_products
+from phase_agent.science.dft.magnetic_diagnostics import diagnose_result_magnetism, extract_magnetic_diagnostics
+from phase_agent.analysis.feedback.dft_result_products import record_dft_products
 
 
 def result(elements=("Fe", "Mn", "O"), moments=(4.3, 2.1, 0)):
@@ -69,7 +69,7 @@ def test_site_and_frame_mismatch_not_passed():
 
 def test_parser_keeps_relax_frames_and_warning(tmp_path):
     import numpy as np
-    from scientific_layer.dft.parse_vasp_result import parse_vasp_result
+    from phase_agent.science.dft.parse_vasp_result import parse_vasp_result
     struct = Structure.from_dict(result()["outputs"]["structure"])
     frames = [{"structure": struct, "e_0_energy": energy, "forces": np.zeros((3,3)),
                "electronic_steps": [{}]} for energy in (-8, -9)]

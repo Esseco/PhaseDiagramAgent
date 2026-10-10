@@ -1,14 +1,14 @@
 from copy import deepcopy
 from pathlib import Path
 import pytest
-from execution_layer.local.regenerate_finetune_inputs import (
+from phase_agent.tools.local.regenerate_finetune_inputs import (
     is_finetune_regeneration_request, plan_finetune_regeneration, regenerate_finetune_inputs)
 
 
 def fixture(tmp_path):
     from tests.test_epoch_output_layout import add_result
-    from config_layer.defaults.default_mace_committee_config import default_mace_committee_config
-    from execution_layer.workflows.prepare_remote_finetune import prepare_remote_finetune
+    from phase_agent.configuration.defaults.default_mace_committee_config import default_mace_committee_config
+    from phase_agent.tools.workflows.prepare_remote_finetune import prepare_remote_finetune
     state = {}
     for index in range(10):
         add_result(state, task_id=f"T{index}")
@@ -67,7 +67,7 @@ def test_failed_generation_restores_original(tmp_path, monkeypatch):
     original = (Path(plan["directory"]) / "inputs/GPU.sh").read_bytes()
     def fail(*args, **kwargs):
         raise ValueError("test failure")
-    monkeypatch.setattr("execution_layer.workflows.prepare_remote_finetune.prepare_remote_finetune", fail)
+    monkeypatch.setattr("phase_agent.tools.workflows.prepare_remote_finetune.prepare_remote_finetune", fail)
     with pytest.raises(ValueError, match="test failure"):
         regenerate_finetune_inputs(state, config, plan)
     assert (Path(plan["directory"]) / "inputs/GPU.sh").read_bytes() == original
@@ -75,11 +75,11 @@ def test_failed_generation_restores_original(tmp_path, monkeypatch):
 
 def test_chat_routes_implicit_request_to_training_plan_not_branch(tmp_path, monkeypatch):
     import json
-    from run.agent_api import RunWorkflowChatHandler
+    from phase_agent.runtime.agent_api import RunWorkflowChatHandler
     state, config = fixture(tmp_path)
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps(state), encoding="utf-8")
-    monkeypatch.setattr("config_layer.runtime.build_effective_run_config.build_effective_run_config",
+    monkeypatch.setattr("phase_agent.configuration.runtime.build_effective_run_config.build_effective_run_config",
                         lambda *args: config)
     handler = RunWorkflowChatHandler({"state_path": str(state_path), "config_session": {}, "run_config": {}},
         workflow=lambda **kwargs: pytest.fail("planning must not advance workflow"))

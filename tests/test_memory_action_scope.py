@@ -1,4 +1,4 @@
-from analysis_layer.state.memory_action_scope import memory_action_scope
+from phase_agent.analysis.state.memory_action_scope import memory_action_scope
 
 
 def test_mixed_stages_are_not_inferred_from_last_task():

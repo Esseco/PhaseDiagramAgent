@@ -4,19 +4,19 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from data_layer.memory.review_queue import propose_memory_update, review_memory_update
-from execution_layer.policy.automatic_mode_authorization import authorize_automatic_action
-from execution_layer.remote.batch_runner import RemoteBatchRunner
-from execution_layer.remote.automatic_controller import disable_automatic_mode, run_automatic_step
-from execution_layer.remote.api import sync_tasks, submit_remote, sync_results, resume
-from execution_layer.remote.verified_mock import VerifiedLocalMirrorTransport, FileBackedMockRemoteScheduler
-from execution_layer.remote.worker import run_remote_task
-from execution_layer.step_runner.file_protocol import write_json
-from execution_layer.workflows.accept_dedup_results import accept_dedup_results
-from execution_layer.workflows.prepare_dedup_batch import prepare_dedup_batch
-from run.local_agent_control import LocalAgentControl
-from run.agent_api import RunWorkflowChatHandler
-from analysis_layer.state.sanitize_untrusted_text import untrusted_text
+from phase_agent.persistence.memory.review_queue import propose_memory_update, review_memory_update
+from phase_agent.tools.policy.automatic_mode_authorization import authorize_automatic_action
+from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
+from phase_agent.tools.remote.automatic_controller import disable_automatic_mode, run_automatic_step
+from phase_agent.tools.remote.api import sync_tasks, submit_remote, sync_results, resume
+from phase_agent.tools.remote.verified_mock import VerifiedLocalMirrorTransport, FileBackedMockRemoteScheduler
+from phase_agent.tools.remote.worker import run_remote_task
+from phase_agent.tools.step_runner.file_protocol import write_json
+from phase_agent.tools.workflows.accept_dedup_results import accept_dedup_results
+from phase_agent.tools.workflows.prepare_dedup_batch import prepare_dedup_batch
+from phase_agent.runtime.local_agent_control import LocalAgentControl
+from phase_agent.runtime.agent_api import RunWorkflowChatHandler
+from phase_agent.analysis.state.sanitize_untrusted_text import untrusted_text
 
 
 class LocalAgentControlTest(unittest.TestCase):

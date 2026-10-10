@@ -2,7 +2,7 @@ from copy import deepcopy
 from pathlib import Path
 import pytest
 
-from analysis_layer.phase.combined_phase_diagram import build_combined_phase_diagram, refresh_combined_phase_diagram
+from phase_agent.analysis.phase.combined_phase_diagram import build_combined_phase_diagram, refresh_combined_phase_diagram
 from tests.test_dft_comparison_csv import add_result
 
 
@@ -74,7 +74,7 @@ def test_export_reuses_unchanged_snapshot(tmp_path):
 
 
 def test_saved_combined_export_does_not_recalculate(tmp_path):
-    from analysis_layer.phase.export_current_phase_diagram import export_current_phase_diagram
+    from phase_agent.analysis.phase.export_current_phase_diagram import export_current_phase_diagram
     state, entry = fixture()
     state["active_model_version"] = "m1"
     state["phase_diagrams"]["mlip"]["entries"].append(entry("outside", 2))

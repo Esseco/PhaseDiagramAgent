@@ -6,11 +6,11 @@ import unittest
 
 from pymatgen.core import Lattice, Structure
 
-from data_layer.ledger.collect_calculation_results import collect_calculation_results
-from decision_layer.calculation.decide_next_calculation import decide_next_calculation
-from scientific_layer.dft.run_singlepoint import run_dft_singlepoint
-from scientific_layer.mlip.run_relax import run_mlip_relax
-from data_layer.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.persistence.ledger.collect_calculation_results import collect_calculation_results
+from phase_agent.decisions.calculation.decide_next_calculation import decide_next_calculation
+from phase_agent.science.dft.run_singlepoint import run_dft_singlepoint
+from phase_agent.science.mlip.run_relax import run_mlip_relax
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
 
 
 class CalculationWorkflowTest(unittest.TestCase):

@@ -1,6 +1,6 @@
 import pytest
 from ase import Atoms
-from scientific_layer.training.prepare_main_model import grouped_folds
+from phase_agent.science.training.prepare_main_model import grouped_folds
 
 
 def records(count=5, rare=False):

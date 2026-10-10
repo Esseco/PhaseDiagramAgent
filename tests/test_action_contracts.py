@@ -1,6 +1,6 @@
 import pytest
-from decision_layer.agent.action_contracts import action_contract_errors
-from decision_layer.agent.propose_tool_action import propose_agent_tool_action
+from phase_agent.decisions.agent.action_contracts import action_contract_errors
+from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
 
 
 @pytest.mark.parametrize("change", [{"budget": True}, {"budget": "30"},

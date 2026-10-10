@@ -1,11 +1,11 @@
 import unittest
 
-from config_layer.session.apply_config_revision import apply_config_revision
-from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
-from config_layer.session.create_config_draft import create_config_draft
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
-from execution_layer.workflows.run_tool_step import run_tool_step
+from phase_agent.configuration.session.apply_config_revision import apply_config_revision
+from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
+from phase_agent.configuration.session.create_config_draft import create_config_draft
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.tools.workflows.run_tool_step import run_tool_step
 
 
 class ExecutionPolicyTest(unittest.TestCase):
@@ -135,7 +135,7 @@ class ExecutionPolicyTest(unittest.TestCase):
         self.assertIsNone(revised.get("execution_result"))
 
     def test_formal_revision_gets_stable_task_key(self):
-        from decision_layer.agent.revise_tool_proposal import revise_tool_proposal
+        from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
         proposal = {"raw_action": {"tool": "generate_branches", "task_key": "original"}}
         agent = lambda payload: {"tool": "prepare_dedup_batch", "parameters": {},
                                  "reason": "准备", "budget": 0}
@@ -149,7 +149,7 @@ class ExecutionPolicyTest(unittest.TestCase):
         self.assertEqual(first["action"]["task_key"], second["action"]["task_key"])
 
     def test_h_limit_feedback_uses_generator_parameter(self):
-        from decision_layer.agent.revise_tool_proposal import revise_tool_proposal
+        from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
         proposal = {"raw_action": {"tool": "generate_branches", "task_key": "original"}}
         agent = lambda payload: {"tool": "generate_branches", "parameters": {
             "h_upper_bound": 12, "max_H": 12}, "reason": "H ≤ 12", "budget": 0}
@@ -161,13 +161,13 @@ class ExecutionPolicyTest(unittest.TestCase):
         self.assertEqual(revised["action"]["parameters"], {"max_det_H": 12})
 
     def test_mc_action_cannot_exceed_confirmed_per_round_limit(self):
-        from execution_layer.policy.validate_tool_action import validate_tool_action
+        from phase_agent.tools.policy.validate_tool_action import validate_tool_action
 
         registry = create_tool_registry({"allocate_mc_bohb": self._handler})
         action = {
             "tool": "allocate_mc_bohb", "task_key": "mc-budget-check",
             "target_ids": ["B1"],
-            "parameters": {"mc_budget": 1001, "exploration_fraction": 0.1},
+            "parameters": {"mc_budget": self.session["confirmed_snapshot"]["config"]["round_strategy"]["maximum_mc_budget"] + 1, "exploration_fraction": 0.1},
             "budget": 0, "reason": "test budget guard", "expected_purpose": "ensure cap",
         }
         result = validate_tool_action(action, {}, self.session, registry)

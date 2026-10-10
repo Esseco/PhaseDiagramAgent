@@ -1,9 +1,9 @@
 """Synthetic round evidence and formal training dispatch; no production I/O."""
 from copy import deepcopy
 
-from analysis_layer.state.post_dft_assessment import post_dft_assessment
-from execution_layer.workflows.create_workflow_handlers import create_workflow_handlers
-from run.chat_state_presentation import brief_chat_state
+from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+from phase_agent.tools.workflows.create_workflow_handlers import create_workflow_handlers
+from phase_agent.runtime.chat_state_presentation import brief_chat_state
 from tests.test_dft_comparison_csv import add_result
 
 
@@ -63,7 +63,7 @@ def test_training_callback_connected_but_disabled_config_blocks():
 
 
 def test_retry_missing_comparison_reuses_labels_and_cached_predictions():
-    from execution_layer.workflows.refresh_dft_comparisons import refresh_dft_comparisons
+    from phase_agent.tools.workflows.refresh_dft_comparisons import refresh_dft_comparisons
     state = {}
     add_result(state, evaluator=False)
     before = deepcopy(state.get("new_dft_records"))
@@ -81,11 +81,11 @@ def test_retry_missing_comparison_reuses_labels_and_cached_predictions():
 
 
 def test_closed_dft_routes_to_llm_not_old_mc_dft(monkeypatch):
-    from execution_layer.workflows.run_tool_step import run_tool_step
-    from execution_layer.dispatch.create_tool_registry import create_tool_registry
-    from config_layer.defaults.default_layered_search_config import default_layered_search_config
-    from config_layer.session.create_config_draft import create_config_draft
-    from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
+    from phase_agent.tools.workflows.run_tool_step import run_tool_step
+    from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+    from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+    from phase_agent.configuration.session.create_config_draft import create_config_draft
+    from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
     config = default_layered_search_config()
     session = confirm_config_snapshot(create_config_draft(config), user_confirmed=True)
     state = {}
@@ -105,7 +105,7 @@ def test_closed_dft_routes_to_llm_not_old_mc_dft(monkeypatch):
         return {"tool": "check_convergence", "task_key": "review-round", "target_ids": [],
                 "parameters": {}, "budget": 0., "reason": "review evidence", "decision_source": "llm",
                 "post_dft_review": assessment_review}
-    monkeypatch.setattr("execution_layer.workflows.run_tool_step.propose_agent_tool_action", proposal)
+    monkeypatch.setattr("phase_agent.tools.workflows.run_tool_step.propose_agent_tool_action", proposal)
     result = run_tool_step(state, session, registry=create_tool_registry(create_workflow_handlers()),
         agent_client=lambda **kw: None, execution_mode="interactive",
         invocation_id="old-branch", human_feedback={"decision": "approve"},
@@ -119,13 +119,15 @@ def test_closed_dft_routes_to_llm_not_old_mc_dft(monkeypatch):
 
 
 def test_reply_reports_metrics_and_directory_before_next_proposal():
-    from run.workflow_reply_presentation import format_workflow_reply
+    from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
     state = {}
     add_result(state)
     assessment = post_dft_assessment(state)
     state["dft_result_exports"] = {"round": {"round_scope": assessment["scope"], "directory": "outputs/m1/Search-group-0001/DFT-round-0001"}}
     reply = format_workflow_reply({"status": "completed", "state": state}, "state.json")
     assert "回收 1/1" in reply and "合格配对 1" in reply
-    assert "MAE/RMSE" in reply and "DFT-round-0001" in reply
+    assert "MAE/RMSE" in reply and "DFT-round-0001" not in reply
+    full_reply = format_workflow_reply({"status": "completed", "state": state}, "state.json", verbose=True)
+    assert "DFT-round-0001" in full_reply
     assert reply.index("MAE/RMSE") < reply.index("已完成")
     assert "当前微调未启用" not in reply

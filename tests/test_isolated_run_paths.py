@@ -1,5 +1,5 @@
 from pathlib import Path
-from run.isolated_run_paths import isolate_runtime_outputs
+from phase_agent.runtime.isolated_run_paths import isolate_runtime_outputs
 
 
 def test_all_standard_outputs_are_inside_new_run(tmp_path):

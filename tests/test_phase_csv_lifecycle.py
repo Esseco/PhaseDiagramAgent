@@ -1,6 +1,6 @@
 from pathlib import Path
-from analysis_layer.phase.update_phase_diagram import update_phase_diagram
-from analysis_layer.phase.export_current_phase_diagram import export_current_phase_diagram
+from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
+from phase_agent.analysis.phase.export_current_phase_diagram import export_current_phase_diagram
 from tests.test_na_eform_phase_csv import record
 
 
@@ -33,7 +33,7 @@ def test_new_data_updates_current_preserving_history(tmp_path):
 
 def test_feedback_without_new_data_skips_hull_rebuild(monkeypatch):
     from types import SimpleNamespace
-    import execution_layer.workflows.apply_scientific_feedback as module
+    import phase_agent.tools.workflows.apply_scientific_feedback as module
     state = {"phase_records": [record("left", 0, -3)], "phase_diagrams": {
         "mlip": {"model_version": "m1", "version": "saved", "status": "completed"}}}
     monkeypatch.setattr(module, "ensure_phase_identification", lambda current, manager, **kwargs: (current, {}))

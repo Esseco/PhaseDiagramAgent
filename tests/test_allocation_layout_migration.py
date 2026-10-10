@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from execution_layer.local.migrate_allocation_layout import migrate
-from execution_layer.remote.build_upload_batch_directory import build_upload_batch_directory
+from phase_agent.tools.local.migrate_allocation_layout import migrate
+from phase_agent.tools.remote.build_upload_batch_directory import build_upload_batch_directory
 
 
 def test_migration_preserves_inputs_and_relinks_second_segment(tmp_path):

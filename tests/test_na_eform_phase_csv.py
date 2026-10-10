@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from analysis_layer.phase.update_phase_diagram import update_phase_diagram
-from run.agent_api import RunWorkflowChatHandler
+from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
+from phase_agent.runtime.agent_api import RunWorkflowChatHandler
 
 
 def record(name, x, energy, *, fe=1, method="mlip", version="m1"):

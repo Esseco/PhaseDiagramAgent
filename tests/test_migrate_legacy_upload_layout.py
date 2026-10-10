@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from execution_layer.remote.migrate_legacy_upload_layout import migrate_legacy_upload_layout
+from phase_agent.tools.remote.migrate_legacy_upload_layout import migrate_legacy_upload_layout
 
 
 def test_migrates_flat_batch_and_rewrites_saved_paths(tmp_path):

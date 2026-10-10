@@ -2,12 +2,12 @@ import csv
 import json
 from copy import deepcopy
 import pytest
-from analysis_layer.state.training_result_evidence import training_result_evidence
-from analysis_layer.state.round_budget_evidence import round_budget_evidence, budget_decision_outcomes
-from decision_layer.agent.round_budget_review import round_budget_review_errors
-from decision_layer.agent.proposal_validation import proposal_errors
-from data_layer.memory.collect_memory_candidates import collect_memory_candidates
-from data_layer.memory.verify_evidence_refs import verify_evidence_refs
+from phase_agent.analysis.state.training_result_evidence import training_result_evidence
+from phase_agent.analysis.state.round_budget_evidence import round_budget_evidence, budget_decision_outcomes
+from phase_agent.decisions.agent.round_budget_review import round_budget_review_errors
+from phase_agent.decisions.agent.proposal_validation import proposal_errors
+from phase_agent.persistence.memory.collect_memory_candidates import collect_memory_candidates
+from phase_agent.persistence.memory.verify_evidence_refs import verify_evidence_refs
 
 
 def review(choice="supplement_dft"):

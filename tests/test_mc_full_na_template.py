@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 from pymatgen.core import Lattice, Structure
 
-from scientific_layer.mlip.slurm_executor import create_mlip_task_preparer
-from scientific_layer.structures.build_mc_full_na_template import build_mc_full_na_template
+from phase_agent.science.mlip.slurm_executor import create_mlip_task_preparer
+from phase_agent.science.structures.build_mc_full_na_template import build_mc_full_na_template
 
 
 H = [[2, 0, 0], [0, 1, 0], [0, 0, 1]]

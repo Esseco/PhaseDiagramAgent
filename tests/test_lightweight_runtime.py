@@ -1,7 +1,7 @@
 import json
-from execution_layer.remote.run_single_task import run_single_task
-from execution_layer.remote.integrity import file_checksum
-from analysis_layer.cost.estimate_task_cost import estimate_task_cost
+from phase_agent.tools.remote.run_single_task import run_single_task
+from phase_agent.tools.remote.integrity import file_checksum
+from phase_agent.analysis.cost.estimate_task_cost import estimate_task_cost
 
 
 def test_execution_adds_timing_before_checksum(tmp_path):

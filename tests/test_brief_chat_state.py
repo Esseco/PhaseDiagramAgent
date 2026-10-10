@@ -1,4 +1,4 @@
-from run.agent_api import brief_chat_state
+from phase_agent.runtime.agent_api import brief_chat_state
 
 
 def test_pending_dft_state():

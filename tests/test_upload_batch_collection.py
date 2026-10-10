@@ -1,7 +1,7 @@
 import json
 
-from execution_layer.remote.batch_runner import RemoteBatchRunner
-from execution_layer.remote.integrity import file_checksum
+from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
+from phase_agent.tools.remote.integrity import file_checksum
 
 
 def test_collects_returned_results_from_existing_upload_directory_without_copy(tmp_path):

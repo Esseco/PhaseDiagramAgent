@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 import pytest
-from scientific_layer.dft.prepare_pycode_relax import prepare_pycode_relax
+from phase_agent.science.dft.prepare_pycode_relax import prepare_pycode_relax
 
 
 def test_relax_uses_selected_path_and_gga_none(tmp_path):
@@ -43,7 +43,7 @@ def test_single_point_is_not_relaxed(tmp_path):
 
 
 def test_legacy_atomate_incar_policy(tmp_path):
-    from scientific_layer.dft.create_atomate_workflow import generate_dft_workflow_with_atomate
+    from phase_agent.science.dft.create_atomate_workflow import generate_dft_workflow_with_atomate
     from pymatgen.io.vasp.inputs import Incar
     def writer(workflow, directory):
         Incar({"ENCUT": 520, "ALGO": "Fast"}).write_file(directory / "INCAR")

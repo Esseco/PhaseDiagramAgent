@@ -1,6 +1,6 @@
 """Read only metadata needed for normalization from an existing structure."""
 
-from scientific_layer.structures.boundary_utils import load_structure
+from phase_agent.science.structures.boundary_utils import load_structure
 
 
 def read_structure_metadata(path) -> dict:

@@ -1,9 +1,9 @@
 import pytest
 
-from config_layer.defaults.default_budget_rules import default_budget_rules
-from config_layer.defaults.default_dft_decision_config import default_dft_decision_config
-from execution_layer.budget.estimate_stage_cost import estimate_stage_cost
-from execution_layer.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
+from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
+from phase_agent.configuration.defaults.default_dft_decision_config import default_dft_decision_config
+from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
+from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
 
 
 def test_size_and_mc_work_change_estimate():

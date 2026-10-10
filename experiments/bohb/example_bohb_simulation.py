@@ -3,7 +3,7 @@
 import random
 
 from .compare_bohb_methods import compare_bohb_methods
-from scientific_layer.bohb.default_bohb_config import default_bohb_config
+from phase_agent.science.bohb.default_bohb_config import default_bohb_config
 from .evaluate_budget_correlation import evaluate_budget_correlation
 
 

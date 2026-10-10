@@ -1,5 +1,6 @@
 {
   "dependencies": ["."],
-  "graphs": {"phase_chat": "orchestration.studio_chat_graph:graph"},
-  "http": {"app": "run.studio_runtime:app"}
+  "graphs": {"phase_chat": "phase_agent.graphs.studio_chat_graph:graph",
+             "project_status": "phase_agent.graphs.studio_status_graph:graph"},
+  "http": {"app": "phase_agent.runtime.studio_runtime:app"}
 }

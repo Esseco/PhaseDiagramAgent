@@ -1,8 +1,8 @@
 import json
 from types import SimpleNamespace
 import pytest
-from run.local_agent_control import LocalAgentControl
-from run.control_ui_contracts import PendingResponse, StatusResponse, validate_control_response
+from phase_agent.runtime.local_agent_control import LocalAgentControl
+from phase_agent.runtime.control_ui_contracts import PendingResponse, StatusResponse, validate_control_response
 
 
 def test_read_only_endpoints_preserve_hash_and_state(tmp_path):

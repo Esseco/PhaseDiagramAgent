@@ -2,9 +2,9 @@
 
 import pytest
 
-from analysis_layer.phase.branch_relax_hull import build_relax_hull, rank_relaxed_branches
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from decision_layer.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
+from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull, rank_relaxed_branches
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.decisions.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
 
 
 def _evidence():

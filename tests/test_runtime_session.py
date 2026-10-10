@@ -1,7 +1,7 @@
 import pytest
 
-from execution_layer.step_runner.file_protocol import write_json
-from run.runtime_session import load_or_initialize_runtime_session
+from phase_agent.tools.step_runner.file_protocol import write_json
+from phase_agent.runtime.runtime_session import load_or_initialize_runtime_session
 
 
 def test_nonempty_state_without_confirmed_config_cannot_be_replaced(tmp_path):

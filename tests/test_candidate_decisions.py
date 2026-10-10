@@ -6,9 +6,9 @@ import unittest
 
 from pymatgen.core import Lattice, Structure
 
-from scientific_layer.structures.deduplicate_candidates import deduplicate_candidates
-from execution_layer.budget.estimate_candidate_cost import estimate_candidate_cost
-from scientific_layer.structures.select_candidates import select_candidates
+from phase_agent.science.structures.deduplicate_candidates import deduplicate_candidates
+from phase_agent.tools.budget.estimate_candidate_cost import estimate_candidate_cost
+from phase_agent.science.structures.select_candidates import select_candidates
 
 
 class CandidateDecisionTest(unittest.TestCase):

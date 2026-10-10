@@ -1,4 +1,4 @@
-from analysis_layer.state.model_epoch import model_epoch, model_epoch_label
+from phase_agent.analysis.state.model_epoch import model_epoch, model_epoch_label
 
 
 def test_epoch_uses_persisted_model_round_not_current_activity():
@@ -12,8 +12,8 @@ def test_epoch_uses_persisted_model_round_not_current_activity():
 
 def test_report_and_summary_use_same_epoch():
     from tests.test_dft_comparison_csv import add_result
-    from run.post_dft_presentation import post_dft_lines
-    from analysis_layer.state.summarize_model_rounds import summarize_model_rounds
+    from phase_agent.runtime.post_dft_presentation import post_dft_lines
+    from phase_agent.analysis.state.summarize_model_rounds import summarize_model_rounds
     state = {}
     add_result(state)
     state["upload_layout"] = {"model_rounds": {"m1": 1}}

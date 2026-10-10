@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 from pymatgen.core import Lattice, Structure
 
-from analysis_layer.phase.identify_result_phase import identify_result_phase
-from analysis_layer.phase.ensure_phase_identification import ensure_phase_identification
-from analysis_layer.phase.update_phase_diagram import update_phase_diagram
-from data_layer.ledger.collect_calculation_results import _phase_record
+from phase_agent.analysis.phase.identify_result_phase import identify_result_phase
+from phase_agent.analysis.phase.ensure_phase_identification import ensure_phase_identification
+from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
+from phase_agent.persistence.ledger.collect_calculation_results import _phase_record
 
 
 def test_same_structure_is_identified_once_and_changed_file_reidentified(tmp_path):
@@ -21,7 +21,7 @@ def test_same_structure_is_identified_once_and_changed_file_reidentified(tmp_pat
     structure = Structure(Lattice.cubic(4), ["Na", "O"], [[0, 0, 0], [.5, .5, .5]])
     cache = {}
     with patch("pymatgen.core.Structure.from_file", return_value=structure), patch(
-            "scientific_layer.structures.identify_branch.identify_phase",
+            "phase_agent.science.structures.identify_branch.identify_phase",
             return_value={"phase": "P3", "method": "test"}) as detector:
         first = identify_result_phase(result, manager, cache=cache)
         again = identify_result_phase(result, manager, cache=cache)
@@ -50,7 +50,7 @@ def test_unknown_phase_is_retried_and_identified_cache_survives_restart(tmp_path
                                 "status": "pending_phase_identification"}]}
     cache_path = tmp_path / "phase_identification_cache.json"
     with patch("pymatgen.core.Structure.from_file", return_value=structure), patch(
-            "scientific_layer.structures.identify_branch.identify_phase",
+            "phase_agent.science.structures.identify_branch.identify_phase",
             side_effect=[{"phase": "X"}, {"phase": "P3", "method": "test"}]) as detector:
         first, _ = ensure_phase_identification(state, manager, cache_path=cache_path)
         assert first["phase_records"][0]["status"] == "pending_phase_identification"

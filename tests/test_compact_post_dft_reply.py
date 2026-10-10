@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from run.workflow_reply_presentation import format_workflow_reply, _compact_post_dft_reply
+from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply, _compact_post_dft_reply
 
 
 ASSESSMENT = "\n".join([
@@ -21,21 +21,17 @@ REVIEW = "\n".join([
 ])
 
 
-def test_compact_keeps_all_information_and_visible_caveats():
+def test_compact_shows_metrics_and_action_without_full_report():
     text = _compact_post_dft_reply(ASSESSMENT, "磁矩：合格27，异常4。", REVIEW, "回复同意执行。")
-    for line in (ASSESSMENT + "\n" + REVIEW).splitlines():
-        assert line in text
-    before_details = text.split("<details>")[0]
-    assert "31/34" in before_details and "9.6777/11.208" in before_details
-    assert "尺度小于10%" in before_details and "201" in before_details
-    assert "未收敛" in before_details and "独立测试归属未确认" in before_details
-    assert "synthetic/dft.csv" not in before_details
-    assert "</details>" in text
+    assert "31/34" in text and "9.6777/11.208" in text
+    assert "回复同意执行。" in text
+    assert "synthetic/" not in text and "<details>" not in text
+    assert len(text.splitlines()) <= 6
 
 
 def test_confirmation_reports_status_without_repeating_science():
     result = {"status": "confirmation_required", "reason": "synthetic approval gate"}
-    with patch("run.post_dft_presentation.post_dft_lines", side_effect=AssertionError("must not repeat")):
+    with patch("phase_agent.runtime.post_dft_presentation.post_dft_lines", side_effect=AssertionError("must not repeat")):
         text = format_workflow_reply(result, "synthetic/state.json")
     assert "仍需确认" in text and "synthetic approval gate" in text
     assert "synthetic/state.json" in text and "本轮总结" not in text
@@ -48,8 +44,8 @@ def test_followup_failure_preserves_actual_reason():
 
 
 def test_verbose_keeps_full_plain_report():
-    with patch("run.post_dft_presentation.post_dft_lines", return_value=ASSESSMENT), \
-         patch("run.post_dft_presentation.post_dft_review_lines", return_value=REVIEW):
+    with patch("phase_agent.runtime.post_dft_presentation.post_dft_lines", return_value=ASSESSMENT),\
+         patch("phase_agent.runtime.post_dft_presentation.post_dft_review_lines", return_value=REVIEW):
         text = format_workflow_reply({"status": "completed"}, "synthetic/state.json", verbose=True)
     assert ASSESSMENT in text and REVIEW in text
     assert "<details>" not in text

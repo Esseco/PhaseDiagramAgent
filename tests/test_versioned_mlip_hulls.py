@@ -3,10 +3,10 @@ from copy import deepcopy
 
 import pytest
 
-from analysis_layer.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
-from analysis_layer.phase.branch_relax_hull import hull_energy_per_atom, rank_relaxed_branches
-from analysis_layer.phase.refresh_identified_phases import refresh_identified_phases
-from analysis_layer.phase.update_phase_diagram import update_phase_diagram
+from phase_agent.analysis.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
+from phase_agent.analysis.phase.branch_relax_hull import hull_energy_per_atom, rank_relaxed_branches
+from phase_agent.analysis.phase.refresh_identified_phases import refresh_identified_phases
+from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
 
 
 def task(path, name, composition, energy, *, version="m1", stage="relax_and_feature"):

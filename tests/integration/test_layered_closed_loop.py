@@ -1,20 +1,20 @@
 import tempfile
 import unittest
 
-from config_layer.session.apply_config_revision import apply_config_revision
-from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
-from config_layer.session.create_config_draft import create_config_draft
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from config_layer.defaults.default_budget_rules import default_budget_rules
-from analysis_layer.convergence.check_global_convergence import check_global_convergence
-from data_layer.ledger.collect_calculation_results import collect_calculation_results
-from data_layer.ledger.load_legacy_ledger import load_legacy_ledger
-from data_layer.ledger.phase_data_manager import PhaseDataManager
-from scientific_layer.structures.create_generation_registry import create_generation_registry
-from execution_layer.state.normalize_task import normalize_task
-from execution_layer.state.normalize_task_result import normalize_task_result
-from execution_layer.budget.reserve_budget import reserve_budget
-from execution_layer.budget.settle_budget import settle_budget
+from phase_agent.configuration.session.apply_config_revision import apply_config_revision
+from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
+from phase_agent.configuration.session.create_config_draft import create_config_draft
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
+from phase_agent.analysis.convergence.check_global_convergence import check_global_convergence
+from phase_agent.persistence.ledger.collect_calculation_results import collect_calculation_results
+from phase_agent.persistence.ledger.load_legacy_ledger import load_legacy_ledger
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.science.structures.create_generation_registry import create_generation_registry
+from phase_agent.tools.state.normalize_task import normalize_task
+from phase_agent.tools.state.normalize_task_result import normalize_task_result
+from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.settle_budget import settle_budget
 
 
 class LayeredClosedLoopTest(unittest.TestCase):

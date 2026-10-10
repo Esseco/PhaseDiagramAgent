@@ -1,7 +1,7 @@
 import unittest
 
-from scientific_layer.features.build_cost_record import build_cost_record
-from execution_layer.budget.check_structure_cost_limits import check_structure_cost_limits
+from phase_agent.science.features.build_cost_record import build_cost_record
+from phase_agent.tools.budget.check_structure_cost_limits import check_structure_cost_limits
 
 
 class SizeAwareCostTest(unittest.TestCase):

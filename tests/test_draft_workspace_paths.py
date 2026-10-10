@@ -1,5 +1,5 @@
-from execution_layer.step_runner.file_protocol import write_json
-from run.draft_workspace_paths import prepare_draft_workspace_paths
+from phase_agent.tools.step_runner.file_protocol import write_json
+from phase_agent.runtime.draft_workspace_paths import prepare_draft_workspace_paths
 
 
 def test_existing_user_draft_is_not_overwritten(tmp_path):

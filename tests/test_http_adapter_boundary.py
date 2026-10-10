@@ -3,14 +3,14 @@ from http.client import HTTPConnection
 from pathlib import Path
 import threading
 
-from run import local_http_server
-from run.agent_api import create_server
+from phase_agent.runtime import local_http_server
+from phase_agent.runtime.agent_api import create_server
 
 
 def test_http_adapter_does_not_import_runtime_entry():
     tree = ast.parse(Path(local_http_server.__file__).read_text(encoding="utf-8"))
     imports = [node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
-    assert "run.agent_api" not in imports
+    assert "phase_agent.runtime.agent_api" not in imports
 
 
 def test_empty_chat_body_is_rejected_without_calling_workflow():

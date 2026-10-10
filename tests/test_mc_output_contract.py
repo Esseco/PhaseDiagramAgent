@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from data_layer.ledger.branch_energy_pool_ledger import load_branch_energy_pools, save_branch_energy_pool
-from scientific_layer.mlip.mace_worker import _actual_mc_steps, _final_member_energies, _qbc_from_summary
-from scientific_layer.qbc.summarize_member_energies import summarize_member_energies
+from phase_agent.persistence.ledger.branch_energy_pool_ledger import load_branch_energy_pools, save_branch_energy_pool
+from phase_agent.science.mlip.mace_worker import _actual_mc_steps, _final_member_energies, _qbc_from_summary
+from phase_agent.science.qbc.summarize_member_energies import summarize_member_energies
 
 
 def write_gzip(path, value):

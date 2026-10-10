@@ -3,8 +3,8 @@ from pathlib import Path
 import numpy as np
 from ase import Atoms
 
-from scientific_layer.qbc.generate_qbc_file import generate_qbc_file
-from scientific_layer.training.prepare_mace_finetune import prepare_mace_finetune
+from phase_agent.science.qbc.generate_qbc_file import generate_qbc_file
+from phase_agent.science.training.prepare_mace_finetune import prepare_mace_finetune
 
 
 def test_group_split_and_bootstrap(tmp_path):

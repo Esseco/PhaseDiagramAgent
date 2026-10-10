@@ -1,6 +1,6 @@
 import unittest
 
-from scientific_layer.surrogate_models.example_surrogate_models import run_example
+from phase_agent.science.surrogate_models.example_surrogate_models import run_example
 
 
 class SurrogateModelsTest(unittest.TestCase):

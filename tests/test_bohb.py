@@ -1,10 +1,10 @@
 import unittest
 
-from scientific_layer.bohb.collect_bohb_results import collect_bohb_results
+from phase_agent.science.bohb.collect_bohb_results import collect_bohb_results
 from experiments.bohb.compare_bohb_methods import compare_bohb_methods
-from scientific_layer.bohb.default_bohb_config import default_bohb_config
+from phase_agent.science.bohb.default_bohb_config import default_bohb_config
 from experiments.bohb.evaluate_budget_correlation import evaluate_budget_correlation
-from scientific_layer.bohb.run_bohb_iteration import run_bohb_iteration
+from phase_agent.science.bohb.run_bohb_iteration import run_bohb_iteration
 
 
 def case():

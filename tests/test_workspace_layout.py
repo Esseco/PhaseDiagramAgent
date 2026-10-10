@@ -3,9 +3,9 @@ from pathlib import Path
 from copy import deepcopy
 import pytest
 
-from execution_layer.local.migrate_workspace_layout import migrate_workspace_layout as _migrate
-from config_layer.session.editable_config_location import editable_config_location
-from data_layer.memory.publish_memory_views import publish_memory_views
+from phase_agent.tools.local.migrate_workspace_layout import migrate_workspace_layout as _migrate
+from phase_agent.configuration.session.editable_config_location import editable_config_location
+from phase_agent.persistence.memory.publish_memory_views import publish_memory_views
 
 
 def migrate_workspace_layout(*args, **kwargs):
@@ -71,7 +71,7 @@ def test_failure_rolls_back(tmp_path, monkeypatch):
     old = (tmp_path / "current/state.json").read_bytes()
     def fail(*args):
         raise OSError("test failure")
-    monkeypatch.setattr("execution_layer.local.migrate_workspace_layout._atomic_write", fail)
+    monkeypatch.setattr("phase_agent.tools.local.migrate_workspace_layout._atomic_write", fail)
     with pytest.raises(OSError):
         migrate_workspace_layout(tmp_path)
     assert (tmp_path / "current/state.json").read_bytes() == old
@@ -98,7 +98,7 @@ def test_editable_subdirectory_is_validated(tmp_path):
 
 def test_csv_metadata_preserves_numbers(tmp_path):
     import csv
-    from execution_layer.local.workspace_csv_metadata import rewrite_csv_metadata
+    from phase_agent.tools.local.workspace_csv_metadata import rewrite_csv_metadata
     path = tmp_path / "phase.csv"
     path.write_text("model_version,energy,structure_path\nm1,-1.23000,old/structure.vasp\n", encoding="utf-8")
     output = rewrite_csv_metadata(path, [("old", "new")], "epoch0")
@@ -110,7 +110,7 @@ def test_live_agent_blocks_migration_without_changes(tmp_path, monkeypatch):
     fixture(tmp_path)
     def fail(port):
         raise RuntimeError("Agent服务仍在运行")
-    monkeypatch.setattr("execution_layer.local.migrate_workspace_layout.require_agent_offline", fail)
+    monkeypatch.setattr("phase_agent.tools.local.migrate_workspace_layout.require_agent_offline", fail)
     with pytest.raises(RuntimeError):
         _migrate(tmp_path)
     assert (tmp_path / "current/state.json").is_file()
@@ -127,7 +127,7 @@ def test_concurrent_edit_is_not_rolled_back(tmp_path, monkeypatch):
             current = json.loads(source.read_text(encoding="utf-8"))
             current["user_concurrent_edit"] = True
             source.write_text(json.dumps(current), encoding="utf-8")
-    monkeypatch.setattr("execution_layer.local.migrate_workspace_layout.require_agent_offline", check)
+    monkeypatch.setattr("phase_agent.tools.local.migrate_workspace_layout.require_agent_offline", check)
     with pytest.raises(RuntimeError):
         migrate_workspace_layout(tmp_path)
     assert json.loads(source.read_text(encoding="utf-8"))["user_concurrent_edit"] is True

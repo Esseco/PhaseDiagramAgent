@@ -5,22 +5,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from config_layer.session.create_config_draft import create_config_draft
-from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
-from config_layer.session.create_editable_config_json import create_editable_config_json
-from config_layer.session.load_editable_config_json import (
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.session.create_config_draft import create_config_draft
+from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
+from phase_agent.configuration.session.create_editable_config_json import create_editable_config_json
+from phase_agent.configuration.session.load_editable_config_json import (
     _strip_jsonc_comments, config_leaf_patch, load_editable_config_json,
 )
-from config_layer.session.resolve_phase_reference_directory import resolve_phase_reference_directory
-from config_layer.session.project_config_json import create_project_config_json, write_project_config_patch
-from config_layer.session.project_config_json import expand_project_config
-from config_layer.session.resolve_workspace_paths import (
+from phase_agent.configuration.session.resolve_phase_reference_directory import resolve_phase_reference_directory
+from phase_agent.configuration.session.project_config_json import create_project_config_json, write_project_config_patch
+from phase_agent.configuration.session.project_config_json import expand_project_config
+from phase_agent.configuration.session.resolve_workspace_paths import (
     default_workspace_storage, resolve_workspace_paths,
 )
-from config_layer.session.validate_workspace_root import validate_workspace_root
-from run.configuration_chat import ConfigurationChatHandler
-from run.configuration_chat import _extract_workspace_path, _parse_workspace_setup_values
+from phase_agent.configuration.session.validate_workspace_root import validate_workspace_root
+from phase_agent.runtime.configuration_chat import ConfigurationChatHandler
+from phase_agent.runtime.configuration_chat import _extract_workspace_path, _parse_workspace_setup_values
 
 
 class EditableConfigJsonTests(unittest.TestCase):
@@ -175,12 +175,11 @@ class EditableConfigJsonTests(unittest.TestCase):
 
             document = json.loads(_strip_jsonc_comments(original))
             self.assertEqual(document["config"]["storage"]["workspace_root"], str(path.parent.resolve()))
-            self.assertEqual(document["config"]["system"]["boundary"]["P"]["at_x"],
-                             {"0": ["P3"], "1": ["O3"]})
+            self.assertEqual(document["config"]["system"]["boundary"]["P"], [])
             self.assertEqual(document["config"]["system"]["H_generation"]["size_max"], 16)
             self.assertEqual(
                 document["config"]["system"]["boundary"]["TM_ratio"],
-                config["system"]["constraints"]["TM_ratio"],
+                {},
             )
             document["config"]["system"]["boundary"] = {
                 "P": ["O3"],

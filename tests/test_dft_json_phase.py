@@ -5,10 +5,10 @@ from unittest.mock import patch
 import pytest
 from pymatgen.core import Structure, Lattice
 
-from analysis_layer.phase.identify_result_phase import identify_result_phase
-from analysis_layer.phase.ensure_phase_identification import ensure_phase_identification
-from scientific_layer.structures.load_result_structure import load_result_structure
-from analysis_layer.phase.check_na_layer_uniformity import check_na_layer_uniformity
+from phase_agent.analysis.phase.identify_result_phase import identify_result_phase
+from phase_agent.analysis.phase.ensure_phase_identification import ensure_phase_identification
+from phase_agent.science.structures.load_result_structure import load_result_structure
+from phase_agent.analysis.phase.check_na_layer_uniformity import check_na_layer_uniformity
 
 
 def json_result():
@@ -28,7 +28,7 @@ def manager():
 def test_json_phase_cache_tracks_content_not_file():
     result = json_result()
     cache = {}
-    with patch("scientific_layer.structures.identify_layered_phase_fast.identify_layered_phase_fast",
+    with patch("phase_agent.science.structures.identify_layered_phase_fast.identify_layered_phase_fast",
                return_value={"phase": "O3", "method": "test"}) as identify:
         first = identify_result_phase(result, manager(), cache=cache)
         second = identify_result_phase(result, manager(), cache=cache)
@@ -56,7 +56,7 @@ def test_json_phase_record_refresh_without_task_or_file():
     record = {"structure_id": "S1", "source_task_id": "D1", "energy_method": "dft",
               "energy": -10., "structure": result["outputs"]["structure"],
               "composition": {"Na": 1, "Fe": 1, "O": 2}, "final_frame_valid": True}
-    with patch("scientific_layer.structures.identify_layered_phase_fast.identify_layered_phase_fast",
+    with patch("phase_agent.science.structures.identify_layered_phase_fast.identify_layered_phase_fast",
                return_value={"phase": "O3", "method": "test"}):
         state, _ = ensure_phase_identification({"phase_records": [record]}, manager())
     assert state["phase_records"][0]["phase"] == "O3"

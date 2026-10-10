@@ -1,12 +1,12 @@
 import unittest
 
-from analysis_layer.convergence.check_global_convergence import check_global_convergence
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from config_layer.session.apply_config_revision import apply_config_revision
-from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
-from config_layer.session.create_config_draft import create_config_draft
-from execution_layer.state.reconcile_task_results import reconcile_task_results
-from scientific_layer.training.validate_mlip import validate_mlip
+from phase_agent.analysis.convergence.check_global_convergence import check_global_convergence
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.session.apply_config_revision import apply_config_revision
+from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
+from phase_agent.configuration.session.create_config_draft import create_config_draft
+from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
+from phase_agent.science.training.validate_mlip import validate_mlip
 
 
 RULES = {"hull_change_tolerance": .003, "stable_model_update_epochs": 2,

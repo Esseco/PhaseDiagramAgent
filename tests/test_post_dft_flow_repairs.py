@@ -2,17 +2,17 @@ from copy import deepcopy
 from pathlib import Path
 import yaml
 
-from execution_layer.workflows.create_workflow_handlers import create_workflow_handlers
-from execution_layer.workflows.request_strategy_revision import request_strategy_revision
-from config_layer.runtime.authorize_budget_extension import authorize_budget_extension
-from execution_layer.workflows.run_tool_step import _apply_execution_result
+from phase_agent.tools.workflows.create_workflow_handlers import create_workflow_handlers
+from phase_agent.tools.workflows.request_strategy_revision import request_strategy_revision
+from phase_agent.configuration.runtime.authorize_budget_extension import authorize_budget_extension
+from phase_agent.tools.workflows.run_tool_step import _apply_execution_result
 from tests.test_dft_comparison_csv import add_result
 
 
 def test_config_revision_is_draft_not_enablement(monkeypatch):
     config = {"mlip_finetune": {"enabled": False}}
     state = {"confirmed_config_version": "old", "confirmed_config": deepcopy(config)}
-    monkeypatch.setattr("execution_layer.workflows.create_workflow_handlers._update_mlip",
+    monkeypatch.setattr("phase_agent.tools.workflows.create_workflow_handlers._update_mlip",
         lambda **kwargs: {"status": "awaiting_remote_training", "state": kwargs["context"]["event_state"]})
     result = request_strategy_revision(action={"parameters": {
         "request_configuration_revision": True, "patch": {"mlip_finetune.enabled": True}}},
@@ -43,7 +43,7 @@ def test_successful_supplement_consumes_only_source_round():
 
 
 def test_default_training_prepares_portable_inputs_not_local_training(tmp_path):
-    from config_layer.defaults.default_mace_committee_config import default_mace_committee_config
+    from phase_agent.configuration.defaults.default_mace_committee_config import default_mace_committee_config
     state = {}
     for i in range(10):
         add_result(state, task_id=f"T{i}")
@@ -100,17 +100,17 @@ def test_default_training_prepares_portable_inputs_not_local_training(tmp_path):
 
 
 def test_legacy_training_environment_uses_remote_template_not_local():
-    from execution_layer.remote.write_training_submission import training_environment
+    from phase_agent.tools.remote.write_training_submission import training_environment
     assert training_environment({"python_environments": {"local_mlip": "py-mace"}}) == ("mace", "remote_gpu_template")
     assert training_environment({"python_environments": {"remote_mlip": "my-mace"}}) == ("my-mace", "confirmed_config")
 
 
 def test_input_only_update_bypasses_enablement_not_training_safety(monkeypatch):
-    from execution_layer.workflows.create_workflow_handlers import _update_mlip
-    from run.chat_approval_rules import is_sensitive_proposal
-    from run.workflow_reply_presentation import format_workflow_reply
+    from phase_agent.tools.workflows.create_workflow_handlers import _update_mlip
+    from phase_agent.runtime.chat_approval_rules import is_sensitive_proposal
+    from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
     action = {"tool": "update_mlip", "parameters": {"prepare_inputs_only": True}}
-    monkeypatch.setattr("execution_layer.workflows.prepare_remote_finetune.prepare_remote_finetune",
+    monkeypatch.setattr("phase_agent.tools.workflows.prepare_remote_finetune.prepare_remote_finetune",
         lambda state, config: {"status": "awaiting_remote_training", "state": state})
     def forbidden(**kwargs):
         raise AssertionError("input preparation must not invoke trainer")
@@ -135,7 +135,7 @@ def test_hpc_kfold_finalizer_emits_metrics_and_component_rows(tmp_path, monkeypa
     from ase import Atoms
     from ase.io import write
     from ase.calculators.calculator import Calculator, all_changes
-    from execution_layer.remote import collect_training_results as collector
+    from phase_agent.tools.remote import collect_training_results as collector
 
     class DummyMACE(Calculator):
         implemented_properties = ["energy", "forces"]

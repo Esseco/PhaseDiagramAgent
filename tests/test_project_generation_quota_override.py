@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from config_layer.session.project_config_json import expand_project_config, profile_digest
+from phase_agent.configuration.session.project_config_json import expand_project_config, profile_digest
 
 
 class ProjectGenerationQuotaOverrideTest(unittest.TestCase):

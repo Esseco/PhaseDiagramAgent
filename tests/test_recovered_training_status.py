@@ -1,4 +1,4 @@
-from run.status_presentation import format_progress
+from phase_agent.runtime.status_presentation import format_progress
 
 
 def test_recovered_results_take_priority_over_training_proposal():

@@ -1,7 +1,7 @@
 import json
 
-from decision_layer.agent.decision_contracts import PostDFTReview, review_contract_errors
-from decision_layer.agent.post_dft_review import post_dft_review_errors
+from phase_agent.decisions.agent.decision_contracts import PostDFTReview, review_contract_errors
+from phase_agent.decisions.agent.post_dft_review import post_dft_review_errors
 from tests.test_post_dft_review import review
 
 
@@ -33,7 +33,7 @@ def test_schema_does_not_replace_scientific_action_consistency():
 
 
 def test_request_and_repair_share_contract_and_do_not_execute_tools():
-    from decision_layer.agent.post_dft_review import request_validated_action
+    from phase_agent.decisions.agent.post_dft_review import request_validated_action
     requests = []
     def client(payload):
         requests.append(payload)

@@ -2,7 +2,7 @@ import json
 import tkinter as tk
 
 import pytest
-from run import project_dashboard
+from phase_agent.runtime import project_dashboard
 
 
 def test_ui_builds_folder_project_controls(tmp_path, monkeypatch):

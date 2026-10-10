@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import pytest
-from run.control_request_contracts import validate_control_request
-from run.local_agent_control import LocalAgentControl
+from phase_agent.runtime.control_request_contracts import validate_control_request
+from phase_agent.runtime.local_agent_control import LocalAgentControl
 
 
 @pytest.mark.parametrize("path,body", [("/phase/pause", []),

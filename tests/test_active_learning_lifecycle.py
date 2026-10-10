@@ -2,9 +2,9 @@ import unittest
 
 import numpy as np
 
-from analysis_layer.convergence.build_convergence_evidence import build_convergence_evidence
-from scientific_layer.qbc.create_qbc_evaluator import create_qbc_evaluator
-from execution_layer.workflows.create_model_update_handler import create_model_update_handler
+from phase_agent.analysis.convergence.build_convergence_evidence import build_convergence_evidence
+from phase_agent.science.qbc.create_qbc_evaluator import create_qbc_evaluator
+from phase_agent.tools.workflows.create_model_update_handler import create_model_update_handler
 
 
 class _Manager:

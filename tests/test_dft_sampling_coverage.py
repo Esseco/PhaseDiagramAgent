@@ -1,7 +1,7 @@
-from decision_layer.qbc_selection.select_dft_candidates import select_dft_candidates
-from execution_layer.workflows.preview_dft_inputs import preview_dft_inputs
-from config_layer.defaults.default_dft_decision_config import default_dft_decision_config
-from run.agent_api import format_workflow_reply
+from phase_agent.decisions.qbc_selection.select_dft_candidates import select_dft_candidates
+from phase_agent.tools.workflows.preview_dft_inputs import preview_dft_inputs
+from phase_agent.configuration.defaults.default_dft_decision_config import default_dft_decision_config
+from phase_agent.runtime.agent_api import format_workflow_reply
 
 
 def test_phase_coverage_includes_competing_phase():

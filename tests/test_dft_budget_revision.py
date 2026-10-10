@@ -1,6 +1,6 @@
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from decision_layer.qbc_selection.recommend_post_mc_dft import recommend_post_mc_dft
-from execution_layer.workflows.preview_dft_inputs import preview_dft_inputs
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.decisions.qbc_selection.recommend_post_mc_dft import recommend_post_mc_dft
+from phase_agent.tools.workflows.preview_dft_inputs import preview_dft_inputs
 
 
 def test_budget_failure_does_not_convert_original_action():

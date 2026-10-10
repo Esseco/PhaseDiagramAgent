@@ -1,7 +1,7 @@
 import sys
 from types import ModuleType
 
-from scientific_layer.mlip.mace_worker import run_mace_worker
+from phase_agent.science.mlip.mace_worker import run_mace_worker
 
 
 def test_old_mh1_task_without_head_uses_omat_pbe(tmp_path, monkeypatch):

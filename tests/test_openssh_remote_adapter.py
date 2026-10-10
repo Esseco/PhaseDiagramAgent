@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from execution_layer.remote.ssh_adapter import OpenSSHJobScheduler, OpenSSHTransport
+from phase_agent.tools.remote.ssh_adapter import OpenSSHJobScheduler, OpenSSHTransport
 
 
 class FakeRunner:

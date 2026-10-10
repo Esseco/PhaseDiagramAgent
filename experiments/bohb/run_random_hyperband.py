@@ -3,8 +3,8 @@
 import math
 import random
 
-from scientific_layer.bohb.record_bohb_result import record_bohb_result
-from scientific_layer.bohb.validate_bohb_scope import validate_bohb_scope
+from phase_agent.science.bohb.record_bohb_result import record_bohb_result
+from phase_agent.science.bohb.validate_bohb_scope import validate_bohb_scope
 
 
 def run_random_hyperband(candidates: list[dict], *, config: dict, total_mc_budget: int, seed: int, evaluator) -> dict:

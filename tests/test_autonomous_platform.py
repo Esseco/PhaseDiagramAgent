@@ -1,14 +1,14 @@
 import tempfile
 import unittest
 
-from config_layer.session.apply_config_revision import apply_config_revision
-from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
-from config_layer.session.create_config_draft import create_config_draft
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from config_layer.session.load_config_session import load_config_session
-from execution_layer.workflows.run_tool_step import run_tool_step
-from config_layer.session.save_config_session import save_config_session
+from phase_agent.configuration.session.apply_config_revision import apply_config_revision
+from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.configuration.session.create_config_draft import create_config_draft
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.session.load_config_session import load_config_session
+from phase_agent.tools.workflows.run_tool_step import run_tool_step
+from phase_agent.configuration.session.save_config_session import save_config_session
 
 
 class AutonomousPlatformTest(unittest.TestCase):

@@ -1,12 +1,12 @@
 import tempfile
 import unittest
 
-from decision_layer.strategy.default_round_strategy_config import default_round_strategy_config
-from data_layer.state.load_round_scheduler_state import load_round_scheduler_state
-from data_layer.state.pause_strategy_round import pause_strategy_round
-from execution_layer.workflows.run_round_scheduler import run_round_scheduler
-from data_layer.state.save_round_scheduler_state import save_round_scheduler_state
-from scientific_layer.bohb.default_bohb_config import default_bohb_config
+from phase_agent.decisions.strategy.default_round_strategy_config import default_round_strategy_config
+from phase_agent.persistence.state.load_round_scheduler_state import load_round_scheduler_state
+from phase_agent.persistence.state.pause_strategy_round import pause_strategy_round
+from phase_agent.tools.workflows.run_round_scheduler import run_round_scheduler
+from phase_agent.persistence.state.save_round_scheduler_state import save_round_scheduler_state
+from phase_agent.science.bohb.default_bohb_config import default_bohb_config
 
 
 class RoundSchedulerTest(unittest.TestCase):

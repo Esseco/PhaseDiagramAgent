@@ -1,6 +1,6 @@
 import pytest
-from analysis_layer.cost.estimate_proposal_cost import estimate_proposal_cost
-from execution_layer.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
+from phase_agent.analysis.cost.estimate_proposal_cost import estimate_proposal_cost
+from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
 
 
 @pytest.mark.parametrize("decisions", ["DFT_RELAX", {"s": "DFT_RELAX"}, ["DFT_RELAX"]])

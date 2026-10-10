@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from execution_layer.remote.manual_upload_runner import ManualUploadBatchRunner
-from execution_layer.slurm.slurm_batch_runner import SlurmBatchRunner
+from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
+from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
 
 
 def _tasks(count):

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
-from decision_layer.agent.generation_contracts import GenerationAllocation
-from decision_layer.agent.generation_plan import validate_generation_plan
+from phase_agent.decisions.agent.generation_contracts import GenerationAllocation
+from phase_agent.decisions.agent.generation_plan import validate_generation_plan
 from tests.test_post_dft_review import parameters
 
 

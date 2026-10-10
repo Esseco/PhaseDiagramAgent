@@ -5,25 +5,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from analysis_layer.phase.branch_relax_hull import build_relax_hull
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
-from execution_layer.local.prepare_mc_upload_batches import prepare_mc_upload_batches
-from execution_layer.local.prepare_relax_upload_batches import prepare_relax_upload_batches
-from execution_layer.policy.execution_policy import build_agent_proposal
-from execution_layer.remote.resolve_local_relax_structure import resolve_local_relax_structure
-from execution_layer.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
-from execution_layer.workflows.create_active_learning_handlers import _allocate_mc_bohb
-from execution_layer.workflows.run_tool_step import run_tool_step
-from run.agent_api import format_workflow_reply
-from scientific_layer.mlip.slurm_executor import execute_mlip_task
+from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.tools.local.prepare_mc_upload_batches import prepare_mc_upload_batches
+from phase_agent.tools.local.prepare_relax_upload_batches import prepare_relax_upload_batches
+from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.tools.remote.resolve_local_relax_structure import resolve_local_relax_structure
+from phase_agent.tools.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
+from phase_agent.tools.workflows.create_active_learning_handlers import _allocate_mc_bohb
+from phase_agent.tools.workflows.run_tool_step import run_tool_step
+from phase_agent.runtime.agent_api import format_workflow_reply
+from phase_agent.science.mlip.slurm_executor import execute_mlip_task
 
 
 def test_normal_relax_stop_is_eligible_for_phase_analysis(tmp_path):
     structure = tmp_path / "final.vasp"
     structure.write_text("mock", encoding="utf-8")
-    with patch("scientific_layer.mlip.slurm_executor.run_mace_worker", return_value={
+    with patch("phase_agent.science.mlip.slurm_executor.run_mace_worker", return_value={
         "status": "completed", "relax_stopped_normally": True, "structure_path": str(structure),
         "energy": -5.0, "energy_unit": "eV"}):
         result = execute_mlip_task({"stage": "relax_and_feature", "structure_id": "S1",
@@ -69,7 +69,7 @@ def test_mc_inputs_use_relaxed_structure_and_full_na_template(tmp_path, second_s
     config = {"upload_batches_directory": str(tmp_path / "upload"),
               "mlip": {"model_path": "/remote/mh1.model", "version": "mh1"},
               "supercomputer": {"worker": {"command": ["python3", "--executor",
-                                "scientific_layer.mlip.slurm_executor:execute_mlip_task"]}}}
+                                "phase_agent.science.mlip.slurm_executor:execute_mlip_task"]}}}
     next_action = choose_debug_next_action(state, manager, config,
         allowed_tools=["prepare_local_batch_files"], user_message="继续")
     assert next_action["parameters"]["mode"] == "mc_inputs"
@@ -369,7 +369,7 @@ def test_unverified_old_relax_result_does_not_skip_relax(tmp_path):
 
 
 def test_budget_preview_is_read_only_and_exposes_full_plan(tmp_path):
-    from decision_layer.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
+    from phase_agent.decisions.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
     manager, state, config = _completed_relax_fixture(tmp_path)
     before = json.dumps(state, sort_keys=True)
     pool = state["branch_hull_batches"][state["current_branch_hull_version"]]
@@ -383,12 +383,12 @@ def test_budget_preview_is_read_only_and_exposes_full_plan(tmp_path):
 
 
 def test_relax_phase_identification_preserves_branch(tmp_path):
-    from analysis_layer.phase.identify_relax_result_phase import identify_relax_result_phase
+    from phase_agent.analysis.phase.identify_relax_result_phase import identify_relax_result_phase
     from pymatgen.core import Structure, Lattice
     path = tmp_path / "final.vasp"
     Structure(Lattice.cubic(4), ["Na", "O"], [[0, 0, 0], [.5, .5, .5]]).to(filename=str(path), fmt="poscar")
     manager = SimpleNamespace(data={"branches": {"B1": {"P": "O3"}}, "structures": {}})
-    with patch("scientific_layer.structures.identify_branch.identify_phase", return_value={"phase": "P3"}):
+    with patch("phase_agent.science.structures.identify_branch.identify_phase", return_value={"phase": "P3"}):
         result = identify_relax_result_phase({"stage": "relax_and_feature", "status": "completed",
             "branch_id": "B1", "outputs": {"structure_path": str(path)}}, manager)
     assert result["branch_id"] == "B1"

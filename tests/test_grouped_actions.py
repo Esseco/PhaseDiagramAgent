@@ -1,5 +1,5 @@
 import pytest
-from orchestration.tool_action_graph import build_tool_action_graph, run_tool_action_graph
+from phase_agent.graphs.actions.graph import build_tool_action_graph, run_tool_action_graph
 
 
 @pytest.mark.parametrize("grouped", [False, True])

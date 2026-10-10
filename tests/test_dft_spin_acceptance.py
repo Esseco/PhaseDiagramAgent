@@ -1,4 +1,4 @@
-from analysis_layer.feedback.export_dft_products import dft_product_path
+from phase_agent.analysis.feedback.export_dft_products import dft_product_path
 """Scoped spin proxy changes scientific eligibility, never execution facts."""
 from copy import deepcopy
 import json
@@ -7,10 +7,10 @@ from unittest.mock import Mock
 
 import pytest
 from pymatgen.core import Lattice, Structure
-from scientific_layer.dft.spin_acceptance import apply_dft_spin_standard
-from scientific_layer.training.prepare_mace_finetune import prepare_mace_finetune
-from analysis_layer.feedback.dft_result_products import record_dft_products, export_dft_products
-from data_layer.ledger.collect_calculation_results import collect_calculation_results
+from phase_agent.science.dft.spin_acceptance import apply_dft_spin_standard
+from phase_agent.science.training.prepare_mace_finetune import prepare_mace_finetune
+from phase_agent.analysis.feedback.dft_result_products import record_dft_products, export_dft_products
+from phase_agent.persistence.ledger.collect_calculation_results import collect_calculation_results
 
 
 def make_result(stage="dft_single_point", moments=(4.3, -3.9, 0, 0)):

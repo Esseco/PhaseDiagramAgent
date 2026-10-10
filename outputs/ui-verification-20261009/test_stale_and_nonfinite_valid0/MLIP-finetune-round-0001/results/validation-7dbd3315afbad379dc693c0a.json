@@ -1,1 +1,0 @@
-{"request_id": "7dbd3315afbad379dc693c0a", "data_sha256": "0275fca08c216c77b2a122787b6491a6796ab293e4097e5d62162c0ed4910f08", "status": "completed", "structures": 2, "metrics": {"old_model": {"energy_mae": NaN}, "new_model": {"energy_mae": NaN}}}

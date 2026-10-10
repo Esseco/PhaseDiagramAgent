@@ -1,8 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 import pytest
-from execution_layer.state.execution_receipts import begin_execution, record_execution_return
-from execution_layer.dispatch.execute_tool_action import execute_tool_action
-from orchestration.approval_graph import durable_approval
+from phase_agent.tools.state.execution_receipts import begin_execution, record_execution_return
+from phase_agent.tools.dispatch.execute_tool_action import execute_tool_action
+from phase_agent.graphs.approval_graph import durable_approval
 
 
 IDENTITY = {"invocation_id": "a", "config_version": "c", "action_hash": "h", "tool": "generate_branches"}

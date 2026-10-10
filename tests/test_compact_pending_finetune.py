@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import pytest
-from execution_layer.local.compact_pending_finetune import compact_pending_finetune
+from phase_agent.tools.local.compact_pending_finetune import compact_pending_finetune
 
 
 def fixture(tmp_path):

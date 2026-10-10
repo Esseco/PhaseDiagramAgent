@@ -3,11 +3,11 @@ from types import SimpleNamespace
 import numpy as np
 from pymatgen.core import Structure, Lattice
 
-from scientific_layer.dft.vasp_training_labels import extract_training_frames
-from scientific_layer.dft.parse_vasp_result import parse_vasp_result
-from analysis_layer.feedback.dft_result_products import record_dft_products, export_dft_products
-from scientific_layer.training.prepare_mace_finetune import prepare_mace_finetune
-from scientific_layer.training.update_mlip import _unique
+from phase_agent.science.dft.vasp_training_labels import extract_training_frames
+from phase_agent.science.dft.parse_vasp_result import parse_vasp_result
+from phase_agent.analysis.feedback.dft_result_products import record_dft_products, export_dft_products
+from phase_agent.science.training.prepare_mace_finetune import prepare_mace_finetune
+from phase_agent.science.training.update_mlip import _unique
 
 
 def parsed_relax():
@@ -82,7 +82,7 @@ def test_nonzero_exit_preserves_verified_frames(tmp_path):
 
 def test_checkpoint_can_resolve_one_nested_atomate_calculation(tmp_path):
     import json
-    from execution_layer.remote.finalize_vasp import resolve_calculation_directory
+    from phase_agent.tools.remote.finalize_vasp import resolve_calculation_directory
     (tmp_path / "workflow.json").write_text(json.dumps({"calculation": "relax"}))
     (tmp_path / "workflow_state.json").write_text(json.dumps({"stages": {
         "relax": {"directory": "runs/current"}}}))

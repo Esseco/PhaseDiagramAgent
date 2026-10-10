@@ -3,8 +3,8 @@
 import unittest
 from unittest.mock import patch
 
-from config_layer.session.materialize_layered_h import materialize_layered_h
-from scientific_layer.structures.boundary_utils import allowed_phases_at_x
+from phase_agent.configuration.session.materialize_layered_h import materialize_layered_h
+from phase_agent.science.structures.boundary_utils import allowed_phases_at_x
 
 
 class CompositionPhaseHConfigTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class CompositionPhaseHConfigTests(unittest.TestCase):
                 "size_step": 2, "selected_recommendation_indices": [0],
                 "additional_containment_matrices": [], "min_distance_angstrom": 2.0}}}
         matrix = [[2, 0, 0], [0, 2, 0], [0, 0, 1]]
-        with patch("config_layer.session.materialize_layered_h.enumerate_layered_oxide_supercells",
+        with patch("phase_agent.configuration.session.materialize_layered_h.enumerate_layered_oxide_supercells",
                    return_value=[{"H": matrix}]) as enumerator:
             result = materialize_layered_h(config)
         self.assertEqual(result["system"]["boundary"]["H"], {"O3": [matrix], "P3": [matrix]})
@@ -36,7 +36,7 @@ class CompositionPhaseHConfigTests(unittest.TestCase):
 
     def test_missing_containment_rule_is_not_guessed(self):
         config = {"system": {"system_id": "layered_na_tm_oxide", "boundary": {
-            "P": ["O3"], "H": {}}, "phase_references": {"O3": "O3.vasp"},
+            "P": ["O3"], "H": {}, "TM_ratio": {"Cr": 1.0}}, "phase_references": {"O3": "O3.vasp"},
             "H_generation": {"enabled": True, "size_min": 4, "size_max": 6,
                 "size_step": 2}}}
         with self.assertRaisesRegex(ValueError, "至少一个"):

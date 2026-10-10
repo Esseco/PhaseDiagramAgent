@@ -1,17 +1,13 @@
 import pytest
-from run.runtime_client_settings import search_client_settings
-from run.runtime_client_settings import configuration_client_settings, intent_client_settings
+from phase_agent.runtime.runtime_client_settings import search_client_settings
+from phase_agent.runtime.runtime_client_settings import configuration_client_settings
 
 
 def test_role_specific_defaults_are_not_merged():
     config = configuration_client_settings({}, system_prompt="config")
-    intent = intent_client_settings({}, system_prompt="intent")
     assert config["thinking"] == "disabled"
     assert config["model"] == "deepseek-v4-pro"
     assert "reasoning_max_tokens" not in config
-    assert intent["max_tokens"] == 120
-    assert intent["model"] == "deepseek-flash"
-    assert intent["system_prompt"] == "intent"
     assert configuration_client_settings({"reasoning_max_tokens": "ignored"}, system_prompt="x")
 
 

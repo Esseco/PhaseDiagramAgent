@@ -2,7 +2,7 @@ import unittest
 
 from experiments.branch_surrogate.compare_branch_surrogates import compare_branch_surrogates
 from experiments.branch_surrogate.default_surrogate_comparison_config import default_surrogate_comparison_config
-from scientific_layer.surrogate_models.default_surrogate_config import default_surrogate_config
+from phase_agent.science.surrogate_models.default_surrogate_config import default_surrogate_config
 
 
 class SurrogateComparisonTest(unittest.TestCase):

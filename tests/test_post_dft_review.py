@@ -1,5 +1,5 @@
-from decision_layer.agent.post_dft_review import valid_post_dft_review
-from decision_layer.agent.propose_tool_action import propose_agent_tool_action
+from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
+from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
 
 
 def review():
@@ -28,7 +28,7 @@ def test_review_requires_both_alternatives_and_matching_choice():
 
 
 def test_input_only_finetune_accepts_legacy_wire_label_not_search():
-    from decision_layer.agent.post_dft_review import request_review_repair
+    from phase_agent.decisions.agent.post_dft_review import request_review_repair
     fields = review()
     fields.update(choice="revise_strategy", finetune_recommendation="now")
     action = {"tool": "update_mlip", "parameters": {"prepare_inputs_only": True}, "post_dft_review": fields}
@@ -38,12 +38,12 @@ def test_input_only_finetune_accepts_legacy_wire_label_not_search():
     assert normalized["post_dft_review"]["choice"] == "finetune"
     assert action["post_dft_review"]["choice"] == "revise_strategy"
     fields["choice"] = "search"
-    from decision_layer.agent.post_dft_review import normalize_review_choice
+    from phase_agent.decisions.agent.post_dft_review import normalize_review_choice
     assert not valid_post_dft_review(normalize_review_choice(action))
 
 
 def test_repair_response_tool_alias_is_normalized():
-    from decision_layer.agent.post_dft_review import request_review_repair
+    from phase_agent.decisions.agent.post_dft_review import request_review_repair
     fields = review()
     fields.update(choice="update_mlip", finetune_recommendation="now")
     repaired = request_review_repair(lambda payload: {"tool": "update_mlip",
@@ -62,7 +62,7 @@ def test_generic_branch_reason_cannot_pass_post_dft_gate():
 
 
 def test_review_reports_specific_missing_field_and_choice_conflict():
-    from decision_layer.agent.post_dft_review import post_dft_review_errors
+    from phase_agent.decisions.agent.post_dft_review import post_dft_review_errors
     fields = review()
     fields.pop("limitations")
     fields["finetune_recommendation"] = "now"
@@ -102,7 +102,7 @@ def test_repair_failure_is_bounded_and_not_approved():
 
 
 def test_repair_usage_includes_both_calls():
-    from decision_layer.agent.post_dft_review import request_validated_action
+    from phase_agent.decisions.agent.post_dft_review import request_validated_action
     calls = []
     def client(payload):
         calls.append(payload)
@@ -116,7 +116,7 @@ def test_repair_usage_includes_both_calls():
 
 
 def test_direct_finetune_recommendation_and_conditional_enablement_notice():
-    from run.post_dft_presentation import post_dft_review_lines
+    from phase_agent.runtime.post_dft_presentation import post_dft_review_lines
     fields = review()
     text = post_dft_review_lines({"post_dft_review": fields}, finetune_enabled=False)
     assert "建议暂缓微调。原因：" in text
@@ -131,7 +131,7 @@ def test_direct_finetune_recommendation_and_conditional_enablement_notice():
 
 
 def test_review_is_presented_not_only_purpose():
-    from run.workflow_reply_presentation import format_workflow_reply
+    from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
     proposal = {"recommended_action": "generate_branches", "expected_purpose": "扩展覆盖",
                 "raw_action": {"tool": "generate_branches", "post_dft_review": review(), "parameters": parameters()},
                 "action_parameters": parameters(), "estimated_cost": {}, "calculation_plan": {}}
@@ -149,7 +149,7 @@ def test_tradeoff_without_round_summary_is_not_complete():
 
 
 def test_analysis_report_identifies_saved_phase_diagram_without_inference():
-    from run.post_dft_presentation import post_dft_lines
+    from phase_agent.runtime.post_dft_presentation import post_dft_lines
     from tests.test_dft_comparison_csv import add_result
     state = {}
     add_result(state)

@@ -1,8 +1,8 @@
 import json
 from unittest.mock import Mock, patch
-from run.agent_api import RunWorkflowChatHandler
-from execution_layer.step_runner.build_status_summary import build_status_summary
-from execution_layer.policy.file_approval import proposal_hash
+from phase_agent.runtime.agent_api import RunWorkflowChatHandler
+from phase_agent.tools.step_runner.build_status_summary import build_status_summary
+from phase_agent.tools.policy.file_approval import proposal_hash
 
 
 def test_reject_sensitive_plan_needs_no_sensitive_confirmation(tmp_path):
@@ -13,7 +13,7 @@ def test_reject_sensitive_plan_needs_no_sensitive_confirmation(tmp_path):
     path.write_text(json.dumps(state))
     handler = RunWorkflowChatHandler({"state_path": str(path)})
     handler._run = Mock(return_value={"status": "rejected_by_user"})
-    with patch("run.chat_application._is_sensitive_proposal", return_value=True):
+    with patch("phase_agent.runtime.chat_application._is_sensitive_proposal", return_value=True):
         handler.review_pending("p", "reject",
             expected_state_version=build_status_summary(state, config_version=None)["summary_id"],
             expected_proposal_hash=proposal_hash(proposal), comment="拒绝")

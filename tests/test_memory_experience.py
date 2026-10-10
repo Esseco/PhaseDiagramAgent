@@ -1,7 +1,7 @@
 import pytest
-from data_layer.memory.collect_memory_candidates import collect_memory_candidates
-from data_layer.memory.review_queue import propose_knowledge_record, review_memory_update
-from data_layer.memory.retrieve_relevant_knowledge import retrieve_relevant_knowledge
+from phase_agent.persistence.memory.collect_memory_candidates import collect_memory_candidates
+from phase_agent.persistence.memory.review_queue import propose_knowledge_record, review_memory_update
+from phase_agent.persistence.memory.retrieve_relevant_knowledge import retrieve_relevant_knowledge
 
 
 def knowledge(key, **extra):

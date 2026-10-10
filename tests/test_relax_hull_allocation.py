@@ -1,12 +1,12 @@
 import pytest
 from pymatgen.core import Lattice, Structure
-from analysis_layer.phase.branch_relax_hull import build_relax_hull, hull_energy_per_atom, rank_relaxed_branches
-from execution_layer.workflows.prepare_branch_relaxation import prepare_branch_relaxation
-from config_layer.defaults.default_budget_rules import default_budget_rules
-from data_layer.ledger.phase_data_manager import PhaseDataManager
-from scientific_layer.bohb.select_bohb_candidates import select_bohb_candidates
-from scientific_layer.bohb.default_bohb_config import default_bohb_config
-from execution_layer.workflows.create_active_learning_handlers import _allocate_mc_bohb
+from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull, hull_energy_per_atom, rank_relaxed_branches
+from phase_agent.tools.workflows.prepare_branch_relaxation import prepare_branch_relaxation
+from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.science.bohb.select_bohb_candidates import select_bohb_candidates
+from phase_agent.science.bohb.default_bohb_config import default_bohb_config
+from phase_agent.tools.workflows.create_active_learning_handlers import _allocate_mc_bohb
 
 
 def row(branch, composition, energy):

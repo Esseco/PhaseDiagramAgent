@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import pytest
-from run.control_request_contracts import validate_control_request
-from run.local_agent_control import LocalAgentControl
+from phase_agent.runtime.control_request_contracts import validate_control_request
+from phase_agent.runtime.local_agent_control import LocalAgentControl
 
 
 @pytest.mark.parametrize("path,body", [
@@ -33,7 +33,7 @@ def test_invalid_direct_requests_do_not_read_or_write_state(tmp_path):
 
 
 def test_missing_confirmation_flags_are_not_approval():
-    from run.control_request_contracts import ConfigConfirmRequest, MemoryReviewRequest, SkillPublishRequest
+    from phase_agent.runtime.control_request_contracts import ConfigConfirmRequest, MemoryReviewRequest, SkillPublishRequest
     assert ConfigConfirmRequest.model_validate({}).explicit is False
     assert MemoryReviewRequest.model_validate({"proposal_id": "p1"}).approved is False
     assert SkillPublishRequest.model_validate({"draft_directory": "path"}).approved is False

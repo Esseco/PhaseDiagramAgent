@@ -1,4 +1,4 @@
-from orchestration.approval_graph import durable_approval, build_approval_graph
+from phase_agent.graphs.approval_graph import durable_approval, build_approval_graph
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 import pytest
@@ -34,7 +34,7 @@ def test_native_interrupt_rejects_wrong_identity(tmp_path):
 
 def test_workflow_approval_is_persistent_and_does_not_execute_twice(tmp_path):
     from tests.test_execution_policy import ExecutionPolicyTest
-    from execution_layer.workflows.run_tool_step import run_tool_step
+    from phase_agent.tools.workflows.run_tool_step import run_tool_step
 
     setup = ExecutionPolicyTest()
     setup.setUp()

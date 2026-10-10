@@ -1,6 +1,6 @@
 import hashlib
 import json
-from execution_layer.remote.collect_training_results import write_model_manifest
+from phase_agent.tools.remote.collect_training_results import write_model_manifest
 
 
 def test_models_remain_in_training_directories_and_hashes_are_recorded(tmp_path):

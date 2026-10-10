@@ -3,14 +3,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from analysis_layer.feedback.assess_model_refresh import assess_model_refresh
-from data_layer.models.rollback_model import rollback_model
-from execution_layer.workflows.create_model_update_handler import create_model_update_handler
-from run.step_runner import _runtime_config
-from scientific_layer.training.assess_initial_mlip import assess_initial_mlip
-from scientific_layer.training.validate_mlip import validate_mlip
-from execution_layer.state.restart_failed_task import restart_failed_task
-from config_layer.defaults.default_budget_rules import default_budget_rules
+from phase_agent.analysis.feedback.assess_model_refresh import assess_model_refresh
+from phase_agent.persistence.models.rollback_model import rollback_model
+from phase_agent.tools.workflows.create_model_update_handler import create_model_update_handler
+from phase_agent.runtime.step_runner import _runtime_config
+from phase_agent.science.training.assess_initial_mlip import assess_initial_mlip
+from phase_agent.science.training.validate_mlip import validate_mlip
+from phase_agent.tools.state.restart_failed_task import restart_failed_task
+from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
 
 
 class ModelGovernanceTest(unittest.TestCase):

@@ -8,8 +8,8 @@ import numpy as np
 from pymatgen.core import Lattice, Structure
 import pytest
 
-from analysis_layer.feedback.dft_result_products import record_dft_products, export_dft_products
-from analysis_layer.feedback.export_dft_products import dft_product_path
+from phase_agent.analysis.feedback.dft_result_products import record_dft_products, export_dft_products
+from phase_agent.analysis.feedback.export_dft_products import dft_product_path
 
 
 def add_result(state, *, task_id="T1", version="m1", operation="abcdef", round_index=1,
@@ -168,7 +168,7 @@ def test_unchanged_export_and_reordered_records_do_not_rewrite_or_infer(tmp_path
     stamps = {path: path.stat().st_mtime_ns for path in paths}
     def forbidden(*args, **kwargs):
         raise AssertionError("export must not infer or classify")
-    monkeypatch.setattr("scientific_layer.structures.load_result_structure.load_result_structure", forbidden)
+    monkeypatch.setattr("phase_agent.science.structures.load_result_structure.load_result_structure", forbidden)
     state["dft_dataset_records"].reverse()
     state["dft_training_records"].reverse()
     export_dft_products(state, tmp_path)

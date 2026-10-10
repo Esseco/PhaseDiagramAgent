@@ -1,5 +1,5 @@
 import pytest
-from decision_layer.agent.decision_backend import request_decision_action, check_decision_backend
+from phase_agent.decisions.agent.decision_backend import request_decision_action, check_decision_backend
 
 
 def test_default_langgraph_calls_model_once():

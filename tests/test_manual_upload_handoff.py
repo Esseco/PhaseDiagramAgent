@@ -1,14 +1,14 @@
 from copy import deepcopy
 from pathlib import Path
 
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from config_layer.session.apply_config_revision import apply_config_revision
-from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
-from config_layer.session.create_config_draft import create_config_draft
-from execution_layer.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
-from run.main import run_workflow
-from run.agent_api import format_workflow_reply
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.session.apply_config_revision import apply_config_revision
+from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
+from phase_agent.configuration.session.create_config_draft import create_config_draft
+from phase_agent.tools.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.runtime.main import run_workflow
+from phase_agent.runtime.agent_api import format_workflow_reply
 
 
 def _confirmed_session():

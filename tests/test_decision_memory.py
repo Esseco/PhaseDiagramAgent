@@ -2,13 +2,13 @@
 
 import json
 
-from analysis_layer.state.build_decision_context import build_decision_context
-from execution_layer.workflows.run_event_loop import run_event_loop
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.analysis.state.build_decision_context import build_decision_context
+from phase_agent.tools.workflows.run_event_loop import run_event_loop
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from tests.test_event_loop import _session
-from decision_layer.strategy.propose_round_strategy import propose_round_strategy
-from decision_layer.qbc_selection.decide_dft_actions import decide_dft_actions
-from execution_layer.state.state_manager import agent_state_summary, update_state_snapshot
+from phase_agent.decisions.strategy.propose_round_strategy import propose_round_strategy
+from phase_agent.decisions.qbc_selection.decide_dft_actions import decide_dft_actions
+from phase_agent.tools.state.state_manager import agent_state_summary, update_state_snapshot
 
 
 def test_long_term_advice_revision_survives_restart_and_needs_new_approval(tmp_path):

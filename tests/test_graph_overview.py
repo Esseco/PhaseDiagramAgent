@@ -1,6 +1,6 @@
 """Documentation projections must stay tied to executable topology."""
 from pathlib import Path
-from orchestration.graph_overview import render_overview, mermaid_overview
+from phase_agent.graphs.graph_overview import render_overview, mermaid_overview
 
 
 def test_overview_is_read_only_and_projects_actual_edges():
@@ -22,5 +22,5 @@ def test_overview_is_read_only_and_projects_actual_edges():
 
 
 def test_checked_in_overview_matches_production_topology():
-    document = Path(__file__).resolve().parents[1] / "docs" / "SCIENTIFIC_FLOW_OVERVIEW.md"
+    document = Path(__file__).resolve().parents[1] / "docs" / "architecture" / "flow.md"
     assert document.read_text(encoding="utf-8") == render_overview()

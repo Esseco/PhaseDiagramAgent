@@ -1,9 +1,9 @@
-from config_layer.session.apply_config_revision import apply_config_revision
-from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
-from config_layer.session.create_config_draft import create_config_draft
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from data_layer.ledger.phase_data_manager import PhaseDataManager
-from run import run_workflow
+from phase_agent.configuration.session.apply_config_revision import apply_config_revision
+from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
+from phase_agent.configuration.session.create_config_draft import create_config_draft
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.runtime import run_workflow
 import pytest
 
 
@@ -31,7 +31,7 @@ def _bohb_action(task_key):
     }
 
 
-def test_public_entry_owns_bohb_selection_budget_and_resume(tmp_path):
+def test_legacy_bohb_request_without_phase_evidence_is_blocked(tmp_path):
     boundary = {"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}}
     manager = PhaseDataManager(boundary)
     branch_id = manager.add_branch(P="O3", H=H, x=1, T=["Fe"], composition={"Na": 1, "Fe": 1, "O": 2})
@@ -41,29 +41,11 @@ def test_public_entry_owns_bohb_selection_budget_and_resume(tmp_path):
         config_session=session, execution_mode="autonomous", max_steps=1,
     )
     first = run_workflow(**common, agent_client=lambda _: _bohb_action("round-1"))
-    assert first["status"] == "tasks_in_progress"
-    task = first["state"]["pending_tasks"][0]
-    assert task["branch_id"] == branch_id
-    assert task["incremental_budget"] == 10
-    assert task["planned_relative_cost"] == pytest.approx((4 / 40) ** 1.2)
-    assert first["state"]["active_round"]["branch_selection_owner"] == "agent"
-    assert first["state"]["active_round"]["mc_fidelity_owner"] == "hyperband"
-    assert first["state"]["budget_reservations"][task["task_key"]]["stage"] == "deep_search"
-
-    recovered = [{
-        "task_id": task["task_id"], "task_key": task["task_key"], "status": "completed",
-        "actual_cost": task["planned_relative_cost"], "minimum_energy_per_atom": -1.0,
-        "group_reference_energy_per_atom": 0.0, "group_energy_scale": 1.0,
-    }]
-    second = run_workflow(
-        **{**common, "state": first["state"]}, recovered_results=recovered,
-        agent_client=lambda _: _bohb_action("round-2"),
-    )
-    promoted = second["state"]["pending_tasks"][0]
-    assert promoted["budget"] == 30
-    assert promoted["incremental_budget"] == 20
-    assert promoted["selection_source"] == "bohb_promotion"
-    assert second["state"]["budget_usage"]["total_relative_cost"] == pytest.approx(task["planned_relative_cost"])
+    assert first["status"] == "not_configured"
+    result = first["events"][0]["execution"]["result"]
+    assert result["reason"] == "mc_requires_current_phase_diagram_ehull_per_atom"
+    assert not first["state"].get("pending_tasks")
+    assert not first["state"].get("budget_reservations")
 
 
 def test_public_entry_uses_default_calculation_handler(tmp_path):
@@ -90,12 +72,12 @@ def test_agent_cannot_take_over_bohb_branch_or_fidelity(tmp_path):
         manager, {}, {"state_path": str(tmp_path / "state.json")}, _session(boundary),
         agent_client=lambda _: action, execution_mode="autonomous", max_steps=1,
     )
-    assert result["events"][0]["final_action"]["tool"] == "check_convergence"
+    assert result["events"][0]["final_action"]["tool"] == "pause_search"
     assert "bohb_owned_fields_forbidden" in result["events"][0]["final_action"]["fallback_reason"]
     assert "round_scheduler" not in result["state"]
 
 
-def test_public_entry_hands_pending_tasks_to_runner(tmp_path):
+def test_public_entry_does_not_prepare_mc_without_phase_evidence(tmp_path):
     boundary = {"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}}
     manager = PhaseDataManager(boundary)
     manager.add_branch(P="O3", H=H, x=1, T=["Fe"], composition={"Na": 1, "Fe": 1, "O": 2})
@@ -113,9 +95,9 @@ def test_public_entry_hands_pending_tasks_to_runner(tmp_path):
         agent_client=lambda _: _bohb_action("round-slurm"), execution_mode="autonomous",
         max_steps=1, task_runner=runner,
     )
-    assert result["status"] == "tasks_prepared"
-    assert runner.prepared == [result["state"]["pending_tasks"][0]["task_id"]]
-    assert result["batch"]["task_ids"] == runner.prepared
+    assert result["status"] == "not_configured"
+    assert runner.prepared == []
+    assert not result["state"].get("pending_tasks")
 
 
 def test_public_entry_creates_budgeted_dft_child_tasks_from_qbc(tmp_path):

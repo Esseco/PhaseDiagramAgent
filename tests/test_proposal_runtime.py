@@ -1,6 +1,6 @@
-from analysis_layer.cost.estimate_proposal_runtime import estimate_proposal_runtime
-from execution_layer.policy.execution_policy import build_agent_proposal
-from run.workflow_reply_presentation import format_workflow_reply
+from phase_agent.analysis.cost.estimate_proposal_runtime import estimate_proposal_runtime
+from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
 
 def test_dft_runtime_uses_real_candidate_and_history():

@@ -8,11 +8,11 @@ import pytest
 
 from tests.test_dft_spin_acceptance import make_manager, make_result
 from tests.test_dft_magnetic_data_flow import raw_result
-from scientific_layer.dft.spin_acceptance import apply_dft_spin_standard, spin_standard_passed
-from execution_layer.state.dft_result_refresh import validated_magnetic_refresh
-from execution_layer.state.reconcile_task_results import reconcile_task_results
-from execution_layer.workflows.apply_scientific_feedback import apply_scientific_feedback
-from run.workflow_reply_presentation import format_workflow_reply
+from phase_agent.science.dft.spin_acceptance import apply_dft_spin_standard, spin_standard_passed
+from phase_agent.tools.state.dft_result_refresh import validated_magnetic_refresh
+from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
+from phase_agent.tools.workflows.apply_scientific_feedback import apply_scientific_feedback
+from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
 
 def preserve_phase(state, *args, **kwargs):
@@ -53,8 +53,8 @@ def test_phase_before_gate_and_unchanged_phase_not_reclassified(tmp_path):
             task["outputs"].update(actual_phase="O3", phase_identification={"status": "identified", "phase": "O3"})
         return state, {}
 
-    with patch("execution_layer.workflows.apply_scientific_feedback.ensure_phase_identification", side_effect=classify), \
-         patch("execution_layer.workflows.apply_scientific_feedback.coverage", return_value={}):
+    with patch("phase_agent.tools.workflows.apply_scientific_feedback.ensure_phase_identification", side_effect=classify),\
+         patch("phase_agent.tools.workflows.apply_scientific_feedback.coverage", return_value={}):
         first = apply_scientific_feedback({}, [incoming], manager=manager, phase_diagram_directory=tmp_path)
     saved = first["state"]["dft_dataset_records"][0]
     assert saved["actual_phase"] == "O3"
@@ -109,13 +109,13 @@ def test_real_structure_changes_remain_rejected(change):
 def test_same_task_supplement_refreshes_once_no_charge_or_duplicate(tmp_path):
     manager = make_manager()
     manager.stage_labels = {}
-    module = "execution_layer.workflows.apply_scientific_feedback."
+    module = "phase_agent.tools.workflows.apply_scientific_feedback."
     collector = Mock(return_value={"phase_record": None})
     evaluator = Mock(return_value={"model_version": "m1", "energy": -9, "energy_unit": "eV",
                                    "forces": [[0,0,0]]*4, "forces_unit": "eV/angstrom"})
     prior = make_result(moments=None)
-    with patch(module + "collect_calculation_results", collector), \
-         patch(module + "ensure_phase_identification", side_effect=preserve_phase), \
+    with patch(module + "collect_calculation_results", collector),\
+         patch(module + "ensure_phase_identification", side_effect=preserve_phase),\
          patch(module + "coverage", return_value={}):
         first = apply_scientific_feedback({}, [prior], manager=manager, phase_diagram_directory=tmp_path)
         state = first["state"]
@@ -154,8 +154,8 @@ def test_partial_reply_missing_magnetism_is_explicit_and_round_scoped():
 
 
 def test_processed_dft_collector_accepts_supplement_with_checked_marker(tmp_path):
-    from execution_layer.remote.batch_runner import RemoteBatchRunner
-    from execution_layer.remote.integrity import file_checksum
+    from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
+    from phase_agent.tools.remote.integrity import file_checksum
     incoming = make_result()
     taskdir = tmp_path / "batch" / "00000-D1"
     taskdir.mkdir(parents=True)
@@ -175,15 +175,15 @@ def test_processed_dft_collector_accepts_supplement_with_checked_marker(tmp_path
 
 
 def test_real_ledger_refresh_retains_result_id_and_revokes_science(tmp_path):
-    from data_layer.ledger.phase_data_manager import PhaseDataManager
-    from scientific_layer.training.prepare_mace_finetune import prepare_mace_finetune
+    from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
+    from phase_agent.science.training.prepare_mace_finetune import prepare_mace_finetune
     h = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
     manager = PhaseDataManager({"P": ["O3"], "H": {"O3": [h]}, "TM_ratio": {"Fe": 1, "Mn": 1}})
     branch = manager.add_branch(P="O3", H=h, x=0, T=["Fe", "Mn"], composition={"Fe": 1, "Mn": 1, "O": 2})
     structure_id = manager.add_structure(branch_id=branch, arrangement={}, composition={"Fe": 1, "Mn": 1, "O": 2})
     good = make_result()
     good["structure_id"] = structure_id
-    module = "execution_layer.workflows.apply_scientific_feedback."
+    module = "phase_agent.tools.workflows.apply_scientific_feedback."
     with patch(module + "ensure_phase_identification", side_effect=lambda state, *a, **kw: (deepcopy(state), {})):
         first = apply_scientific_feedback({}, [good], manager=manager, phase_diagram_directory=tmp_path, active_model_version="m1")
         first_id = first["state"]["phase_records"][0]["record_id"]
@@ -215,9 +215,9 @@ def test_cached_final_phase_reused_on_supplement(tmp_path):
                                magnetic_moments={"elements": ["Na","Fe","Mn","O","O"], "moments": [0,4.3,1.2,0,0], "final_frame_index": 0})
     incoming["outputs"].pop("actual_phase")
     incoming["outputs"].pop("phase_identification")
-    module = "execution_layer.workflows.apply_scientific_feedback."
-    with patch("scientific_layer.structures.identify_layered_phase_fast.identify_layered_phase_fast", return_value={"phase": "O3", "method": "test"}) as classify, \
-         patch(module + "collect_calculation_results", return_value={"phase_record": None}), \
+    module = "phase_agent.tools.workflows.apply_scientific_feedback."
+    with patch("phase_agent.science.structures.identify_layered_phase_fast.identify_layered_phase_fast", return_value={"phase": "O3", "method": "test"}) as classify,\
+         patch(module + "collect_calculation_results", return_value={"phase_record": None}),\
          patch(module + "coverage", return_value={}):
         first = apply_scientific_feedback({}, [incoming], manager=manager, phase_diagram_directory=tmp_path)
         incoming["outputs"]["magnetic_moments"]["moments"][2] = 3.9
@@ -227,7 +227,7 @@ def test_cached_final_phase_reused_on_supplement(tmp_path):
 
 
 def test_eligible_metadata_refresh_reuses_prediction_and_not_requeues_consumed_training():
-    from analysis_layer.feedback.dft_result_products import record_dft_products
+    from phase_agent.analysis.feedback.dft_result_products import record_dft_products
     predictor = Mock(return_value={"model_version": "m1", "energy": -9, "energy_unit": "eV",
                                   "forces": [[0,0,0]]*4, "forces_unit": "eV/angstrom"})
     state = {}
@@ -257,7 +257,7 @@ def test_supplement_preserves_non_spin_quality_failure():
 
 def test_all_dft_points_revoked_does_not_leave_old_current_csv(tmp_path):
     import csv
-    from analysis_layer.phase.update_phase_diagram import update_phase_diagram
+    from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
     from tests.test_na_eform_phase_csv import record
     rows = [record("left", 0, -3), record("right", 1, -4)]
     for row in rows:

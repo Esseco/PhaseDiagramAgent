@@ -1,6 +1,6 @@
 import pytest
-from run.agent_api import handle_chat_request, OpenWebUIRequestError
-from run.ui_contracts import ChatRequest, ChatResponse
+from phase_agent.runtime.agent_api import handle_chat_request, OpenWebUIRequestError
+from phase_agent.runtime.ui_contracts import ChatRequest, ChatResponse
 
 
 @pytest.mark.parametrize("change", [{"messages": "继续"}, {"messages": [1]},

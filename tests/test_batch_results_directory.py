@@ -4,11 +4,11 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from execution_layer.remote.batch_runner import RemoteBatchRunner
-from execution_layer.remote.export_batch_result import export_batch_result
-from execution_layer.remote.finalize_vasp import finalize_vasp
-from execution_layer.remote.integrity import file_checksum
-from execution_layer.slurm.run_slurm_array_task import run_slurm_array_task
+from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
+from phase_agent.tools.remote.export_batch_result import export_batch_result
+from phase_agent.tools.remote.finalize_vasp import finalize_vasp
+from phase_agent.tools.remote.integrity import file_checksum
+from phase_agent.tools.slurm.run_slurm_array_task import run_slurm_array_task
 
 
 def test_relax_result_is_collected_from_stage_results_folder(tmp_path):
@@ -72,7 +72,7 @@ def test_completed_dft_result_relinks_downloaded_contcar(tmp_path):
     (task_dir / "CONTCAR").write_text("final DFT structure", encoding="utf-8")
     parsed = {**task, "status": "completed", "outputs": {"energy": -20.0,
               "energy_unit": "eV", "structure_path": str(task_dir / "CONTCAR")}}
-    with patch("execution_layer.remote.finalize_vasp.parse_vasp_result", return_value=parsed):
+    with patch("phase_agent.tools.remote.finalize_vasp.parse_vasp_result", return_value=parsed):
         finalize_vasp(task_dir)
     exported = stage / "results" / task_dir.name
     state = {"tasks": [{**task, "status": "pending", "input_path": str(task_dir / "task.json"),

@@ -1,8 +1,8 @@
-from execution_layer.workflows.run_tool_step import run_tool_step, _model_failure_action
+from phase_agent.tools.workflows.run_tool_step import run_tool_step, _model_failure_action
 from unittest.mock import patch
 from unittest.mock import Mock
 import json
-from run.agent_api import RunWorkflowChatHandler, format_workflow_reply
+from phase_agent.runtime.agent_api import RunWorkflowChatHandler, format_workflow_reply
 
 
 def test_history_resume_refreshes_failed_proposal(tmp_path):
@@ -15,7 +15,7 @@ def test_history_resume_refreshes_failed_proposal(tmp_path):
     handler._run = Mock(return_value={"status": "not_configured", "reason": "模型未返回有效方案"})
     handler([{"role": "user", "content": "继续"}])
     assert handler._run.call_count == 1
-    assert handler._run.call_args.args[:2] == ("p", None)
+    assert handler._run.call_args.args[:2] == ("p", {"decision": "comment", "comment": "继续"})
 
 
 def test_failed_proposal_has_no_approval_invitation():
@@ -30,8 +30,8 @@ def test_continue_discards_failed_pause_without_executing():
               "fallback_reason": "llm_failed: truncated"}
     state = {"pending_execution_policies": {
         "__single_interactive_action__": {"agent_proposal": {"raw_action": action}}}}
-    with patch("decision_layer.agent.choose_debug_next_action.choose_debug_next_action", return_value=None), \
-         patch("execution_layer.workflows.run_tool_step.propose_agent_tool_action", return_value=action) as propose:
+    with patch("phase_agent.decisions.agent.choose_debug_next_action.choose_debug_next_action", return_value=None),\
+         patch("phase_agent.tools.workflows.run_tool_step.propose_agent_tool_action", return_value=action) as propose:
         result = run_tool_step(state, {"config": {}}, registry={},
                                execution_mode="interactive", context={"user_message": "继续"})
     assert propose.call_count == 1

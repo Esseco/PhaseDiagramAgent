@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from execution_layer.remote.openssh_runtime import OpenSSHJobScheduler
+from phase_agent.tools.remote.openssh_runtime import OpenSSHJobScheduler
 
 
 class FakeRunner:

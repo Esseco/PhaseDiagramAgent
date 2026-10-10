@@ -1,11 +1,11 @@
-from orchestration.runtime_context import WorkflowRuntime
+from phase_agent.graphs.runtime_context import WorkflowRuntime
 import json
 from concurrent.futures import ThreadPoolExecutor
 import pytest
-from orchestration.event_loop_graph import run_event_loop_graph
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
-from orchestration.search_workflow_graph import build_search_workflow_graph
-from orchestration.tool_action_graph import build_tool_action_graph
+from phase_agent.graphs.actions.iteration import run_event_loop_graph
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.graphs.project.graph import build_react_lifecycle_graph as build_search_workflow_graph
+from phase_agent.graphs.actions.graph import build_tool_action_graph
 
 
 def test_lifecycle_wait_does_not_reach_decision_or_tools():

@@ -1,4 +1,4 @@
-from analysis_layer.state.summarize_task_stages import summarize_task_stages
+from phase_agent.analysis.state.summarize_task_stages import summarize_task_stages
 
 
 def test_task_order_does_not_change_evidence():

@@ -1,11 +1,11 @@
 import json
 from unittest.mock import patch
 
-from execution_layer.cost.runtime_observation import start_timer, runtime_observation
-from execution_layer.remote.run_mlip_batch import run_mlip_batch
-from execution_layer.workflows.attach_dft_preview import attach_dft_preview
-from execution_layer.state.state_manager import update_state_snapshot
-from config_layer.defaults.default_dft_decision_config import default_dft_decision_config
+from phase_agent.tools.cost.runtime_observation import start_timer, runtime_observation
+from phase_agent.tools.remote.run_mlip_batch import run_mlip_batch
+from phase_agent.tools.workflows.attach_dft_preview import attach_dft_preview
+from phase_agent.tools.state.state_manager import update_state_snapshot
+from phase_agent.configuration.defaults.default_dft_decision_config import default_dft_decision_config
 
 
 def test_runtime_uses_executed_mc_settings():
@@ -47,13 +47,13 @@ def test_new_history_summaries_keep_full_current_and_legacy():
 
 
 def test_chat_compatibility_import():
-    from run.agent_api import brief_chat_state
-    from run.chat_state_presentation import brief_chat_state as implementation
+    from phase_agent.runtime.agent_api import brief_chat_state
+    from phase_agent.runtime.chat_state_presentation import brief_chat_state as implementation
     assert brief_chat_state is implementation
 
 
 def test_missing_manager_does_not_invent_generation_evidence():
-    from execution_layer.state.restore_generation_gate import restore_generation_gate
+    from phase_agent.tools.state.restore_generation_gate import restore_generation_gate
     source = {"generation_history": [{"summary": {"unique_structures": 1,
               "registered_structures": 1}, "registered_ids": ["unknown"]}]}
     result = restore_generation_gate(source, None)
@@ -63,6 +63,6 @@ def test_missing_manager_does_not_invent_generation_evidence():
 
 def test_template_review_missing_ledger_reports_clear_error():
     import pytest
-    from execution_layer.workflows.dft_template_review import create_review
+    from phase_agent.tools.workflows.dft_template_review import create_review
     with pytest.raises(ValueError, match="缺少结构台账"):
         create_review({}, {}, {}, None)

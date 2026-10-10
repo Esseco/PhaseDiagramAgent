@@ -1,13 +1,13 @@
 from unittest.mock import Mock
 import pytest
-from decision_layer.agent.hybrid_proposal import create_hybrid_client,choose_harness
+from phase_agent.decisions.agent.hybrid_proposal import create_hybrid_client,choose_harness
 
 
 def test_routine_never_constructs_deep_client():
     legacy=Mock(return_value={'intent':'status','_llm_usage':{'calls':1}})
     factory=Mock()
     client=create_hybrid_client(legacy,factory)
-    result=client({'mode':'resolve_chat_intent','analysis_harness':'deepagents'})
+    result=client({'mode':'configuration_dialogue','analysis_harness':'deepagents'})
     assert result['_proposal_harness']=='legacy'
     factory.assert_not_called()
 

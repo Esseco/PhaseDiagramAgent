@@ -1,6 +1,6 @@
 import pytest
-from config_layer.schema.python_environments import python_environment, remote_comparison_model
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.schema.python_environments import python_environment, remote_comparison_model
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
 
 
 def test_remote_not_inferred_from_local_or_model():

@@ -4,11 +4,11 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from config_layer.defaults.default_budget_rules import default_budget_rules
-from decision_layer.agent.choose_debug_next_action import choose_debug_next_action
-from execution_layer.local.prepare_relax_upload_batches import prepare_relax_upload_batches
-from execution_layer.remote.manual_upload_runner import ManualUploadBatchRunner
-from execution_layer.workflows.run_tool_step import _prepare_debug_relax_screen_action
+from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
+from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+from phase_agent.tools.local.prepare_relax_upload_batches import prepare_relax_upload_batches
+from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
+from phase_agent.tools.workflows.run_tool_step import _prepare_debug_relax_screen_action
 
 
 def test_debug_relax_preparation_is_portable_and_idempotent(tmp_path):
@@ -25,8 +25,8 @@ def test_debug_relax_preparation_is_portable_and_idempotent(tmp_path):
               "bohb": {"relax_structures_per_branch": 3},
               "upload_batches_directory": str(tmp_path / "upload"),
               "supercomputer": {"worker": {"command": ["python3", "-m",
-                  "execution_layer.slurm.run_slurm_array_task", "--executor",
-                  "scientific_layer.mlip.slurm_executor:execute_mlip_task"]},
+                  "phase_agent.tools.slurm.run_slurm_array_task", "--executor",
+                  "phase_agent.science.mlip.slurm_executor:execute_mlip_task"]},
                   "batch_sizes": {"relax_and_feature": 100}}}
     state = {"dedup_gate": {"status": "ready"}, "tasks": []}
     action = choose_debug_next_action(state, manager, config,
@@ -79,7 +79,7 @@ def test_relax_preparation_includes_all_registered_branches_in_one_compatible_jo
               "bohb": {"relax_structures_per_branch": 3},
               "upload_batches_directory": str(tmp_path / "upload"),
               "supercomputer": {"worker": {"command": ["python3", "-m", "worker", "--executor",
-                  "scientific_layer.mlip.slurm_executor:execute_mlip_task"]}}}
+                  "phase_agent.science.mlip.slurm_executor:execute_mlip_task"]}}}
     state = {"dedup_gate": {"status": "ready"}, "tasks": []}
     action = choose_debug_next_action(state, manager, config,
                                       allowed_tools=["prepare_local_batch_files"])
@@ -116,7 +116,7 @@ def test_manual_mc_task_gets_own_structure_and_script(tmp_path):
             "status": "pending", "model_version": "mh-1"}
     runner = ManualUploadBatchRunner(
         tmp_path / "upload", worker_command=["python3", "-m", "worker", "--executor",
-                                            "scientific_layer.mlip.slurm_executor:execute_mlip_task"],
+                                            "phase_agent.science.mlip.slurm_executor:execute_mlip_task"],
         task_preparer=lambda row: {**row, "worker_job": {"structure_path": str(structure),
             "operation": "mc", "model_path": "/remote/mh-1.model",
             "parameters": {"full_na_structure": str(full_na)}}},

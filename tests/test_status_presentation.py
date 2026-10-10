@@ -1,7 +1,7 @@
 from copy import deepcopy
-from orchestration.studio_chat_graph import build_studio_graph
-from run.status_presentation import format_progress
-from run.response_preferences import response_detail, detailed_response
+from phase_agent.graphs.studio_chat_graph import build_studio_graph
+from phase_agent.runtime.status_presentation import format_progress
+from phase_agent.runtime.response_preferences import response_detail, detailed_response
 
 
 def test_epoch_action_and_waived_results_are_explicit():

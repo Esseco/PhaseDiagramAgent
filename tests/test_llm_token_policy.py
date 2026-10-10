@@ -2,15 +2,15 @@ import json
 import unittest
 from unittest.mock import patch
 from tests.test_deepseek_client import FakeResponse, completion
-from decision_layer.agent.create_deepseek_client import create_deepseek_client, DeepSeekResponseError
-from decision_layer.agent.prepare_llm_request import prepare_llm_request
-from decision_layer.agent.propose_tool_action import propose_agent_tool_action
+from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client, DeepSeekResponseError
+from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
+from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
 
 
 class TokenPolicyTest(unittest.TestCase):
     def test_routine_disables_thinking_and_caps_output(self):
         client = create_deepseek_client(api_key="mock", thinking="enabled", max_tokens=2400)
-        with patch("decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+        with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
                    return_value=FakeResponse(completion('{"tool":"prepare_local_batch_files"}'))) as request:
             client({"mode": "autonomous_search", "state": {}})
         body = json.loads(request.call_args.args[0].data)
@@ -19,7 +19,7 @@ class TokenPolicyTest(unittest.TestCase):
 
     def test_important_decision_enables_reasoning(self):
         client = create_deepseek_client(api_key="mock", max_tokens=2400)
-        with patch("decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+        with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
                    return_value=FakeResponse(completion('{"tool":"check_convergence"}'))) as request:
             client({"decision_kind": "convergence", "state": {}})
         body = json.loads(request.call_args.args[0].data)
@@ -39,7 +39,7 @@ class TokenPolicyTest(unittest.TestCase):
 
     def test_failed_usage_reaches_fallback(self):
         client = create_deepseek_client(api_key="mock")
-        with patch("decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+        with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
                    side_effect=[FakeResponse(completion("bad")), FakeResponse(completion("bad"))]):
             action = propose_agent_tool_action({}, agent_client=client, allowed_tools=["pause_search"])
         self.assertEqual(action["_llm_usage"]["calls"], 2)
@@ -49,7 +49,7 @@ class TokenPolicyTest(unittest.TestCase):
         first = completion("", finish_reason="length")
         first["choices"][0]["message"]["reasoning_content"] = "mock thought"
         client = create_deepseek_client(api_key="mock", thinking="enabled")
-        with patch("decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+        with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
                    side_effect=[FakeResponse(first), FakeResponse(completion('{"tool":"pause_search"}'))]) as request:
             result = client({"decision_kind": "strategy"})
         retry = json.loads(request.call_args.args[0].data)

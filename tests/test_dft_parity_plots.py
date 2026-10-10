@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
-from analysis_layer.feedback.dft_comparison_tables import build_comparison_tables
-from analysis_layer.feedback.dft_parity_plots import export_parity_plots
+from phase_agent.analysis.feedback.dft_comparison_tables import build_comparison_tables
+from phase_agent.analysis.feedback.dft_parity_plots import export_parity_plots
 from tests.test_dft_comparison_csv import add_result
 
 
@@ -63,7 +63,7 @@ def test_path_change_reuses_plots(tmp_path):
 
 
 def test_publication_failure_does_not_crash_or_overwrite(tmp_path, monkeypatch):
-    from analysis_layer.feedback import export_dft_products as publisher
+    from phase_agent.analysis.feedback import export_dft_products as publisher
     from matplotlib.figure import Figure
     original = Figure.savefig
 

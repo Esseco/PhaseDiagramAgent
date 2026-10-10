@@ -1,8 +1,8 @@
 import pytest
 
-from execution_layer.remote.batch_runner import RemoteBatchRunner
-from execution_layer.remote.manual_upload_runner import ManualUploadBatchRunner
-from run.runtime_backends import compose_runtime_backends
+from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
+from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
+from phase_agent.runtime.runtime_backends import compose_runtime_backends
 
 
 def test_default_backend_is_only_a_collector_without_creating_files(tmp_path):

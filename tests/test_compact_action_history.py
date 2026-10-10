@@ -1,6 +1,6 @@
 """Regression checks for bounded persisted workflow history."""
 
-from execution_layer.workflows.compact_action_history import (
+from phase_agent.tools.workflows.compact_action_history import (
     compact_action_history,
     compact_state_history,
 )

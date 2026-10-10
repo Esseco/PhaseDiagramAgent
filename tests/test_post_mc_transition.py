@@ -1,6 +1,6 @@
-from scientific_layer.mc.second_round_state import second_round_completed
-from scientific_layer.qbc.post_mc_candidates import post_mc_candidates
-from run.agent_api import format_workflow_reply
+from phase_agent.science.mc.second_round_state import second_round_completed
+from phase_agent.science.qbc.post_mc_candidates import post_mc_candidates
+from phase_agent.runtime.agent_api import format_workflow_reply
 
 
 def test_complete_wave_requires_all_tasks():

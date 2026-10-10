@@ -2,9 +2,9 @@ import csv
 import json
 from copy import deepcopy
 
-from execution_layer.local.recover_remote_training import inspect_training_results, recover_remote_training
-from run.chat_application import _is_status_command
-from run.status_presentation import format_progress
+from phase_agent.tools.local.recover_remote_training import inspect_training_results, recover_remote_training
+from phase_agent.runtime.chat_application import _is_status_command
+from phase_agent.runtime.status_presentation import format_progress
 
 
 def returned_job(tmp_path):

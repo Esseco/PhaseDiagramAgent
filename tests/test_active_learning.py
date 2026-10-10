@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 from pymatgen.core import Lattice, Structure
 
-from scientific_layer.mlip.build_mlip_committee import build_mlip_committee
-from scientific_layer.qbc.evaluate_qbc import evaluate_qbc
-from scientific_layer.training.update_mlip import update_mlip
-from scientific_layer.training.validate_mlip import validate_mlip
+from phase_agent.science.mlip.build_mlip_committee import build_mlip_committee
+from phase_agent.science.qbc.evaluate_qbc import evaluate_qbc
+from phase_agent.science.training.update_mlip import update_mlip
+from phase_agent.science.training.validate_mlip import validate_mlip
 
 
 class ActiveLearningTest(unittest.TestCase):

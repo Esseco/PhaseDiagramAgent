@@ -2,11 +2,11 @@ import json
 
 import pytest
 
-from config_layer.defaults.default_slurm_cluster_config import default_slurm_cluster_config
-from execution_layer.slurm.run_slurm_array_task import run_slurm_array_task
-from execution_layer.slurm.slurm_batch_runner import SlurmBatchRunner
-from scientific_layer.dft.create_atomate_workflow import generate_dft_workflow_with_atomate
-from scientific_layer.dft.parse_vasp_result import write_vasp_result
+from phase_agent.configuration.defaults.default_slurm_cluster_config import default_slurm_cluster_config
+from phase_agent.tools.slurm.run_slurm_array_task import run_slurm_array_task
+from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
+from phase_agent.science.dft.create_atomate_workflow import generate_dft_workflow_with_atomate
+from phase_agent.science.dft.parse_vasp_result import write_vasp_result
 
 
 def _state():
@@ -131,7 +131,7 @@ def test_dft_batch_uses_atomate_inputs_and_direct_vasp_slurm(tmp_path):
     assert prepared["batch"]["backend"] == "atomate_vasp"
     assert "module load nvhpc-hpcx fftw/3.3.10-nvhpc" in script
     assert "mpirun -np ${SLURM_NPROCS} vasp_std" in script
-    assert "scientific_layer.dft.parse_vasp_result" in script
+    assert "phase_agent.science.dft.parse_vasp_result" in script
     assert "LaunchPad" not in script
 
 

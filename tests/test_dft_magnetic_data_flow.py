@@ -1,4 +1,4 @@
-from analysis_layer.feedback.export_dft_products import dft_product_path
+from phase_agent.analysis.feedback.export_dft_products import dft_product_path
 """Keep raw DFT magnetization on transport; assess only on scientific consumption."""
 from copy import deepcopy
 import csv
@@ -7,11 +7,11 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from tests.test_dft_spin_acceptance import make_result, make_manager
-from scientific_layer.dft.spin_acceptance import apply_dft_spin_standard, spin_standard_passed
-from execution_layer.state.reconcile_task_results import reconcile_task_results
-from data_layer.ledger.collect_calculation_results import collect_calculation_results
-from analysis_layer.feedback.dft_result_products import record_dft_products, export_dft_products
-from run.workflow_reply_presentation import format_workflow_reply
+from phase_agent.science.dft.spin_acceptance import apply_dft_spin_standard, spin_standard_passed
+from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
+from phase_agent.persistence.ledger.collect_calculation_results import collect_calculation_results
+from phase_agent.analysis.feedback.dft_result_products import record_dft_products, export_dft_products
+from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
 
 def raw_result():

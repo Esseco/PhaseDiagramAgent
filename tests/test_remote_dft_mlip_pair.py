@@ -3,11 +3,11 @@ from copy import deepcopy
 import json
 import pytest
 from tests.test_round_model_recovery import dft_result
-from execution_layer.remote.predict_dft_final_frame import write_prediction, supplement_results
-from execution_layer.remote.dft_mlip_pair import load_pair, validate_prediction
-from execution_layer.remote.integrity import file_checksum, verify_result
-from execution_layer.workflows.create_dft_comparison_evaluator import create_dft_comparison_evaluator
-from execution_layer.state.dft_result_refresh import validated_magnetic_refresh
+from phase_agent.tools.remote.predict_dft_final_frame import write_prediction, supplement_results
+from phase_agent.tools.remote.dft_mlip_pair import load_pair, validate_prediction
+from phase_agent.tools.remote.integrity import file_checksum, verify_result
+from phase_agent.tools.workflows.create_dft_comparison_evaluator import create_dft_comparison_evaluator
+from phase_agent.tools.state.dft_result_refresh import validated_magnetic_refresh
 
 
 def fixture(tmp_path):
@@ -36,7 +36,7 @@ def test_transport_and_local_evaluator_use_remote_only(tmp_path, monkeypatch):
     save_result(tmp_path, result)
     verified = verify_result(tmp_path / "result.json", tmp_path / "task.finished.json", result)
     assert verified["valid"]
-    monkeypatch.setattr("scientific_layer.mlip.run_mace_subprocess.run_mace_with_py_mace",
+    monkeypatch.setattr("phase_agent.science.mlip.run_mace_subprocess.run_mace_with_py_mace",
                         lambda *a, **kw: pytest.fail("local inference forbidden"))
     config = {"mlip": {"version": "m1", "model_path": "/HPC/not-local.model"}}
     evaluated = create_dft_comparison_evaluator(config)(result=verified["result"], structure_id="S-D1", manager=None)

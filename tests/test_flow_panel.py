@@ -1,5 +1,5 @@
 from copy import deepcopy
-from run.flow_panel import render_flow_panel
+from phase_agent.runtime.flow_panel import render_flow_panel
 
 
 def test_panel_is_read_only_escaped_and_has_science_and_real_edges():
@@ -21,7 +21,7 @@ def test_panel_is_read_only_escaped_and_has_science_and_real_edges():
 
 
 def test_route_is_get_only():
-    from run.studio_runtime import app
+    from phase_agent.runtime.studio_runtime import app
     route = next(route for route in app.routes if route.path == "/phase/flow")
     assert "GET" in route.methods and "POST" not in route.methods
 
@@ -30,8 +30,8 @@ def test_endpoint_reads_state_without_workflow(tmp_path, monkeypatch):
     import json
     from unittest.mock import Mock
     from starlette.testclient import TestClient
-    from run.chat_application import RunWorkflowChatHandler
-    from run import studio_runtime
+    from phase_agent.runtime.chat_application import RunWorkflowChatHandler
+    from phase_agent.runtime import studio_runtime
     path = tmp_path / "state.json"
     path.write_text(json.dumps({"active_model_version": "m1"}), encoding="utf-8")
     before = path.read_bytes()

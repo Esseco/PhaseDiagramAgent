@@ -1,9 +1,9 @@
 import json
-from execution_layer.local.migrate_round_inputs import migrate
+from phase_agent.tools.local.migrate_round_inputs import migrate
 
 
 def test_offline_migration_preserves_results_remote_paths_and_task_bytes(tmp_path, monkeypatch):
-    monkeypatch.setattr("execution_layer.local.migrate_round_inputs.require_agent_offline", lambda port: None)
+    monkeypatch.setattr("phase_agent.tools.local.migrate_round_inputs.require_agent_offline", lambda port: None)
     batch = tmp_path / "submissions/epoch0_m1/Search-group-0001/Relax-0001/batch"
     batch.mkdir(parents=True)
     (batch / "task.json").write_bytes(b"immutable task")

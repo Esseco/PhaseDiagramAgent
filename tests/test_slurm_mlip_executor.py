@@ -1,10 +1,10 @@
 import json
 from unittest.mock import patch
 
-from config_layer.defaults.default_slurm_cluster_config import default_slurm_cluster_config
-from data_layer.ledger.phase_data_manager import PhaseDataManager
-from execution_layer.slurm.slurm_batch_runner import SlurmBatchRunner
-from scientific_layer.mlip.slurm_executor import create_mlip_task_preparer, execute_mlip_task
+from phase_agent.configuration.defaults.default_slurm_cluster_config import default_slurm_cluster_config
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
+from phase_agent.science.mlip.slurm_executor import create_mlip_task_preparer, execute_mlip_task
 
 
 H = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
@@ -28,8 +28,8 @@ def test_mlip_mc_task_is_self_contained_and_uses_incremental_budget(tmp_path):
     }
     runner = SlurmBatchRunner(
         tmp_path / "batches",
-        worker_command=["python3", "-m", "execution_layer.slurm.run_slurm_array_task",
-                        "--executor", "scientific_layer.mlip.slurm_executor:execute_mlip_task"],
+        worker_command=["python3", "-m", "phase_agent.tools.slurm.run_slurm_array_task",
+                        "--executor", "phase_agent.science.mlip.slurm_executor:execute_mlip_task"],
         stage_profiles=default_slurm_cluster_config(),
         task_preparer=create_mlip_task_preparer(
             manager, {}, {"mlip": {"model_path": "/models/mace.model", "version": "m1"}}
@@ -45,7 +45,7 @@ def test_mlip_mc_task_is_self_contained_and_uses_incremental_budget(tmp_path):
     assert (tmp_path / "batches/slurm-000001/00000-MC1/full_na_structure.vasp").is_file()
     assert "slurm_array_task" in (tmp_path / "batches/slurm-000001/submit.sbatch").read_text()
 
-    with patch("scientific_layer.mlip.slurm_executor.run_mace_worker", return_value={
+    with patch("phase_agent.science.mlip.slurm_executor.run_mace_worker", return_value={
         "status": "completed", "energy": -3.0, "energy_unit": "eV",
         "structure_path": str(structure_path), "checkpoint": "checkpoint.json",
     }):

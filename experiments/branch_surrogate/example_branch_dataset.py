@@ -2,7 +2,7 @@
 
 from tempfile import TemporaryDirectory
 
-from data_layer.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
 from experiments.branch_surrogate.default_branch_surrogate_config import default_branch_surrogate_config
 from experiments.branch_surrogate.run_branch_dataset_preparation import run_branch_dataset_preparation
 

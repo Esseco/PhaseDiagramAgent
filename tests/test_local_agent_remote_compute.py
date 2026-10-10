@@ -2,11 +2,11 @@ import json
 from pathlib import Path
 import pytest
 
-from execution_layer.remote.api import (RemoteBatchRunner, cancel_remote, query_remote, resume,
+from phase_agent.tools.remote.api import (RemoteBatchRunner, cancel_remote, query_remote, resume,
     submit_remote, sync_results, sync_tasks)
-from execution_layer.remote.worker import run_remote_task
-from execution_layer.remote.verified_mock import FileBackedMockRemoteScheduler, VerifiedLocalMirrorTransport
-from execution_layer.step_runner.file_protocol import write_json
+from phase_agent.tools.remote.worker import run_remote_task
+from phase_agent.tools.remote.verified_mock import FileBackedMockRemoteScheduler, VerifiedLocalMirrorTransport
+from phase_agent.tools.step_runner.file_protocol import write_json
 
 
 def _task(index, stage):

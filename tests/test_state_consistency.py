@@ -1,15 +1,15 @@
 import tempfile
 import unittest
 
-from data_layer.models.activate_validated_model import activate_validated_model
-from analysis_layer.state.summarize_agent_state import summarize_agent_state
-from config_layer.defaults.default_budget_rules import default_budget_rules
-from execution_layer.budget.expire_budget_reservations import expire_budget_reservations
-from execution_layer.budget.reserve_budget import reserve_budget
-from execution_layer.budget.settle_budget import settle_budget
-from scientific_layer.structures.validate_structure_transition import validate_structure_transition
-from analysis_layer.convergence.check_global_convergence import check_global_convergence
-from config_layer.runtime.authorize_budget_extension import authorize_budget_extension
+from phase_agent.persistence.models.activate_validated_model import activate_validated_model
+from phase_agent.analysis.state.summarize_agent_state import summarize_agent_state
+from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
+from phase_agent.tools.budget.expire_budget_reservations import expire_budget_reservations
+from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.settle_budget import settle_budget
+from phase_agent.science.structures.validate_structure_transition import validate_structure_transition
+from phase_agent.analysis.convergence.check_global_convergence import check_global_convergence
+from phase_agent.configuration.runtime.authorize_budget_extension import authorize_budget_extension
 
 
 class StateConsistencyTest(unittest.TestCase):
@@ -47,7 +47,7 @@ class StateConsistencyTest(unittest.TestCase):
 
     def test_approved_budget_migration_is_a_separate_non_executing_step(self):
         from types import SimpleNamespace
-        from run.main import run_workflow
+        from phase_agent.runtime.main import run_workflow
 
         old = {"system": {"id": "test"}, "budgets": {"total_relative_cost": 10},
                "round_strategy": {"maximum_mc_budget": 1000}, "agent": {"allowed_tools": []}}

@@ -1,7 +1,7 @@
 import json
 import pytest
-from run.artifact_queries import finetune_location_reply
-from run.chat_application import RunWorkflowChatHandler
+from phase_agent.runtime.artifact_queries import finetune_location_reply
+from phase_agent.runtime.chat_application import RunWorkflowChatHandler
 
 
 @pytest.mark.parametrize("message", ["微调文件夹在哪", "训练输入在哪里？", "看一下微调路径", "committee目录呢"])

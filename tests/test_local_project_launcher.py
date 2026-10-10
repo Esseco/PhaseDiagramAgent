@@ -4,13 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from run.local_project_launcher import (
+from phase_agent.runtime.local_project_launcher import (
     _stop_owned_process, create_project, describe_project,
     read_project_registry, register_project, start_agent,
 )
-from run.local_service_tokens import local_service_tokens
-from run.agent_api import create_agent_runtime
-from run.configuration_chat import ConfigurationChatHandler
+from phase_agent.runtime.local_service_tokens import local_service_tokens
+from phase_agent.runtime.agent_api import create_agent_runtime
+from phase_agent.runtime.configuration_chat import ConfigurationChatHandler
 
 
 class LocalProjectLauncherTests(unittest.TestCase):
@@ -49,7 +49,7 @@ class LocalProjectLauncherTests(unittest.TestCase):
             self.assertEqual(session["status"], "draft")
             self.assertTrue((target.parent / "parameters/search_config.project.json").is_file())
             self.assertIn("项目长期记忆：无", describe_project(target))
-            with patch("run.deepseek_credentials.load_deepseek_api_key", return_value=None):
+            with patch("phase_agent.runtime.deepseek_credentials.load_deepseek_api_key", return_value=None):
                 handler = create_agent_runtime(target)
             self.assertIsInstance(handler, ConfigurationChatHandler)
             self.assertEqual(handler.workflow_kwargs["config_session"]["setup_stage"], "json_ready")
@@ -73,7 +73,7 @@ class LocalProjectLauncherTests(unittest.TestCase):
     def test_occupied_port_never_launches_other_project(self):
         with tempfile.TemporaryDirectory() as directory:
             target = create_project(Path(directory) / "a", registry=Path(directory) / "registry.json")
-            with patch("run.local_project_launcher._port_is_free", return_value=False):
+            with patch("phase_agent.runtime.local_project_launcher._port_is_free", return_value=False):
                 with self.assertRaisesRegex(RuntimeError, "占用"):
                     start_agent(target)
 
@@ -81,16 +81,16 @@ class LocalProjectLauncherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = create_project(Path(directory) / "a", registry=Path(directory) / "registry.json")
             existing = object()
-            with patch("run.local_project_launcher._port_is_free", return_value=False), \
-                 patch("run.local_project_launcher._existing_agent", return_value=existing), \
-                 patch("run.local_project_launcher.local_service_tokens", return_value=("a" * 24, "b" * 24)), \
-                 patch("run.local_project_launcher._agent_accepts_token", return_value=True):
+            with patch("phase_agent.runtime.local_project_launcher._port_is_free", return_value=False),\
+                 patch("phase_agent.runtime.local_project_launcher._existing_agent", return_value=existing),\
+                 patch("phase_agent.runtime.local_project_launcher.local_service_tokens", return_value=("a" * 24, "b" * 24)),\
+                 patch("phase_agent.runtime.local_project_launcher._agent_accepts_token", return_value=True):
                 with self.assertRaisesRegex(RuntimeError, "占用"):
                     start_agent(target)
-            with patch("run.local_project_launcher._port_is_free", return_value=False), \
-                 patch("run.local_project_launcher._existing_agent", return_value=existing), \
-                 patch("run.local_project_launcher.local_service_tokens", return_value=("a" * 24, "b" * 24)), \
-                 patch("run.local_project_launcher._agent_accepts_token", return_value=False):
+            with patch("phase_agent.runtime.local_project_launcher._port_is_free", return_value=False),\
+                 patch("phase_agent.runtime.local_project_launcher._existing_agent", return_value=existing),\
+                 patch("phase_agent.runtime.local_project_launcher.local_service_tokens", return_value=("a" * 24, "b" * 24)),\
+                 patch("phase_agent.runtime.local_project_launcher._agent_accepts_token", return_value=False):
                 with self.assertRaisesRegex(RuntimeError, "占用"):
                     start_agent(target)
 

@@ -4,22 +4,22 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from analysis_layer.visualization.build_webui_charts import build_webui_charts
-from config_layer.defaults.default_layered_search_config import default_layered_search_config
-from config_layer.runtime.path_mapping import map_windows_to_linux, validate_path_mappings
-from config_layer.session.apply_config_revision import apply_config_revision
-from config_layer.session.create_config_draft import create_config_draft
-from config_layer.session.confirm_config_snapshot import confirm_config_snapshot
-from data_layer.memory.review_queue import propose_memory_update
-from execution_layer.local.prepare_local_batch_files import prepare_local_batch_files
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
-from execution_layer.workflows.run_tool_step import run_tool_step
-from execution_layer.policy.file_approval import proposal_hash
-from execution_layer.step_runner.build_status_summary import build_status_summary
-from execution_layer.step_runner.file_protocol import write_json
-from run.local_agent_control import LocalAgentControl
-from run.agent_api import OpenWebUIRequestError, RunWorkflowChatHandler
-from run.agent_api import format_workflow_reply
+from phase_agent.analysis.visualization.build_webui_charts import build_webui_charts
+from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.runtime.path_mapping import map_windows_to_linux, validate_path_mappings
+from phase_agent.configuration.session.apply_config_revision import apply_config_revision
+from phase_agent.configuration.session.create_config_draft import create_config_draft
+from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
+from phase_agent.persistence.memory.review_queue import propose_memory_update
+from phase_agent.tools.local.prepare_local_batch_files import prepare_local_batch_files
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.tools.workflows.run_tool_step import run_tool_step
+from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.tools.step_runner.build_status_summary import build_status_summary
+from phase_agent.tools.step_runner.file_protocol import write_json
+from phase_agent.runtime.local_agent_control import LocalAgentControl
+from phase_agent.runtime.agent_api import OpenWebUIRequestError, RunWorkflowChatHandler
+from phase_agent.runtime.agent_api import format_workflow_reply
 
 
 class OpenWebUILocalMVPTest(unittest.TestCase):
@@ -111,6 +111,7 @@ class OpenWebUILocalMVPTest(unittest.TestCase):
             with self.assertRaisesRegex(OpenWebUIRequestError, "stale"):
                 handler.review_pending("P1", "approve", expected_state_version="old",
                                        expected_proposal_hash=proposal_hash(proposal))
+            handler([{"role": "user", "content": "查看方案"}], conversation_id="chat")
             reply = handler([{"role": "user", "content": "同意"}], conversation_id="chat")
             self.assertIn("已完成", reply)
             self.assertEqual(len(calls), 1)

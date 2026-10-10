@@ -3,13 +3,13 @@ from collections import Counter
 
 from pymatgen.core import Lattice, Structure
 
-from scientific_layer.structures.enumerate_legal_frameworks import enumerate_legal_frameworks
-from scientific_layer.structures.propose_branches import propose_branches
-from data_layer.ledger.phase_data_manager import PhaseDataManager
-from scientific_layer.structures.generate_branch_structure import generate_branch_structure
-from scientific_layer.structures.generate_tm_ordering_branches import generate_tm_ordering_branches
-from scientific_layer.structures.boundary_utils import det_H
-from config_layer.defaults.layered_oxide_system_config import layered_oxide_system_config
+from phase_agent.science.structures.enumerate_legal_frameworks import enumerate_legal_frameworks
+from phase_agent.science.structures.propose_branches import propose_branches
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.science.structures.generate_branch_structure import generate_branch_structure
+from phase_agent.science.structures.generate_tm_ordering_branches import generate_tm_ordering_branches
+from phase_agent.science.structures.boundary_utils import det_H
+from phase_agent.configuration.defaults.layered_oxide_system_config import layered_oxide_system_config
 
 
 def build_case():
@@ -58,11 +58,15 @@ class BranchProposalTest(unittest.TestCase):
         system["configuration_space"]["roles"]["T"] = "fixed"
         system["configuration_space"]["fixed_T_source"] = "phase_reference"
         manager = PhaseDataManager(manager.boundary, system_config=system)
+        with self.assertRaisesRegex(ValueError, "tm_ordering"):
+            propose_branches(manager, references,
+                             quotas={"coverage": 4, "tm_ordering": 4}, seed=1,
+                             register=False)
         first = propose_branches(manager, references,
-                                 quotas={"coverage": 4, "tm_ordering": 4}, seed=1,
+                                 quotas={"coverage": 4}, seed=1,
                                  register=False)
         second = propose_branches(manager, references,
-                                  quotas={"coverage": 4, "tm_ordering": 4}, seed=99,
+                                  quotas={"coverage": 4}, seed=99,
                                   register=False)
         self.assertTrue(first)
         self.assertTrue(all(item["strategy"] != "tm_ordering" for item in first))

@@ -1,5 +1,5 @@
-from data_layer.memory.retrieve_relevant_knowledge import retrieve_relevant_knowledge
-from execution_layer.state.execution_receipts import begin_execution, record_execution_return, recovery_report
+from phase_agent.persistence.memory.retrieve_relevant_knowledge import retrieve_relevant_knowledge
+from phase_agent.tools.state.execution_receipts import begin_execution, record_execution_return, recovery_report
 
 
 def record(key, text, **extra):

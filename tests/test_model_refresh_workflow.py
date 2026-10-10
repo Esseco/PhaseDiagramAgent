@@ -5,11 +5,11 @@ from types import SimpleNamespace
 from ase import Atoms
 from ase.io import write
 
-from config_layer.defaults.default_budget_rules import default_budget_rules
-from data_layer.models.require_structure_refresh import require_structure_refresh
-from execution_layer.local.prepare_local_batch_files import prepare_local_batch_files
-from execution_layer.workflows.model_refresh_gate import run_model_refresh_gate, advance_refresh
-from execution_layer.workflows.run_tool_step import run_tool_step
+from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
+from phase_agent.persistence.models.require_structure_refresh import require_structure_refresh
+from phase_agent.tools.local.prepare_local_batch_files import prepare_local_batch_files
+from phase_agent.tools.workflows.model_refresh_gate import run_model_refresh_gate, advance_refresh
+from phase_agent.tools.workflows.run_tool_step import run_tool_step
 
 
 def setup(tmp_path):
@@ -19,7 +19,7 @@ def setup(tmp_path):
         "composition": {"Na": 1, "Fe": 1, "O": 2}}}, "branches": {"b": {"structure_ids": ["s"]}}}, boundary={})
     config = {"budgets": default_budget_rules(), "mlip": {"version": "old", "model_path": "/models/old.model"},
         "upload_batches_directory": str(tmp_path / "submissions"),
-        "supercomputer": {"worker": {"command": ["python", "-m", "execution_layer.remote.run_slurm_array_task", "--executor", "scientific_layer.mlip.slurm_executor:execute_mlip_task"]}}}
+        "supercomputer": {"worker": {"command": ["python", "-m", "phase_agent.tools.remote.run_slurm_array_task", "--executor", "phase_agent.science.mlip.slurm_executor:execute_mlip_task"]}}}
     state = {"tasks": [], "active_model": {"version": "new", "model_path": "/models/new.model"},
         "active_model_version": "new", "dedup_gate": {"status": "ready", "valid_structure_ids": ["s"]},
         "phase_diagrams": {"mlip": {"status": "completed", "model_version": "old", "entries": [
@@ -131,8 +131,8 @@ def test_failure_waiver_does_not_change_task_status(tmp_path):
 
 
 def test_refresh_single_point_enters_versioned_hull_without_faking_convergence(tmp_path):
-    from data_layer.ledger.collect_calculation_results import _phase_record
-    from analysis_layer.phase.update_phase_diagram import update_phase_diagram
+    from phase_agent.persistence.ledger.collect_calculation_results import _phase_record
+    from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
     manager = SimpleNamespace(data={"structures": {"s": {"branch_id": "b"}}, "branches": {"b": {"P": "O3"}}})
     records = []
     for index, composition in enumerate(({"Fe": 1, "O": 2}, {"Na": 1, "Fe": 1, "O": 2})):
@@ -152,3 +152,27 @@ def test_refresh_single_point_enters_versioned_hull_without_faking_convergence(t
     assert diagram["status"] == "completed"
     assert {r["source_version"] for r in diagram["entries"]} == {"new"}
     assert len(diagram["entries"]) == 2
+
+
+def test_empty_refresh_task_list_cannot_complete(tmp_path):
+    state, _, _, _ = recovered_state(tmp_path)
+    state["model_refresh"]["task_ids"] = []
+    updated, waiting = advance_refresh(state)
+    assert "清单为空" in waiting
+    assert updated["model_refresh"]["status"] == "waiting_results"
+    assert state == updated
+
+
+def test_duplicate_refresh_evidence_cannot_complete(tmp_path):
+    for location in ("tasks", "phase_records", "entries", "task_ids"):
+        case_path = tmp_path / location
+        case_path.mkdir()
+        state, _, _, _ = recovered_state(case_path)
+        records = (state["phase_diagrams"]["mlip"]["entries"] if location == "entries"
+                   else state["model_refresh"]["task_ids"] if location == "task_ids"
+                   else state[location])
+        records.append(deepcopy(records[0]))
+        updated, waiting = advance_refresh(state)
+        assert waiting and ("重复" in waiting or "多个" in waiting)
+        assert updated["model_refresh"]["status"] == "waiting_results"
+        assert updated == state

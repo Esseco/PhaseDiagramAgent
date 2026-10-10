@@ -1,7 +1,7 @@
 import pytest
 
-from analysis_layer.feedback.model_refresh_plan import build_model_refresh_plan, supplemental_relaxation_required
-from scientific_layer.training.cumulative_training_records import cumulative_training_records
+from phase_agent.analysis.feedback.model_refresh_plan import build_model_refresh_plan, supplemental_relaxation_required
+from phase_agent.science.training.cumulative_training_records import cumulative_training_records
 
 
 def row(index, energy, **extra):

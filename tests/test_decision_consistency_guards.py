@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import patch
-from run.agent_api import RunWorkflowChatHandler
-from analysis_layer.cost.predict_runtime import predict_runtime
-from analysis_layer.state.build_decision_context import build_decision_context
+from phase_agent.runtime.agent_api import RunWorkflowChatHandler
+from phase_agent.analysis.cost.predict_runtime import predict_runtime
+from phase_agent.analysis.state.build_decision_context import build_decision_context
 
 
 @pytest.mark.parametrize("steps", [None, 0, -1, True, float("nan")])
@@ -17,13 +17,12 @@ def test_relax_stage_selects_mc_memory_scope():
     assert result["memory_retrieval"]["action"] == "allocate_mc_bohb"
 
 
-def test_model_switch_preserves_dedicated_intent_client(tmp_path):
-    search, intent = object(), object()
+def test_model_switch_replaces_the_single_decision_client(tmp_path):
+    search = object()
     handler = RunWorkflowChatHandler({"state_path": str(tmp_path / "state.json")},
-        config_intent_client=intent,
         deepseek_model_switcher=lambda model: (model, search))
-    with patch("run.resolve_deepseek_model_request.resolve_deepseek_model_request",
+    with patch("phase_agent.runtime.resolve_deepseek_model_request.resolve_deepseek_model_request",
                return_value="deepseek-flash"):
         handler([{"role": "user", "content": "切换模型"}])
     assert handler.workflow_kwargs["agent_client"] is search
-    assert handler.config_intent_client is intent
+    assert not hasattr(handler, "config_intent_client")

@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 import pytest
 
-from execution_layer.local.rename_workspace_directories import rename_workspace_directories
-from execution_layer.local.remove_migrated_duplicates import remove_migrated_duplicates
+from phase_agent.tools.local.rename_workspace_directories import rename_workspace_directories
+from phase_agent.tools.local.remove_migrated_duplicates import remove_migrated_duplicates
 
 
 def workspace(root):
@@ -66,7 +66,7 @@ def test_delete_identical_old_only(tmp_path):
 
 
 def test_relocations_do_not_change_snapshot_or_external_paths(tmp_path):
-    from config_layer.session.relocate_workspace_paths import relocate_workspace_paths
+    from phase_agent.configuration.session.relocate_workspace_paths import relocate_workspace_paths
     original = {"system": {"phase_references": {"O3": str(tmp_path / "InitFile/O3.vasp")}},
                 "model_path": "/remote/models/m1.model"}
     changed = relocate_workspace_paths(original, [{"from": str(tmp_path / "InitFile"),

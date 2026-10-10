@@ -1,10 +1,10 @@
 import unittest
 
-from analysis_layer.state.build_decision_context import build_decision_context
-from decision_layer.agent.propose_tool_action import propose_agent_tool_action
-from execution_layer.policy.validate_tool_action import validate_tool_action
-from execution_layer.workflows.run_tool_step import _apply_execution_result
-from run.agent_api import _drop_finished_pending, format_workflow_reply
+from phase_agent.analysis.state.build_decision_context import build_decision_context
+from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
+from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+from phase_agent.tools.workflows.run_tool_step import _apply_execution_result
+from phase_agent.runtime.agent_api import _drop_finished_pending, format_workflow_reply
 
 
 class AgentRetryGuardTest(unittest.TestCase):

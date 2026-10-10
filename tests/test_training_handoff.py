@@ -2,7 +2,7 @@ import json
 from copy import deepcopy
 from pathlib import Path
 
-from execution_layer.local.training_handoff import advance_training_handoffs
+from phase_agent.tools.local.training_handoff import advance_training_handoffs
 from tests.test_remote_training_recovery import returned_job
 
 
@@ -69,7 +69,7 @@ def test_validation_request_recovery_and_separate_activation(tmp_path):
     candidate = updated['candidate_models'][waits[0]['candidate_model_version']]
     assert candidate['validation']['passed'] is True
     assert updated['active_model_version'] == 'base' and 'active_model' not in updated
-    from execution_layer.local.review_candidate_command import review_candidate_command
+    from phase_agent.tools.local.review_candidate_command import review_candidate_command
     assert review_candidate_command('继续', updated) is None
     assert review_candidate_command('同意', updated) is None
     reviewed = review_candidate_command('激活候选 ' + candidate['model']['version'] + ' 原因：独立验证符合标准', updated)
@@ -112,8 +112,11 @@ def test_stale_and_nonfinite_validation_rejected(tmp_path):
 
 
 def test_gate_persists_handoff_and_extracts_memory(tmp_path):
-    from execution_layer.workflows.lifecycle_recovery import _workflow_wait_gate
-    state, _, _ = setup(tmp_path)
+    from phase_agent.tools.workflows.lifecycle_recovery import _workflow_wait_gate
+    state, results, _ = setup(tmp_path)
+    models = json.loads((results / 'models.json').read_text())
+    models[0]['sha256'] = ''
+    (results / 'models.json').write_text(json.dumps(models))
     updated, waits = advance_training_handoffs(state, {})
     path = tmp_path / 'state.json'
     frame = {'recovery_question': None, 'execution_mode': 'interactive', 'feedback': {'state': updated},
@@ -128,7 +131,7 @@ def test_gate_persists_handoff_and_extracts_memory(tmp_path):
 
 
 def test_reply_preserves_handoff_instructions():
-    from run.workflow_reply_presentation import format_workflow_reply
+    from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
     assert format_workflow_reply({'status': 'training_handoff', 'reason': 'sbatch GPU_manifest.sh'}, 'state.json') == 'sbatch GPU_manifest.sh'
 
 def test_remote_validator_checks_independence_and_model_hash(tmp_path, monkeypatch):
@@ -138,8 +141,8 @@ def test_remote_validator_checks_independence_and_model_hash(tmp_path, monkeypat
     from ase import Atoms
     from ase.io import write
     from ase.calculators.calculator import Calculator, all_changes
-    import execution_layer.remote.validate_remote_training as remote
-    from execution_layer.local.training_handoff import digest_file
+    import phase_agent.tools.remote.validate_remote_training as remote
+    from phase_agent.tools.local.training_handoff import digest_file
     root = tmp_path / 'inputs'
     root.mkdir()
     (root / '_shared_data').mkdir()
@@ -181,3 +184,17 @@ def test_remote_validator_checks_independence_and_model_hash(tmp_path, monkeypat
     plan['training_sha256'] = digest_file(root/'_shared_data/train.xyz')
     with pytest.raises(ValueError, match='overlap'):
         remote.evaluate(plan)
+
+
+def test_cv_review_gate_continues_to_action_planning(tmp_path):
+    from phase_agent.tools.workflows.lifecycle_recovery import _workflow_wait_gate
+    state, _, _ = setup(tmp_path)
+    updated, waits = advance_training_handoffs(state, {})
+    frame = {'recovery_question': None, 'execution_mode': 'interactive', 'feedback': {'state': updated},
+        'state_path': None, 'effective_config': {}, 'recovered_count': 0, 'collection_report': None,
+        'snapshot': {}, 'pre_reconciled': {}, 'manual_wait': None, 'rebuilding': False,
+        'training_handoffs': waits}
+    response = _workflow_wait_gate(frame)
+    assert response is frame
+    assert response['feedback']['state']['training_validation_planning']['reviews']
+    assert 'status' not in response

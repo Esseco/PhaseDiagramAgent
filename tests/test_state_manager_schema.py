@@ -1,10 +1,10 @@
-from config_layer.schema.action_state_schema import ACTION_REQUIRED_FIELDS, STATE_REQUIRED_FIELDS
-from data_layer.memory.decision_memory import update_long_term_memory
-from execution_layer.dispatch.create_tool_registry import create_tool_registry
-from execution_layer.workflows.run_tool_step import run_tool_step
-from execution_layer.state.state_manager import update_state_snapshot
+from phase_agent.configuration.schema.action_state_schema import ACTION_REQUIRED_FIELDS, STATE_REQUIRED_FIELDS
+from phase_agent.persistence.memory.decision_memory import update_long_term_memory
+from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+from phase_agent.tools.workflows.run_tool_step import run_tool_step
+from phase_agent.tools.state.state_manager import update_state_snapshot
 from tests.test_event_loop import _session
-from config_layer.schema.state_schema_migrations import migrate_state_snapshot
+from phase_agent.configuration.schema.state_schema_migrations import migrate_state_snapshot
 import pytest
 
 

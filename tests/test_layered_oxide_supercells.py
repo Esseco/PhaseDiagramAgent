@@ -4,7 +4,7 @@ from unittest.mock import patch
 import numpy as np
 from pymatgen.core import Lattice, Structure
 
-from scientific_layer.structures.enumerate_layered_oxide_supercells import (
+from phase_agent.science.structures.enumerate_layered_oxide_supercells import (
     LAYERED_OXIDE_P_SMALL_RECOMMENDATIONS,
     can_contain,
     enumerate_layered_oxide_supercells,
@@ -28,7 +28,7 @@ class LayeredOxideSupercellTest(unittest.TestCase):
         h = np.diag([2, 2, 1])
         cell = h @ np.asarray(self.structure.lattice.matrix)
         with patch(
-            "scientific_layer.structures.enumerate_layered_oxide_supercells._enumerate_icet_supercells",
+            "phase_agent.science.structures.enumerate_layered_oxide_supercells._enumerate_icet_supercells",
             return_value=[FakeSupercell(cell)],
         ):
             result = enumerate_layered_oxide_supercells(
@@ -62,7 +62,7 @@ class LayeredOxideSupercellTest(unittest.TestCase):
         h = np.diag([2, 2, 1])
         cell = h @ np.asarray(self.structure.lattice.matrix)
         with patch(
-            "scientific_layer.structures.enumerate_layered_oxide_supercells._enumerate_icet_supercells",
+            "phase_agent.science.structures.enumerate_layered_oxide_supercells._enumerate_icet_supercells",
             return_value=[FakeSupercell(cell)],
         ):
             result = enumerate_layered_oxide_supercells(
@@ -78,7 +78,7 @@ class LayeredOxideSupercellTest(unittest.TestCase):
         h = np.array([[1, 2, 0], [0, 6, 0], [0, 0, 1]])
         cell = h @ np.asarray(self.structure.lattice.matrix)
         with patch(
-            "scientific_layer.structures.enumerate_layered_oxide_supercells._enumerate_icet_supercells",
+            "phase_agent.science.structures.enumerate_layered_oxide_supercells._enumerate_icet_supercells",
             return_value=[FakeSupercell(cell)],
         ):
             result = enumerate_layered_oxide_supercells(

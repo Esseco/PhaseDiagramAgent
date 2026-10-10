@@ -1,4 +1,4 @@
-from analysis_layer.state.summarize_task_rounds import summarize_task_rounds
+from phase_agent.analysis.state.summarize_task_rounds import summarize_task_rounds
 
 
 def test_shared_relax_parent_keeps_mc_segments_distinct():

@@ -1,6 +1,6 @@
 import json
-from execution_layer.remote.export_batch_result import export_batch_result
-from execution_layer.remote.integrity import file_checksum
+from phase_agent.tools.remote.export_batch_result import export_batch_result
+from phase_agent.tools.remote.integrity import file_checksum
 
 
 def test_logs_and_traces_stay_remote_but_resume_checkpoint_is_preserved(tmp_path):

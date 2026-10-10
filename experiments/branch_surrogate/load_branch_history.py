@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from data_layer.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
 
 
 def load_branch_history(source):

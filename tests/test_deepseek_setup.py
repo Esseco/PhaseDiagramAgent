@@ -4,8 +4,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from run.agent_api import create_server
-from run.deepseek_setup import setup_page, test_and_save_api_key as _test_and_save_api_key
+from phase_agent.runtime.agent_api import create_server
+from phase_agent.runtime.deepseek_setup import setup_page, test_and_save_api_key as _test_and_save_api_key
 
 
 class DeepSeekSetupTest(unittest.TestCase):
@@ -19,8 +19,8 @@ class DeepSeekSetupTest(unittest.TestCase):
     def test_valid_key_is_tested_then_saved_and_activated(self):
         activated = []
         client = lambda _payload: {"_llm_usage": {"calls": 1}}
-        with patch("decision_layer.agent.create_deepseek_client.create_deepseek_client", return_value=client) as factory, \
-                patch("run.deepseek_credentials.save_deepseek_api_key") as save:
+        with patch("phase_agent.decisions.agent.create_deepseek_client.create_deepseek_client", return_value=client) as factory,\
+                patch("phase_agent.runtime.deepseek_credentials.save_deepseek_api_key") as save:
             result = _test_and_save_api_key(
                 "sk-test-secret-value",
                 settings={"model": "deepseek-flash", "base_url": "https://api.deepseek.com"},
@@ -33,8 +33,8 @@ class DeepSeekSetupTest(unittest.TestCase):
 
     def test_failed_key_test_does_not_save_or_activate(self):
         activated = []
-        with patch("decision_layer.agent.create_deepseek_client.create_deepseek_client", return_value=lambda _payload: {}), \
-                patch("run.deepseek_credentials.save_deepseek_api_key") as save:
+        with patch("phase_agent.decisions.agent.create_deepseek_client.create_deepseek_client", return_value=lambda _payload: {}),\
+                patch("phase_agent.runtime.deepseek_credentials.save_deepseek_api_key") as save:
             with self.assertRaisesRegex(RuntimeError, "密钥未保存"):
                 _test_and_save_api_key(
                     "sk-test-secret-value", settings={}, activate_client=activated.append,
@@ -57,7 +57,7 @@ class DeepSeekSetupTest(unittest.TestCase):
         thread.start()
         try:
             connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-            with patch("run.deepseek_credentials.load_deepseek_api_key", return_value=None):
+            with patch("phase_agent.runtime.deepseek_credentials.load_deepseek_api_key", return_value=None):
                 connection.request("GET", "/phase/setup")
                 response = connection.getresponse()
                 page = response.read().decode("utf-8")

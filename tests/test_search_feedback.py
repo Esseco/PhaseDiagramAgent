@@ -8,11 +8,10 @@ import csv
 from pathlib import Path
 from unittest.mock import patch
 
-from data_layer.ledger.phase_data_manager import PhaseDataManager
-from analysis_layer.feedback.calculate_search_reward import calculate_search_reward
-from analysis_layer.convergence.check_global_convergence import check_global_convergence
-from run.search_iteration import run_search_iteration
-from analysis_layer.phase.update_phase_diagram import update_phase_diagram
+from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
+from phase_agent.analysis.feedback.calculate_search_reward import calculate_search_reward
+from phase_agent.analysis.convergence.check_global_convergence import check_global_convergence
+from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
 
 
 class SearchFeedbackTest(unittest.TestCase):
@@ -103,89 +102,7 @@ class SearchFeedbackTest(unittest.TestCase):
         self.assertEqual(result["status"], "budget_exhausted")
         self.assertFalse(result["converged"])
 
-    def test_one_iteration_leaves_unfinished_task_pending(self):
-        H = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-        manager = PhaseDataManager(
-            {"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}}
-        )
-        branch_id = manager.add_branch(P="O3", H=H, x=1, T=["Fe"])
-        structure_id = manager.add_structure(
-            branch_id=branch_id,
-            arrangement={"V": [1]},
-            source_path="S-1.vasp",
-        )
-        generated = {
-            "registered": [{"structure_id": structure_id, "structure_path": "S-1.vasp"}]
-        }
-        with patch(
-            "run.search_iteration.run_branch_generation",
-            return_value=generated,
-        ):
-            result = run_search_iteration(
-                manager,
-                {},
-                None,
-                structure_directory="unused",
-                total_quota=5,
-                batch_size=1,
-                initial_states_per_branch=1,
-                seed=9,
-            )
-        self.assertEqual(result["state"]["iteration"], 1)
-        self.assertEqual(result["state"]["pending_tasks"][0]["status"], "pending")
-        self.assertEqual(result["decision"]["seed"], 9)
 
-        with patch(
-            "run.search_iteration.run_branch_generation",
-            return_value=generated,
-        ):
-            repeated = run_search_iteration(
-                manager,
-                {},
-                result["state"],
-                structure_directory="unused",
-                total_quota=5,
-                batch_size=1,
-                initial_states_per_branch=1,
-                seed=10,
-            )
-        self.assertEqual(len(repeated["state"]["pending_tasks"]), 1)
-        self.assertEqual(repeated["dispatched"], [])
-
-    def test_iteration_state_can_be_saved_and_restored(self):
-        H = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-        manager = PhaseDataManager(
-            {"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}}
-        )
-        generated = {"registered": []}
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
-            state_path = Path(directory) / "state.json"
-            with patch(
-                "run.search_iteration.run_branch_generation",
-                return_value=generated,
-            ):
-                run_search_iteration(
-                    manager,
-                    {},
-                    None,
-                    structure_directory="unused",
-                    total_quota=5,
-                    batch_size=1,
-                    initial_states_per_branch=1,
-                    seed=1,
-                    state_path=state_path,
-                )
-                restored = run_search_iteration(
-                    manager,
-                    {},
-                    state_path,
-                    structure_directory="unused",
-                    total_quota=5,
-                    batch_size=1,
-                    initial_states_per_branch=1,
-                    seed=2,
-                )
-            self.assertEqual(restored["state"]["iteration"], 2)
 
 
 if __name__ == "__main__":

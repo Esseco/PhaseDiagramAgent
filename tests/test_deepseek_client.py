@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from decision_layer.agent.create_deepseek_client import (
+from phase_agent.decisions.agent.create_deepseek_client import (
     DeepSeekResponseError,
     create_deepseek_client,
 )
@@ -41,7 +41,7 @@ class DeepSeekClientTest(unittest.TestCase):
         client = create_deepseek_client(api_key="test", thinking="disabled")
         payload = {"allowed_tools": ["select_dft_candidates"],
                    "state": {"qbc_candidates": [{}] * 100}}
-        with patch("decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+        with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
                    side_effect=[FakeResponse(completion('{"reply":', finish_reason="length")),
                                 FakeResponse(completion('{"reply":"ok"}'))]) as request:
             self.assertEqual(client(payload)["reply"], "ok")
@@ -51,7 +51,7 @@ class DeepSeekClientTest(unittest.TestCase):
 
     def test_length_finish_is_retried_even_if_json_parses(self):
         client = create_deepseek_client(api_key="test", thinking="disabled")
-        with patch("decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+        with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
                    side_effect=[FakeResponse(completion('{}', finish_reason="length")),
                                 FakeResponse(completion('{"reply":"complete"}'))]) as request:
             result = client({})
@@ -61,7 +61,7 @@ class DeepSeekClientTest(unittest.TestCase):
     def test_empty_json_output_is_retried_and_usage_counts_both_calls(self):
         client = create_deepseek_client(api_key="test-secret-do-not-print", thinking="disabled")
         with patch(
-            "decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+            "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
             side_effect=[FakeResponse(completion("")), FakeResponse(completion('{"reply":"ok"}'))],
         ) as urlopen:
             result = client({"instruction": "test"})
@@ -77,7 +77,7 @@ class DeepSeekClientTest(unittest.TestCase):
     def test_invalid_json_after_retry_has_safe_actionable_error(self):
         client = create_deepseek_client(api_key="test-secret-do-not-print")
         with patch(
-            "decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+            "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
             side_effect=[FakeResponse(completion("not-json")), FakeResponse(completion("still-not-json"))],
         ) as urlopen:
             with self.assertRaises(DeepSeekResponseError) as raised:
@@ -91,7 +91,7 @@ class DeepSeekClientTest(unittest.TestCase):
     def test_json_markdown_fence_is_accepted(self):
         client = create_deepseek_client(api_key="test-secret-do-not-print")
         with patch(
-            "decision_layer.agent.create_deepseek_client.urllib.request.urlopen",
+            "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
             return_value=FakeResponse(completion('```json\n{"reply":"ok"}\n```')),
         ) as urlopen:
             result = client({"instruction": "test"})

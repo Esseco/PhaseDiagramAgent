@@ -1,4 +1,4 @@
-from execution_layer.remote.write_unix_shell_script import write_unix_shell_script
+from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
 
 
 def test_slurm_script_normalizes_windows_and_old_mac_endings(tmp_path):

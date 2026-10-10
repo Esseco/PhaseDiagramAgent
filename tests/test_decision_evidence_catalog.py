@@ -1,4 +1,4 @@
-from analysis_layer.state.decision_evidence_catalog import decision_evidence_catalog, check_decision_evidence_refs
+from phase_agent.analysis.state.decision_evidence_catalog import decision_evidence_catalog, check_decision_evidence_refs
 
 
 def test_only_existing_versions_and_approved_context_are_indexed():

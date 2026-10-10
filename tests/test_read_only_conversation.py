@@ -1,44 +1,22 @@
 import json
 from unittest.mock import Mock
-from run.chat_application import RunWorkflowChatHandler
-from run.chat_intent_routing import normalize_chat_intent
-from run.conversation_context import conversation_context
+from phase_agent.runtime.chat_application import RunWorkflowChatHandler
+from phase_agent.runtime.conversation_context import conversation_context
 
 
-def test_semantic_question_returns_short_answer_without_workflow(tmp_path):
-    path = tmp_path / "state.json"
-    state = {"active_model_version": "m1", "pending_execution_policies": {"p": {
-        "agent_proposal": {"recommended_action": "update_mlip"}}}}
-    path.write_text(json.dumps(state), encoding="utf-8")
-    before = path.read_bytes()
-    client = Mock(return_value={"intent": "read_only", "answer": "K折用于评估泛化误差，最终模型使用全部数据训练。"})
-    workflow = Mock()
-    handler = RunWorkflowChatHandler({"state_path": str(path), "agent_client": client}, workflow=workflow)
+def test_semantic_question_returns_short_answer_without_execution(tmp_path):
+    from tests.test_unified_react_dialogue import make_handler
+    from phase_agent.tools.step_runner.file_protocol import read_json
+    client = Mock(return_value={"kind": "answer", "answer": "K折用于评估泛化误差。"})
+    handler = make_handler(tmp_path, client)
     reply = handler([{"role": "user", "content": "这个K折究竟是干嘛的？"}])
     assert "K折用于" in reply
-    assert "本轮总结" not in reply
-    assert "回复“同意”" not in reply
-    workflow.assert_not_called()
-    assert path.read_bytes() == before
+    assert client.call_count == 1
+    assert not read_json(handler.state_path, {}).get("pending_execution_policies")
 
 
-def test_other_is_conversation_not_implicit_workflow():
-    def client(payload):
-        if payload["mode"] == "resolve_chat_intent":
-            return {"intent": "other"}
-        return {"kind": "answer", "answer": "这是旧输入与当前参数不一致，尚未覆盖。"}
-    result = normalize_chat_intent("这句话什么意思", {}, agent_client=client, enable_context=True)
-    assert result == {"reply": "这是旧输入与当前参数不一致，尚未覆盖。"}
 
 
-def test_feedback_requires_explicit_request_not_model_approval():
-    def result(response):
-        return normalize_chat_intent("把方案改成四个成员", {}, enable_context=True, agent_client=lambda payload:
-            {"intent": "other"} if payload["mode"] == "resolve_chat_intent" else response)
-    assert "reply" in result({"kind": "approve", "direct_request": True, "confidence": 1})
-    assert "reply" in result({"kind": "workflow_feedback", "direct_request": False, "confidence": 1})
-    assert result({"kind": "workflow_feedback", "direct_request": True, "confidence": .98}) == {
-        "message": "把方案改成四个成员"}
 
 
 def test_context_is_bounded_allowlist_and_recent_dialogue():
@@ -52,17 +30,5 @@ def test_context_is_bounded_allowlist_and_recent_dialogue():
     assert "private" not in json.dumps(snapshot)
 
 
-def test_conversation_failure_stays_read_only():
-    client = Mock(side_effect=[{"intent": "other"}, RuntimeError("secret")])
-    reply = normalize_chat_intent("解释一下", {}, agent_client=client, enable_context=True)
-    assert "未推进任务" in reply["reply"]
-    assert "secret" not in reply["reply"]
 
 
-def test_context_external_transfer_is_disabled_by_default():
-    client = Mock(return_value={"intent": "other"})
-    result = normalize_chat_intent("解释一下", {"active_model_version": "private"}, agent_client=client,
-                                  messages=[{"role": "assistant", "content": "private path"}])
-    assert "reply" in result
-    assert client.call_count == 1
-    assert client.call_args.args[0]["context"]["conversation"] == {}

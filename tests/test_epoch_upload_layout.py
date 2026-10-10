@@ -1,6 +1,6 @@
 import json
-from execution_layer.remote.build_upload_batch_directory import build_upload_batch_directory
-from execution_layer.local.migrate_epoch_upload_layout import migrate
+from phase_agent.tools.remote.build_upload_batch_directory import build_upload_batch_directory
+from phase_agent.tools.local.migrate_epoch_upload_layout import migrate
 
 
 def test_epoch_naming_preserves_ids(tmp_path):

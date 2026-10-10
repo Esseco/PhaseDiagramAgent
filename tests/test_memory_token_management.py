@@ -1,12 +1,12 @@
 from copy import deepcopy
 from unittest.mock import patch
 
-from analysis_layer.state.build_decision_context import build_decision_context
-from decision_layer.agent.prepare_llm_request import prepare_llm_request
-from execution_layer.workflows.preview_dft_inputs import preview_dft_inputs
-from config_layer.defaults.default_dft_decision_config import default_dft_decision_config
-from execution_layer.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
-from execution_layer.workflows.run_tool_step import run_tool_step
+from phase_agent.analysis.state.build_decision_context import build_decision_context
+from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
+from phase_agent.tools.workflows.preview_dft_inputs import preview_dft_inputs
+from phase_agent.configuration.defaults.default_dft_decision_config import default_dft_decision_config
+from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
+from phase_agent.tools.workflows.run_tool_step import run_tool_step
 
 
 def test_compaction_keeps_all_candidates_memory_versions_and_request():
@@ -74,11 +74,11 @@ def test_failed_validation_returns_to_llm_and_requires_approval():
     revised = deepcopy(action)
     revised["parameters"]["decisions"][0]["action"] = "DFT_SINGLE_POINT"
     preview = {"relative_cost": 30, "task_count": 1, "workload": []}
-    with patch("decision_layer.agent.choose_debug_next_action.choose_debug_next_action", return_value=None), \
-         patch("execution_layer.workflows.run_tool_step.propose_agent_tool_action", return_value=action), \
-         patch("execution_layer.workflows.attach_dft_preview.preview_dft_inputs", side_effect=[(None, "dft_budget"), (preview, None)]), \
-         patch("execution_layer.workflows.run_tool_step.revise_tool_proposal", return_value={"revision_status": "revised", "action": revised}) as revise, \
-         patch("execution_layer.workflows.dft_template_review.gate_template", side_effect=lambda proposal, *args, **kw: (proposal, False)):
+    with patch("phase_agent.decisions.agent.choose_debug_next_action.choose_debug_next_action", return_value=None),\
+         patch("phase_agent.tools.workflows.run_tool_step.propose_agent_tool_action", return_value=action),\
+         patch("phase_agent.tools.workflows.attach_dft_preview.preview_dft_inputs", side_effect=[(None, "dft_budget"), (preview, None)]),\
+         patch("phase_agent.tools.workflows.run_tool_step.revise_tool_proposal", return_value={"revision_status": "revised", "action": revised}) as revise,\
+         patch("phase_agent.tools.workflows.dft_template_review.gate_template", side_effect=lambda proposal, *args, **kw: (proposal, False)):
         result = run_tool_step({}, {"config": config},
             registry={"select_dft_candidates": {"handler": lambda **kw: None}},
             agent_client=lambda p: {}, execution_mode="interactive")

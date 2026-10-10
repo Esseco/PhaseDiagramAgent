@@ -1,13 +1,13 @@
 import json
 
-from execution_layer.slurm.slurm_batch_runner import SlurmBatchRunner
-from execution_layer.step_runner.advise_next_actions import advise_next_actions
-from execution_layer.step_runner.confirm_action_plan import confirm_action_plan
-from execution_layer.step_runner.file_protocol import write_json
-from execution_layer.step_runner.prepare_confirmed_plan import prepare_confirmed_plan
-from execution_layer.step_runner.recover_results import recover_results
-from execution_layer.step_runner.scheduler_adapter import MockSchedulerAdapter
-from execution_layer.step_runner.submit_prepared_jobs import submit_prepared_jobs
+from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
+from phase_agent.tools.step_runner.advise_next_actions import advise_next_actions
+from phase_agent.tools.step_runner.confirm_action_plan import confirm_action_plan
+from phase_agent.tools.step_runner.file_protocol import write_json
+from phase_agent.tools.step_runner.prepare_confirmed_plan import prepare_confirmed_plan
+from phase_agent.tools.step_runner.recover_results import recover_results
+from phase_agent.tools.step_runner.scheduler_adapter import MockSchedulerAdapter
+from phase_agent.tools.step_runner.submit_prepared_jobs import submit_prepared_jobs
 
 
 def _task(index, stage, model="m1"):
