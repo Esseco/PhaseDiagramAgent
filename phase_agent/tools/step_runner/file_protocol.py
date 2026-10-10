@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import time
 import uuid
@@ -30,7 +31,10 @@ def write_json(path, payload):
         return str(target)
     temporary = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
     try:
-        temporary.write_bytes(encoded)
+        with temporary.open("wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
         for attempt in range(3):
             try:
                 temporary.replace(target)

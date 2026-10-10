@@ -327,8 +327,8 @@ def _stop_owned_process(process, *, timeout: float = 5) -> bool:
             child.kill()
         except psutil.NoSuchProcess:
             pass
-    psutil.wait_procs(alive, timeout=timeout)
-    return not _process_is_running(process)
+    _, remaining = psutil.wait_procs(alive, timeout=timeout)
+    return not remaining and not _process_is_running(process)
 
 
 def stop_project_service(path, process=None):
@@ -337,7 +337,7 @@ def stop_project_service(path, process=None):
     import psutil
 
     if process is None:
-        service = read_service(path)
+        service = read_service(path, require_ready=False)
         if service is None:
             return True
         process = psutil.Process(service["pid"])
@@ -347,6 +347,9 @@ def stop_project_service(path, process=None):
         configured = Path(command[command.index("--runtime-config") + 1]).resolve()
         if configured != Path(path).resolve():
             raise RuntimeError("服务不属于所选项目，未停止")
+    service = read_service(path, require_ready=False)
+    if service:
+        write_service(path, {**service, "status": "stopping"})
     stopped = _stop_owned_process(process)
     if stopped:
         write_service(path, {"status": "stopped"})
@@ -418,6 +421,13 @@ def _process_is_running(process) -> bool:
 
 
 def start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, bool]:
+    from phase_agent.runtime.project_service import project_lock
+
+    with project_lock(path, lock_name="launch.lock"):
+        return _start_agent(path, port=port)
+
+
+def _start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, bool]:
     """Start an isolated project service, or open its verified existing instance."""
     from phase_agent.runtime.project_service import available_port, read_service
 
@@ -433,7 +443,12 @@ def start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, bo
         process.studio_port = existing["studio_port"]
         process.control_port = existing["control_port"]
         return process, local_service_tokens()[0], True
-    timeout = config.get("agent_startup_timeout_seconds", 45)
+    owner = read_service(path, require_ready=False)
+    if owner:
+        raise RuntimeError(
+            f"该项目服务仍存在（{owner.get('status', 'unhealthy')}），请先停止后重启；未重复启动"
+        )
+    timeout = config.get("agent_startup_timeout_seconds", 90)
     if type(timeout) not in {int, float} or not 5 <= timeout <= 600:
         raise ValueError("agent_startup_timeout_seconds 必须在 5–600 秒之间")
     port = port if port is not None else available_port(config.get("control_port", 8765))
@@ -483,7 +498,9 @@ def start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, bo
     deadline = time.monotonic() + float(timeout)
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RuntimeError(f"Agent 启动失败；请查看 {log_path}")
+            raise RuntimeError(
+                f"Agent 启动失败（退出码 {process.poll()}）；请查看 {log_path} 和同目录 studio_server.log"
+            )
         try:
             with urlopen(f"http://127.0.0.1:{port}/health", timeout=0.5) as response:
                 if response.status == 200:

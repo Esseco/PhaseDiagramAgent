@@ -217,16 +217,43 @@ from phase_agent.runtime.workflow_reply_presentation import (
 def _approval_page():
     return """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>相图项目本地审批</title>
-<style>body{font-family:system-ui;margin:2rem;max-width:1050px;color:#18212b}input,textarea,button,select{font:inherit;padding:.55rem;margin:.25rem}input{min-width:28rem}.card{border:1px solid #ccd4dd;border-radius:8px;padding:1rem;margin:1rem 0;background:#fff}pre{white-space:pre-wrap;background:#f5f7f9;padding:.8rem;overflow:auto}.charts svg{max-width:100%;height:auto;border:1px solid #eee;margin:.4rem 0}.warn{color:#a33}</style></head><body>
-<h1>相图项目本地审批</h1><p>此页面只连接本机受限接口。聊天中的“同意/继续”不会执行动作。</p>
+<style>body{font-family:system-ui;margin:2rem;max-width:1050px;color:#18212b}input,textarea,button,select{font:inherit;padding:.55rem;margin:.25rem}input{min-width:28rem}.card{border:1px solid #ccd4dd;border-radius:8px;padding:1rem;margin:1rem 0;background:#fff}pre{white-space:pre-wrap;background:#f5f7f9;padding:.8rem;overflow:auto}.charts svg{max-width:100%;height:auto;border:1px solid #eee;margin:.4rem 0}.warn{color:#a33}table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{border:1px solid #ccd4dd;padding:.5rem;text-align:left;overflow-wrap:anywhere}textarea{display:block;width:90%;min-height:4rem}input{max-width:90%;min-width:0}</style></head><body>
+<h1>相图项目本地审批</h1><p>审阅具体方案后批准、修改或拒绝。“继续”只推进分析，不代表批准。</p>
 <label>本地控制令牌 <input id="token" type="password" autocomplete="off"></label><button onclick="loadAll()">读取</button>
-<p id="message" class="warn"></p><section id="plans"></section><h2>项目生成图表</h2><section id="charts" class="charts"></section>
+<p id="message" class="warn"></p><section id="recovery"></section><section id="plans"></section><h2>项目生成图表</h2><section id="charts" class="charts"></section>
 <script>
 const el=id=>document.getElementById(id); const auth=()=>({'Authorization':'Bearer '+el('token').value,'Content-Type':'application/json'});
 async function api(path, options={}){const r=await fetch(path,{...options,headers:auth()});const j=await r.json();if(!r.ok)throw Error(j.error?.message||r.status);return j}
 function pretty(x){return JSON.stringify(x,null,2)}
-async function loadAll(){try{el('message').textContent='';const p=await api('/phase/pending');const c=await api('/phase/charts');renderPlans(p);el('charts').innerHTML='';Object.values(c.charts).forEach(x=>{const d=document.createElement('div');d.className='card';d.innerHTML=x.svg;const v=document.createElement('code');v.textContent='数据版本 '+x.data_version;d.appendChild(v);el('charts').appendChild(d)})}catch(e){el('message').textContent=e.message}}
-function renderPlans(value){el('plans').innerHTML='<h2>待批计划（'+value.count+'）</h2>';value.pending.forEach(p=>{const d=document.createElement('div');d.className='card';const pre=document.createElement('pre');pre.textContent=pretty(p);d.appendChild(pre);const note=document.createElement('textarea');note.placeholder='审核意见（可选）';d.appendChild(note);['approve','reject','confirm_sensitive'].forEach(decision=>{const b=document.createElement('button');b.textContent={approve:'批准',reject:'拒绝',confirm_sensitive:'确认敏感操作'}[decision];b.onclick=()=>decide(p,decision,note.value);d.appendChild(b)});el('plans').appendChild(d)})}
+async function loadAll(){try{el('message').textContent='';const p=await api('/phase/pending');const c=await api('/phase/charts');const status=await api('/phase/status');renderRecovery(status);renderPlans(p);el('charts').innerHTML='';Object.values(c.charts).forEach(x=>{const d=document.createElement('div');d.className='card';d.innerHTML=x.svg;const v=document.createElement('code');v.textContent='数据版本 '+x.data_version;d.appendChild(v);el('charts').appendChild(d)})}catch(e){el('message').textContent=e.message}}
+function renderRecovery(status){
+ const root=el('recovery');root.replaceChildren();const heading=document.createElement('h2');heading.textContent=status.waiting_state?.label||'项目状态';root.appendChild(heading);const next=document.createElement('p');next.textContent=status.waiting_state?.next_action||'';root.appendChild(next);
+ (status.recovery_report?.checks||[]).forEach(x=>{
+ const card=document.createElement('div');card.className='card';const text=document.createElement('p');text.textContent='中断动作 '+(x.identity?.invocation_id||'未记录')+'：已登记完成 '+x.completed_task_ids.length+' 个任务，等待 '+x.pending_task_ids.length+' 个任务。'+x.next_action;card.appendChild(text);
+ const detail=document.createElement('details');const summary=document.createElement('summary');summary.textContent='查看文件、任务、执行日志和预算核对证据';detail.appendChild(summary);const pre=document.createElement('pre');pre.textContent=pretty(x);detail.appendChild(pre);card.appendChild(detail);
+ if(x.identity?.invocation_id){
+ function select(label,choices){const wrap=document.createElement('label');wrap.textContent=label;const input=document.createElement('select');[['','请选择'],...choices].forEach(([value,name])=>{const option=document.createElement('option');option.value=value;option.textContent=name;input.appendChild(option)});wrap.appendChild(input);card.appendChild(wrap);return input}
+ const resolution=select('处理方式 ',[['verified_registered_effects','复用已登记任务与结果'],['verified_no_effect','结束已核对无副作用的旧动作']]);
+ const jobs=select('外部作业核对 ',[['registered_only','仅有已登记作业'],['none_found','已核对，没有作业'],['not_applicable','此动作不涉及外部作业']]);
+ const inventory=select('产出核对 ',[['registered_outputs','已核对登记产出'],['checked_no_outputs','已核对，没有产出']]);
+ const cost=document.createElement('input');cost.type='number';cost.min='0';cost.step='any';cost.placeholder='无副作用时填写 0';const costLabel=document.createElement('label');costLabel.textContent='科学计算实际成本 ';costLabel.appendChild(cost);card.appendChild(costLabel);
+ const note=document.createElement('textarea');note.placeholder='填写实际核对的目录、任务来源、作业和台账依据；文件缺失不能证明没有副作用。';card.appendChild(note);
+ const button=document.createElement('button');button.textContent='生成核对处理方案';button.onclick=async()=>{try{await api('/phase/recovery/propose',{method:'POST',body:JSON.stringify({invocation_id:x.identity.invocation_id,resolution:resolution.value,evidence_note:note.value,external_jobs:jobs.value,output_inventory:inventory.value,external_cost:cost.value===''?null:Number(cost.value)})});await loadAll();el('message').textContent='处理方案已生成，请审阅后确认；尚未解除阻塞。'}catch(e){el('message').textContent=e.message}};card.appendChild(button);
+ }root.appendChild(card);
+ })
+}
+function renderPlans(value){
+ el('plans').replaceChildren();const heading=document.createElement('h2');heading.textContent='待审方案（'+value.count+'）';el('plans').appendChild(heading);
+ value.pending.forEach(p=>{const c=p.review_card||{};const d=document.createElement('div');d.className='card';
+ const title=document.createElement('h3');title.textContent=(c.title||p.recommended_action)+' · 修订 '+p.revision;d.appendChild(title);
+ function line(label,value){const x=document.createElement('p');x.textContent=label+'：'+value;d.appendChild(x)}
+ line('方案',p.plan_id+' · '+p.proposal_hash.slice(0,12));line('目的',c.purpose||p.reason||'未记录');line('理由',c.reason||p.reason||'未记录');
+ line('执行范围',c.scope||((c.target_count??p.target_ids.length)+' 个目标'));line('预算',c.budget??'未记录');line('审批边界',c.approval_boundary||'仅本次展示的动作');if(c.blocked)line('暂不可批准',c.blocked);
+ if(c.changes?.length){const table=document.createElement('table');const head=table.insertRow();['修改项','原值','新值'].forEach(v=>{const cell=document.createElement('th');cell.textContent=v;head.appendChild(cell)});c.changes.forEach(x=>{const row=table.insertRow();[x.field,pretty(x.before),pretty(x.after)].forEach(v=>{const cell=row.insertCell();cell.textContent=v})});d.appendChild(table);line('修订确认','旧版批准不适用于新版方案')}
+ const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='查看目标、成本预估与完整参数依据';details.appendChild(summary);const pre=document.createElement('pre');pre.textContent=pretty(p);details.appendChild(pre);d.appendChild(details);
+ const note=document.createElement('textarea');note.placeholder=p.review_kind==='configuration'?'配置修改填写 JSON 路径与值，或在聊天中描述要求':p.review_kind==='execution_recovery'?'审核意见；修改核对依据请重新生成方案':'修改要求或审核意见';note.setAttribute('aria-label','修改要求或审核意见');d.appendChild(note);
+ [c.sensitive?'confirm_sensitive':'approve',...(p.review_kind==='execution_recovery'?[]:['modify']),'reject'].forEach(decision=>{const b=document.createElement('button');b.textContent={approve:'批准本方案',modify:'修改后重新审阅',reject:'拒绝',confirm_sensitive:p.review_kind==='execution_recovery'?'确认恢复处理':p.review_kind==='model_activation'?'确认切换模型':'确认敏感操作'}[decision];b.disabled=(decision==='approve'&&c.sensitive)||(!!c.blocked&&['approve','confirm_sensitive'].includes(decision));b.onclick=()=>decide(p,decision,note.value);d.appendChild(b)});el('plans').appendChild(d)})
+}
 async function decide(p,decision,comment){try{const result=await api('/phase/decision',{method:'POST',body:JSON.stringify({plan_id:p.plan_id,decision,state_version:p.state_version,proposal_hash:p.proposal_hash,comment})});el('message').textContent='处理结果：'+result.status;await loadAll()}catch(e){el('message').textContent=e.message}}
 </script></body></html>"""
 

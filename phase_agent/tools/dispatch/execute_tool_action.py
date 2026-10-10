@@ -34,7 +34,7 @@ def execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict:
             "action_hash": proposal_hash(action),
             "tool": tool,
         }
-        receipt = begin_execution(state_path, identity)
+        receipt = begin_execution(state_path, identity, action=action)
         if not receipt["allowed"]:
             return {
                 "status": "execution_reconciliation_required",
@@ -64,5 +64,14 @@ def execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict:
     if identity is not None:
         from phase_agent.tools.state.execution_receipts import record_execution_return
 
-        record_execution_return(state_path, identity, execution["status"])
+        from phase_agent.tools.state.execution_return_evidence import return_evidence
+
+        record_execution_return(
+            state_path,
+            identity,
+            execution["status"],
+            evidence=return_evidence(
+                execution, action=action, invocation_id=identity["invocation_id"]
+            ),
+        )
     return execution

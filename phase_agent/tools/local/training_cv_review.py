@@ -167,7 +167,7 @@ def register_cv_candidate(current, key, job, result, report, handoff):
         "status": "validated_candidate",
     }
     if stored and stored.get("validation") == validation and stored.get("model") == model:
-        for field in ("agent_review", "agent_review_diagnostic"):
+        for field in ("agent_review", "agent_review_diagnostic", "superseded_agent_reviews"):
             if field in stored:
                 current["candidate_models"][version][field] = deepcopy(stored[field])
     artifact = Path(job["directory"]) / "results" / "cv_baseline_review.json"

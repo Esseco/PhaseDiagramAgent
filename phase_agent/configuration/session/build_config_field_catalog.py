@@ -20,6 +20,22 @@ def build_config_field_catalog(config):
             "python_environments.remote_mlip": "超算Relax/MC/MACE环境",
         }
     )
+    meanings.update(
+        {
+            "system.H_generation.size_min": "超胞体积倍数下限；未指定时保留现值，不代表用户限制",
+            "system.H_generation.size_step": "体积倍数枚举步长；默认1，奇偶限制须用户明确指定",
+            "system.H_generation.selected_recommendation_indices": "用户明确选择的周期包含约束；空列表表示不额外限制",
+            "system.H_generation.min_distance_angstrom": "最短层内周期距离的一半下限，单位Å，不是原子间距",
+            "budgets.structure_limits.max_det_H": "全局超胞体积倍数上限，与生成范围一致",
+            "budgets.structure_limits.max_atoms": "单结构原子数上限",
+            "convergence.final_energy_mae_tolerance": "最终能量MAE阈值，单位eV/atom；meV/atom需除1000",
+            "convergence.hull_change_tolerance": "凸包变化阈值，采用相图定义的能量归一化",
+            "convergence.stable_model_update_epochs": "连续稳定模型更新轮数，不是训练epoch数",
+            "dft.parameter_source": "DFT参数来源；采用默认值需说明来源",
+            "dft.parameters": "用户DFT设置；单点与弛豫设置须区分",
+            "python_environments.local_python": "本地管理和分析环境；未另指定使用py1",
+        }
+    )
     derived = {
         "system.constraints.phases": "system.boundary.P",
         "system.constraints.TM_ratio": "system.boundary.TM_ratio",

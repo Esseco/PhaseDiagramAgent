@@ -183,15 +183,15 @@ def select_initial_proposal(
                 "prepare_local_batch_files",
             }
         ]
-    from phase_agent.tools.state.approved_direction import approved_direction, direction_hash, TOOLS
+    from phase_agent.tools.state.approved_direction import action_direction, direction_hash, TOOLS
 
-    direction = approved_direction(current)
+    direction = action_direction(current)
     if direction:
         safe_next = None
         allowed = [tool for tool in allowed if tool in TOOLS[direction["direction"]]]
         decision_state.setdefault("decision_context", {})["approved_direction"] = {
             **deepcopy(direction),
-            "instruction": "方向已经批准；仅细化该方向的具体候选、参数与预算，不重新选择方向，不再次微调或启动新搜索。具体动作另行审批。",
+            "instruction": "复用已保存的方向及具体动作，禁止重新选择方向或生成同一动作的新版本。尚未批准时只展示完整执行范围及成本；一次具体动作审批同时确认方向。",
         }
     if (
         not unified
@@ -212,13 +212,11 @@ def select_initial_proposal(
         if safe_next and safe_next.get("tool") == "update_mlip":
             safe_next = None
         decision_state.setdefault("decision_context", {})["training_already_completed"] = {
-            "instruction": "本轮微调已完成且结果回收；禁止再次训练。当前应提出验证所需的数据复用、补DFT或验证配置修订方案。"
+            "instruction": "本轮微调已完成且结果回收，不重复相同数据的训练。应比较切换候选模型后刷新并搜索，与针对明确覆盖缺口补采样/DFT、回收新增数据后再微调的收益；不要默认转向独立验证配置修订。"
         }
     from phase_agent.tools.local.training_followup_plan import saved_followup
 
-    planned_action = (
-        saved_followup(direction) if direction and not unified and not model_owned else None
-    )
+    planned_action = saved_followup(direction) if direction else None
     if planned_action:
         planned_action["decision_source"] = "saved_agent_direction_plan"
     action = (
@@ -239,7 +237,7 @@ def select_initial_proposal(
         return {
             "status": "not_configured",
             "state": current,
-            "reason": "本轮微调已完成，重复训练方案已拦截。请继续生成验证数据或配置方案。",
+            "reason": "本轮微调已完成，重复训练方案已拦截。请先审阅切换搜索或补采样/DFT的方案。",
         }
     if assessment and not model_failed(action):
         if not valid_post_dft_review(action):
@@ -361,6 +359,7 @@ def select_initial_proposal(
                 "reason": "具体方案偏离已批准方向，已拦截；未执行。",
             }
         action["_approved_direction_hash"] = direction_hash(direction)
+        action.setdefault("task_key", "direction-action:" + direction_hash(direction))
     proposal = build_agent_proposal(action, decision_state, runtime_state=current)
     record_id = record_id_factory(current, invocation_id)
     return {

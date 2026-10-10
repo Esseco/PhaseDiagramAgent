@@ -15,6 +15,18 @@ def scientific_progress(config_path):
     if not state_path.is_file():
         return {}
     state = json.loads(state_path.read_text(encoding="utf-8"))
+    session = None
+    if settings.get("config_session_path"):
+        session_path = Path(settings["config_session_path"])
+        if not session_path.is_absolute():
+            session_path = config.parent / session_path
+        if session_path.is_file():
+            session = json.loads(session_path.read_text(encoding="utf-8"))
+    return project_progress(state, state_path, session=session)
+
+
+def project_progress(state, state_path, *, session=None):
+    """One projection shared by Studio and the authenticated status endpoint."""
     progress = {
         "active_model_version": state.get("active_model_version"),
         "pending_action_count": len(state.get("pending_execution_policies") or {}),
@@ -37,7 +49,9 @@ def scientific_progress(config_path):
     waiting = [
         row
         for row in progress["directions"]
-        if row.get("status") == "awaiting_approval" and not row["activated"]
+        if row.get("status") == "awaiting_approval"
+        and row.get("waiting_at") != "execution_plan_ready"
+        and not row["activated"]
     ]
     progress["waiting_for"] = (
         "direction_approval"
@@ -68,4 +82,41 @@ def scientific_progress(config_path):
         if progress["directions"]
         else fallback
     )
+    from phase_agent.runtime.review_requests import pending_reviews
+
+    progress["review_requests"] = pending_reviews(state, session)
+    progress["pending_review_count"] = len(progress["review_requests"])
+    progress["plan_cards"] = [row["review_card"] for row in progress["review_requests"]]
+    status, label, action = "ready", "可提出下一步方案", "回复继续，由 Agent 核对现有结果并提出方案"
+    from phase_agent.graphs.execution_recovery_graph import execution_recovery_report
+
+    report = execution_recovery_report(state_path, state)
+    progress["recovery_report"] = report
+    reconciliation = report.get("unsettled") or []
+    if reconciliation:
+        status, label, action = (
+            "reconciliation",
+            "需要核对中断执行",
+            "核对已有文件、任务和账本，再决定恢复；不要重复批准",
+        )
+    elif progress["review_requests"]:
+        status, label, action = (
+            "human_review",
+            "等待人工审阅",
+            "查看具体方案后批准、修改或拒绝；继续不代表批准",
+        )
+    elif any(row.get("status") == "running" for row in tasks):
+        status, label, action = (
+            "task_running",
+            "计算任务记录为运行中",
+            "核对超算状态并回传结果；Studio 聊天状态不代表超算状态",
+        )
+    elif active:
+        status, label, action = (
+            "external_results",
+            "等待任务执行或结果回传",
+            "确认已提交任务，回传结果后回复继续；未回传结果不算完成",
+        )
+    progress["waiting_state"] = {"kind": status, "label": label, "next_action": action}
+    progress["summary"] = label
     return progress

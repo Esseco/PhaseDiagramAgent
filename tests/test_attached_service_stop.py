@@ -35,4 +35,4 @@ def test_explicit_stop_verifies_selected_project(tmp_path):
     ):
         assert stop_project_service(path)
         stop.assert_called_once_with(process)
-        write.assert_called_once_with(path, {"status": "stopped"})
+        assert [call.args[1]["status"] for call in write.call_args_list] == ["stopping", "stopped"]

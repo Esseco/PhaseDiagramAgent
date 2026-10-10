@@ -164,6 +164,25 @@ def run_model_refresh_gate(
     config = context["effective_config"]
     refresh = current["model_refresh"]
     automatic = refresh.get("status") == "supplement_ready"
+    from phase_agent.tools.workflows.model_refresh_scope import (
+        approved_refresh_scope,
+        refresh_scope_errors,
+        consume_refresh_scope,
+    )
+
+    if automatic:
+        scope_errors = refresh_scope_errors(
+            refresh, session["confirmed_snapshot"]["config_version"]
+        )
+        if scope_errors:
+            return {
+                "status": "confirmation_required",
+                "state": current,
+                "submitted": False,
+                "reason": "补充刷新暂停："
+                + "；".join(scope_errors)
+                + "。请修订并审阅刷新范围；未追加输入或计算。",
+            }
     try:
         plan = (
             refresh["plan"] if automatic else refresh_preview(current, context["manager"], config)
@@ -208,6 +227,22 @@ def run_model_refresh_gate(
         else ("dry_run" if mode == "dry_run" else "interactive"),
         human_feedback=human_feedback,
     )
+    if not automatic and not policy.get("execute"):
+        from phase_agent.tools.policy.native_approval import native_approval_gate
+
+        blocked = native_approval_gate(
+            {
+                "mode": mode,
+                "context": context,
+                "pending_key": action["task_key"],
+                "current": current,
+                "proposal": proposal,
+                "stored": stored,
+            },
+            policy,
+        )
+        if blocked is not None:
+            return blocked
     if policy["status"] == "awaiting_approval":
         current.setdefault("pending_execution_policies", {})[key] = {
             "agent_proposal": proposal,
@@ -244,6 +279,22 @@ def run_model_refresh_gate(
             "reason": "刷新方案校验失败，未截断：" + str(validation["errors"]),
             "submitted": False,
         }
+    if not automatic:
+        from phase_agent.tools.policy.native_approval import native_approval_gate
+
+        blocked = native_approval_gate(
+            {
+                "mode": mode,
+                "context": context,
+                "pending_key": action["task_key"],
+                "current": current,
+                "proposal": proposal,
+                "stored": stored,
+            },
+            policy,
+        )
+        if blocked is not None:
+            return blocked
     execution = execute_tool_action(
         action,
         registry=registry,
@@ -252,12 +303,28 @@ def run_model_refresh_gate(
             "event_state": current,
             "config_version": session["confirmed_snapshot"]["config_version"],
             "approval_record_id": action["task_key"],
+            "invocation_id": action["task_key"],
         },
     )
     result = execution.get("result") or {}
     updated = result.get("state", current)
     if result.get("status") == "prepared":
         updated.setdefault("pending_execution_policies", {}).pop(key, None)
+        if automatic:
+            consume_refresh_scope(updated["model_refresh"])
+        else:
+            updated["model_refresh"]["approved_scope"] = approved_refresh_scope(
+                plan, session["confirmed_snapshot"]["config_version"]
+            )
+    if execution.get("status") in {"completed", "failed"}:
+        updated.setdefault("invocations", {})[action["task_key"]] = {
+            "status": result.get("status", execution["status"]),
+            "execution": {
+                "status": execution["status"],
+                "tool": execution.get("tool"),
+                "error": execution.get("error"),
+            },
+        }
     updated.setdefault("action_records", []).append(
         {
             "record_id": action["task_key"],

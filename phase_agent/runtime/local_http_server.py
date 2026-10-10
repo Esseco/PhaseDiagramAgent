@@ -149,6 +149,7 @@ def create_local_http_server(
             if self.path in {
                 "/phase/propose",
                 "/phase/decision",
+                "/phase/recovery/propose",
                 "/phase/pause",
                 "/phase/config/patch",
                 "/phase/config/confirm",
@@ -187,6 +188,8 @@ def create_local_http_server(
                             comment=body.get("comment", ""),
                             conversation_id=conversation,
                         )
+                    elif self.path == "/phase/recovery/propose":
+                        response = local_control.propose_recovery(body)
                     elif self.path == "/phase/config/patch":
                         response = local_control.patch_config(
                             body.get("patch"),

@@ -874,6 +874,9 @@ def _finish_graph_node(frame):
     current.setdefault("decisions", []).append(
         {"config_version": validation.get("config_version"), **compact_action_history(response)}
     )
+    from phase_agent.tools.state.approved_direction import complete_action_direction
+
+    complete_action_direction(current, action, record_id, status)
     _store_completed(current, invocation_id, response)
     current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
     return {**response, "state": current, "idempotent_replay": False}

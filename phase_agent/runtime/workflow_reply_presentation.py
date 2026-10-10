@@ -14,10 +14,48 @@ def _is_model_failure_proposal(proposal):
 
 
 def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
+    if result.get("status") == "awaiting_approval" and not result.get("_review_card_rendered"):
+        pending = (result.get("state") or {}).get("pending_execution_policies") or {}
+        proposal = result.get("agent_proposal") or {}
+        match = next(
+            ((key, row) for key, row in pending.items() if row.get("agent_proposal") == proposal),
+            None,
+        )
+        if match:
+            from phase_agent.runtime.review_presentation import review_card, revision_lines
+
+            key, row = match
+            card = review_card(key, row)
+            heading = (
+                f"方案：{card['title']} · 修订 {card['revision']} · {card['proposal_hash'][:12]}"
+            )
+            original = format_workflow_reply(
+                {**result, "_review_card_rendered": True}, state_path, verbose=verbose
+            )
+            return "\n".join(
+                [heading, *revision_lines(row), original, "审批范围：" + card["approval_boundary"]]
+            )
     if result.get("status") in DIALOGUE_STATUSES:
         return str(result.get("answer") or "未取得有效答复。")
     if result.get("status") == "execution_reconciliation_required":
-        rows = (result.get("recovery_report") or {}).get("unsettled") or []
+        report = result.get("recovery_report") or {}
+        checks = report.get("checks") or []
+        if checks:
+            lines = ["当前：中断执行需要对账，本轮未执行新动作。"]
+            for check in checks[:4]:
+                identity = check.get("identity") or {}
+                lines.extend(
+                    [
+                        f"动作：{identity.get('tool') or '未知'}；编号：{identity.get('invocation_id') or '未记录'}",
+                        f"已登记完成任务 {len(check['completed_task_ids'])} 个、待执行/回传 {len(check['pending_task_ids'])} 个；已核对文件 {len(check['artifact_checks'])} 个。",
+                        "恢复建议：" + check["next_action"],
+                    ]
+                )
+                for artifact in check["artifact_checks"][:4]:
+                    lines.append(f"- {artifact['path']}：{artifact['status']}")
+            lines.append("上述为只读核对；原动作不会自动重跑。没有记录或文件缺失不等于没有副作用。")
+            return "\n".join(lines)
+        rows = report.get("unsettled") or []
         names = {"generate_branches": "初始结构生成", "prepare_local_batch_files": "输入文件准备"}
         tools = list(
             dict.fromkeys(

@@ -28,7 +28,10 @@ def pending_plan_reply(state):
         ("MC输入重生成", state.get("pending_mc_regeneration")),
     ]
     regeneration = [(name, plan) for name, plan in regeneration if plan]
-    total = len(pending) + len(regeneration)
+    from phase_agent.runtime.review_requests import additional_reviews
+
+    reviews = additional_reviews(state)
+    total = len(pending) + len(regeneration) + len(reviews)
     if not total:
         return "当前没有待确认方案。可说“继续”获取下一步建议。"
     if total > 1:
@@ -37,7 +40,16 @@ def pending_plan_reply(state):
             for key, row in pending.items()
         ]
         entries.extend(name for name, _ in regeneration)
+        entries.extend(f"{row['plan_id']}：{row['review_card']['title']}" for row in reviews)
         return "有多个待确认方案，请指定要查看哪个：\n" + "\n".join(f"- {item}" for item in entries)
+    if reviews:
+        row = reviews[0]
+        card = row["review_card"]
+        return (
+            f"已保存方案（编号：{row['plan_id']}）：\n"
+            f"{card['title']}：{card['scope']}\n依据：{row['reason']}\n"
+            f"审批边界：{card['approval_boundary']}\n本次仅查看，未批准或执行。"
+        )
     if regeneration:
         name, plan = regeneration[0]
         return (

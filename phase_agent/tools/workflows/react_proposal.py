@@ -15,6 +15,18 @@ def prepare_react_proposal(frame):
     stored = current["pending_execution_policies"].get(key)
     feedback = frame.get("human_feedback")
     decision = feedback.get("decision") if isinstance(feedback, dict) else feedback
+    if stored and decision == "comment":
+        from phase_agent.tools.workflows.training_plan_revision import revise_training_plan
+
+        current, response = revise_training_plan(
+            current,
+            stored,
+            str(feedback.get("comment") or context.get("user_message") or ""),
+            frame["agent_client"],
+            context.get("state_path"),
+        )
+        if response:
+            return response
     summary = agent_state_summary(current)
     summary["user_message"] = str(context.get("user_message") or "")
     if stored:

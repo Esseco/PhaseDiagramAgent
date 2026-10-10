@@ -96,10 +96,6 @@ class LayeredOxideSupercellTest(unittest.TestCase):
         self.assertEqual(result[0]["H"], h.tolist())
 
     def test_empty_or_invalid_inputs_are_rejected(self):
-        with self.assertRaisesRegex(ValueError, "P_small"):
-            enumerate_layered_oxide_supercells(
-                "O3", self.structure, sizes=[4], p_small_list=[]
-            )
         with self.assertRaisesRegex(ValueError, "sizes"):
             enumerate_layered_oxide_supercells(
                 "O3", self.structure, sizes=[], p_small_list=[[[1, 0], [0, 1]]]

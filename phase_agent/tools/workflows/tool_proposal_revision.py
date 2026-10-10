@@ -123,8 +123,32 @@ def revise_pending_proposal(
         if mode == "interactive" and original_action.get("tool") == "run_calculation_stage"
         else None
     )
+    from phase_agent.tools.workflows.training_plan_revision import revise_training_plan
+    from phase_agent.tools.state.approved_direction import action_direction, direction_hash
+    from phase_agent.tools.local.training_followup_plan import saved_followup
+
+    current, response = revise_training_plan(
+        current, stored, opinion, agent_client, (context or {}).get("state_path")
+    )
+    if response:
+        return response
+    bound_plan = (
+        saved_followup(action_direction(current))
+        if original_action.get("_approved_direction_hash")
+        else None
+    )
+    if bound_plan:
+        bound_plan["_approved_direction_hash"] = direction_hash(action_direction(current))
+        bound_plan["task_key"] = "direction-action:" + bound_plan["_approved_direction_hash"]
+        bound_plan["decision_source"] = "saved_agent_direction_plan"
     revision = (
         {
+            "action": bound_plan,
+            "analysis": bound_plan["reason"],
+            "revision_status": "training_direction_revised",
+        }
+        if bound_plan
+        else {
             "action": safe_next,
             "analysis": safe_next["reason"],
             "revision_status": "debug_preparation_required",
@@ -213,6 +237,7 @@ def revise_pending_proposal(
     history.append(
         {
             "comment": opinion,
+            "prior_proposal": deepcopy(stored["agent_proposal"]),
             "revision_status": revision["revision_status"],
             "analysis": revision["analysis"],
         }

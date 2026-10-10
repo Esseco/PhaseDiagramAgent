@@ -60,10 +60,14 @@ def durable_approval(state_path, envelope, decision=None):
                 snapshot = graph.get_state(config)
             if snapshot.values.get("envelope") != envelope:
                 raise ValueError("native approval identity mismatch")
+            if snapshot.values.get("delivered"):
+                return {
+                    "status": "approval_reconciliation_required",
+                    "checkpoint_path": str(path),
+                    "decision": (snapshot.values.get("decision") or {}).get("decision"),
+                }
             if decision is None:
                 return {"status": "awaiting_approval", "checkpoint_path": str(path)}
-            if snapshot.values.get("delivered"):
-                return {"status": "approval_reconciliation_required", "checkpoint_path": str(path)}
             answer = {"decision": decision, "envelope": envelope}
             saved = snapshot.values.get("decision")
             if saved and saved != answer:

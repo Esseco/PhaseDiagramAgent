@@ -69,6 +69,8 @@ def build_react_lifecycle_graph(*, action_graph=None, checkpointer=None, **stage
     graph = StateGraph(SearchWorkflowState, context_schema=WorkflowRuntime)
     graph.add_node("initialize", nodes["initialize_confirmed_run"])
     observation = observations.compile(checkpointer=None, name="project_observation")
+    # These are the exact read-only graphs called by the existing batch node.
+    observation.nodes["batch_recovery"].subgraphs = nodes["batch_recovery"].scientific_children
     graph.add_node("observe", observation)
     graph.add_node("wait", nodes["results_wait_gate"])
     graph.add_node("analyze", nodes["assess_and_export_round"])

@@ -245,11 +245,38 @@ def patch_split_project(path, patch, *, expected_hash=None, baseline_config=None
 
     combined = combine_project_documents(initial, source, run_document=run)
     effective = expand_project_config(combined, source=source, baseline_config=baseline_config)
-    # Rebase the pinned template using the existing saved full baseline if it changed.
-    if initial.get("profile_digest") != profile_digest():
-        raise ValueError(
-            "拆分配置的默认模板已更新；请先恢复原合并草稿并执行已有模板迁移，再拆分。文件未修改。"
+    # Expand first: stale templates require a usable saved full baseline.
+    migrated = initial.get("profile_digest") != profile_digest()
+    if migrated:
+        from phase_agent.configuration.session.project_config_json import (
+            _document_for_effective_config,
         )
+
+        rebased = _document_for_effective_config(combined, effective)
+        initial = deepcopy(initial)
+        initial["profile_digest"] = rebased["profile_digest"]
+        run = deepcopy(run)
+        run_values = {}
+        for section in ("config", "overrides"):
+            initial[section] = {}
+            for key, value in rebased.get(section, {}).items():
+                if key in INITIAL_ROOTS:
+                    initial[section][key] = deepcopy(value)
+                elif (
+                    key in run_values
+                    and isinstance(value, dict)
+                    and isinstance(run_values[key], dict)
+                ):
+                    run_values[key] = merge_dict(run_values[key], value)
+                else:
+                    run_values[key] = deepcopy(value)
+        run["config"] = run_values
+        checked = expand_project_config(
+            combine_project_documents(initial, source, run_document=run), source=source
+        )
+        if checked != effective:
+            raise ValueError("拆分模板迁移后的有效配置不一致，文件未修改")
+        touched.update({"initial", "run"})
     for dotted_path, value in patch.items():
         actual = effective
         for part in dotted_path.split("."):
@@ -258,6 +285,13 @@ def patch_split_project(path, patch, *, expected_hash=None, baseline_config=None
             raise ValueError("写入后生效值不一致：" + dotted_path)
     if editable_project_hash(source) != identity:
         raise ValueError("配置在写入前发生变化，请重新读取")
+    if migrated:
+        from phase_agent.configuration.session.project_config_json import _profile_migration_backup
+
+        for target in (source, runtime):
+            backup = _profile_migration_backup(target)
+            with backup.open("xb") as handle:
+                handle.write(target.read_bytes())
     # A crash between replacements changes combined identity and invalidates review.
     if "run" in touched:
         write_document(runtime, run)

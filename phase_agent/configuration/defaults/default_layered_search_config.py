@@ -167,7 +167,7 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             "resource_limit": {"max_tasks": 100, "max_concurrency": 4},
             "debug_requires_approval": True,
         },
-        "run": {"total_quota": 300, "batch_size": 96, "initial_states_per_branch": 4, "seed": 42},
+        "run": {"total_quota": 900, "batch_size": 288, "initial_states_per_branch": 4, "seed": 42},
         "qbc": default_dft_decision_config(),
         "bohb": default_bohb_config(),
         "round_strategy": default_round_strategy_config(),

@@ -69,6 +69,9 @@ def _save_runner_state(state, state_path):
     if state_path is None:
         return
     write_json(state_path, state)
+    from phase_agent.tools.state.execution_receipts import record_business_saved
+
+    record_business_saved(state_path, state)
     from phase_agent.persistence.memory.publish_memory_views import publish_memory_views
 
     publish_memory_views(state, state_path)

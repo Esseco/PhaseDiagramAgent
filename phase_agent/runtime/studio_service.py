@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 import socket
-from urllib.request import urlopen
+from urllib.request import ProxyHandler, build_opener
 
 
 def preflight(config_path, port, control_port=8765):
@@ -66,25 +66,48 @@ def run_service(args):
         / "studio_gateway"
         / "gateway.json"
     )
+    identity = {
+        "pid": os.getpid(),
+        "process_started": psutil.Process().create_time(),
+        "runtime_config": str(config_path),
+        "project_name": config_path.parent.name,
+        "control_port": args.control_port,
+        "studio_port": args.port,
+    }
     child = None
+    failure = None
+    child_log = config_path.parent / "logs" / "studio_server.log"
+    child_log.parent.mkdir(parents=True, exist_ok=True)
+    write_service(config_path, {**identity, "status": "starting"})
     try:
-        child = subprocess.Popen(
-            [
-                str(cli),
-                "dev",
-                "--config",
-                str(graph_config),
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(args.port),
-                "--no-browser",
-                "--no-reload",
-            ],
-            env=env,
-            cwd=graph_config.parent,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        stream = child_log.open("a", encoding="utf-8")
+        stream.write(f"\nStudio start owner={os.getpid()} port={args.port}\n")
+        stream.flush()
+        try:
+            child = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-u",
+                    "-m",
+                    "langgraph_cli",
+                    "dev",
+                    "--config",
+                    str(graph_config),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(args.port),
+                    "--no-browser",
+                    "--no-reload",
+                ],
+                env=env,
+                cwd=graph_config.parent,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+            )
+        finally:
+            stream.close()
         import psutil
 
         deadline = time.monotonic() + 90
@@ -94,21 +117,25 @@ def run_service(args):
                 break
             if not ready:
                 try:
-                    with urlopen(f"http://127.0.0.1:{args.port}/info", timeout=0.5) as response:
+                    with build_opener(ProxyHandler({})).open(
+                        f"http://127.0.0.1:{args.port}/info", timeout=0.5
+                    ) as response:
                         ready = response.status == 200
+                    if ready:
+                        with build_opener(ProxyHandler({})).open(
+                            f"http://127.0.0.1:{args.control_port}/health", timeout=0.5
+                        ) as response:
+                            ready = response.status == 200
                 except OSError:
-                    pass
+                    ready = False
                 if ready:
                     write_service(
                         config_path,
                         {
-                            "pid": os.getpid(),
-                            "process_started": psutil.Process().create_time(),
-                            "runtime_config": str(config_path),
-                            "project_name": config_path.parent.name,
-                            "control_port": args.control_port,
-                            "studio_port": args.port,
+                            **identity,
                             "status": "ready",
+                            "child_pid": child.pid,
+                            "child_log": str(child_log),
                         },
                     )
                     print(f"READY: Studio API http://127.0.0.1:{args.port}", flush=True)
@@ -125,11 +152,20 @@ def run_service(args):
                         "Studio API did not become ready within 90 seconds; inspect terminal errors"
                     )
             time.sleep(0.5)
-        if child.poll() not in {None, 0}:
-            raise RuntimeError("Studio development server exited; inspect agent_server.log")
+        if child.poll() is not None:
+            raise RuntimeError(f"Studio 子进程退出（退出码 {child.poll()}）；请查看 {child_log}")
     except KeyboardInterrupt:
         print("Studio stopped.", flush=True)
+    except Exception as error:
+        failure = {
+            "error_type": type(error).__name__,
+            "error": str(error),
+            "child_exit_code": child.poll() if child else None,
+            "child_log": str(child_log),
+        }
+        raise
     finally:
+        write_service(config_path, {**identity, "status": "stopping", **(failure or {})})
         from phase_agent.runtime.studio_run_lifecycle import interrupt_studio_runs
 
         try:
@@ -142,7 +178,10 @@ def run_service(args):
                     child.kill()
                     child.wait(timeout=5)
         finally:
-            write_service(config_path, {"status": "stopped"})
+            write_service(
+                config_path,
+                {**identity, "status": "failed" if failure else "stopped", **(failure or {})},
+            )
 
 
 if __name__ == "__main__":

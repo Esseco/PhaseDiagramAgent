@@ -1,17 +1,26 @@
 """Scientific choice precedes human execution approval."""
 
 from copy import deepcopy
+
+REVIEW_POLICY = "post_training_single_approval_v3"
 from phase_agent.tools.budget.record_budget_usage import record_budget_usage
 
 
-def review_training_choice(state, waits, agent_client, *, state_path=None, user_message=None):
+def review_training_choice(
+    state, waits, agent_client, *, state_path=None, user_message=None, revise_approved=False
+):
     feedback = str(user_message or "").strip()
     if feedback.lower() in {"继续", "继续原运行", "同意", "拒绝", "continue", "approve", "reject"}:
         feedback = ""
     for handoff in waits:
         if (
             handoff.get("stage")
-            not in {"awaiting_activation_approval", "awaiting_direction_approval"}
+            not in {
+                "awaiting_activation_approval",
+                "awaiting_direction_approval",
+                "execution_plan_ready",
+                "execution_plan_approved",
+            }
             or handoff.get("evidence_type") != "grouped_cross_validation_review"
         ):
             continue
@@ -19,11 +28,21 @@ def review_training_choice(state, waits, agent_client, *, state_path=None, user_
         candidate = state["candidate_models"][version]
         review = candidate.get("agent_review")
         previous_review = deepcopy(review)
+        if review and review.get("followup_result") and not feedback:
+            handoff.update(
+                stage="followup_completed", direction_status=review["followup_result"]["status"]
+            )
+            for job in state.get("remote_finetune_jobs", {}).values():
+                if (job.get("training_handoff") or {}).get("candidate_model_version") == version:
+                    job["training_handoff"] = deepcopy(handoff)
+            continue
         revised = bool(
-            feedback
-            and review
-            and review.get("user_feedback") != feedback
-            and handoff.get("direction_status") not in {"approved", "rejected"}
+            review
+            and (
+                review.get("review_policy") != REVIEW_POLICY
+                or (feedback and review.get("user_feedback") != feedback)
+            )
+            and (revise_approved or handoff.get("direction_status") not in {"approved", "rejected"})
         )
         if revised:
             candidate.setdefault("superseded_agent_reviews", []).append(deepcopy(review))
@@ -58,7 +77,7 @@ def review_training_choice(state, waits, agent_client, *, state_path=None, user_
                     "candidate_validation": candidate["validation"],
                     "search_evidence": build_decision_context(state),
                 },
-                "instruction": "由你作科学判断，比较换新模型、保留旧模型补DFT、核查接口或其他策略。禁止把选择交给用户。返回tool=adjust_strategy，parameters.choice=activate/supplement_dft/other，reason为简短科学理由，parameters.alternatives为其他路线暂不选的原因。K折不是最终模型独立测试；激活仅供下一轮刷新，之后判收敛和DFT缺口。不得执行或重训。",
+                "instruction": "微调已完成。科学决策主要比较两条路线：1.activate：切换候选新模型，刷新已有结构与凸包，再进入下一轮搜索；2.supplement_dft：针对覆盖缺口或高误差区域补采样与DFT，回收新增数据后再微调。比较下一轮搜索的信息收益与新增DFT的边际收益、覆盖、误差分布和预算，推荐一条并解释另一条暂不选的原因。旧模型误差不能当作新模型误差；微调改善是用户工作假设，未测量的改善幅度不得虚构。若没有明确高收益补DFT目标，应说明切换并搜索是否更合理。不要把独立验证字段缺失自动当成这两条路线的阻塞，也不要仅凭预测力幅度小就诊断接口错误。K折不等于最终独立验证，但候选可按现有审批进入下一轮搜索，不代表已收敛。other仅限有直接证据的执行阻塞，须明确证据和解除条件。返回tool=adjust_strategy，parameters.choice=activate/supplement_dft/other，reason为简短收益比较，parameters.alternatives解释未选路线。此处只提出方案，不执行或重复本轮训练。",
             }
             if feedback:
                 payload["user_instruction"] = feedback
@@ -89,7 +108,7 @@ def review_training_choice(state, waits, agent_client, *, state_path=None, user_
                 " 严格按output_contracts返回完整JSON；choice和alternatives必须放在parameters中。"
                 " 非activate方向必须同时给出parameters.followup_action完整动作，包含tool、parameters、target_ids、budget、reason、expected_purpose、evidence_refs。"
                 " supplement_dft使用select_dft_candidates或必要配置修订adjust_strategy；other使用adjust_strategy。"
-                " 候选必须来自提供的数据，无法形成DFT方案则明确提出配置或核查方案，不虚构任务。"
+                " 候选必须来自提供的数据，不能虚构候选；尚无可用目标时说明下一步怎样采样获得目标，不因无法列目标自动选择补验证配置。"
                 " 若search_evidence.post_dft_assessment存在，followup_action必须带符合schema的post_dft_review；"
                 " 说明微调已经完成，此处只做后续决策，不再次训练。方向和具体动作必须一致。"
             )
@@ -149,6 +168,7 @@ def review_training_choice(state, waits, agent_client, *, state_path=None, user_
                 continue
             review = {
                 "choice": choice,
+                "review_policy": REVIEW_POLICY,
                 "user_feedback": feedback,
                 "reason": reason,
                 "alternatives": deepcopy(alternatives),
@@ -157,6 +177,7 @@ def review_training_choice(state, waits, agent_client, *, state_path=None, user_
             candidate["agent_review"] = review
         proposal = {
             "direction": review["choice"],
+            "review_policy": review.get("review_policy"),
             "user_feedback": review.get("user_feedback", ""),
             "candidate_model_version": version,
             "training_fingerprint": handoff.get("training_fingerprint"),
@@ -168,16 +189,18 @@ def review_training_choice(state, waits, agent_client, *, state_path=None, user_
             else deepcopy(review["followup_action"]),
         }
         handoff["direction_proposal"] = proposal
+        handoff.setdefault("direction_status", "awaiting_approval")
         if state_path:
             from phase_agent.graphs.direction_review_graph import direction_checkpoint
 
             checkpoint = direction_checkpoint(state_path, proposal)
             handoff["direction_status"] = checkpoint.get("status", "awaiting_approval")
         if review["choice"] == "activate":
+            handoff["stage"] = "awaiting_activation_approval"
             handoff["reason"] = (
                 "Agent判断：采用新模型。"
                 + review["reason"][:350]
-                + "\n执行方案：切换模型，随后准备已有结构与凸包刷新；刷新后判断收敛、补DFT或下一轮搜索。回复‘同意’执行，‘拒绝’取消。"
+                + "\n本次执行：切换模型。切换后展示已有结构与凸包刷新的具体范围、成本；该新增计算动作再审批。回复‘同意’执行，‘拒绝’取消。"
             )
         else:
             approved = handoff.get("direction_status") == "approved"
@@ -191,21 +214,21 @@ def review_training_choice(state, waits, agent_client, *, state_path=None, user_
             handoff.update(
                 stage="direction_rejected"
                 if rejected
-                else "validation_prerequisites_required"
+                else "execution_plan_approved"
                 if approved
-                else "awaiting_direction_approval",
+                else "execution_plan_ready",
                 reason="方向判断已完成。Agent建议："
                 + review["reason"][:220]
                 + plan_text
                 + (
-                    "；方向已批准，准备具体执行方案，执行另行审批。"
+                    "；该动作已批准，复用原方案核对执行条件。"
                     if approved
                     else "；方向已拒绝，未执行。"
                     if rejected
-                    else "\n回复‘同意’批准该方向及上述计划，随后核对执行条件；‘拒绝’取消。"
+                    else "；接下来核对并展示完整动作与成本，在执行方案处统一审批。"
                 ),
             )
         for job in state.get("remote_finetune_jobs", {}).values():
             if (job.get("training_handoff") or {}).get("candidate_model_version") == version:
                 job["training_handoff"] = deepcopy(handoff)
-    return state, waits
+    return state, [row for row in waits if row.get("stage") != "followup_completed"]

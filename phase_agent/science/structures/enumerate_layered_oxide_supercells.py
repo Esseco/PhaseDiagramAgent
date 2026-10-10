@@ -148,8 +148,6 @@ def _normalize_p_small_list(p_small_list: Iterable[Any]) -> list[list[list[int]]
             raise TypeError("p_small_list 必须是 2×2/3×3 矩阵组成的序列") from error
         if _is_matrix(values):
             values = [values]
-    if not values:
-        raise ValueError("至少选择一个 P_small 矩阵")
 
     result = []
     for value in values:

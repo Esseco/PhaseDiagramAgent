@@ -22,6 +22,12 @@ def handle(self, user_message, state, messages, conversation_id):
     if self.config_delegate is None and _is_status_command(user_message):
         return format_status_reply(state)
     if self.config_delegate is None:
+        from phase_agent.runtime.review_requests import additional_reviews
+
+        if str(user_message).strip() in {"同意", "拒绝"} and additional_reviews(state):
+            from phase_agent.graphs.dialogue.support import review_presented_proposal
+
+            return review_presented_proposal(self, state, user_message)
         from phase_agent.tools.local.review_candidate_command import review_candidate_command
         from phase_agent.tools.local.review_direction_command import review_direction_command
 

@@ -39,10 +39,13 @@ def read_project_status(state):
         "current_stage": progress.get("summary", "项目状态尚未登记"),
         "agent_recommendations": [row["proposal"] for row in directions if not row["activated"]],
         "awaiting_approval": {
+            "reviews": progress.get("review_requests") or [],
             "directions": [
                 row["proposal"]
                 for row in directions
-                if row.get("status") == "awaiting_approval" and not row["activated"]
+                if row.get("status") == "awaiting_approval"
+                and row.get("waiting_at") != "execution_plan_ready"
+                and not row["activated"]
             ],
             "execution": progress.get("execution_approvals") or {},
         },

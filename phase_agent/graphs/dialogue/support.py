@@ -33,19 +33,19 @@ def _load_binding(handler):
     return getattr(handler, "presented_plan_binding", None)
 
 
+def _review_rows(handler, state):
+    from phase_agent.runtime.review_requests import pending_reviews
+
+    return pending_reviews(state)
+
+
 def bind_presented_proposal(handler, state):
-    pending = state.get("pending_execution_policies") or {}
+    rows = _review_rows(handler, state)
     _save_binding(handler, None)
-    if len(pending) == 1:
-        plan_id, record = next(iter(pending.items()))
-        binding = {
-            "plan_id": plan_id,
-            "state_version": build_status_summary(
-                state, config_version=state.get("confirmed_config_version")
-            )["summary_id"],
-            "proposal_hash": proposal_hash(record.get("agent_proposal") or {}),
-        }
-        _save_binding(handler, binding)
+    if len(rows) == 1:
+        _save_binding(
+            handler, {key: rows[0][key] for key in ("plan_id", "state_version", "proposal_hash")}
+        )
 
 
 def review_presented_proposal(handler, state, message):
@@ -53,24 +53,28 @@ def review_presented_proposal(handler, state, message):
     from phase_agent.runtime.chat_approval_rules import is_sensitive_proposal
     from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
-    pending = state.get("pending_execution_policies") or {}
-    if len(pending) != 1:
-        return "当前没有唯一待审批方案，请查看项目状态；未执行任务。"
-    plan_id, record = next(iter(pending.items()))
+    rows = _review_rows(handler, state)
+    if len(rows) != 1:
+        return "当前没有唯一待审批方案，请在审批页选择对象；未执行任务。"
+    row = rows[0]
+    plan_id = row["plan_id"]
     decision = "approve" if message.strip().lower() in {"approve", "同意"} else "reject"
-    if decision == "approve" and is_sensitive_proposal(record.get("agent_proposal") or {}):
-        import os
-
-        return (
-            "请在本机审批页核对并批准具体影响："
-            + f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
-        )
     binding = _load_binding(handler)
     if binding is None or binding.get("plan_id") != plan_id:
         bind_presented_proposal(handler, state)
         if decision == "approve":
             return pending_plan_reply(state) + "\n请核对以上方案后再批准或拒绝。"
         binding = handler.presented_plan_binding
+    sensitive = (row.get("review_card") or {}).get("sensitive") or is_sensitive_proposal(
+        row.get("agent_proposal") or {}
+    )
+    if decision == "approve" and sensitive:
+        import os
+
+        return (
+            "请在本机审批页核对并批准具体影响："
+            + f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
+        )
     try:
         outcome = handler.review_pending(
             plan_id,
@@ -88,6 +92,8 @@ def review_presented_proposal(handler, state, message):
         from phase_agent.tools.step_runner.file_protocol import read_json
 
         bind_presented_proposal(handler, read_json(handler.state_path, {}) or {})
+    if row.get("review_kind") != "scientific_action":
+        return result.get("reason") or outcome.get("reason") or str(outcome.get("status"))
     return format_workflow_reply(result, handler.state_path)
 
 

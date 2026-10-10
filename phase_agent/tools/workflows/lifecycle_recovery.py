@@ -83,12 +83,17 @@ def _advance_training_workflow(frame, *, graph=None):
 def _review_training_direction(frame):
     from phase_agent.tools.local.training_agent_review import review_training_choice
 
+    feedback = frame.get("human_feedback")
+    decision = feedback.get("decision") if isinstance(feedback, dict) else feedback
+    message = (frame.get("runtime_adapters") or {}).get("user_message")
+    if decision in {"approve", "reject", "confirm_sensitive"}:
+        message = None  # Approval consumes the saved plan; it never requests a new review.
     current, waits = review_training_choice(
         frame["pre_reconciled"]["state"],
         frame.get("training_handoffs") or [],
         frame.get("agent_client"),
         state_path=frame.get("state_path") or frame.get("runtime_state_path"),
-        user_message=(frame.get("runtime_adapters") or {}).get("user_message"),
+        user_message=message,
     )
     frame["pre_reconciled"]["state"] = current
     return {**frame, "loaded_state": current, "training_handoffs": waits}
@@ -176,9 +181,26 @@ def _workflow_wait_gate(frame):
     manual_wait = frame["manual_wait"]
     rebuilding = frame["rebuilding"]
     runtime_path = state_path or effective_config.get("state_path")
+    if runtime_path:
+        from phase_agent.graphs.execution_recovery_graph import execution_recovery_report
+
+        report = execution_recovery_report(runtime_path, feedback["state"])
+        feedback["state"]["execution_recovery_report"] = report
+        if report["unsettled"]:
+            _save_runner_state(feedback["state"], runtime_path)
+            return {
+                "status": "execution_reconciliation_required",
+                "state": feedback["state"],
+                "recovery_report": report,
+                "steps_executed": 0,
+                "submitted": False,
+                "recovered_count": recovered_count,
+            }
     training_waits = frame.get("training_handoffs") or []
     review_ready = bool(training_waits) and all(
-        row.get("stage") == "validation_prerequisites_required" and row.get("cv_review")
+        row.get("stage")
+        in {"validation_prerequisites_required", "execution_plan_ready", "execution_plan_approved"}
+        and row.get("cv_review")
         for row in training_waits
     )
     if review_ready:
@@ -191,7 +213,7 @@ def _workflow_wait_gate(frame):
                 == feedback["state"].get("active_model_version")
                 and candidate.get("agent_review")
             ],
-            "instruction": "用户已要求推进验证计划。必须通过现有动作与审批机制提出具体可执行方案，不能重复报告或要求再次同意泛泛建议。先从已有DFT中排除本轮训练数据，检查可复用独立样本；不足时从现有结构池选择未训练的同组成近凸包候选，给出target_ids、选择理由、预算及DFT输入准备动作。不得再次update_mlip或自动激活。缺少候选或标准时提出具体配置修订方案，说明科学依据。",
+            "instruction": "微调后已有方向与具体计划。复用保存的followup_action，经现有动作校验形成完整执行方案，统一展示执行范围、成本与目的，一次审批确认方向和本次动作。不要重新选择方向，不默认改为独立验证配置，不重复本轮训练或自动激活；新增科学动作仍另行审批。",
         }
         pending = feedback["state"].get("pending_execution_policies") or {}
         for record_id, record in list(pending.items()):
@@ -237,20 +259,6 @@ def _workflow_wait_gate(frame):
             "steps_executed": 0,
             "submitted": False,
         }
-    if runtime_path:
-        from phase_agent.tools.state.execution_receipts import recovery_report
-
-        report = recovery_report(runtime_path, feedback["state"])
-        if report["unsettled"]:
-            _save_runner_state(feedback["state"], runtime_path)
-            return {
-                "status": "execution_reconciliation_required",
-                "state": feedback["state"],
-                "recovery_report": report,
-                "steps_executed": 0,
-                "submitted": False,
-                "recovered_count": recovered_count,
-            }
     if recovery_question and execution_mode == "interactive":
         _save_runner_state(feedback["state"], state_path or effective_config.get("state_path"))
         return {

@@ -1,7 +1,7 @@
 """Input shape validation, not approval or permission validation."""
 
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from phase_agent.runtime.control_ui_contracts import Identifier
 
 
@@ -15,11 +15,20 @@ class ProposeRequest(ControlRequest):
 
 
 class DecisionRequest(ControlRequest):
-    decision: Literal["approve", "reject", "confirm_sensitive"]
+    decision: Literal["approve", "reject", "confirm_sensitive", "modify"]
     plan_id: Identifier
     state_version: Identifier
     proposal_hash: Identifier
     comment: str = ""
+
+
+class RecoveryProposeRequest(ControlRequest):
+    invocation_id: Identifier
+    resolution: Literal["verified_no_effect", "verified_registered_effects"]
+    evidence_note: Identifier
+    external_jobs: Literal["none_found", "registered_only", "not_applicable"]
+    output_inventory: Literal["checked_no_outputs", "registered_outputs"]
+    external_cost: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class PauseRequest(ControlRequest):
@@ -64,6 +73,7 @@ class SkillPublishRequest(ControlRequest):
 MODELS = {
     "/phase/propose": ProposeRequest,
     "/phase/decision": DecisionRequest,
+    "/phase/recovery/propose": RecoveryProposeRequest,
     "/phase/pause": PauseRequest,
     "/phase/config/patch": ConfigPatchRequest,
     "/phase/config/confirm": ConfigConfirmRequest,

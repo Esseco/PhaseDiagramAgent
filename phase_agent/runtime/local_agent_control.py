@@ -38,36 +38,31 @@ class LocalAgentControl:
 
     def status(self):
         state = read_json(self.state_path, {}) or {}
-        return validate_control_response(
-            StatusResponse,
-            build_status_summary(state, config_version=state.get("confirmed_config_version")),
-        )
+        from phase_agent.runtime.scientific_progress import project_progress
+
+        summary = build_status_summary(state, config_version=state.get("confirmed_config_version"))
+        session = (getattr(self.chat_handler, "workflow_kwargs", None) or {}).get("config_session")
+        progress = project_progress(state, self.state_path, session=session)
+        summary["pending_approvals"] = progress["pending_review_count"]
+        summary["waiting_state"] = progress["waiting_state"]
+        summary["recovery_report"] = progress["recovery_report"]
+        return validate_control_response(StatusResponse, summary)
 
     def pending(self):
         state = read_json(self.state_path, {}) or {}
         state_version = build_status_summary(
             state, config_version=state.get("confirmed_config_version")
         )["summary_id"]
-        rows = []
-        for invocation_id, value in (state.get("pending_execution_policies") or {}).items():
-            proposal = value.get("agent_proposal") or {}
-            rows.append(
-                {
-                    "plan_id": invocation_id,
-                    "invocation_id": invocation_id,
-                    "revision": value.get("revision", 0),
-                    "recommended_action": proposal.get("recommended_action"),
-                    "target_ids": ((proposal.get("raw_action") or {}).get("target_ids") or []),
-                    "parameters": proposal.get("action_parameters"),
-                    "reason": proposal.get("reason"),
-                    "estimated_cost": proposal.get("estimated_cost"),
-                    "missing_evidence": proposal.get("missing_evidence"),
-                    "config_version": state.get("confirmed_config_version"),
-                    "model_version": state.get("active_model_version"),
-                    "state_version": state_version,
-                    "proposal_hash": proposal_hash(proposal),
-                }
-            )
+        from phase_agent.runtime.review_requests import pending_reviews
+
+        session = (getattr(self.chat_handler, "workflow_kwargs", None) or {}).get("config_session")
+        rows = pending_reviews(state, session)
+        from phase_agent.tools.state.execution_receipts import recovery_report
+
+        if recovery_report(self.state_path, state)["unsettled"]:
+            for row in rows:
+                if row.get("review_kind") not in {"configuration", "execution_recovery"}:
+                    row["review_card"]["blocked"] = "先核对中断执行，再批准此科学动作"
         return validate_control_response(
             PendingResponse,
             {
@@ -237,8 +232,8 @@ class LocalAgentControl:
                 "conversation_id": conversation_id,
             },
         )
-        if decision not in {"approve", "reject", "confirm_sensitive"}:
-            raise ValueError("decision must be approve/reject/confirm_sensitive")
+        if decision not in {"approve", "reject", "confirm_sensitive", "modify"}:
+            raise ValueError("decision must be approve/reject/confirm_sensitive/modify")
         return self.chat_handler.review_pending(
             str(plan_id or ""),
             decision,
@@ -246,6 +241,32 @@ class LocalAgentControl:
             expected_proposal_hash=expected_proposal_hash,
             comment=comment,
         )
+
+    def propose_recovery(self, body):
+        validate_control_request("/phase/recovery/propose", body)
+        from filelock import FileLock
+        from phase_agent.tools.state.execution_reconciliation import propose_reconciliation
+
+        with self.chat_handler.lock:
+            with FileLock(
+                str(Path(self.state_path).parent / "langgraph_lifecycle.sqlite") + ".lock",
+                timeout=10,
+            ):
+                state = read_json(self.state_path, {}) or {}
+                attestation = {
+                    key: body.get(key)
+                    for key in (
+                        "evidence_note",
+                        "external_jobs",
+                        "output_inventory",
+                        "external_cost",
+                    )
+                }
+                result = propose_reconciliation(
+                    self.state_path, state, body["invocation_id"], body["resolution"], attestation
+                )
+                write_json(self.state_path, result["state"])
+                return {"status": result["status"], "plan_id": result["plan_id"]}
 
     def patch_config(self, patch, *, reasons=None, impacts=None):
         validate_control_request(

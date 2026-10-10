@@ -39,6 +39,12 @@ def create_lifecycle_nodes(
 
     def training(state, runtime: Runtime[WorkflowRuntime]):
         context = require_runtime(runtime)
+        if (
+            ((context.frame.get("pre_reconciled") or {}).get("state") or {})
+            .get("execution_recovery_report", {})
+            .get("unsettled")
+        ):
+            return {"phase": "training_waits_for_reconciliation"}
         if "pre_reconciled" in context.frame and "effective_config" in context.frame:
             from phase_agent.tools.workflows.lifecycle_recovery import _advance_training_workflow
 
@@ -48,24 +54,34 @@ def create_lifecycle_nodes(
     from phase_agent.graphs.batch_recovery_graph import build_batch_recovery_graph
 
     batch_graph = build_batch_recovery_graph()
+    from phase_agent.graphs.execution_recovery_graph import build_execution_recovery_graph
+
+    recovery_graph = build_execution_recovery_graph()
+    from phase_agent.graphs.recovery_observation_graph import build_recovery_observation_graph
+
+    recovery_observation = build_recovery_observation_graph(batch_graph, recovery_graph)
 
     def batches(state, runtime: Runtime[WorkflowRuntime]):
         context = require_runtime(runtime)
         frame = context.frame
         if "pre_reconciled" in frame:
-            from phase_agent.graphs.batch_recovery_graph import recover_batch_stages
-
             business = frame["pre_reconciled"]["state"]
-            reports = recover_batch_stages(
-                business,
-                frame.get("state_path") or frame.get("effective_config", {}).get("state_path"),
-                graph=batch_graph,
+            path = frame.get("state_path") or frame.get("effective_config", {}).get("state_path")
+            observed = recovery_observation.invoke(
+                {"business": business, "state_path": str(path) if path else None}
             )
-            business["batch_recovery_reports"] = reports
+            business["batch_recovery_reports"] = observed["batch_reports"]
+            business["execution_recovery_report"] = observed["execution_report"]
         return {"phase": "batches_checked"}
 
     def direction(state, runtime: Runtime[WorkflowRuntime]):
         context = require_runtime(runtime)
+        if (
+            ((context.frame.get("pre_reconciled") or {}).get("state") or {})
+            .get("execution_recovery_report", {})
+            .get("unsettled")
+        ):
+            return {"phase": "direction_waits_for_reconciliation"}
         if "pre_reconciled" in context.frame:
             from phase_agent.tools.workflows.lifecycle_recovery import _review_training_direction
 
@@ -164,4 +180,6 @@ def create_lifecycle_nodes(
         "training_lifecycle": training_graph,
         "bounded_action_graph": action_graph,
     }
-    return {name: traced(name, callback, children.get(name)) for name, callback in nodes.items()}
+    wrapped = {name: traced(name, callback, children.get(name)) for name, callback in nodes.items()}
+    wrapped["batch_recovery"].scientific_children = [recovery_observation]
+    return wrapped
