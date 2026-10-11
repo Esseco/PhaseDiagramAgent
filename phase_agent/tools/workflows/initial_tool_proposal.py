@@ -338,6 +338,15 @@ def select_initial_proposal(
                 "reason": error,
                 "post_dft_review": action.get("post_dft_review"),
             }
+    if action.get("tool") == "allocate_mc_bohb":
+        from phase_agent.tools.workflows.prepare_mc_preview import prepare_mc_preview
+
+        try:
+            action = prepare_mc_preview(
+                action, current, context, (context or {}).get("effective_config") or config
+            )
+        except ValueError as error:
+            return {"status": "rejected", "state": current, "reason": str(error)}
     from phase_agent.analysis.cost.generation_preflight import attach_generation_preflight
 
     try:

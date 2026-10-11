@@ -153,6 +153,19 @@ def recover_remote_training(state):
     for job in (current.get("remote_finetune_jobs") or {}).values():
         if job.get("status") in INACTIVE or job.get("activated"):
             continue
+        from phase_agent.tools.remote.transfer_bundle import import_registered_bundles
+
+        errors = import_registered_bundles([Path(job["directory"]) / "results"])
+        if errors:
+            reports.append(
+                {
+                    "status": "invalid_results",
+                    "directory": job["directory"],
+                    "transfer_errors": errors,
+                    "issues": [row["reason"] for row in errors],
+                }
+            )
+            continue
         result = inspect_training_results(job)
         if result is None:
             continue

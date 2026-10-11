@@ -222,6 +222,10 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     (inputs / "collect_training_results.py").write_text(
         evaluator.read_text(encoding="utf-8"), encoding="utf-8"
     )
+    bundle_source = Path(__file__).parents[1] / "remote/transfer_bundle.py"
+    (inputs / "transfer_bundle.py").write_text(
+        bundle_source.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     lines.append(f"{command} collect_training_results.py")
     (inputs / "training_plan.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
@@ -234,7 +238,11 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
 
     write_training_submission(inputs, environment)
     (directory / "results").mkdir(exist_ok=True)
+    from phase_agent.tools.remote.transfer_bundle import input_bundle
+
+    upload_archive = input_bundle(inputs)
     current.setdefault("remote_finetune_jobs", {})[digest] = {
+        "upload_archive": upload_archive,
         "directory": str(directory),
         "status": "inputs_prepared",
         "original_model_version": version,
@@ -245,5 +253,5 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     return {
         "status": "awaiting_remote_training",
         "state": current,
-        "reason": f"微调轮：{directory}；完整上传该轮目录，在inputs内sbatch GPU.sh一次。回传该轮results中的指标CSV、models.json和完成标记即可，模型留在超算inputs。未本机训练/提交；后续仍需独立验证与单独激活审批。",
+        "reason": f"微调轮：{directory}；上传{upload_archive}并在远端微调轮目录解压，在inputs内sbatch GPU.sh一次。仅下载training.results.zip到本轮results，回复“继续”自动核对回收，模型留在超算inputs。未本机训练/提交；后续仍需独立验证与单独激活审批。",
     }

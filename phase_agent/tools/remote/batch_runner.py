@@ -213,6 +213,12 @@ class RemoteBatchRunner:
             "missing_structure_count": 0,
             "details_preview": [],
         }
+        from phase_agent.tools.remote.transfer_bundle import (
+            import_registered_bundles,
+            registered_result_directories,
+        )
+
+        report["transfer_errors"] = import_registered_bundles(registered_result_directories(state))
         for task in state.get("tasks") or []:
             task_id = task.get("task_id")
             previously_processed = task_id in processed

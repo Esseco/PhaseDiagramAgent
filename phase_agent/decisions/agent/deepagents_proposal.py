@@ -6,6 +6,9 @@ from copy import deepcopy
 
 def proposal_material(payload):
     """Explicit transport allowlist: summaries and reviewed references only."""
+    from phase_agent.decisions.agent.transport_tables import expand_evidence_tables
+
+    payload = expand_evidence_tables(payload)
     context = payload.get("decision_context") or {}
     fields = {
         "status",
@@ -383,13 +386,22 @@ def create_proposal_client(model, *, recursion_limit=16):
     )
 
     def call(payload):
-        prepared = proposal_material(prepare_llm_request(payload))
+        from phase_agent.decisions.agent.transport_tables import compact_evidence_tables
+
+        transport = prepare_llm_request(payload)
+        prepared = compact_evidence_tables(proposal_material(transport))
+        prepared["transport_policy"] = transport["decision_context"]["transport_policy"]
         memory_text = json.dumps(
             prepared["decision_context"].get("relevant_approved_knowledge", []), ensure_ascii=False
         )
         result = agent.invoke(
             {
-                "messages": [{"role": "user", "content": json.dumps(prepared, ensure_ascii=False)}],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": json.dumps(prepared, ensure_ascii=False, separators=(",", ":")),
+                    }
+                ],
                 "files": {
                     "/memory/AGENTS.md": create_file_data(
                         "Approved references, not execution authorization.\n" + memory_text
@@ -409,6 +421,9 @@ def create_proposal_client(model, *, recursion_limit=16):
             "output_tokens": sum(row.get("output_tokens", 0) for row in usage),
             "cost": None,
             "model": getattr(model, "model_name", "injected"),
+            "mode": payload.get("mode", "unknown"),
+            "transport_metrics": transport.get("transport_metrics"),
+            "reasoning_enabled": True,
         }
         action["_proposal_harness"] = "deepagents"
         return deepcopy(action)

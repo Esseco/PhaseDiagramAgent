@@ -18,6 +18,7 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
         batch.parent.parent if batch.parent.name == "inputs" else batch.parent
     ) / "results"
     results_directory.mkdir(exist_ok=True)
+    exported = []
     failures = []
     timer = start_timer()
     executed = 0
@@ -30,7 +31,7 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
         if marker.is_file() and (task_dir / "result.json").is_file():
             try:
                 if json.loads(marker.read_text(encoding="utf-8")).get("status") == "completed":
-                    export_batch_result(task_dir, results_directory)
+                    exported.append(export_batch_result(task_dir, results_directory))
                     continue
             except (OSError, ValueError) as error:
                 print(f"已有结果汇集失败 {entry['task_id']}: {error}", file=sys.stderr)
@@ -65,7 +66,7 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
             failures.append(entry["task_id"])
         if marker.is_file() and (task_dir / "result.json").is_file():
             try:
-                export_batch_result(task_dir, results_directory)
+                exported.append(export_batch_result(task_dir, results_directory))
             except (OSError, ValueError) as error:
                 print(f"结果汇集失败 {entry['task_id']}: {error}", file=sys.stderr)
                 if entry["task_id"] not in failures:
@@ -87,6 +88,9 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
         )
     except OSError as error:
         print(f"批次统计未保存（计算结果保持不变）: {error}", file=sys.stderr)
+    from phase_agent.tools.remote.transfer_bundle import result_bundle
+
+    result_bundle(results_directory, exported, batch_id)
     return failures
 
 

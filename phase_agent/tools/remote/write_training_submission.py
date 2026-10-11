@@ -37,11 +37,11 @@ def write_training_submission(directory, environment, *, template=None):
     )
     write_unix_shell_script(directory / "GPU.sh", _render_job_name(script, "mlip-finetune"))
     (directory / "UPLOAD_AND_SUBMIT.md").write_text(
-        "上传完整训练轮目录（含inputs），在inputs内执行 sbatch GPU.sh，仅提交一次；results位于inputs的同级。\n"
+        "上传inputs.upload.zip，在远端训练轮目录解压，在inputs内执行 sbatch GPU.sh一次；results位于inputs同级。\n"
         "脚本顺序训练4个committee成员和5个K折评估模型；主模型复用com_1，不重复训练。使用现有MLIP GPU资源模板。\n"
         "确认远端原模型文件存在且mace环境支持foundation_head等参数。\n"
         "正式committee全部数据参与训练，com_1同时为主模型；同文件validation仅训练监视，不是泛化误差。\n"
-        "完成后只下载results中的K折指标/逐点能量与受力CSV、models.json和完成标记；不需要模型文件。\n"
+        "完成后只下载training.results.zip到登记的本地results目录，说“继续”自动校验回收；不需要模型文件。\n"
         "模型保留在超算com_*训练目录；models.json记录绝对远端路径、大小和SHA256，后续任务在超算读取。不要移动或删除这些模型。\n"
         "泛化误差只参考main_cv_*留出数据；模型激活仍需独立验证与审批。\n",
         encoding="utf-8",

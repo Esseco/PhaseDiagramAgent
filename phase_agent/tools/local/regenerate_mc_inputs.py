@@ -26,8 +26,13 @@ def is_mc_regeneration_confirmation(message):
     }
 
 
-def plan_mc_regeneration(state, upload_root):
-    """Validate the approved plan and exact current-round MC directory."""
+def _mc_operation_directory(input_path):
+    batch = Path(input_path).resolve().parent.parent
+    return batch.parent.parent if batch.parent.name == "inputs" else batch.parent
+
+
+def _approved_mc_preview(state):
+    """Use a frozen preview or the exact legacy execution receipt, never a fresh allocation."""
     records = [
         row
         for row in state.get("action_records") or []
@@ -37,8 +42,86 @@ def plan_mc_regeneration(state, upload_root):
     ]
     if not records:
         raise ValueError("没有已批准的当前轮 MC 分配方案")
-    action = records[-1]["final_action"]
-    preview = (action.get("parameters") or {}).get("budget_preview") or {}
+    record = records[-1]
+    action = record["final_action"]
+    parameters = action.get("parameters") or {}
+    if "budget_preview" in parameters:
+        return deepcopy(parameters.get("budget_preview") or {}), "approved_budget_preview"
+    execution = record.get("execution_result") or {}
+    result = execution.get("result") or {}
+    children = result.get("actions") or []
+    if (
+        execution.get("status") != "completed"
+        or result.get("status") != "completed"
+        or not children
+    ):
+        raise ValueError("旧 MC 方案没有完整执行分配记录；不能推测或重新分配")
+    fields = (
+        "branch_id",
+        "structure_id",
+        "structure_path",
+        "model_version",
+        "max_mc_steps",
+        "patience_steps",
+        "min_improvement",
+        "seed",
+        "planned_relative_cost",
+    )
+    tasks = {row.get("task_key"): row for row in state.get("tasks") or []}
+    keys = set()
+    cost = 0.0
+    steps = 0
+    for child in children:
+        key = child.get("task_key")
+        if not key or key in keys or child.get("stage") != "deep_search":
+            raise ValueError("旧 MC 执行分配记录含重复任务或非法阶段")
+        keys.add(key)
+        if child.get("branch_id") not in (action.get("target_ids") or []):
+            raise ValueError("旧 MC 执行分支不在原批准范围内")
+        count = child.get("max_mc_steps")
+        relative_cost = child.get("planned_relative_cost")
+        if (
+            type(count) is not int
+            or count <= 0
+            or isinstance(relative_cost, bool)
+            or not isinstance(relative_cost, (int, float))
+            or not math.isfinite(relative_cost)
+            or relative_cost < 0
+        ):
+            raise ValueError("旧 MC 执行记录缺少有效步数或成本")
+        current = tasks.get(key)
+        if current is not None and (
+            current.get("stage") != "deep_search"
+            or any(current.get(field) != child.get(field) for field in fields)
+        ):
+            raise ValueError("旧 MC 执行分配与当前任务记录不一致")
+        steps += count
+        cost += relative_cost
+    step_limit = parameters.get("mc_budget")
+    cost_limit = action.get("budget")
+    if (
+        type(step_limit) is not int
+        or steps > step_limit
+        or isinstance(cost_limit, bool)
+        or not isinstance(cost_limit, (int, float))
+        or not math.isfinite(cost_limit)
+        or cost > cost_limit + 1e-9
+    ):
+        raise ValueError("旧 MC 执行分配超出原批准的步数或成本范围")
+    from phase_agent.tools.remote.integrity import payload_checksum
+
+    allocations = deepcopy(children)
+    return {
+        "allocations": allocations,
+        "selected_branch_count": len(allocations),
+        "estimated_relative_cost": cost,
+        "allocation_checksum": payload_checksum(allocations),
+    }, "approved_execution_record"
+
+
+def plan_mc_regeneration(state, upload_root):
+    """Validate the approved plan and exact current-round MC directory."""
+    preview, allocation_source = _approved_mc_preview(state)
     allocations = preview.get("allocations") or []
     if not allocations or len(allocations) != preview.get("selected_branch_count"):
         raise ValueError("已批准的 MC 分配清单不完整")
@@ -56,11 +139,7 @@ def plan_mc_regeneration(state, upload_root):
         raise ValueError("当前轮 MC 已提交、完成或状态不明，不能重生成")
     old_ids = {row.get("task_id") for row in current}
     root = Path(upload_root).resolve()
-    paths = {
-        Path(row["input_path"]).resolve().parent.parent.parent
-        for row in current
-        if row.get("input_path")
-    }
+    paths = {_mc_operation_directory(row["input_path"]) for row in current if row.get("input_path")}
     if len(paths) != 1:
         raise ValueError("无法唯一确定当前轮 MC-search 目录")
     mc_root = paths.pop()
@@ -115,15 +194,24 @@ def plan_mc_regeneration(state, upload_root):
             "initial.vasp",
             "manifest.json",
             "run_mlip_batch.py",
+            "_handoff_mlip_batch.py",
+            "transfer_bundle.py",
             "run_mlip_task.py",
             "SHA256SUMS",
             "task.json",
             "UPLOAD_AND_SUBMIT.md",
         }
+        input_archives = {
+            Path(row["upload_directory"])
+            .resolve()
+            .with_name(Path(row["upload_directory"]).name + ".upload.zip")
+            for row in batches
+            if row.get("upload_directory")
+        }
         for path in mc_root.rglob("*"):
             if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
                 raise ValueError("MC-search 中含链接，不能自动删除")
-            if path.is_file() and path.name not in allowed:
+            if path.is_file() and path.name not in allowed and path.resolve() not in input_archives:
                 raise ValueError(f"MC-search 中含结果、日志或未知文件，不能自动删除：{path}")
     branch_phase = {
         row.get("branch_id"): row.get("P") for row in state.get("branch_candidates") or []
@@ -143,6 +231,7 @@ def plan_mc_regeneration(state, upload_root):
         math.ceil(count / batch_size) for count in compatibility_counts.values()
     )
     return {
+        "allocation_source": allocation_source,
         "directory": str(mc_root),
         "exists": mc_root.exists(),
         "old_task_ids": sorted(old_ids),
@@ -174,13 +263,7 @@ def regenerate_mc_inputs(
     plan = plan_mc_regeneration(state, upload_root)
     if plan != approved_plan:
         raise ValueError("MC 状态或目录已变化，请重新检查并确认")
-    preview = next(
-        row["final_action"]["parameters"]["budget_preview"]
-        for row in reversed(state["action_records"])
-        if row.get("status") == "completed"
-        and (row.get("final_action") or {}).get("tool") == "allocate_mc_bohb"
-        and (row.get("human_feedback") or {}).get("decision") == "approve"
-    )
+    preview, _ = _approved_mc_preview(state)
     allocations = deepcopy(preview["allocations"])
     for child in allocations:
         if not Path(child["structure_path"]).is_file():

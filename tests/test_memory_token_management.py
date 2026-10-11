@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from phase_agent.analysis.state.build_decision_context import build_decision_context
 from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
+from phase_agent.decisions.agent.transport_tables import expand_evidence_tables
 from phase_agent.tools.workflows.preview_dft_inputs import preview_dft_inputs
 from phase_agent.configuration.defaults.default_dft_decision_config import default_dft_decision_config
 from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
@@ -22,7 +23,7 @@ def test_compaction_keeps_all_candidates_memory_versions_and_request():
                          "long_term_memory": memory, "user_message": "探索P3"},
                "decision_context": context}
     original = deepcopy(payload)
-    result = prepare_llm_request(payload)
+    result = expand_evidence_tables(prepare_llm_request(payload))
     assert payload == original
     assert "qbc_candidates" not in result["state"]
     assert len(result["decision_context"]["qbc_candidates"]) == 240

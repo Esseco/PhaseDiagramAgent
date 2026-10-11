@@ -45,10 +45,18 @@ def pending_plan_reply(state):
     if reviews:
         row = reviews[0]
         card = row["review_card"]
+        import os
+
+        approval = (
+            "请在本机审批页核对并批准："
+            + f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
+            if card.get("sensitive")
+            else "核对后可回复‘同意’或‘拒绝’。"
+        )
         return (
             f"已保存方案（编号：{row['plan_id']}）：\n"
             f"{card['title']}：{card['scope']}\n依据：{row['reason']}\n"
-            f"审批边界：{card['approval_boundary']}\n本次仅查看，未批准或执行。"
+            f"审批边界：{card['approval_boundary']}\n{approval}\n本次仅查看，未批准或执行。"
         )
     if regeneration:
         name, plan = regeneration[0]

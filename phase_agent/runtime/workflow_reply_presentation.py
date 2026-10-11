@@ -331,7 +331,16 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             if roots:
                 lines.append("目录：" + "、".join(f"`{path}`" for path in roots))
         lines.append("尚未本机提交。Relax/MC 提交批次 GPU.sh；DFT 提交单任务 GPU.sh。")
-        lines.append("完成后回传对应 results 文件夹，再说“继续”。未回传任务保持等待。")
+        if wait.get("upload_archives"):
+            lines.append(
+                "上传输入包：" + "、".join(f"`{path}`" for path in wait["upload_archives"])
+            )
+        lines.append(
+            "完成后仅下载 *.results.zip 到对应 results 目录，再说“继续”自动校验回收；旧批次仍可回传精简 results 文件夹。未回传任务保持等待。"
+        )
+        errors = collection.get("transfer_errors") or []
+        if errors:
+            lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
         return "\n".join(lines)
     text = _format_workflow_reply_verbose(result, state_path)
     return "\n".join(
@@ -693,6 +702,10 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             lines.append(
                 f"按 branch 分组的完整上传清单：`{wait['upload_plan_path']}`。每个 branch 的所有任务目录都列在一起。"
             )
+        if wait.get("upload_archives"):
+            lines.append(
+                "必要输入包：" + "、".join(f"`{path}`" for path in wait["upload_archives"])
+            )
         directories = wait.get("batch_directories") or wait.get("task_directories") or []
         if directories:
             lines.append("待提交的批次目录：")
@@ -705,7 +718,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 "本阶段统一结果目录：" + "、".join(f"`{path}`" for path in results_directories)
             )
         lines.append(
-            "本阶段任务完成后，只需下载对应的整个 `results/` 文件夹，放回本地同一阶段目录，"
+            "本阶段任务完成后，只需下载对应的 `*.results.zip`，放到登记的本地 `results/` 目录，"
             "其中含所有任务的 `result.json`、`task.finished.json` 和最终结构；再对 Agent 说“继续”。"
             "Agent 会按任务校验并回收；未回传任务继续等待，不会重复准备或提交。"
             "旧批次仍按原任务目录回收。"

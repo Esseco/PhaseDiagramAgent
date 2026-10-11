@@ -63,8 +63,13 @@ def handle(self, user_message, state, messages, conversation_id):
                     "当前只提出方案，尚未删除文件或生成任务。\n"
                     f"当前轮 MC 目录：`{plan['directory']}`。{existing}\n"
                     f"将废弃 {len(plan['old_task_ids'])} 个旧 MC 任务及 "
-                    f"{plan['old_batch_count']} 条旧批次记录，保留其他阶段和已批准的分配方案。\n"
-                    f"重新生成 {plan['allocation_count']} 个独立 MC 算例、"
+                    f"{plan['old_batch_count']} 条旧批次记录，保留其他阶段和原记录的分配方案。\n"
+                    + (
+                        "旧方案按已批准执行记录恢复；只重建已记录任务，扩大采样需另提方案。\n"
+                        if plan.get("allocation_source") == "approved_execution_record"
+                        else ""
+                    )
+                    + f"重新生成 {plan['allocation_count']} 个独立 MC 算例、"
                     f"共 {plan['total_mc_steps']} 步；估计相对成本 "
                     f"{float(plan['estimated_relative_cost']):.2f}{over_limit}。\n"
                     f"每个 GPU 批次最多 {plan['mc_batch_size']} 个算例，"
@@ -94,7 +99,7 @@ def handle(self, user_message, state, messages, conversation_id):
             )
             write_json(self.state_path, upload["state"])
             return (
-                f"已按原批准的完整方案重新生成 {upload['task_count']} 个 MC 输入，"
+                f"已按原记录的分配方案重新生成 {upload['task_count']} 个 MC 输入，"
                 f"分为 {upload['batch_count']} 个批次；未提交超算作业。"
                 f"目录：`{plan['directory']}`。"
             )

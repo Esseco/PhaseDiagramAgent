@@ -8,7 +8,8 @@ from phase_agent.tools.local import regenerate_mc_inputs as module
 from phase_agent.tools.remote.build_upload_batch_directory import build_upload_batch_directory
 from phase_agent.runtime.agent_api import RunWorkflowChatHandler
 from phase_agent.tools.budget.stratify_mc_actions import (
-    interleave_mc_strata, summarize_mc_interception,
+    interleave_mc_strata,
+    summarize_mc_interception,
 )
 
 
@@ -20,25 +21,67 @@ def _state(root):
     old_input = old_batch / f"00000-{task_id}" / "task.json"
     source = root / "source.vasp"
     source.write_text("source", encoding="utf-8")
-    child = {"task_key": key, "branch_id": "B-1", "structure_id": "S-1",
-             "structure_path": str(source), "stage": "deep_search", "model_version": "model",
-             "max_mc_steps": 30, "patience_steps": 4, "min_improvement": 0.001,
-             "seed": 42, "planned_relative_cost": 50.0}
-    old = {**child, "task_id": task_id, "status": "pending", "input_path": str(old_input),
-           "result_path": str(old_input.with_name("result.json")), "batch_id": "remote-000002"}
-    return {"tasks": [old], "pending_tasks": [old], "slurm_batches": [
-                {"batch_id": "remote-000001", "task_ids": ["RELAX-1"],
-                 "calculation_group": "Relax-screening", "status": "prepared"},
-                {"batch_id": "remote-000002", "task_ids": [task_id],
-                 "calculation_group": "MC-search", "upload_directory": str(old_batch),
-                 "status": "prepared", "job_id": None}],
-            "budget_reservations": {key: {"stage": "deep_search", "status": "reserved"}},
-            "tiered_mc_state": {"segments": [child]},
-            "action_records": [{"status": "completed", "human_feedback": {"decision": "approve"},
-                "final_action": {"tool": "allocate_mc_bohb", "task_key": "approved-plan",
-                    "parameters": {"budget_preview": {"allocations": [child],
-                        "selected_branch_count": 1, "allocation_checksum": "abc",
-                        "estimated_relative_cost": 50.0}}}}]}
+    child = {
+        "task_key": key,
+        "branch_id": "B-1",
+        "structure_id": "S-1",
+        "structure_path": str(source),
+        "stage": "deep_search",
+        "model_version": "model",
+        "max_mc_steps": 30,
+        "patience_steps": 4,
+        "min_improvement": 0.001,
+        "seed": 42,
+        "planned_relative_cost": 50.0,
+    }
+    old = {
+        **child,
+        "task_id": task_id,
+        "status": "pending",
+        "input_path": str(old_input),
+        "result_path": str(old_input.with_name("result.json")),
+        "batch_id": "remote-000002",
+    }
+    return {
+        "tasks": [old],
+        "pending_tasks": [old],
+        "slurm_batches": [
+            {
+                "batch_id": "remote-000001",
+                "task_ids": ["RELAX-1"],
+                "calculation_group": "Relax-screening",
+                "status": "prepared",
+            },
+            {
+                "batch_id": "remote-000002",
+                "task_ids": [task_id],
+                "calculation_group": "MC-search",
+                "upload_directory": str(old_batch),
+                "status": "prepared",
+                "job_id": None,
+            },
+        ],
+        "budget_reservations": {key: {"stage": "deep_search", "status": "reserved"}},
+        "tiered_mc_state": {"segments": [child]},
+        "action_records": [
+            {
+                "status": "completed",
+                "human_feedback": {"decision": "approve"},
+                "final_action": {
+                    "tool": "allocate_mc_bohb",
+                    "task_key": "approved-plan",
+                    "parameters": {
+                        "budget_preview": {
+                            "allocations": [child],
+                            "selected_branch_count": 1,
+                            "allocation_checksum": "abc",
+                            "estimated_relative_cost": 50.0,
+                        }
+                    },
+                },
+            }
+        ],
+    }
 
 
 def test_missing_directory_regenerates_approved_plan(tmp_path, monkeypatch):
@@ -53,19 +96,31 @@ def test_missing_directory_regenerates_approved_plan(tmp_path, monkeypatch):
 
     def prepare(*, action, context):
         captured.update(context["event_state"])
-        return {"status": "prepared", "task_count": 1, "batch_count": 1,
-                "state": context["event_state"]}
+        return {
+            "status": "prepared",
+            "task_count": 1,
+            "batch_count": 1,
+            "state": context["event_state"],
+        }
 
     monkeypatch.setattr(module, "prepare_mc_upload_batches", prepare)
-    result = module.regenerate_mc_inputs(state, approved_plan=plan, upload_root=tmp_path,
-        config={}, manager=None, phase_references={}, config_version="v1")
+    result = module.regenerate_mc_inputs(
+        state,
+        approved_plan=plan,
+        upload_root=tmp_path,
+        config={},
+        manager=None,
+        phase_references={},
+        config_version="v1",
+    )
     assert result["task_count"] == 1
     assert len(captured["tasks"]) == 1
     assert captured["budget_reservations"]["tiered-mc:one"]["approval_override"] == "abc"
     assert [row["batch_id"] for row in captured["slurm_batches"]] == ["remote-000001"]
     assert captured["mc_regeneration_history"][0]["old_batch_ids"] == ["remote-000002"]
-    directory, layout = build_upload_batch_directory(tmp_path, captured,
-        batch_id="remote-000002", stage="deep_search", model_version="model")
+    directory, layout = build_upload_batch_directory(
+        tmp_path, captured, batch_id="remote-000002", stage="deep_search", model_version="model"
+    )
     assert directory.name == "MC-sampling-0001_remote-000002"
     assert layout["submission_index"] == 1
 
@@ -77,8 +132,15 @@ def test_existing_directory_requires_confirmation(tmp_path):
     plan = module.plan_mc_regeneration(state, tmp_path)
     assert plan["exists"] is True
     with pytest.raises(ValueError, match="确认"):
-        module.regenerate_mc_inputs(state, approved_plan=plan, upload_root=tmp_path,
-            config={}, manager=None, phase_references={}, config_version="v1")
+        module.regenerate_mc_inputs(
+            state,
+            approved_plan=plan,
+            upload_root=tmp_path,
+            config={},
+            manager=None,
+            phase_references={},
+            config_version="v1",
+        )
 
 
 def test_result_file_blocks_regeneration(tmp_path):
@@ -100,27 +162,34 @@ def test_budget_limited_order_interleaves_tier_and_phase():
     phase = {"A": "P2", "B": "P3", "C": "P2"}
     ordered = interleave_mc_strata(actions, phase)
     assert [row["task_key"] for row in ordered] == ["a", "c", "d", "b"]
-    summary = summarize_mc_interception(ordered[:2],
+    summary = summarize_mc_interception(
+        ordered[:2],
         [{"action": row, "reasons": ["stage_cost_limit"]} for row in ordered[2:]],
-        phase, full_plan_approved=False)
+        phase,
+        full_plan_approved=False,
+    )
     assert summary["strata"]["tier-1/P2"]["rejected"] == 1
     assert summary["rejected_count"] == 2
 
 
 @pytest.mark.parametrize("directory_exists", [False, True])
 def test_chat_request_only_proposes_and_dedicated_confirmation_executes(
-        tmp_path, monkeypatch, directory_exists):
+    tmp_path, monkeypatch, directory_exists
+):
     state = _state(tmp_path)
     if directory_exists:
         Path(state["tasks"][0]["input_path"]).parents[2].mkdir(parents=True)
     state["confirmed_config_version"] = "v1"
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps(state), encoding="utf-8")
-    config = {"upload_batches_directory": str(tmp_path),
-              "budgets": {"stage_limits": {"deep_search": {"max_cost": 10}}}}
+    config = {
+        "upload_batches_directory": str(tmp_path),
+        "budgets": {"stage_limits": {"deep_search": {"max_cost": 10}}},
+    }
     monkeypatch.setattr(
         "phase_agent.configuration.runtime.build_effective_run_config.build_effective_run_config",
-        lambda *_: config)
+        lambda *_: config,
+    )
     calls = []
 
     def regenerate(*args, **kwargs):
@@ -128,8 +197,15 @@ def test_chat_request_only_proposes_and_dedicated_confirmation_executes(
         return {"status": "prepared", "state": args[0], "task_count": 1, "batch_count": 1}
 
     monkeypatch.setattr(module, "regenerate_mc_inputs", regenerate)
-    handler = RunWorkflowChatHandler({"state_path": str(state_path), "config_session": {},
-        "run_config": {}, "manager": None, "phase_references": {}})
+    handler = RunWorkflowChatHandler(
+        {
+            "state_path": str(state_path),
+            "config_session": {},
+            "run_config": {},
+            "manager": None,
+            "phase_references": {},
+        }
+    )
     reply = handler([{"role": "user", "content": "重新生成当前轮MC任务"}])
     assert "尚未删除文件或生成任务" in reply
     assert ("该目录存在" if directory_exists else "该目录不存在") in reply
@@ -142,3 +218,101 @@ def test_chat_request_only_proposes_and_dedicated_confirmation_executes(
     confirmed = handler([{"role": "user", "content": "确认重新生成当前轮MC任务"}])
     assert "重新生成 1 个 MC 输入" in confirmed
     assert len(calls) == 1
+
+
+def _legacy_state(root):
+    state = _state(root)
+    record = state["action_records"][0]
+    children = record["final_action"]["parameters"].pop("budget_preview")["allocations"]
+    record["final_action"].update(target_ids=["B-1"], budget=50.0)
+    record["final_action"]["parameters"]["mc_budget"] = 30
+    record["execution_result"] = {
+        "status": "completed",
+        "result": {"status": "completed", "actions": children},
+    }
+    return state
+
+
+def test_legacy_approved_execution_allocations_are_reused_without_replanning(tmp_path, monkeypatch):
+    state = _legacy_state(tmp_path)
+    original = json.dumps(state, sort_keys=True)
+    plan = module.plan_mc_regeneration(state, tmp_path)
+    assert plan["allocation_count"] == 1
+    assert plan["total_mc_steps"] == 30
+    assert plan["estimated_relative_cost"] == 50.0
+    assert plan["allocation_source"] == "approved_execution_record"
+    captured = {}
+
+    def prepare(*, action, context):
+        captured.update(context["event_state"])
+        return {
+            "status": "prepared",
+            "task_count": 1,
+            "batch_count": 1,
+            "state": context["event_state"],
+        }
+
+    monkeypatch.setattr(module, "prepare_mc_upload_batches", prepare)
+    module.regenerate_mc_inputs(
+        state,
+        approved_plan=plan,
+        upload_root=tmp_path,
+        config={},
+        manager=None,
+        phase_references={},
+        config_version="v1",
+    )
+    assert captured["tasks"][0]["max_mc_steps"] == 30
+    assert json.dumps(state, sort_keys=True) == original
+
+
+@pytest.mark.parametrize(
+    "field,value", [("max_mc_steps", 31), ("planned_relative_cost", 51.0), ("branch_id", "other")]
+)
+def test_legacy_allocation_cannot_exceed_or_mismatch_approved_scope(tmp_path, field, value):
+    state = _legacy_state(tmp_path)
+    from copy import deepcopy
+
+    state["action_records"][0]["execution_result"] = deepcopy(
+        state["action_records"][0]["execution_result"]
+    )
+    state["action_records"][0]["execution_result"]["result"]["actions"][0][field] = value
+    with pytest.raises(ValueError):
+        module.plan_mc_regeneration(state, tmp_path)
+
+
+def test_absent_legacy_receipt_and_partial_new_preview_are_not_guessed(tmp_path):
+    state = _legacy_state(tmp_path)
+    state["action_records"][0].pop("execution_result")
+    with pytest.raises(ValueError):
+        module.plan_mc_regeneration(state, tmp_path)
+    state = _legacy_state(tmp_path)
+    state["action_records"][0]["final_action"]["parameters"]["budget_preview"] = {
+        "selected_branch_count": 2
+    }
+    with pytest.raises(ValueError, match="不完整"):
+        module.plan_mc_regeneration(state, tmp_path)
+
+
+def test_numbered_mc_round_inputs_layout_and_input_archive_are_recognized(tmp_path):
+    state = _legacy_state(tmp_path)
+    root = tmp_path / "epoch0_model/Search-group-0001/Relax-0001_MC-round-0001"
+    batch = root / "inputs/MC-sampling-0001_remote-000002"
+    task_root = batch / "00000-MC-1"
+    task_root.mkdir(parents=True)
+    (task_root / "task.json").write_text("{}")
+    (batch / "transfer_bundle.py").write_text("adapter")
+    (batch / "_handoff_mlip_batch.py").write_text("adapter")
+    archive = batch.with_name(batch.name + ".upload.zip")
+    archive.write_bytes(b"existing input archive")
+    task = state["tasks"][0]
+    task["input_path"] = str(task_root / "task.json")
+    task["result_path"] = str(root / "results/00000-MC-1/result.json")
+    state["slurm_batches"][1]["upload_directory"] = str(batch)
+    plan = module.plan_mc_regeneration(state, tmp_path)
+    assert plan["directory"] == str(root.resolve())
+    assert plan["exists"]
+    (root / "results").mkdir()
+    (root / "results/unknown.results.zip").write_bytes(b"returned results")
+    with pytest.raises(ValueError, match="结果|未知"):
+        module.plan_mc_regeneration(state, tmp_path)

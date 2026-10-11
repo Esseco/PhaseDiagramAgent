@@ -18,10 +18,10 @@ def recent_turns(state_path, thread_id):
         return (
             [
                 {
-                    "user": str(row.get("user", ""))[:1000],
-                    "assistant": str(row.get("assistant", ""))[:1600],
+                    "user": str(row.get("user", ""))[:16000],
+                    "assistant": str(row.get("assistant", ""))[:16000],
                 }
-                for row in rows[-6:]
+                for row in rows[-1:]
             ]
             if isinstance(rows, list)
             else []
@@ -36,14 +36,14 @@ def remember_turn(state_path, thread_id, user, assistant):
     rows.append(
         {
             "time": datetime.now(timezone.utc).isoformat(),
-            "user": clean(user),
-            "assistant": clean(assistant),
+            "user": str(clean(user))[:16000],
+            "assistant": str(clean(assistant))[:16000],
         }
     )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(rows[-12:], ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.write_text(json.dumps(rows[-1:], ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(path)
     except OSError:
         pass

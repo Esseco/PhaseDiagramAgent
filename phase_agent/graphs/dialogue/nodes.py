@@ -40,6 +40,44 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
     handler = runtime.context.handler
     handler.conversation_id = runtime.context.conversation_id
     command = state["message"].strip().lower()
+    from phase_agent.runtime.review_requests import pending_reviews
+
+    reviews = pending_reviews(state["facts"])
+    # Existing explicit control messages do not request a revised scientific
+    # proposal. Reuse the saved approval owner instead of asking an LLM again.
+    if (
+        handler.config_delegate is None
+        and reviews
+        and command in {"继续", "continue", "继续原运行"}
+    ):
+        from phase_agent.runtime.plan_queries import pending_plan_reply
+        from phase_agent.graphs.dialogue.support import bind_presented_proposal
+
+        pending = state["facts"].get("pending_execution_policies") or {}
+        if len(pending) == 1:
+            from phase_agent.tools.state.execution_receipts import recovery_report
+
+            if recovery_report(handler.state_path, state["facts"])["unsettled"]:
+                return {"reply": "上次执行仍需核对，请在审批页查看恢复证据；本次未重新分析或执行。"}
+            from phase_agent.graphs.approval_graph import durable_approval
+            from phase_agent.tools.policy.file_approval import proposal_hash
+
+            invocation, stored = next(iter(pending.items()))
+            approval = durable_approval(
+                handler.state_path,
+                {
+                    "invocation_id": invocation,
+                    "config_version": state["facts"].get("confirmed_config_version"),
+                    "proposal_hash": proposal_hash(stored.get("agent_proposal") or {}),
+                    "revision": stored.get("revision", 0),
+                },
+            )
+            if approval["status"] == "approval_reconciliation_required":
+                return {
+                    "reply": "上次审批决定已交付，业务记录尚需核对；本次未重新批准、分析或执行。"
+                }
+        bind_presented_proposal(handler, state["facts"])
+        return {"reply": pending_plan_reply(state["facts"])}
     if command in {"确认敏感操作", "confirm sensitive action"}:
         import os
 
@@ -49,9 +87,7 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
         }
     if handler.config_delegate is not None:
         operation = "configure"
-    elif command in {"approve", "同意", "reject", "拒绝"} and state["facts"].get(
-        "pending_execution_policies"
-    ):
+    elif command in {"approve", "同意", "reject", "拒绝"} and reviews:
         operation = "review"
     elif command in {"配置修订", "修改配置"}:
         operation = "configure"
@@ -123,6 +159,23 @@ def decide(state, runtime: Runtime[TurnRuntime]):
         runtime.context.scientific_call = execute
         return {"status": "scientific_requested"}
 
+    # Continuation with returned files must reach the original collector before
+    # a dialogue-only answer can mistake stale task status for missing results.
+    if state["message"].strip().lower() in {"继续", "continue", "继续原运行"}:
+        from pathlib import Path
+        from phase_agent.tools.state.task_waiting import awaiting_task_result
+
+        from phase_agent.tools.remote.transfer_bundle import has_registered_return
+
+        returned = has_registered_return(state["facts"]) or any(
+            awaiting_task_result(row)
+            and isinstance(row.get("result_path"), str)
+            and Path(row["result_path"]).is_file()
+            for row in state["facts"].get("tasks") or []
+        )
+        if returned and not pending:
+            request_scientific()
+            return {"operation": "scientific_workflow"}
     with dialogue_message():
         result = decide_from_saved_facts(
             handler,

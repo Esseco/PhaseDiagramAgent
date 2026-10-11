@@ -20,8 +20,11 @@ def read_json(path, default=None):
 def write_json(path, payload):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Large workflow states are machine records; whitespace alone can occupy
+    # tens of MB. Keep other artifacts readable and preserve every state field.
+    options = {"separators": (",", ":")} if target.name == "state.json" else {"indent": 2}
     encoded = (
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n"
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, **options) + "\n"
     ).encode("utf-8")
     if (
         target.is_file()

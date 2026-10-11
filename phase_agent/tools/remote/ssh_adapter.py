@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
+import shutil
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
@@ -68,7 +70,16 @@ class OpenSSHTransport:
             if exists:
                 raise RuntimeError(f"incomplete remote upload exists: {staging}")
             self._ssh("mkdir", "-p", parent)
-            self._run([self.scp, "-r", str(source), f"{self.host}:{staging}"])
+            from phase_agent.tools.remote.transfer_bundle import input_files
+
+            with tempfile.TemporaryDirectory(prefix="phase-upload-") as temporary:
+                minimal = Path(temporary) / source.name
+                minimal.mkdir()
+                for path in input_files(source):
+                    destination = minimal / path.relative_to(source)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(path, destination)
+                self._run([self.scp, "-r", str(minimal), f"{self.host}:{staging}"])
             staged = self._remote_snapshot(staging)
         if staged is None or staged.get("manifest_checksum") != checksum:
             raise ValueError("uploaded batch snapshot checksum does not match local batch")
@@ -84,8 +95,28 @@ class OpenSSHTransport:
         if manifest_text.returncode != 0:
             is_directory = self._ssh("test", "-d", str(remote), check=False)
             if is_directory.returncode == 0 and remote.name == "results":
-                self._run([self.scp, "-r", f"{self.host}:{remote}/.", str(target)])
-                return {"status": "synced", "path": str(target), "files": []}
+                from phase_agent.tools.remote.transfer_bundle import RESULT_NAMES
+
+                listing = self._ssh("find", str(remote), "-type", "f")
+                paths = [PurePosixPath(line) for line in listing.stdout.splitlines()]
+                selected = [
+                    path
+                    for path in paths
+                    if path.name in RESULT_NAMES
+                    or path.suffix.lower() in {".vasp", ".poscar"}
+                    or path.name.endswith(".runtime.json")
+                ]
+                copied = []
+                for path in selected:
+                    relative = path.relative_to(remote)
+                    if any(part in {"..", "."} for part in relative.parts):
+                        raise ValueError("Unsafe remote result path")
+                    local_file = target.joinpath(*relative.parts)
+                    local_file.resolve().relative_to(target.resolve())
+                    local_file.parent.mkdir(parents=True, exist_ok=True)
+                    self._run([self.scp, f"{self.host}:{path}", str(local_file)])
+                    copied.append(relative.as_posix())
+                return {"status": "synced", "path": str(target), "files": copied}
             return {"status": "not_found", "path": remote}
         try:
             manifest = json.loads(manifest_text.stdout)

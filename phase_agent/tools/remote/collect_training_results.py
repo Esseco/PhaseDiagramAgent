@@ -196,6 +196,10 @@ def main():
         encoding="utf-8",
     )
 
+    from transfer_bundle import result_bundle
+
+    result_bundle(output, [output], "training")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

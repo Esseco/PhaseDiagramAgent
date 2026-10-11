@@ -91,11 +91,18 @@ class RunWorkflowChatHandler:
             if studio_turn:
                 self.conversation_id = conversation_id
                 persisted = thread_history()
-                self.recent_dialogue = (
-                    list(persisted[:-1])[-4:]
-                    if persisted is not None
-                    else list(self.studio_dialogues.get(conversation_id) or [])
-                )
+                if persisted is not None:
+                    self.recent_dialogue = list(persisted[:-1])[-2:]
+                elif conversation_id in self.studio_dialogues:
+                    self.recent_dialogue = list(self.studio_dialogues[conversation_id])[-2:]
+                else:
+                    from phase_agent.graphs.dialogue.memory import recent_turns
+
+                    self.recent_dialogue = [
+                        {"role": role, "content": row[key]}
+                        for row in recent_turns(self.state_path, conversation_id)[-1:]
+                        for role, key in (("user", "user"), ("assistant", "assistant"))
+                    ]
             supplied = list(messages)
             if len(supplied) == 1 and self.conversation_id in {None, conversation_id}:
                 supplied = [*self.recent_dialogue, *supplied]
@@ -105,9 +112,9 @@ class RunWorkflowChatHandler:
             if _open_webui_metadata_reply(_latest_user_message(messages)) is None:
                 self.recent_dialogue = [
                     *self.recent_dialogue,
-                    {"role": "user", "content": str(_latest_user_message(messages))[:450]},
-                    {"role": "assistant", "content": str(reply)[:450]},
-                ][-4:]
+                    {"role": "user", "content": str(_latest_user_message(messages))[:16000]},
+                    {"role": "assistant", "content": str(reply)[:16000]},
+                ][-2:]
                 if studio_turn:
                     self.studio_dialogues[conversation_id] = list(self.recent_dialogue)
         if _open_webui_metadata_reply(_latest_user_message(messages)) is not None:

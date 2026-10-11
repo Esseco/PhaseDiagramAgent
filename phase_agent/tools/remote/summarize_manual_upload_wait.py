@@ -29,6 +29,13 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
     }
     relax_only = set(stage_counts) == {"relax_and_feature"}
     return {
+        "upload_archives": sorted(
+            {
+                str(archive)
+                for path in batch_directories
+                if (archive := Path(path).parent / f"{Path(path).name}.upload.zip").is_file()
+            }
+        ),
         "dft_recovery_rounds": _dft_recovery_rounds(state),
         "task_count": len(waiting),
         "waiting_task_count": len(waiting),
@@ -38,7 +45,17 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
         "task_directories": task_directories,
         "batch_directories": batch_directories,
         "results_directories": sorted(
-            {str(Path(path).parent / "results") for path in batch_directories}
+            {
+                str(
+                    (
+                        Path(path).parent.parent
+                        if Path(path).parent.name == "inputs"
+                        else Path(path).parent
+                    )
+                    / "results"
+                )
+                for path in batch_directories
+            }
         ),
         "upload_root": next(iter(upload_roots)) if len(upload_roots) == 1 else None,
         "upload_plan_path": (

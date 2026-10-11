@@ -74,6 +74,16 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 else "mlip_gpu_template.sh"
             )
             if stage in {"dft_single_point", "dft_relax"}:
+                _portable_transfer_worker(task_directory, "finalize_vasp", "_handoff_finalize_vasp")
+                workflow = task_directory / "workflow.py"
+                if workflow.is_file():
+                    workflow.write_text(
+                        workflow.read_text(encoding="utf-8").replace(
+                            "from phase_agent.tools.remote.finalize_vasp import finalize_vasp",
+                            "from _handoff_finalize_vasp import finalize_vasp",
+                        ),
+                        encoding="utf-8",
+                    )
                 if json.loads((task_directory / "task.json").read_text(encoding="utf-8")).get(
                     "atomate", {}
                 ).get("backend") in {"pycode_atomate2_relax", "pycode_atomate2_static"}:
@@ -100,15 +110,16 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                     'cd "${SLURM_SUBMIT_DIR:-.}"\n'
                     "export PHASE_TASK_STARTED_EPOCH=$(date +%s)\n"
                     "set +e\n" + vasp_command + "\nvasp_exit_code=$?\nset -e\n"
-                    "python3 -m phase_agent.tools.remote.finalize_vasp "
+                    "python3 _handoff_finalize_vasp.py "
                     '--directory . --exit-code "$vasp_exit_code"',
                 )
                 write_unix_shell_script(task_directory / "GPU.sh", script)
         if mlip_batch:
+            _portable_transfer_worker(directory, "run_mlip_batch", "_handoff_mlip_batch")
             executor = _executor_reference(self.worker_command)
             (directory / "run_mlip_batch.py").write_text(
                 "from pathlib import Path\n"
-                "from phase_agent.tools.remote.run_mlip_batch import main\n"
+                "from _handoff_mlip_batch import main\n"
                 "if __name__ == '__main__':\n"
                 "    manifest = str(Path(__file__).resolve().with_name('manifest.json'))\n"
                 f"    raise SystemExit(main(['--manifest', manifest, '--executor', {executor!r}]))\n",
@@ -139,6 +150,11 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
         results_directory = (
             directory.parent.parent if directory.parent.name == "inputs" else directory.parent
         ) / "results"
+        from phase_agent.tools.remote.transfer_bundle import input_bundle
+
+        upload_archive = input_bundle(directory)
+        batch["upload_archive"] = upload_archive
+        result["state"]["slurm_batches"][-1]["upload_archive"] = upload_archive
         batch.update(
             {
                 "upload_directory": str(directory),
@@ -203,20 +219,90 @@ This directory was generated locally. Nothing has been submitted.
 1. Keep every submission directory for this stage as a sibling under the same
    allocation folder under the MLIP-round stage. Inspect `manifest.json`, `task.json`, and `GPU.sh`.
 2. Confirm the model/input files and all site-specific Slurm settings.
-3. Upload the complete allocation folder, keeping its batch directories as siblings. Relax jobs
+3. Upload the adjacent `<batch>.upload.zip` and extract it under the remote `inputs/`
+   directory, keeping batch directories as siblings. The archive contains runtime inputs
+   and a checksummed transfer manifest; local guides, logs and caches are excluded. Relax jobs
    contain up to 100 structures; MC jobs contain up to 10 compatible simulations,
    possibly from multiple branches.
-4. Optionally verify its files with `sha256sum -c SHA256SUMS`.
+4. Keep the extracted directory structure; model paths already registered on HPC remain there.
 5. For MLIP Relax/MC, submit the batch root's `GPU.sh` once; it runs each task
    subdirectory and collects results in this allocation folder's shared `results/`.
    For DFT, change into the only task subdirectory and submit its `GPU.sh` once.
    Never submit both levels.
-6. After all jobs for this allocation finish, download the allocation folder's single
-   `results/` directory into the matching local allocation folder. It includes result JSON,
-   completion markers and required final structures.
+6. Download only `results/*.results.zip` into the matching local `results/` directory
+   and say “继续”. Code verifies and imports the archives, then checks original task identity.
+   Required final structures and MC resume checkpoints are included; large logs stay remote.
+   Older remote scripts may return the existing minimal results folders instead.
 
 The generated script is not evidence that executables, environments, paths,
 pseudopotentials, permissions, or resource requests are correct for your site.
 For DFT, the remote Python environment must import this project and pymatgen
 to parse VASP output and publish `results/` after the calculation.
 """
+
+
+def _portable_transfer_worker(directory, source_name, module_name):
+    """Ship only updated handoff adapters; reuse the configured scientific runtime."""
+    root = Path(__file__).parent
+    source = (root / f"{source_name}.py").read_text(encoding="utf-8")
+    source = source.replace(
+        "from phase_agent.tools.remote.transfer_bundle import", "from transfer_bundle import"
+    )
+    (directory / f"{module_name}.py").write_text(source, encoding="utf-8")
+    (directory / "transfer_bundle.py").write_text(
+        (root / "transfer_bundle.py").read_text(encoding="utf-8-sig"), encoding="utf-8"
+    )
+
+
+def package_existing_manual_inputs(directory):
+    """Add a portable handoff archive without rewriting frozen task inputs."""
+    import shutil
+    import tempfile
+    from phase_agent.tools.remote.transfer_bundle import input_bundle, input_files
+
+    directory = Path(directory).resolve()
+    destination = directory.parent / f"{directory.name}.upload.zip"
+    with tempfile.TemporaryDirectory(prefix=".phase-handoff-", dir=directory.parent) as temporary:
+        staged = Path(temporary) / directory.name
+        staged.mkdir()
+        for source in input_files(directory):
+            target = staged / source.relative_to(directory)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        manifest = json.loads((staged / "manifest.json").read_text(encoding="utf-8"))
+        if (staged / "run_mlip_batch.py").is_file():
+            _portable_transfer_worker(staged, "run_mlip_batch", "_handoff_mlip_batch")
+            wrapper = staged / "run_mlip_batch.py"
+            wrapper.write_text(
+                wrapper.read_text(encoding="utf-8").replace(
+                    "from phase_agent.tools.remote.run_mlip_batch import main",
+                    "from _handoff_mlip_batch import main",
+                ),
+                encoding="utf-8",
+            )
+        for entry in manifest:
+            if entry.get("stage") not in {"dft_single_point", "dft_relax"}:
+                continue
+            task = (staged / str(entry["input_path"]).replace("\\", "/")).parent.resolve()
+            task.relative_to(staged.resolve())
+            _portable_transfer_worker(task, "finalize_vasp", "_handoff_finalize_vasp")
+            for name in ("workflow.py", "GPU.sh"):
+                path = task / name
+                if path.is_file():
+                    text = (
+                        path.read_text(encoding="utf-8")
+                        .replace(
+                            "from phase_agent.tools.remote.finalize_vasp import finalize_vasp",
+                            "from _handoff_finalize_vasp import finalize_vasp",
+                        )
+                        .replace(
+                            "python3 -m phase_agent.tools.remote.finalize_vasp ",
+                            "python3 _handoff_finalize_vasp.py ",
+                        )
+                    )
+                    path.write_text(text, encoding="utf-8", newline="\n")
+        archive = Path(input_bundle(staged))
+        pending = destination.with_name(destination.name + ".part")
+        shutil.copy2(archive, pending)
+        pending.replace(destination)
+    return str(destination)

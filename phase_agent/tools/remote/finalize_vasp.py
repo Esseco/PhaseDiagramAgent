@@ -118,7 +118,10 @@ def finalize_vasp(directory, *, exit_code=0, calculation_directory=None, runtime
     stage = root.parent.parent
     if stage.name == "inputs":
         stage = stage.parent
-    export_batch_result(root, stage / "results")
+    destination = export_batch_result(root, stage / "results")
+    from phase_agent.tools.remote.transfer_bundle import result_bundle
+
+    result_bundle(stage / "results", [destination], destination.name)
     return result
 
 

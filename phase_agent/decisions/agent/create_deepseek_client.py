@@ -87,10 +87,12 @@ def create_deepseek_client(
     def call(payload: dict) -> dict:
         important = needs_deep_reasoning(payload)
         payload = prepare_llm_request(payload)
+        from phase_agent.decisions.agent.transport_tables import evidence_row_count
+
         context = payload.get("decision_context") or {}
         count = len((context.get("dft_sampling_recommendation") or {}).get("candidate_ids") or [])
         if not count and "select_dft_candidates" in (payload.get("allowed_tools") or []):
-            count = len(context.get("qbc_candidates") or [])
+            count = evidence_row_count(context.get("qbc_candidates"))
         json_ceiling = max(int(routine_max_tokens), min(16384, 1024 + 100 * count))
         messages = [
             {
@@ -101,7 +103,10 @@ def create_deepseek_client(
                     "Ehull, reward, confidence, or completed calculations."
                 ),
             },
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            {
+                "role": "user",
+                "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            },
         ]
         if payload.get("unified_dialogue") and payload.get("user_instruction"):
             messages.append(
@@ -243,6 +248,9 @@ def create_deepseek_client(
                 "output_tokens": output_tokens,
                 "cost": None,
                 "model": result.get("model", model),
+                "mode": payload.get("mode", "unknown"),
+                "transport_metrics": payload.get("transport_metrics"),
+                "reasoning_enabled": thinking_this_try == "enabled",
             }
             return action
 
@@ -255,6 +263,8 @@ def create_deepseek_client(
             "output_tokens": output_tokens,
             "cost": None,
             "model": model,
+            "mode": payload.get("mode", "unknown"),
+            "transport_metrics": payload.get("transport_metrics"),
         }
         raise error
 

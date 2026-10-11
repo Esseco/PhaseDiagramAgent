@@ -40,7 +40,16 @@ def run_search_workflow_graph(
                 ):
                     return snapshot.values["completed_response"]
                 context = WorkflowRuntime(stages={**stages, "durable": True}, expose_response=False)
-                if snapshot.next:
+                # A native project wait is a completed request boundary. The
+                # resume command below enters initialize with fresh facts; it
+                # must not restore the old request's configuration/frame.
+                new_request_at_wait = (
+                    bool(project_thread)
+                    and tuple(snapshot.next) == ("wait_for_project_input",)
+                    and any(task.interrupts for task in snapshot.tasks)
+                    and snapshot.values.get("request_id") != invocation_id
+                )
+                if snapshot.next and not new_request_at_wait:
                     prepared = stages["initialize"]()
                     if not prepared.get("_workflow_prepared"):
                         raise ValueError("Cannot restore lifecycle runtime dependencies")

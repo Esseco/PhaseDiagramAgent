@@ -173,8 +173,10 @@ def format_progress(state):
     elif state.get("pending_dft_recovery_question"):
         lines.append("下一步：回复“继续回收”或“不再回收”，确认是否等待剩余 DFT。")
     elif training:
+        if training.get("upload_archive"):
+            lines.append(f"必要输入包：`{training['upload_archive']}`。")
         lines.append(
-            "下一步：上传完整训练轮目录，在inputs内提交 GPU.sh（旧布局在轮根）；回传该轮results，再说“继续”。模型仍需验证和单独激活审批。"
+            "下一步：上传输入包并在训练轮目录解压，在inputs内提交 GPU.sh；只回传training.results.zip到本轮results，再说“继续”（旧批次可回传精简results文件夹）。模型仍需验证和单独激活审批。"
             if training.get("status") == "inputs_prepared"
             else "下一步：回传训练结果后说“继续”，检查通过后再单独批准模型激活。"
         )

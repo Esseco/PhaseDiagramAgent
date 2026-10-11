@@ -23,7 +23,7 @@ def default_budget_rules() -> dict:
         "stage_limits": {
             # Overall priority: MLIP exploration > DFT single-point > DFT relaxation.
             "simple_check": {"max_tasks": None, "max_cost": 300.0, "task_cost": 0.05},
-            "relax_and_feature": {"max_tasks": 1500, "max_cost": 9000.0, "task_cost": 1.0},
+            "relax_and_feature": {"max_tasks": 10000, "max_cost": 9000.0, "task_cost": 1.0},
             "deep_search": {"max_tasks": 300, "max_cost": 27000.0, "task_cost": 1.0},
             "dft_single_point": {"max_tasks": 120, "max_cost": 7200.0, "task_cost": 30.0},
             "dft_relax": {"max_tasks": 2, "max_cost": 2280.0, "task_cost": 900.0},
