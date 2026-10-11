@@ -29,6 +29,7 @@ DEFAULT_PROJECT_SETTINGS = {
     "approval_directory": "workflow_state/approvals",
     "local_action_directory": "workflow_state/approved_batches",
     "execution_mode": "debug",
+    "service_start_policy": "manual",
     "run_steps_per_click": 1,
     "resume_existing_project": True,
     "deepseek": {
@@ -93,6 +94,17 @@ def validate_project_paths(path):
     path = Path(path).resolve()
     root = path.parent
     settings = _load_config(path)
+    system_root = root if (root / "system.json").is_file() else root.parent.parent
+    descriptor = _load_optional_json(system_root / "system.json")
+    diagram = (settings.get("shared_dft") or {}).get("diagram_id")
+    registered = bool(diagram and diagram in descriptor.get("diagrams", []) and
+        path in {system_root / PROJECT_CONFIG_NAME, system_root / "diagrams" / diagram / PROJECT_CONFIG_NAME})
+    canonical = system_root / "diagrams" / diagram if registered else root
+    # Default-diagram aliases may resolve to old physical directories on Windows.
+    owned = [canonical.resolve()]
+    if registered:
+        owned.extend((canonical / name).resolve() for name in
+            ("workflow_state", "parameters", "structures", "submissions", "analysis_outputs", "open_webui_runs"))
     keys = (
         "state_path",
         "ledger_path",
@@ -107,7 +119,7 @@ def validate_project_paths(path):
     for key in keys:
         if settings.get(key):
             target = _resolve(root, settings[key])
-            if not target.is_relative_to(root):
+            if not any(target.is_relative_to(owner) for owner in owned):
                 raise ValueError(f"项目写入路径 {key} 超出项目文件夹：{target}")
     session = _load_optional_json(
         _resolve(root, settings.get("config_session_path", "parameters/config_session.json"))
@@ -117,7 +129,9 @@ def validate_project_paths(path):
         (session.get("confirmed_snapshot") or {}).get("config") or {},
         {"storage": settings.get("runtime_storage_override") or {}},
     ):
-        if settings.get("local_path_relocations"):
+        if registered and diagram == descriptor.get("default_diagram") and settings.get("runtime_storage_override"):
+            config = {"storage": settings["runtime_storage_override"]}
+        if settings.get("local_path_relocations") and not registered:
             from phase_agent.configuration.session.relocate_workspace_paths import (
                 relocate_workspace_paths,
             )
@@ -126,7 +140,7 @@ def validate_project_paths(path):
         storage = config.get("storage") or {}
         if storage.get("workspace_root"):
             owner = _resolve(root, storage["workspace_root"])
-            if owner != root:
+            if owner != canonical.resolve() and not (registered and owner == system_root):
                 raise ValueError("配置工作区必须与项目文件夹一致；请先核对旧项目路径")
 
 
@@ -232,6 +246,8 @@ def create_project(
 
 def describe_project(path: Path) -> str:
     config = _load_config(path)
+    if config.get("service_start_policy", "manual") != "manual":
+        raise ValueError("项目服务仅支持手动启动和停止")
     root = path.resolve().parent
     state = _load_optional_json(_resolve(root, config["state_path"]))
     session_path = _resolve(root, config.get("config_session_path", "config_session.json"))
@@ -251,6 +267,7 @@ def describe_project(path: Path) -> str:
         f"配置：{'已确认' if session.get('status') == 'confirmed' else '待确认'}\n"
         f"模式：{'自动模式' if config.get('execution_mode') == 'automatic' else '审批模式'}\n"
         f"任务：{counts or '尚未生成'}\n"
+        "服务：用户手动启动和停止；更新不会自动启动。\n"
         f"项目长期记忆：{'有（人工审核）' if long_term else '无'}\n"
         f"项目短期记忆：{'有（运行状态）' if recent else '无'}\n"
         "记忆由本项目审核管理；Studio只提供对话与调试入口。"
@@ -420,19 +437,34 @@ def _process_is_running(process) -> bool:
     return process.is_running()
 
 
-def start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, bool]:
+def _check_start_cancelled(cancel_event, process=None):
+    if cancel_event is not None and cancel_event.is_set():
+        if process is not None and not _stop_owned_process(process):
+            raise RuntimeError("启动已取消，但服务仍在退出；请再次停止")
+        raise RuntimeError("启动已取消；服务保持停止")
+
+
+def start_agent(
+    path: Path, *, port: int | None = None, cancel_event=None
+) -> tuple[object, str, bool]:
     from phase_agent.runtime.project_service import project_lock
 
+    _check_start_cancelled(cancel_event)
     with project_lock(path, lock_name="launch.lock"):
-        return _start_agent(path, port=port)
+        return _start_agent(path, port=port, cancel_event=cancel_event)
 
 
-def _start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, bool]:
+def _start_agent(
+    path: Path, *, port: int | None = None, cancel_event=None
+) -> tuple[object, str, bool]:
     """Start an isolated project service, or open its verified existing instance."""
     from phase_agent.runtime.project_service import available_port, read_service
 
     path = path.resolve()
+    _check_start_cancelled(cancel_event)
     config = _load_config(path)
+    if config.get("service_start_policy", "manual") != "manual":
+        raise ValueError("项目服务仅支持手动启动和停止")
     if path.is_file():
         validate_project_paths(path)
     existing = read_service(path)
@@ -485,6 +517,7 @@ def _start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, b
     log_path.parent.mkdir(parents=True, exist_ok=True)
     stream = log_path.open("a", encoding="utf-8")
     try:
+        _check_start_cancelled(cancel_event)
         process = subprocess.Popen(
             command,
             cwd=Path(__file__).resolve().parents[2],
@@ -497,6 +530,7 @@ def _start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, b
         stream.close()
     deadline = time.monotonic() + float(timeout)
     while time.monotonic() < deadline:
+        _check_start_cancelled(cancel_event, process)
         if process.poll() is not None:
             raise RuntimeError(
                 f"Agent 启动失败（退出码 {process.poll()}）；请查看 {log_path} 和同目录 studio_server.log"
@@ -507,6 +541,7 @@ def _start_agent(path: Path, *, port: int | None = None) -> tuple[object, str, b
                     request = Request(f"http://127.0.0.1:{ui_port}/info")
                     with urlopen(request, timeout=0.5) as ui_response:
                         if ui_response.status == 200:
+                            _check_start_cancelled(cancel_event, process)
                             process.studio_port = ui_port
                             process.control_port = port
                             if type(process.pid) is int:

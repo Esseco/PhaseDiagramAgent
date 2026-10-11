@@ -5,7 +5,8 @@ from collections import Counter
 import hashlib
 import math
 from pathlib import Path
-import shutil
+import json
+import uuid
 
 from phase_agent.tools.local.prepare_mc_upload_batches import prepare_mc_upload_batches
 from phase_agent.tools.mc_batch_policy import mc_batch_limit
@@ -33,6 +34,18 @@ def _mc_operation_directory(input_path):
 
 def _approved_mc_preview(state):
     """Use a frozen preview or the exact legacy execution receipt, never a fresh allocation."""
+    history = state.get("mc_regeneration_history") or []
+    if history and history[-1].get("replacement_preview"):
+        preview = history[-1]["replacement_preview"]
+        tasks = {row.get("task_key"): row for row in state.get("tasks") or []}
+        fields = ("branch_id", "model_version", "structure_path", "max_mc_steps", "seed")
+        if any(
+            row["task_key"] not in tasks
+            or any(tasks[row["task_key"]].get(field) != row.get(field) for field in fields)
+            for row in preview["allocations"]
+        ):
+            raise ValueError("重新规划的 MC 清单与当前任务不一致")
+        return deepcopy(preview), "user_requested_replanning"
     records = [
         row
         for row in state.get("action_records") or []
@@ -119,9 +132,13 @@ def _approved_mc_preview(state):
     }, "approved_execution_record"
 
 
-def plan_mc_regeneration(state, upload_root):
+def plan_mc_regeneration(state, upload_root, *, replacement_preview=None):
     """Validate the approved plan and exact current-round MC directory."""
     preview, allocation_source = _approved_mc_preview(state)
+    original_keys = {row.get("task_key") for row in preview.get("allocations") or []}
+    if replacement_preview is not None:
+        preview = deepcopy(replacement_preview)
+        allocation_source = "user_requested_replanning"
     allocations = preview.get("allocations") or []
     if not allocations or len(allocations) != preview.get("selected_branch_count"):
         raise ValueError("已批准的 MC 分配清单不完整")
@@ -133,7 +150,7 @@ def plan_mc_regeneration(state, upload_root):
     current = [
         row
         for row in state.get("tasks") or []
-        if row.get("stage") == "deep_search" and row.get("task_key") in set(keys)
+        if row.get("stage") == "deep_search" and row.get("task_key") in original_keys
     ]
     if any(row.get("status") not in {"pending"} or row.get("job_id") for row in current):
         raise ValueError("当前轮 MC 已提交、完成或状态不明，不能重生成")
@@ -143,11 +160,18 @@ def plan_mc_regeneration(state, upload_root):
     if len(paths) != 1:
         raise ValueError("无法唯一确定当前轮 MC-search 目录")
     mc_root = paths.pop()
+    registered = {
+        Path(row["operation_directory"]).resolve()
+        for row in state.get("slurm_batches") or []
+        if row.get("calculation_group") == "MC-search"
+        and row.get("operation_directory")
+        and set(row.get("task_ids") or []) & old_ids
+    }
     if (
         mc_root.name != "MC-search"
         and not (mc_root.name.startswith("allocation-") and mc_root.parent.name == "MC-search")
     ) or root not in mc_root.parents:
-        if not (
+        if not (mc_root in registered and root in mc_root.parents) and not (
             (mc_root.name.startswith("MC-round-") or "_MC-round-" in mc_root.name)
             and mc_root.parent.name.startswith("Search-group-")
             and root in mc_root.parents
@@ -184,35 +208,64 @@ def plan_mc_regeneration(state, upload_root):
         for number in range(remote_start, remote_start + len(allocations))
     ):
         raise ValueError("保留的其他阶段批次编号与重建后的 MC 批次冲突")
-    if any(Path(row.get("result_path") or "").is_file() for row in current):
-        raise ValueError("发现 MC 结果文件，不能覆盖")
-    if mc_root.exists():
-        allowed = {
-            "batch.snapshot.json",
-            "full_na_structure.vasp",
-            "GPU.sh",
-            "initial.vasp",
-            "manifest.json",
-            "run_mlip_batch.py",
-            "_handoff_mlip_batch.py",
-            "transfer_bundle.py",
-            "run_mlip_task.py",
-            "SHA256SUMS",
-            "task.json",
-            "UPLOAD_AND_SUBMIT.md",
+    input_directories = sorted(
+        {
+            Path(row["input_path"]).resolve().parent.parent
+            for row in current
+            if row.get("input_path")
         }
-        input_archives = {
-            Path(row["upload_directory"])
-            .resolve()
-            .with_name(Path(row["upload_directory"]).name + ".upload.zip")
-            for row in batches
-            if row.get("upload_directory")
-        }
-        for path in mc_root.rglob("*"):
+    )
+    input_archives = {
+        directory.with_name(directory.name + ".upload.zip") for directory in input_directories
+    }
+    storage_archive = mc_root / "inputs" / "all.inputs.zip"
+    if storage_archive.is_file():
+        input_archives.add(storage_archive)
+    for row in current:
+        result = Path(row["result_path"]) if row.get("result_path") else None
+        if result is not None and (
+            result.is_file() or result.with_name("task.finished.json").is_file()
+        ):
+            raise ValueError("发现本轮 MC 结果文件，不能覆盖")
+    for directory in input_directories:
+        directory.relative_to(mc_root)
+        returned = mc_root / "results" / (directory.name + ".results.zip")
+        if returned.is_file():
+            raise ValueError("发现本轮 MC 结果包，请先回收，不能重生成")
+    allowed = {
+        "batch.snapshot.json",
+        "full_na_structure.vasp",
+        "GPU.sh",
+        "initial.vasp",
+        "manifest.json",
+        "run_mlip_batch.py",
+        "_handoff_mlip_batch.py",
+        "transfer_bundle.py",
+        "run_mlip_task.py",
+        "SHA256SUMS",
+        "task.json",
+        "UPLOAD_AND_SUBMIT.md",
+    }
+    from phase_agent.tools.remote.integrity import file_checksum
+
+    input_checksums = {}
+    for directory in input_directories:
+        if directory.is_symlink() or (
+            hasattr(directory, "is_junction") and directory.is_junction()
+        ):
+            raise ValueError("MC 输入中含链接，不能重生成")
+        for path in directory.rglob("*"):
             if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
-                raise ValueError("MC-search 中含链接，不能自动删除")
-            if path.is_file() and path.name not in allowed and path.resolve() not in input_archives:
-                raise ValueError(f"MC-search 中含结果、日志或未知文件，不能自动删除：{path}")
+                raise ValueError("MC 输入中含链接，不能重生成")
+            if path.is_file():
+                if path.name not in allowed:
+                    raise ValueError(f"MC 输入中含结果、日志或未知文件，不能替换：{path}")
+                input_checksums[str(path)] = file_checksum(path)
+    for archive in input_archives:
+        if archive.is_symlink():
+            raise ValueError("MC 输入包是链接，不能替换")
+        if archive.is_file():
+            input_checksums[str(archive)] = file_checksum(archive)
     branch_phase = {
         row.get("branch_id"): row.get("P") for row in state.get("branch_candidates") or []
     }
@@ -231,6 +284,10 @@ def plan_mc_regeneration(state, upload_root):
         math.ceil(count / batch_size) for count in compatibility_counts.values()
     )
     return {
+        **({"replacement_preview": preview} if replacement_preview is not None else {}),
+        "input_directories": [str(path) for path in input_directories],
+        "input_archives": sorted(str(path) for path in input_archives if path.is_file()),
+        "input_file_checksums": input_checksums,
         "allocation_source": allocation_source,
         "directory": str(mc_root),
         "exists": mc_root.exists(),
@@ -259,20 +316,20 @@ def regenerate_mc_inputs(
     phase_references,
     config_version,
     allow_delete=False,
+    replacement_preview=None,
 ):
-    plan = plan_mc_regeneration(state, upload_root)
+    plan = plan_mc_regeneration(state, upload_root, replacement_preview=replacement_preview)
     if plan != approved_plan:
         raise ValueError("MC 状态或目录已变化，请重新检查并确认")
-    preview, _ = _approved_mc_preview(state)
+    preview = replacement_preview
+    if preview is None:
+        preview, _ = _approved_mc_preview(state)
     allocations = deepcopy(preview["allocations"])
     for child in allocations:
         if not Path(child["structure_path"]).is_file():
             raise FileNotFoundError(f"MC 结构文件不存在：{child['structure_path']}")
-    mc_root = Path(plan["directory"])
-    if plan["exists"]:
-        if not allow_delete:
-            raise ValueError("MC-search 仍存在，必须先确认删除")
-        shutil.rmtree(mc_root)
+    if plan["exists"] and not allow_delete:
+        raise ValueError("MC 输入仍存在，必须先确认备份并替换")
     current = deepcopy(state)
     old_ids = set(plan["old_task_ids"])
     old_keys = {
@@ -353,17 +410,78 @@ def regenerate_mc_inputs(
             ],
         }
     )
-    upload = prepare_mc_upload_batches(
-        action={"parameters": {"mode": "mc_inputs"}},
-        context={
-            "effective_config": config,
-            "event_state": current,
-            "manager": manager,
-            "phase_references": phase_references,
-        },
+    return _prepare_with_input_backup(
+        current, state, plan, upload_root, config, manager, phase_references
     )
-    if upload["status"] != "prepared" or upload["task_count"] != len(allocations):
-        raise RuntimeError(
-            f"MC 输入未完整生成：{upload.get('status')} / {upload.get('task_count')}"
+
+
+def _prepare_with_input_backup(
+    current, original, plan, upload_root, config, manager, phase_references
+):
+    """Archive exact input paths and restore them if preparation fails; never remove results."""
+    operation = Path(plan["directory"]).resolve()
+    root = Path(upload_root).resolve()
+    sources = [Path(p) for p in [*plan["input_directories"], *plan["input_archives"]]]
+    for source in sources:
+        source.resolve().relative_to(operation)
+        if source.resolve() == operation:
+            raise ValueError("不能替换整个 MC 轮次目录")
+    backup = operation.parent / ".mc_input_history" / operation.name / uuid.uuid4().hex
+    backup.resolve().relative_to(root)
+    parents = {source.parent for source in sources}
+    previous_children = {path for parent in parents if parent.is_dir() for path in parent.iterdir()}
+    backup.mkdir(parents=True)
+    moved = []
+    old_ids = set(plan["old_task_ids"])
+    record = {
+        "plan": plan,
+        "tasks": [r for r in original.get("tasks") or [] if r.get("task_id") in old_ids],
+        "batches": [
+            r
+            for r in original.get("slurm_batches") or []
+            if r.get("batch_id") in plan["old_batch_ids"]
+        ],
+    }
+    (backup / "record.json").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    try:
+        for source in sources:
+            if source.exists():
+                target = backup / source.relative_to(operation)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.rename(target)
+                moved.append((source, target))
+        current["mc_regeneration_history"][-1]["input_backup_directory"] = str(backup)
+        upload = prepare_mc_upload_batches(
+            action={"parameters": {"mode": "mc_inputs"}},
+            context={
+                "effective_config": config,
+                "event_state": current,
+                "manager": manager,
+                "phase_references": phase_references,
+            },
         )
-    return upload
+        if upload["status"] != "prepared" or upload["task_count"] != plan["allocation_count"]:
+            raise RuntimeError(
+                f"MC 输入未完整生成：{upload.get('status')} / {upload.get('task_count')}"
+            )
+        if any(Path(path).name == "all.inputs.zip" for path in plan["input_archives"]):
+            from phase_agent.tools.remote.submission_storage import pack_storage_directory
+
+            pack_storage_directory(operation / "inputs", "inputs")
+        return upload
+    except Exception:
+        new_children = {
+            path for parent in parents if parent.is_dir() for path in parent.iterdir()
+        } - previous_children
+        replaced_sources = {source for source, _ in moved if source.exists()}
+        for path in sorted(new_children | replaced_sources):
+            path.resolve().relative_to(operation)
+            failed = backup / "failed_new_inputs" / path.relative_to(operation)
+            failed.parent.mkdir(parents=True, exist_ok=True)
+            path.rename(failed)
+        for source, archived in reversed(moved):
+            source.parent.mkdir(parents=True, exist_ok=True)
+            archived.rename(source)
+        raise

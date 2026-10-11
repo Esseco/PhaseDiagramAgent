@@ -14,7 +14,14 @@ def propose_agent_tool_action(
     failed_review = None
     if agent_client is not None:
         try:
+            from phase_agent.analysis.state.project_authority import AUTHORITY_RULE
+
             decision_context = state.get("decision_context") or {}
+            decision_context = {
+                **decision_context,
+                "current_project": state.get("current_project"),
+                "current_settings_authority": AUTHORITY_RULE,
+            }
             decision_context = {
                 **decision_context,
                 "decision_review_format": {
@@ -112,7 +119,9 @@ def propose_agent_tool_action(
             if decision_context.get("unified_dialogue"):
                 from phase_agent.decisions.agent.dialogue_contract import dialogue_output_contract
 
-                decision_context["dialogue_output_contract"] = dialogue_output_contract()
+                decision_context["dialogue_output_contract"] = dialogue_output_contract(
+                    allow_controls=decision_context.get("conversation_controls") is True
+                )
             from phase_agent.decisions.agent.round_budget_review import round_budget_instruction
 
             decision_context["round_budget_review_format"] = round_budget_instruction()

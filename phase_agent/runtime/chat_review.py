@@ -20,6 +20,13 @@ def review_pending(
 
     with handler.lock:
         state = read_json(handler.state_path, {}) or {}
+        from phase_agent.analysis.state.project_authority import project_identity
+
+        if (
+            decision in {"approve", "confirm_sensitive"}
+            and not project_identity(state)["model_consistent"]
+        ):
+            raise request_error("当前模型版本与文件登记不一致，需先核对；未执行")
         completed = (state.get("invocations") or {}).get(plan_id)
         pending = (state.get("pending_execution_policies") or {}).get(plan_id)
         if pending is None and completed is not None:
@@ -44,6 +51,14 @@ def review_pending(
         )["summary_id"]
         if expected_state_version != current_version:
             raise request_error("state_version_stale; refresh the approval page")
+        from phase_agent.analysis.state.project_authority import project_identity
+
+        if (
+            decision in {"approve", "confirm_sensitive"}
+            and pending.get("project_identity")
+            and (pending["project_identity"] != project_identity(state))
+        ):
+            raise request_error("proposal_context_changed; 模型或生效设置已改变，需更新具体方案")
         proposal = pending.get("agent_proposal") or {}
         if expected_proposal_hash != proposal_hash(proposal):
             raise request_error("proposal_hash_mismatch; refresh the approval page")

@@ -192,6 +192,9 @@ class RemoteBatchRunner:
             "job_id": None,
         }
         current.setdefault("slurm_batches", []).append(batch)
+        from phase_agent.tools.remote.submission_layout import write_submission_index
+
+        write_submission_index(self.root, current)
         current["pending_tasks"] = active_pending_tasks(tasks)
         return {"status": "prepared", "state": current, "batch": deepcopy(batch)}
 
@@ -200,6 +203,9 @@ class RemoteBatchRunner:
 
     def collect_results_with_report(self, state):
         """Read new batch results folders or legacy task-local result files."""
+        from phase_agent.tools.remote.submission_storage import restore_state_archives
+
+        restore_state_archives(state)
         processed = set(state.get("processed_task_ids") or [])
         directories = _task_directories_by_id(state)
         recovered = []
@@ -220,6 +226,12 @@ class RemoteBatchRunner:
 
         report["transfer_errors"] = import_registered_bundles(registered_result_directories(state))
         for task in state.get("tasks") or []:
+            # WebUI control records are not remote scientific jobs. Legacy
+            # tasks with file/batch pointers remain eligible even without stage.
+            if not task.get("stage") and not any(
+                task.get(key) for key in ("batch_id", "slurm_batch_id", "input_path", "result_path", "calculation_result_path")
+            ):
+                continue
             task_id = task.get("task_id")
             previously_processed = task_id in processed
             if not task_id or (previously_processed and task.get("stage") not in DFT_STAGES):
@@ -601,6 +613,11 @@ def _locate_task_directory(task, indexed):
 
 
 def _task_result_path(task, task_directory):
+    # Completed scientific records use result_path for their final structure.
+    # The immutable calculation JSON retains a separate operational pointer.
+    calculation = task.get("calculation_result_path")
+    if calculation and Path(calculation).is_file():
+        return Path(calculation)
     if task_directory is not None and task.get("stage") in DFT_STAGES:
         from phase_agent.tools.remote.result_directory_name import result_directory_name
 

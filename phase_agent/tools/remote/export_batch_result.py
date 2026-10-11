@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -10,7 +11,7 @@ from phase_agent.tools.remote.integrity import file_checksum
 from phase_agent.tools.remote.result_directory_name import result_directory_name
 
 
-def export_batch_result(task_directory, results_directory):
+def export_batch_result(task_directory, results_directory, *, create_archive=True):
     task_dir = Path(task_directory).resolve()
     result_path = task_dir / "result.json"
     marker_path = task_dir / "task.finished.json"
@@ -27,7 +28,9 @@ def export_batch_result(task_directory, results_directory):
     ):
         raise ValueError(f"任务身份不一致：{task_dir}")
 
-    destination = Path(results_directory) / result_directory_name(task_dir, result.get("stage"))
+    destination = Path(results_directory) / result_directory_name(
+        task_dir, result.get("stage")
+    )
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "task.finished.json").unlink(missing_ok=True)
     outputs = result.get("outputs") or {}
@@ -40,8 +43,12 @@ def export_batch_result(task_directory, results_directory):
     if training_file:
         source = (task_dir / training_file).resolve()
         if task_dir not in source.parents or source.name != "training.json":
-            raise ValueError("Training file must be training.json within task directory")
-        if not source.is_file() or outputs.get("training_checksum") != file_checksum(source):
+            raise ValueError(
+                "Training file must be training.json within task directory"
+            )
+        if not source.is_file() or outputs.get("training_checksum") != file_checksum(
+            source
+        ):
             raise ValueError("Training file missing or checksum mismatch")
         _copy(source, destination / "training.json")
     structure = outputs.get("structure_path") or outputs.get("final_structure_path")
@@ -55,7 +62,9 @@ def export_batch_result(task_directory, results_directory):
         if not source.is_absolute():
             source = task_dir / source
         source = source.resolve()
-        valid_name = source.suffix.lower() in {".vasp", ".poscar"} or source.name == "CONTCAR"
+        valid_name = (
+            source.suffix.lower() in {".vasp", ".poscar"} or source.name == "CONTCAR"
+        )
         if task_dir not in source.parents or not valid_name:
             if result.get("status") == "completed":
                 raise ValueError(f"最终结构不在任务目录内：{structure}")
@@ -71,7 +80,11 @@ def export_batch_result(task_directory, results_directory):
     checkpoint = result.get("checkpoint")
     if checkpoint:
         checkpoint_path = Path(str(checkpoint).replace("\\", "/"))
-        source = checkpoint_path if checkpoint_path.is_absolute() else task_dir / checkpoint_path
+        source = (
+            checkpoint_path
+            if checkpoint_path.is_absolute()
+            else task_dir / checkpoint_path
+        )
         if source.is_file() and task_dir in source.resolve().parents:
             _copy(source, destination / source.name)
     # Checkpoints still participate in the existing resume contract; do not
@@ -103,13 +116,20 @@ def export_batch_result(task_directory, results_directory):
         manifest = destination / "remote_artifacts.json"
         temporary = manifest.with_name(manifest.name + ".part")
         temporary.write_text(
-            json.dumps({"task_id": result.get("task_id"), "artifacts": remote_artifacts}, indent=2),
+            json.dumps(
+                {"task_id": result.get("task_id"), "artifacts": remote_artifacts},
+                indent=2,
+            ),
             encoding="utf-8",
         )
         temporary.replace(manifest)
     _copy(result_path, destination / "result.json")
     # The completion marker is published last, after every required file.
     _copy(marker_path, destination / "task.finished.json")
+    if create_archive and os.environ.get("PHASE_DEFER_RESULT_ARCHIVE") != "1":
+        from phase_agent.tools.remote.transfer_bundle import result_bundle
+
+        result_bundle(results_directory, [destination], destination.name)
     return destination
 
 

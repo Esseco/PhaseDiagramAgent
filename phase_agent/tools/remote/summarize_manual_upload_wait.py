@@ -20,6 +20,9 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
     if not waiting:
         return None
 
+    from phase_agent.tools.remote.submission_handoff import ensure_waiting_handoffs
+
+    ensure_waiting_handoffs(state)
     task_directories = sorted({str(Path(row["input_path"]).parent) for row in waiting})
     batch_directories = sorted({str(Path(row["input_path"]).parent.parent) for row in waiting})
     upload_roots = {str(Path(path).parent) for path in batch_directories}
@@ -28,7 +31,10 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
         for stage in {row.get("stage") for row in waiting}
     }
     relax_only = set(stage_counts) == {"relax_and_feature"}
+    waiting_ids = {r["task_id"] for r in waiting}
+    handoffs = {r["handoff"]["folder"]: r["handoff"] for r in state.get("slurm_batches", []) if r.get("handoff") and waiting_ids.intersection(r.get("task_ids", []))}
     return {
+        "handoffs": list(handoffs.values()),
         "upload_archives": sorted(
             {
                 str(archive)

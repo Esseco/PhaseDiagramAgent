@@ -7,6 +7,7 @@ class TurnState(TypedDict, total=False):
     history_restored: bool
     operation: str
     facts: dict
+    verified_recovery: dict
     result: dict
     reply: str
 

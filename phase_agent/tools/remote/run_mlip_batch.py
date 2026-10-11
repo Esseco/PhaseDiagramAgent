@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -30,8 +31,15 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
         marker = task_dir / "task.finished.json"
         if marker.is_file() and (task_dir / "result.json").is_file():
             try:
-                if json.loads(marker.read_text(encoding="utf-8")).get("status") == "completed":
-                    exported.append(export_batch_result(task_dir, results_directory))
+                if (
+                    json.loads(marker.read_text(encoding="utf-8")).get("status")
+                    == "completed"
+                ):
+                    exported.append(
+                        export_batch_result(
+                            task_dir, results_directory, create_archive=False
+                        )
+                    )
                     continue
             except (OSError, ValueError) as error:
                 print(f"已有结果汇集失败 {entry['task_id']}: {error}", file=sys.stderr)
@@ -57,6 +65,7 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
             outcome = subprocess.run(
                 command,
                 cwd=task_dir,
+                env={**os.environ, "PHASE_DEFER_RESULT_ARCHIVE": "1"},
                 stdout=stdout,
                 stderr=stderr,
                 check=False,
@@ -66,7 +75,11 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
             failures.append(entry["task_id"])
         if marker.is_file() and (task_dir / "result.json").is_file():
             try:
-                exported.append(export_batch_result(task_dir, results_directory))
+                exported.append(
+                    export_batch_result(
+                        task_dir, results_directory, create_archive=False
+                    )
+                )
             except (OSError, ValueError) as error:
                 print(f"结果汇集失败 {entry['task_id']}: {error}", file=sys.stderr)
                 if entry["task_id"] not in failures:

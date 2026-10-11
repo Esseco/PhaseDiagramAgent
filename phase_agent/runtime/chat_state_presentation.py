@@ -29,6 +29,15 @@ def brief_chat_state(state, *, configuring=False):
         return "当前：微调完成，仍在使用旧模型。"
     refresh = state.get("model_refresh") or {}
     if refresh and refresh.get("status") != "completed":
+        if refresh.get("status") == "waiting_results":
+            return "当前：用微调模型重新计算已有结构，输入已生成，等待结果。"
+        authorization = refresh.get("input_authorization") or {}
+        if (
+            authorization.get("config_version") == state.get("confirmed_config_version")
+            and authorization.get("approved_by")
+            and (authorization.get("plan") or {}).get("model") == state.get("active_model")
+        ):
+            return "当前：新模型结构刷新方案已批准，输入生成待恢复。"
         return (
             "当前：新模型结构刷新方案待确认。"
             if refresh.get("status") == "approval_required"
@@ -59,6 +68,8 @@ def brief_chat_state(state, *, configuring=False):
             if training.get("status") == "inputs_prepared"
             else "当前：微调训练等待结果回传。"
         )
+    if state.get("pending_mc_regeneration"):
+        return "当前：MC 重生成计划待确认。"
     tasks = state.get("tasks") or []
     active = active_pending_tasks(tasks)
     if active:
@@ -77,8 +88,6 @@ def brief_chat_state(state, *, configuring=False):
             + "、".join(f"{name} {count} 个待完成" for name, count in counts.items())
             + "。"
         )
-    if state.get("pending_mc_regeneration"):
-        return "当前：MC 重生成计划待确认。"
     from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
 
     assessment = post_dft_assessment(state, state.get("confirmed_config") or {})
@@ -104,7 +113,7 @@ def epoch_stage_line(state, *, configuring=False):
     from phase_agent.analysis.state.model_epoch import model_epoch
 
     version = state.get("active_model_version") or (state.get("active_model") or {}).get("version")
-    epoch = model_epoch(state, version) or "epoch0"
+    epoch = model_epoch(state, version) or ("epoch0" if not version else "epoch未登记")
     stage = brief_chat_state(state, configuring=configuring).removeprefix("当前：").rstrip("。")
     if (
         not configuring
@@ -118,7 +127,7 @@ def epoch_stage_line(state, *, configuring=False):
     return f"{epoch} · {stage}"
 
 
-def format_epoch_reply(reply, state, *, configuring=False):
+def format_epoch_reply(reply, state, *, configuring=False, project_card=None):
     """Show the epoch once, removing only an identical repeated stage label."""
     header = epoch_stage_line(state, configuring=configuring)
     stage = header.split(" · ", 1)[-1].rstrip("。")
@@ -127,4 +136,8 @@ def format_epoch_reply(reply, state, *, configuring=False):
         if line.startswith("当前状态：") and line.split("：", 1)[1].rstrip("。") == stage:
             continue
         lines.append(line)
+    if project_card is not None:
+        from phase_agent.runtime.project_context import project_context_line
+
+        header = project_context_line(project_card) + "\n" + header
     return header + "\n" + "\n".join(lines)

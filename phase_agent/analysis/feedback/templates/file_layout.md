@@ -4,7 +4,7 @@
 
 epoch对应实际激活的模型版本；Search-group对应一次branch生成与搜索链。
 Relax-0001与Relax-0001_MC-round-0001、0002为同一组的浅/深MC。
-DFT-round归入该Search-group；MLIP-finetune-round位于原模型epoch下。
+submissions 在 epoch 下直接列出 G0001_Relax-0001、G0001_Relax-0001_MC-round-0001 和 G0001_DFT-0001_DFT-single-point 等计算目录；G 表示搜索组。每个计算目录的 inputs/results 为同级目录。MLIP-finetune-round 位于原模型 epoch 下。提交和回收入口见 submissions/README.md；历史深层路径仅作为隐藏兼容入口。
 未执行且已明确废弃的微调草稿不占编号，不重编号真实运行历史。
 
 ## 回传到哪里

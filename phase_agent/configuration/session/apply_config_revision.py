@@ -15,6 +15,8 @@ def apply_config_revision(session: dict, patch: dict, *, reasons=None, author="u
         for part in parts[:-1]:
             target = target.setdefault(part, {})
         old = deepcopy(target.get(parts[-1]))
+        if parts[-1] in target and old == new_value:
+            continue
         target[parts[-1]] = deepcopy(new_value)
         permission = classify_config_permission(path, updated["config"])
         changes.append(
@@ -30,7 +32,12 @@ def apply_config_revision(session: dict, patch: dict, *, reasons=None, author="u
                 else "unclassified",
             }
         )
-    if any(path.startswith(("system.boundary", "system.configuration_space")) for path in patch):
+    if not changes:
+        return deepcopy(session)
+    if any(
+        change["path"].startswith(("system.boundary", "system.configuration_space"))
+        for change in changes
+    ):
         from phase_agent.configuration.session.synchronize_system_scope import (
             synchronize_system_scope,
         )

@@ -3,9 +3,12 @@
 from collections import Counter
 import json
 from pathlib import Path
-from phase_agent.analysis.state.model_epoch import model_epoch_label
+from phase_agent.analysis.state.model_epoch import model_epoch_label, model_epoch
 from phase_agent.tools.state.task_waiting import awaiting_task_result
-from phase_agent.runtime.chat_state_presentation import brief_chat_state, waiting_training_job
+from phase_agent.runtime.chat_state_presentation import (
+    brief_chat_state,
+    waiting_training_job,
+)
 from phase_agent.runtime.response_preferences import detailed_response
 
 ACTION_NAMES = {
@@ -29,6 +32,12 @@ STAGE_NAMES = {
 
 def format_progress(state):
     model = state.get("active_model_version") or "未记录"
+    epoch = model_epoch(state, model)
+    model_label = (
+        f"{epoch}（微调模型）"
+        if epoch and model.startswith("remote-")
+        else model_epoch_label(state, model)
+    )
     pending = state.get("pending_execution_policies") or {}
     tasks = state.get("tasks") or []
     training = waiting_training_job(state)
@@ -39,7 +48,10 @@ def format_progress(state):
         if row.get("status") in {"pending", "running", "submitted", "unknown"}
         and not awaiting_task_result(row)
     ]
-    lines = [f"当前项目状态：{model_epoch_label(state, model)}。", brief_chat_state(state)]
+    lines = [
+        f"当前项目状态：{model_label}。",
+        brief_chat_state(state),
+    ]
     from phase_agent.tools.local.recover_remote_training import (
         inspect_training_results,
         training_result_message,
@@ -104,7 +116,10 @@ def format_progress(state):
                     reasons.append(
                         f"模型清单已齐。K折对比报告：{report_path}；匹配结构 {report['structures']}，力分量 {report['force_components']}。"
                     )
-                    for name, unit in (("energy_per_atom", "meV/atom"), ("forces", "meV/Å")):
+                    for name, unit in (
+                        ("energy_per_atom", "meV/atom"),
+                        ("forces", "meV/Å"),
+                    ):
                         old, new = report["old"].get(name), report["new"].get(name)
                         if old and new and old.get("mae") is not None:
                             reasons.append(
@@ -169,20 +184,25 @@ def format_progress(state):
             if purpose:
                 lines.append(f"目的：{purpose}")
     elif pending:
-        lines += [f"待审批方案 {len(pending)} 个。", "下一步：先明确审批对象，不要笼统批准。"]
+        lines += [
+            f"待审批方案 {len(pending)} 个。",
+            "下一步：先明确审批对象，不要笼统批准。",
+        ]
     elif state.get("pending_dft_recovery_question"):
         lines.append("下一步：回复“继续回收”或“不再回收”，确认是否等待剩余 DFT。")
     elif training:
         if training.get("upload_archive"):
             lines.append(f"必要输入包：`{training['upload_archive']}`。")
         lines.append(
-            "下一步：上传输入包并在训练轮目录解压，在inputs内提交 GPU.sh；只回传training.results.zip到本轮results，再说“继续”（旧批次可回传精简results文件夹）。模型仍需验证和单独激活审批。"
+            "下一步：上传输入包并在训练轮目录解压，在inputs内提交 GPU.sh；只下载results/transfer/all.results.zip并回传到本轮results，再说“继续”（旧批次可回传精简results文件夹）。模型仍需验证和单独激活审批。"
             if training.get("status") == "inputs_prepared"
             else "下一步：回传训练结果后说“继续”，检查通过后再单独批准模型激活。"
         )
         lines.append(f"训练目录：{training.get('directory') or '未记录'}。")
     elif waiting:
-        lines.append("下一步：回传对应 results 后说“继续”；尚未回传的任务继续等待。")
+        from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
+
+        lines.extend(waiting_file_lines(state))
     else:
         lines.append("下一步：说“继续”，由 Agent 检查已有结果并提出下一步方案，不等于批准。")
     by_stage = Counter(

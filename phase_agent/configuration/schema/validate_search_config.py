@@ -1,5 +1,7 @@
 """Check missing, conflicts and ambiguity without launching work."""
 
+from math import isfinite
+
 
 def validate_search_config(config: dict, *, stage="full") -> dict:
     if stage not in {"full", "startup"}:
@@ -53,17 +55,26 @@ def validate_search_config(config: dict, *, stage="full") -> dict:
         missing.append("convergence.stable_model_update_epochs")
     elif isinstance(epochs, bool) or int(epochs) <= 0:
         conflicts.append("convergence_stable_model_update_epochs_must_be_positive")
-    for field in ("hull_change_tolerance", "final_energy_mae_tolerance"):
+    for field in (
+        "hull_change_tolerance",
+        "final_energy_mae_tolerance",
+        "final_energy_rmse_tolerance",
+        "final_force_mae_tolerance",
+        "final_force_rmse_tolerance",
+        "phase_competition_gap_ev_per_atom",
+    ):
         value = convergence.get(
             field,
             convergence.get(
                 {
                     "hull_change_tolerance": "hull_tolerance",
                     "final_energy_mae_tolerance": "final_frame_error_tolerance",
-                }[field]
+                }.get(field, field)
             ),
         )
-        if value is not None and (isinstance(value, bool) or float(value) < 0):
+        if value is not None and (
+            isinstance(value, bool) or not isfinite(float(value)) or float(value) < 0
+        ):
             conflicts.append(f"convergence.{field}_must_be_nonnegative")
     mc = config.get("mc_policy")
     if mc is not None:

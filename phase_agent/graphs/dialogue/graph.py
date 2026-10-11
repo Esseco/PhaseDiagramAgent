@@ -79,6 +79,7 @@ def build_project_turn_graph(science=None):
             "configure": "configure",
             "inspect_configuration": "inspect_configuration",
             "present": "present",
+            "review": "review",
             "scientific_workflow": "scientific_workflow",
         },
     )

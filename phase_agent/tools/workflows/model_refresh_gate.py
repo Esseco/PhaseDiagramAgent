@@ -9,7 +9,11 @@ from phase_agent.tools.budget.release_budget import release_budget
 from phase_agent.tools.policy.execution_policy import apply_execution_policy, build_agent_proposal
 from phase_agent.tools.policy.validate_tool_action import validate_tool_action
 from phase_agent.tools.dispatch.execute_tool_action import execute_tool_action
-from phase_agent.tools.workflows.model_refresh_state import refresh_active, refresh_preview
+from phase_agent.tools.workflows.model_refresh_state import (
+    refresh_active,
+    refresh_preview,
+    fingerprint,
+)
 
 
 def advance_refresh(state, user_message=""):
@@ -164,6 +168,18 @@ def run_model_refresh_gate(
     config = context["effective_config"]
     refresh = current["model_refresh"]
     automatic = refresh.get("status") == "supplement_ready"
+    approval_identity = fingerprint(
+        {
+            "config": session["confirmed_snapshot"],
+            "active_model": current.get("active_model"),
+        }
+    )
+    authorization = refresh.get("input_authorization") or {}
+    resume_approved = (
+        not automatic
+        and authorization.get("identity") == approval_identity
+        and authorization.get("plan")
+    )
     from phase_agent.tools.workflows.model_refresh_scope import (
         approved_refresh_scope,
         refresh_scope_errors,
@@ -185,7 +201,13 @@ def run_model_refresh_gate(
             }
     try:
         plan = (
-            refresh["plan"] if automatic else refresh_preview(current, context["manager"], config)
+            refresh["plan"]
+            if automatic
+            else (
+                deepcopy(authorization["plan"])
+                if resume_approved
+                else refresh_preview(current, context["manager"], config)
+            )
         )
     except (ValueError, OSError) as error:
         return {
@@ -218,7 +240,9 @@ def run_model_refresh_gate(
     stored = (current.get("pending_execution_policies") or {}).get(key) or {}
     previous = ((stored.get("agent_proposal") or {}).get("raw_action") or {}).get("task_key")
     # A previous action's approval must never approve a new refresh or changed files.
-    if not automatic and previous != action["task_key"]:
+    if resume_approved:
+        human_feedback = "同意"
+    elif not automatic and previous != action["task_key"]:
         human_feedback = None
     policy = apply_execution_policy(
         proposal,
@@ -272,14 +296,23 @@ def run_model_refresh_gate(
             reason="replace envelope with actual supplemental tasks",
         )["state"]
     validation = validate_tool_action(action, validation_state, session, registry)
-    if not validation["valid"]:
+    budget_errors = {
+        "total_cost_limit",
+        "stage_task_limit",
+        "stage_cost_limit",
+        "reserved_total_cost_limit",
+    }
+    deferred_budget_errors = [error for error in validation["errors"] if error in budget_errors]
+    if not validation["valid"] and (
+        automatic or any(error not in budget_errors for error in validation["errors"])
+    ):
         return {
             "status": "rejected",
             "state": current,
             "reason": "刷新方案校验失败，未截断：" + str(validation["errors"]),
             "submitted": False,
         }
-    if not automatic:
+    if not automatic and not resume_approved:
         from phase_agent.tools.policy.native_approval import native_approval_gate
 
         blocked = native_approval_gate(
@@ -295,6 +328,36 @@ def run_model_refresh_gate(
         )
         if blocked is not None:
             return blocked
+    if not automatic:
+        # Preserve a delivered approval before a budget preflight can block it.
+        # No execution receipt or files exist until that preflight succeeds.
+        refresh["input_authorization"] = {
+            "identity": approval_identity,
+            "config_version": session["confirmed_snapshot"]["config_version"],
+            "plan": deepcopy(plan),
+            "approved_by": action["task_key"],
+        }
+        from phase_agent.tools.budget.check_budget import check_budget
+
+        checked = check_budget(
+            current,
+            {
+                "stage": "relax_and_feature",
+                "tasks": len(plan["candidates"]) + plan["maximum_supplemental_count"],
+                "relative_cost": plan["maximum_total_cost"],
+            },
+            config["budgets"],
+        )
+        if not checked["allowed"] or deferred_budget_errors:
+            current.setdefault("pending_execution_policies", {}).pop(key, None)
+            return {
+                "status": "budget_exhausted",
+                "state": current,
+                "submitted": False,
+                "reason": "刷新方案已批准，尚未生成输入；预算阻塞："
+                + ",".join(sorted(set(checked["reasons"] + deferred_budget_errors)))
+                + "。范围和配置不变时，继续将复用本次批准。",
+            }
     execution = execute_tool_action(
         action,
         registry=registry,
@@ -309,6 +372,9 @@ def run_model_refresh_gate(
     result = execution.get("result") or {}
     updated = result.get("state", current)
     if result.get("status") == "prepared":
+        from phase_agent.tools.remote.submission_handoff import ensure_waiting_handoffs
+
+        ensure_waiting_handoffs(updated)
         updated.setdefault("pending_execution_policies", {}).pop(key, None)
         if automatic:
             consume_refresh_scope(updated["model_refresh"])

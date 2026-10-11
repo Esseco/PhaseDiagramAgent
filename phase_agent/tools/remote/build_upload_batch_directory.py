@@ -16,7 +16,7 @@ STAGE_NAMES = {
 }
 
 
-def build_upload_batch_directory(
+def _build_legacy_upload_batch_directory(
     root,
     state,
     *,
@@ -135,3 +135,15 @@ def build_upload_batch_directory(
 def _safe(value):
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value)).strip("-.")
     return cleaned[:64] or "unnamed"
+
+
+def build_upload_batch_directory(root, state, **kwargs):
+    from phase_agent.tools.remote.submission_layout import compact_calculation_directory
+
+    directory, metadata = _build_legacy_upload_batch_directory(root, state, **kwargs)
+    operation = compact_calculation_directory(root, directory.parent.parent)
+    for key in ("operation_directory", "parent_relax_directory"):
+        if metadata.get(key):
+            metadata[key] = str(compact_calculation_directory(root, metadata[key]))
+    metadata["submission_layout_version"] = 2
+    return operation / "inputs" / directory.name, metadata

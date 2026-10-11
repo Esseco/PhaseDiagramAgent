@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from phase_agent.module_references import import_saved_module
 import json
+import os
 from pathlib import Path
 import traceback
 
@@ -25,7 +26,10 @@ def run_single_task(task_path="task.json", *, executor):
     timer = start_timer()
     try:
         result = executor(task)
-        if not isinstance(result, dict) or result.get("status") not in TERMINAL_STATUSES:
+        if (
+            not isinstance(result, dict)
+            or result.get("status") not in TERMINAL_STATUSES
+        ):
             raise ValueError("executor 必须返回带终态 status 的 dict")
         payload = {**result, "task_id": task["task_id"], "task_key": task["task_key"]}
     except Exception as error:
@@ -63,12 +67,20 @@ def run_single_task(task_path="task.json", *, executor):
             "status",
         )
     }
-    marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})
+    marker.update(
+        {"result_file": result_path.name, "result_checksum": file_checksum(result_path)}
+    )
     _write(directory / "task.finished.json", marker)
     if (directory.parent / "batch.snapshot.json").is_file():
         from phase_agent.tools.remote.export_batch_result import export_batch_result
 
-        export_batch_result(directory, directory.parent.parent / "results")
+        batch_parent = directory.parent.parent
+        stage = batch_parent.parent if batch_parent.name == "inputs" else batch_parent
+        export_batch_result(directory, stage / "results")
+    elif os.environ.get("PHASE_DEFER_RESULT_ARCHIVE") != "1":
+        from phase_agent.tools.remote.transfer_bundle import result_bundle
+
+        result_bundle(directory.parent, [directory], directory.name)
     return payload
 
 
@@ -85,7 +97,8 @@ def _load(reference):
 def _write(path, payload):
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        + "\n",
         encoding="utf-8",
     )
     temporary.replace(path)

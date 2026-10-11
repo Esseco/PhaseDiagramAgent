@@ -35,6 +35,9 @@ def _csv(path, columns):
 def inspect_training_results(job):
     """Read-only inspection, including legacy manifests with unresolved paths."""
     root = Path(job["directory"]) / "results"
+    from phase_agent.tools.remote.submission_storage import restore_storage_directory
+
+    restore_storage_directory(root, "results")
     if not root.is_dir() or not any((root / name).exists() for name in FILES):
         return None
     try:
@@ -155,7 +158,9 @@ def recover_remote_training(state):
             continue
         from phase_agent.tools.remote.transfer_bundle import import_registered_bundles
 
-        errors = import_registered_bundles([Path(job["directory"]) / "results"])
+        errors = import_registered_bundles(
+            [Path(job["directory"]), Path(job["directory"]) / "results"]
+        )
         if errors:
             reports.append(
                 {

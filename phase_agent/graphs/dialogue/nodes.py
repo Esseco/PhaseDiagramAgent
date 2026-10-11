@@ -21,7 +21,28 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
     if handler.conversation_id not in {None, context.conversation_id}:
         raise OpenWebUIRequestError("此运行时已绑定另一个会话。")
     facts = read_json(handler.state_path, {}) or {}
-    return {"message": message, "facts": facts, "operation": "dispatch"}
+    statuses = {row.get("task_id"): row.get("status") for row in facts.get("tasks") or []}
+    if handler.config_delegate is None:
+        from phase_agent.tools.workflows.recover_saved_results import (
+            recover_saved_results,
+        )
+
+        facts = recover_saved_results(facts, **handler.workflow_kwargs)
+    recovered = {}
+    for row in facts.get("tasks") or []:
+        if row.get("status") in {"completed", "failed", "timeout", "cancelled"} and row.get(
+            "status"
+        ) != statuses.get(row.get("task_id")):
+            counts = recovered.setdefault(
+                row.get("stage") or "unknown", {"completed": 0, "failed": 0}
+            )
+            counts["completed" if row["status"] == "completed" else "failed"] += 1
+    return {
+        "message": message,
+        "facts": facts,
+        "verified_recovery": recovered,
+        "operation": "dispatch",
+    }
 
 
 def history(state, runtime: Runtime[TurnRuntime]):
@@ -120,7 +141,10 @@ def review(state, runtime: Runtime[TurnRuntime]):
 
     return {
         "reply": review_presented_proposal(
-            runtime.context.handler, state["facts"], state["message"]
+            runtime.context.handler,
+            state["facts"],
+            state["message"],
+            requested_review=(state.get("result") or {}).get("review"),
         )
     }
 
@@ -138,7 +162,10 @@ def decide(state, runtime: Runtime[TurnRuntime]):
         else None
     )
     handler.turn_context = fresh_turn_context(
-        handler, state["facts"], runtime.context.messages, runtime.context.conversation_id
+        handler,
+        state["facts"],
+        runtime.context.messages,
+        runtime.context.conversation_id,
     )
     from phase_agent.graphs.invocation_context import dialogue_message
 
@@ -190,6 +217,7 @@ def decide(state, runtime: Runtime[TurnRuntime]):
             "scientific_requested": "scientific_workflow",
             "configuration_edit_requested": "configure",
             "configuration_view_requested": "inspect_configuration",
+            "proposal_review_requested": "review",
         }.get(result.get("status"), "present"),
     }
 
@@ -211,17 +239,20 @@ def present(state, runtime: Runtime[TurnRuntime]):
     handler.last_turn_outcome = state["result"].get("status")
     if state["result"].get("status") == "awaiting_approval":
         bind_presented_proposal(handler, read_json(handler.state_path, {}) or {})
-    return {"reply": format_workflow_reply(state["result"], handler.state_path)}
+    result = {**state["result"], "verified_recovery": state.get("verified_recovery") or {}}
+    return {"reply": format_workflow_reply(result, handler.state_path)}
 
 
 def operation_node(handle):
     def node(state, runtime: Runtime[TurnRuntime]):
-        from phase_agent.tools.step_runner.file_protocol import read_json
-
         context = runtime.context
-        facts = read_json(context.handler.state_path, {}) or {}
+        facts = state["facts"]
         reply = handle(
-            context.handler, state["message"], facts, context.messages, context.conversation_id
+            context.handler,
+            state["message"],
+            facts,
+            context.messages,
+            context.conversation_id,
         )
         return {"facts": facts, **({"reply": reply} if reply is not None else {})}
 

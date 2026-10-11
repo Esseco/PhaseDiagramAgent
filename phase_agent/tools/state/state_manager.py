@@ -31,7 +31,11 @@ def update_state_snapshot(state: dict, *, config_version=None) -> dict:
 
 
 def agent_state_summary(state: dict) -> dict:
-    return deepcopy(state.get("current_state_snapshot") or {})
+    from phase_agent.analysis.state.project_authority import current_project
+
+    summary = deepcopy(state.get("current_state_snapshot") or {})
+    summary["current_project"] = current_project(state)
+    return summary
 
 
 def _history_snapshot(snapshot):

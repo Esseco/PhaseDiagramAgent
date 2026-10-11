@@ -10,7 +10,7 @@ from phase_agent.configuration.defaults.default_slurm_cluster_config import (
 from phase_agent.tools.budget.check_budget import check_budget
 from phase_agent.tools.budget.reserve_budget import reserve_budget
 from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
-from phase_agent.tools.workflows.model_refresh_state import refresh_preview
+from phase_agent.tools.workflows.model_refresh_state import refresh_preview, fingerprint
 from phase_agent.science.mlip.slurm_executor import create_mlip_task_preparer
 
 
@@ -37,7 +37,27 @@ def prepare_model_refresh(*, action, context):
     refresh = state["model_refresh"]
     wave = int(refresh.get("wave", 0))
     if wave == 0:
-        plan = refresh_preview(state, context["manager"], config)
+        frozen = (action.get("parameters") or {}).get("refresh_preview")
+        plan = deepcopy(frozen) if frozen else refresh_preview(state, context["manager"], config)
+        if frozen:
+            body = {k: v for k, v in plan.items() if k != "checksum"}
+            if fingerprint(body) != plan.get("checksum"):
+                return {
+                    "status": "rejected",
+                    "state": state,
+                    "reason": "已批准刷新方案校验码不一致",
+                }
+            if (
+                plan.get("model") != state.get("active_model")
+                or plan.get("new_model_version") != state.get("active_model_version")
+                or plan.get("relax_parameters")
+                != ((config.get("mlip") or {}).get("relax_parameters") or {})
+            ):
+                return {
+                    "status": "rejected",
+                    "state": state,
+                    "reason": "当前模型或弛豫设置与已批准方案不一致",
+                }
         if (action.get("parameters") or {}).get("preview_checksum") != plan["checksum"]:
             return {
                 "status": "rejected",

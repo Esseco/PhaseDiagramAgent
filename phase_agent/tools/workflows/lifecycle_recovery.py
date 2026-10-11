@@ -37,7 +37,12 @@ def _collect_workflow_results(frame):
             collection_report = collected["report"]
         else:
             automatic_results = collector.collect_results(loaded_state)
-    combined_results = [*(recovered_results or []), *automatic_results]
+    from phase_agent.persistence.shared_dft import publish, import_records, reusable_results
+
+    publish(loaded_state, manager, effective_config)
+    import_records(loaded_state, effective_config)
+    shared_results = reusable_results(loaded_state, manager, effective_config)
+    combined_results = [*(recovered_results or []), *automatic_results, *shared_results]
     pre_reconciled = reconcile_task_results(loaded_state, combined_results)
     from phase_agent.tools.workflows.comparison_model_registry import remember_comparison_models
 
@@ -181,6 +186,12 @@ def _workflow_wait_gate(frame):
     manual_wait = frame["manual_wait"]
     rebuilding = frame["rebuilding"]
     runtime_path = state_path or effective_config.get("state_path")
+    from phase_agent.tools.workflows.reference_dft_startup import startup_gate
+    human=frame.get('human_feedback')
+    startup=startup_gate(feedback['state'],effective_config,message=(frame.get('runtime_adapters') or {}).get('user_message'),decision=human.get('decision') if isinstance(human,dict) else human)
+    if startup is not None:
+        _save_runner_state(startup['state'],runtime_path)
+        return startup
     if runtime_path:
         from phase_agent.graphs.execution_recovery_graph import execution_recovery_report
 

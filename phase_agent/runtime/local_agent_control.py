@@ -41,7 +41,13 @@ class LocalAgentControl:
         from phase_agent.runtime.scientific_progress import project_progress
 
         summary = build_status_summary(state, config_version=state.get("confirmed_config_version"))
-        session = (getattr(self.chat_handler, "workflow_kwargs", None) or {}).get("config_session")
+        from phase_agent.runtime.project_context import (
+            current_config_session,
+            handler_project_context,
+        )
+
+        session = current_config_session(self.chat_handler)
+        summary["current_project"] = handler_project_context(self.chat_handler, state)
         progress = project_progress(state, self.state_path, session=session)
         summary["pending_approvals"] = progress["pending_review_count"]
         summary["waiting_state"] = progress["waiting_state"]
@@ -55,8 +61,10 @@ class LocalAgentControl:
         )["summary_id"]
         from phase_agent.runtime.review_requests import pending_reviews
 
-        session = (getattr(self.chat_handler, "workflow_kwargs", None) or {}).get("config_session")
-        rows = pending_reviews(state, session)
+        from phase_agent.runtime.project_context import current_config_session
+
+        session = current_config_session(self.chat_handler)
+        rows = pending_reviews(state, session, state_path=self.state_path)
         from phase_agent.tools.state.execution_receipts import recovery_report
 
         if recovery_report(self.state_path, state)["unsettled"]:
@@ -102,7 +110,9 @@ class LocalAgentControl:
 
     def config(self):
         handler = getattr(self.chat_handler, "config_delegate", None) or self.chat_handler
-        session = handler.workflow_kwargs.get("config_session") or {}
+        from phase_agent.runtime.project_context import current_config_session
+
+        session = current_config_session(handler)
         return validate_control_response(
             ConfigResponse,
             {

@@ -243,7 +243,10 @@ def revise_pending_proposal(
         }
     )
     revision_number = int(stored.get("revision", 0)) + 1
+    from phase_agent.analysis.state.project_authority import project_identity
+
     current["pending_execution_policies"][pending_key] = {
+        "project_identity": project_identity(current),
         "record_id": record_id,
         "agent_proposal": deepcopy(proposal),
         "revision": revision_number,

@@ -47,5 +47,15 @@ def build_status_summary(state: dict, *, config_version=None) -> dict:
             ]
         ),
     }
-    summary["summary_id"] = content_id(summary, "summary")
+    from phase_agent.analysis.state.project_authority import project_identity
+
+    summary["project_identity"] = project_identity(state)
+    versioned = deepcopy(summary)
+    # Asking about a frozen proposal consumes tokens, not a new scientific state.
+    # Keep usage visible while binding approval to scientific costs and evidence.
+    budget = versioned["budget_usage"]
+    budget.pop("llm", None)
+    budget.setdefault("total_relative_cost", 0.0)
+    budget.setdefault("stages", {})
+    summary["summary_id"] = content_id(versioned, "summary")
     return summary

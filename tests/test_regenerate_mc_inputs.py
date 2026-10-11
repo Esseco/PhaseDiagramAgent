@@ -173,7 +173,7 @@ def test_budget_limited_order_interleaves_tier_and_phase():
 
 
 @pytest.mark.parametrize("directory_exists", [False, True])
-def test_chat_request_only_proposes_and_dedicated_confirmation_executes(
+def test_chat_request_proposes_and_simple_approval_executes(
     tmp_path, monkeypatch, directory_exists
 ):
     state = _state(tmp_path)
@@ -184,13 +184,17 @@ def test_chat_request_only_proposes_and_dedicated_confirmation_executes(
     state_path.write_text(json.dumps(state), encoding="utf-8")
     config = {
         "upload_batches_directory": str(tmp_path),
-        "budgets": {"stage_limits": {"deep_search": {"max_cost": 10}}},
+        "budgets": {"stage_limits": {"deep_search": {"max_cost": 100}}},
     }
     monkeypatch.setattr(
         "phase_agent.configuration.runtime.build_effective_run_config.build_effective_run_config",
         lambda *_: config,
     )
     calls = []
+    monkeypatch.setattr(
+        "phase_agent.tools.local.replan_mc_allocation.replan_mc_allocation",
+        lambda *_: module._approved_mc_preview(state)[0],
+    )
 
     def regenerate(*args, **kwargs):
         calls.append(kwargs)
@@ -210,13 +214,11 @@ def test_chat_request_only_proposes_and_dedicated_confirmation_executes(
     assert "尚未删除文件或生成任务" in reply
     assert ("该目录存在" if directory_exists else "该目录不存在") in reply
     assert "MC-sampling 从 0001" in reply
-    assert "高于当前 MC 阶段成本上限" in reply
+    assert "重新规划" in reply
     assert calls == []
     assert json.loads(state_path.read_text(encoding="utf-8"))["pending_mc_regeneration"]
-    handler([{"role": "user", "content": "同意"}])
-    assert calls == []
-    confirmed = handler([{"role": "user", "content": "确认重新生成当前轮MC任务"}])
-    assert "重新生成 1 个 MC 输入" in confirmed
+    confirmed = handler([{"role": "user", "content": "同意"}])
+    assert "生成 1 个 MC 输入" in confirmed
     assert len(calls) == 1
 
 
@@ -313,6 +315,178 @@ def test_numbered_mc_round_inputs_layout_and_input_archive_are_recognized(tmp_pa
     assert plan["directory"] == str(root.resolve())
     assert plan["exists"]
     (root / "results").mkdir()
-    (root / "results/unknown.results.zip").write_bytes(b"returned results")
+    returned = Path(task["result_path"])
+    returned.parent.mkdir(parents=True)
+    returned.write_text("actual MC return")
+    with pytest.raises(ValueError, match="结果|未知"):
+        module.plan_mc_regeneration(state, tmp_path)
+
+
+def _mixed_return_state(tmp_path):
+    state = _legacy_state(tmp_path)
+    root = tmp_path / "epoch0_model/Search-group-0001/Relax-0001_MC-round-0001"
+    batch = root / "inputs/MC-sampling-0001_remote-000002"
+    task_root = batch / "00000-MC-1"
+    task_root.mkdir(parents=True)
+    (task_root / "task.json").write_bytes(b"old input")
+    archive = batch.with_name(batch.name + ".upload.zip")
+    archive.write_bytes(b"old upload archive")
+    results = root / "results"
+    (results / "00000-RELAX-old").mkdir(parents=True)
+    (results / "00000-RELAX-old/result.json").write_bytes(b"returned Relax evidence")
+    (results / "Relax-submission-0001_remote-000001.runtime.json").write_bytes(b"Relax timing")
+    (results / "other.log").write_bytes(b"preserve any result-side evidence")
+    state["tasks"][0]["input_path"] = str(task_root / "task.json")
+    state["tasks"][0]["result_path"] = str(results / "00000-MC-1/result.json")
+    state["slurm_batches"][1]["upload_directory"] = str(batch)
+    return state, root, batch, archive
+
+
+def test_mixed_relax_returns_do_not_block_input_only_regeneration(tmp_path):
+    state, root, batch, archive = _mixed_return_state(tmp_path)
+    plan = module.plan_mc_regeneration(state, tmp_path)
+    assert plan["directory"] == str(root.resolve())
+    assert plan["input_directories"] == [str(batch.resolve())]
+    assert plan["input_archives"] == [str(archive.resolve())]
+
+
+def test_registered_compact_calculation_path_can_be_regenerated(tmp_path):
+    state, root, batch, archive = _mixed_return_state(tmp_path)
+    compact = tmp_path / "epoch0_model/G0001_Relax-0001_MC-round-0001"
+    root.rename(compact)
+    task = state["tasks"][0]
+    task["input_path"] = str(compact / Path(task["input_path"]).relative_to(root))
+    task["result_path"] = str(compact / Path(task["result_path"]).relative_to(root))
+    state["slurm_batches"][1]["upload_directory"] = str(compact / batch.relative_to(root))
+    state["slurm_batches"][1]["operation_directory"] = str(compact)
+    plan = module.plan_mc_regeneration(state, tmp_path)
+    assert plan["directory"] == str(compact.resolve())
+    state["slurm_batches"][1]["operation_directory"] = str(tmp_path / "unregistered")
+    with pytest.raises(ValueError, match="上传根目录"):
+        module.plan_mc_regeneration(state, tmp_path)
+
+
+def test_regeneration_backs_up_and_refreshes_complete_input_archive(tmp_path, monkeypatch):
+    from phase_agent.tools.remote.submission_storage import pack_storage_directory
+
+    state, root, batch, archive = _mixed_return_state(tmp_path)
+    pack_storage_directory(root / "inputs", "inputs")
+    complete = root / "inputs/all.inputs.zip"
+    original = complete.read_bytes()
+    plan = module.plan_mc_regeneration(state, tmp_path)
+    assert str(complete) in plan["input_archives"]
+
+    def prepare(*, action, context):
+        assert not complete.exists()
+        batch.mkdir(parents=True)
+        (batch / "task.json").write_bytes(b"new input")
+        return {
+            "status": "prepared",
+            "state": context["event_state"],
+            "task_count": 1,
+            "batch_count": 1,
+        }
+
+    monkeypatch.setattr(module, "prepare_mc_upload_batches", prepare)
+    result = module.regenerate_mc_inputs(
+        state,
+        approved_plan=plan,
+        upload_root=tmp_path,
+        config={},
+        manager=None,
+        phase_references={},
+        config_version="v1",
+        allow_delete=True,
+    )
+    backup = Path(result["state"]["mc_regeneration_history"][-1]["input_backup_directory"])
+    assert (backup / "inputs/all.inputs.zip").read_bytes() == original
+    assert complete.is_file() and complete.read_bytes() != original
+    import zipfile
+
+    with zipfile.ZipFile(complete) as zipped:
+        assert zipped.read(batch.name + "/task.json") == b"new input"
+
+
+def test_regeneration_archives_inputs_and_preserves_all_returned_files(tmp_path, monkeypatch):
+    state, root, batch, archive = _mixed_return_state(tmp_path)
+    results = {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in (root / "results").rglob("*")
+        if p.is_file()
+    }
+    plan = module.plan_mc_regeneration(state, tmp_path)
+
+    def prepare(*, action, context):
+        assert not batch.exists() and not archive.exists()
+        batch.mkdir(parents=True)
+        (batch / "task.json").write_bytes(b"new input")
+        return {
+            "status": "prepared",
+            "state": context["event_state"],
+            "task_count": 1,
+            "batch_count": 1,
+        }
+
+    monkeypatch.setattr(module, "prepare_mc_upload_batches", prepare)
+    outcome = module.regenerate_mc_inputs(
+        state,
+        approved_plan=plan,
+        upload_root=tmp_path,
+        config={},
+        manager=None,
+        phase_references={},
+        config_version="v1",
+        allow_delete=True,
+    )
+    history = outcome["state"]["mc_regeneration_history"][-1]
+    backup = Path(history["input_backup_directory"])
+    assert (backup / batch.relative_to(root) / "00000-MC-1/task.json").read_bytes() == b"old input"
+    assert (backup / archive.relative_to(root)).read_bytes() == b"old upload archive"
+    assert (batch / "task.json").read_bytes() == b"new input"
+    assert results == {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in (root / "results").rglob("*")
+        if p.is_file()
+    }
+
+
+def test_failed_regeneration_restores_old_inputs_and_keeps_returned_results(tmp_path, monkeypatch):
+    state, root, batch, archive = _mixed_return_state(tmp_path)
+    before = json.dumps(state, sort_keys=True)
+    plan = module.plan_mc_regeneration(state, tmp_path)
+
+    def fail(*, action, context):
+        batch.mkdir(parents=True)
+        (batch / "partial.json").write_bytes(b"failed new input")
+        raise RuntimeError("preparation failed")
+
+    monkeypatch.setattr(module, "prepare_mc_upload_batches", fail)
+    with pytest.raises(RuntimeError, match="preparation failed"):
+        module.regenerate_mc_inputs(
+            state,
+            approved_plan=plan,
+            upload_root=tmp_path,
+            config={},
+            manager=None,
+            phase_references={},
+            config_version="v1",
+            allow_delete=True,
+        )
+    assert (batch / "00000-MC-1/task.json").read_bytes() == b"old input"
+    assert archive.read_bytes() == b"old upload archive"
+    assert (root / "results/00000-RELAX-old/result.json").read_bytes() == b"returned Relax evidence"
+    assert json.dumps(state, sort_keys=True) == before
+    assert list((root.parent / ".mc_input_history").rglob("partial.json"))
+
+
+def test_actual_mc_result_archive_and_task_local_result_block_regeneration(tmp_path):
+    state, root, batch, archive = _mixed_return_state(tmp_path)
+    returned = root / "results" / (batch.name + ".results.zip")
+    returned.write_bytes(b"actual MC archive")
+    with pytest.raises(ValueError, match="结果"):
+        module.plan_mc_regeneration(state, tmp_path)
+    returned.unlink()
+    task_result = Path(state["tasks"][0]["input_path"]).with_name("result.json")
+    task_result.write_text("actual task-local result")
     with pytest.raises(ValueError, match="结果|未知"):
         module.plan_mc_regeneration(state, tmp_path)

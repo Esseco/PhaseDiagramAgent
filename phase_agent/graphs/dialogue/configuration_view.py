@@ -1,45 +1,25 @@
 """Read saved configuration without creating a draft or preparing science."""
 
-from pathlib import Path
 import json
 
 
 def configuration_view(handler, facts):
-    session = handler.workflow_kwargs.get("config_session") or {}
-    confirmed = (
-        facts.get("confirmed_config")
-        or (session.get("confirmed_snapshot") or {}).get("config")
-        or session.get("config")
-        or {}
-    )
-    state_path = Path(handler.state_path).resolve()
-    root = (
-        state_path.parent.parent
-        if state_path.parent.name == "workflow_state"
-        else state_path.parent
-    )
-    source = root / "parameters/search_config.project.json"
-    if not source.is_file():
-        source = root / "search_config.project.json"
-    config = confirmed
-    label = "已确认配置"
-    if source.is_file():
-        from phase_agent.configuration.session.load_editable_config_json import (
-            load_editable_config_json,
-        )
+    from phase_agent.runtime.project_context import handler_project_context, current_config_session
+    from phase_agent.analysis.state.project_authority import confirmed_configuration
 
-        try:
-            config = load_editable_config_json(source, confirmed)
-            label = "当前设置文件（是否用于运行以确认快照为准）"
-        except (OSError, TypeError, ValueError, KeyError) as error:
-            return f"设置文件读取失败：{type(error).__name__}: {error}；未修改文件或待审批方案。"
+    card = handler_project_context(handler, facts)
+    config = confirmed_configuration(facts, current_config_session(handler))
+    label = "当前生效配置 " + str(card["configuration"]["version"] or "未确认")
+    source = (card.get("editable_file") or {}).get("path")
     system = config.get("system") or {}
     fields = {
         "相边界": (system.get("boundary") or {}).get("P"),
         "TM比例": (system.get("boundary") or {}).get("TM_ratio"),
         "H生成设置": system.get("H_generation"),
         "Python环境": config.get("python_environments"),
-        "远端模型路径": (config.get("mlip") or {}).get("model_path"),
+        "当前运行模型": (card.get("active_model") or {}).get("version"),
+        "当前模型路径": (card.get("active_model") or {}).get("model_path"),
+        "配置中的初始模型": card.get("initial_model_version"),
         "母结构目录": system.get("phase_reference_directory"),
     }
     # Matrices and full runtime defaults are available in the source, not dumped into chat.
@@ -57,7 +37,20 @@ def configuration_view(handler, facts):
             if value is not None
         ],
     ]
-    if source.is_file():
-        lines.append(f"设置文件：{source}")
+    if source:
+        lines.append(f"设置文件（未确认修改不影响运行）：{source}")
+    draft = card["draft"]
+    if draft["status"] != "no_changes":
+        lines.append(
+            f"未生效草稿：版本 {draft['revision']}；修改项："
+            + "、".join(
+                draft.get("changed_paths")
+                or (card.get("editable_file") or {}).get("changed_paths")
+                or []
+            )
+        )
+    if (card.get("editable_file") or {}).get("error"):
+        lines.append("设置文件读取问题：" + card["editable_file"]["error"])
+    lines.extend(card.get("consistency_issues") or [])
     lines.append("本次仅查看，未进入配置修订、生成结构或批准待审批方案。")
     return "\n".join(lines)

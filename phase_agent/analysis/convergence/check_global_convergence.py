@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any
+from math import isfinite
+from phase_agent.analysis.convergence.single_point_validation import single_point_validation
 from phase_agent.tools.state.task_waiting import awaiting_task_result
 
 
@@ -31,7 +33,18 @@ def check_global_convergence(
         }
     required = int(config["stable_model_update_epochs"])
     minimum_checks = int(config["minimum_recent_dft_checks"])
-    if required <= 0 or minimum_checks < 0:
+    invalid_limits = any(
+        config.get(name) is not None and (not _number(config[name]) or config[name] < 0)
+        for name in (
+            "hull_change_tolerance",
+            "final_energy_mae_tolerance",
+            "final_energy_rmse_tolerance",
+            "final_force_mae_tolerance",
+            "final_force_rmse_tolerance",
+            "phase_competition_gap_ev_per_atom",
+        )
+    )
+    if required <= 0 or minimum_checks < 0 or invalid_limits:
         return {
             "status": "needs_confirmed_convergence_rules",
             "converged": False,
@@ -61,23 +74,48 @@ def check_global_convergence(
         _number(row.get("error_ev_per_atom")) for row in errors
     )
     recent_mae = (
-        sum(float(row["error_ev_per_atom"]) for row in errors) / len(errors)
+        sum(abs(float(row["error_ev_per_atom"])) for row in errors) / len(errors)
         if errors_known and errors
         else 0.0
         if errors_known
         else None
     )
+    version = state.get("active_model_version") or (tail[-1].get("model_version") if tail else None)
+    validation = single_point_validation(
+        state,
+        model_version=version,
+        minimum_checks=minimum_checks,
+        phase_gap=config.get("phase_competition_gap_ev_per_atom"),
+    )
+    metrics = validation["metrics"]
+    if (
+        state.get("dft_dataset_records")
+        or config.get("phase_competition_gap_ev_per_atom") is not None
+    ):
+        errors_known = metrics["enough_checks"]
+        recent_mae = metrics["energy_per_atom"]["mae"]
     checks = {
         "model_update_epoch_count": enough_epochs,
         "hull_stable": hull_values_known
         and all(
-            float(row["hull_change"]) <= float(config["hull_change_tolerance"]) for row in tail
+            abs(float(row["hull_change"])) <= float(config["hull_change_tolerance"]) for row in tail
         ),
         "ground_states_stable": ground_states_known
         and all(row.get("ground_state_unchanged") is True for row in tail),
         "final_frame_dft_calibrated": errors_known
+        and recent_mae is not None
         and recent_mae <= float(config["final_energy_mae_tolerance"]),
     }
+    if config.get("phase_competition_gap_ev_per_atom") is not None:
+        checks["competing_phases_agree"] = validation["phase_competition"]["passed"]
+    for rule, metric, statistic in (
+        ("final_energy_rmse_tolerance", "energy_per_atom", "rmse"),
+        ("final_force_mae_tolerance", "forces", "mae"),
+        ("final_force_rmse_tolerance", "forces", "rmse"),
+    ):
+        if config.get(rule) is not None:
+            value = metrics[metric][statistic]
+            checks[rule] = errors_known and value is not None and value <= float(config[rule])
     missing = []
     if not enough_epochs:
         missing.append("consecutive_unique_model_update_epochs")
@@ -87,6 +125,8 @@ def check_global_convergence(
         missing.append("model_epoch_ground_state_stability")
     if not errors_known:
         missing.append("final_frame_dft_error")
+    if validation["phase_competition"]["status"] == "missing_evidence":
+        missing.append("competing_phase_same_frame_dft")
     coverage = state.get("coverage") or state.get("coverage_summary")
     coverage_risk = _coverage_risk(coverage)
     coverage_risk["unreturned_dft_wait_waived_task_ids"] = [
@@ -110,6 +150,7 @@ def check_global_convergence(
             "coverage_risk": coverage_risk,
             "coverage_is_hard_condition": False,
             "recent_final_frame_mae_ev_per_atom": recent_mae,
+            "single_point_validation": validation,
             "model_update_epochs_counted": [row.get("model_version") for row in tail],
             "config_version": state.get("confirmed_config_version"),
         }
@@ -130,6 +171,7 @@ def check_global_convergence(
         "coverage_risk": coverage_risk,
         "coverage_is_hard_condition": False,
         "recent_final_frame_mae_ev_per_atom": recent_mae,
+        "single_point_validation": validation,
         "model_update_epochs_counted": [row.get("model_version") for row in tail],
     }
 
@@ -174,4 +216,4 @@ def _coverage_risk(coverage):
 
 
 def _number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)

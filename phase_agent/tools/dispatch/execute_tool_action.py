@@ -9,6 +9,10 @@ def execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict:
     from phase_agent.graphs.cancellation import check_cancelled
 
     check_cancelled()
+    from phase_agent.tools.workflows.reference_dft_startup import blocked_action
+    blocked=blocked_action(context.get('event_state') or {},action.get('tool'))
+    if blocked:
+        return {'status':'blocked','tool':action.get('tool'),'result':None,'error':blocked}
     item = registry.get(action.get("tool")) or {}
     handler = item.get("handler")
     tool = action.get("tool")

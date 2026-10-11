@@ -31,6 +31,7 @@ STOP_STATUSES = set(DIALOGUE_STATUSES) | {
     "running",
     "configuration_revision_required",
     "configuration_version_mismatch",
+    "proposal_context_changed",
     "approval_reconciliation_required",
     "execution_reconciliation_required",
 }

@@ -13,6 +13,29 @@ def run_workflow_turn(
     dft_recovery_decision=None,
     explicit_branch_request=False,
 ):
+    if isinstance(human_feedback, dict) and human_feedback.get("decision") == "approve":
+        from phase_agent.analysis.state.project_authority import project_identity
+
+        state = read_json(handler.state_path, {}) or {}
+        if not project_identity(state)["model_consistent"]:
+            return {
+                "status": "proposal_context_changed",
+                "state": state,
+                "reason": "当前模型版本与文件登记不一致，需先核对；未执行。",
+                "submitted": False,
+                "steps_executed": 0,
+            }
+        pending = (state.get("pending_execution_policies") or {}).get(invocation_id) or {}
+        if pending.get("project_identity") and pending["project_identity"] != project_identity(
+            state
+        ):
+            return {
+                "status": "proposal_context_changed",
+                "state": state,
+                "reason": "当前模型文件或生效设置已变化，需更新具体方案；未执行。",
+                "submitted": False,
+                "steps_executed": 0,
+            }
     workflow = handler.workflow
     if workflow is None:
         from phase_agent.runtime.main import run_workflow
@@ -98,11 +121,34 @@ def run_workflow_turn(
             started = monotonic()
             outcome = "失败"
             try:
+                from phase_agent.runtime.project_context import handler_project_context
+
+                actual = handler_project_context(handler, read_json(handler.state_path, {}) or {})
+                observed = payload.get("state") or {}
+                observed = observed if isinstance(observed, dict) else {}
+                card = {
+                    **(observed.get("current_project") or actual),
+                    "project": actual["project"],
+                    "project_path": actual["project_path"],
+                    "draft": actual["draft"],
+                    "editable_file": actual.get("editable_file"),
+                }
                 response = base_agent_client(
                     {
                         **payload,
+                        "state": {**observed, "current_project": card}
+                        if isinstance(payload.get("state"), dict)
+                        else payload.get("state"),
+                        "decision_context": {
+                            **(payload.get("decision_context") or {}),
+                            "current_project": card,
+                        },
                         "user_instruction": user_message,
-                        "conversation_facts": getattr(handler, "turn_context", {}),
+                        "conversation_facts": {
+                            **getattr(handler, "turn_context", {}),
+                            "current_project": card,
+                            "project_settings": card["configuration"]["effective_settings"],
+                        },
                     }
                 )
                 outcome = "已返回"

@@ -36,6 +36,11 @@ def compose_runtime(
     )
 
     base = config_file.parent
+    if (settings.get("shared_dft") or {}).get("diagram_id") == "diagram_default" and base.parent.name == "diagrams":
+        system_root = base.parent.parent
+        descriptor_file = system_root / "system.json"
+        if descriptor_file.is_file() and json.loads(descriptor_file.read_text(encoding="utf-8")).get("default_diagram") == base.name:
+            base = system_root
     missing = [key for key in ("state_path", "ledger_path") if not settings.get(key)]
     if missing:
         raise ValueError(f"运行时配置缺少 {missing}；请编辑 {config_file}")
@@ -48,6 +53,10 @@ def compose_runtime(
         else None
     )
     state = _load_json_object(state_path, "state") if state_path.is_file() else {}
+    if state:
+        from phase_agent.tools.remote.submission_storage import restore_state_archives
+
+        restore_state_archives(state)
 
     resolved_session = _resolve_path(
         settings.get("config_session_path", "local/config_session.json"), base
@@ -250,6 +259,8 @@ def compose_runtime(
         manager.save(ledger_path)
 
     runtime_config = default_run_config()
+    if settings.get("shared_dft"):
+        runtime_config["shared_dft"] = deepcopy(settings["shared_dft"])
     runtime_config["system_config"] = deepcopy(effective_config["system"])
     runtime_config.update({"state_path": str(state_path), "ledger_path": str(ledger_path)})
     for key in (

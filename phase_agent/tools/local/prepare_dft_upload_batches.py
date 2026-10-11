@@ -21,6 +21,17 @@ def prepare_dft_upload_batches(*, action, context):
         and (not requested or row.get("task_id") in requested)
     ]
 
+    from phase_agent.persistence.shared_dft import reusable_results
+    from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
+    from phase_agent.tools.workflows.apply_scientific_feedback import apply_scientific_feedback
+
+    reused = reusable_results(state, context["manager"], config, task_ids={t["task_id"] for t in tasks})
+    if reused:
+        state = reconcile_task_results(state, reused)["state"]
+        state = apply_scientific_feedback(state, reused, manager=context["manager"], ledger_path=config.get("ledger_path"), phase_diagram_directory=config.get("phase_diagram_directory"), phase_references=context.get("phase_references"))["state"]
+        reused_ids = {t["task_id"] for t in reused}
+        tasks = [t for t in tasks if t["task_id"] not in reused_ids]
+
     def dispatch(task):
         from pathlib import Path
         import re
@@ -63,5 +74,6 @@ def prepare_dft_upload_batches(*, action, context):
         "state": state,
         "batches": batches,
         "batch_count": len(batches),
+        "reused_dft_count": len(reused),
         "submitted": False,
     }

@@ -27,6 +27,10 @@ def available_port(preferred, excluded=()):
 @contextmanager
 def project_lock(config_path, *, lock_name="service.lock"):
     """OS lock survives stale files and is released even after a process crash."""
+    if lock_name == "service.lock":
+        base = Path(config_path).resolve().parent
+        if any((p / ".diagram_migration_in_progress").exists() for p in (base, *base.parents)):
+            raise RuntimeError("项目相图目录正在迁移，请稍后重新打开服务")
     directory = service_directory(config_path)
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / lock_name).open("a+b") as stream:

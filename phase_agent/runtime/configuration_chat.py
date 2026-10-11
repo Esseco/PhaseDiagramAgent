@@ -62,6 +62,11 @@ configuration_json_review只审查程序刚导入的事实，patch为空。ready
 """
 
 
+from phase_agent.runtime.response_preferences import ACTIONABLE_REPLY_RULE
+
+CONFIG_AGENT_SYSTEM_PROMPT += "\n" + ACTIONABLE_REPLY_RULE
+
+
 BOOTSTRAP_HINTS = {
     "notes": [
         "母结构目录使用当前项目的配置；不要沿用其他项目的目录或相列表。",
@@ -448,13 +453,18 @@ class ConfigurationChatHandler:
 
         if session.get("status") == "confirmed":
             if _is_config_revision_request(message) or _is_config_json_import_command(message):
+                if _is_config_json_import_command(message):
+                    from phase_agent.runtime.configuration_read_policy import (
+                        confirmed_file_unchanged,
+                    )
+
+                    if confirmed_file_unchanged(self, session):
+                        return "设置文件内容未变化，继续使用当前已确认配置；未创建新版本。"
                 updated = deepcopy(session)
 
                 updated["status"] = "draft"
 
                 updated["setup_stage"] = "json_ready"
-
-                updated["draft_revision"] = int(updated.get("draft_revision", 0)) + 1
 
                 updated["previous_confirmed_snapshot"] = deepcopy(session.get("confirmed_snapshot"))
 
@@ -682,6 +692,13 @@ class ConfigurationChatHandler:
                 mode=request_payload.get("mode"),
             )
 
+        from phase_agent.runtime.project_context import handler_project_context
+        from phase_agent.tools.step_runner.file_protocol import read_json
+
+        payload = {
+            **payload,
+            "current_project": handler_project_context(self, read_json(self.state_path, {}) or {}),
+        }
         result = request(payload)
 
         errors = config_patch_field_errors(result, payload["editable_field_catalog"])
@@ -1860,10 +1877,8 @@ class ConfigurationChatHandler:
 
         self._save(confirmed)
 
-        version = confirmed["confirmed_snapshot"]["config_version"]
-
         return (
-            f"配置已确认并保存为版本 {version}。配置快照：{snapshot_path}\n"
+            "配置已确认并保存。完整版本记录可在配置详情中查看。\n"
             "配置现已冻结；搜索 Agent 开始提出本轮建议，具体计算仍需按审批规则确认后才会派发。"
         )
 

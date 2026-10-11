@@ -126,10 +126,18 @@ def request_validated_action(agent_client, payload):
     if payload.get("unified_dialogue"):
         from phase_agent.decisions.agent.dialogue_contract import dialogue_output_contract
 
-        contracts["dialogue_outcome"] = dialogue_output_contract()
+        contracts["dialogue_outcome"] = dialogue_output_contract(
+            allow_controls=context.get("conversation_controls") is True
+        )
+        controls = (
+            "回传/回收通知或要求推进需要先核对最新证据时，用kind=advance进入原科学流程，在本轮完成分析并提出下一步方案；不先询问是否读取或分析。明确批准/拒绝已展示方案用kind=review，填真实plan_id和decision=approve/reject，不重提新方案。"
+            if context.get("conversation_controls")
+            else "本轮已完成结果观察与核对；直接提出一项具体工具方案供审批，或说明真实等待条件。不要要求再发继续，不再使用advance/review。"
+        )
         payload = {
             **payload,
             "instruction": "先理解用户目标。答疑用kind=answer；只读查看或返回设置用kind=inspect_configuration；修改持久设置用kind=configure。用户要求你选择或提出下一步科学方案时，返回工具契约供审批；提出方案本身不执行，也不需要用户先批准。用户要求等待审批不等于只要文字答疑。仅解释或讨论时才用answer，不要在answer正文中用自然语言代替可审核的动作对象。待审批方案不是执行授权，返回配置不等于修改或批准该方案。仅返回其中一种JSON结果。 "
+            + controls
             + payload.get("instruction", ""),
         }
     if "allocate_mc_bohb" in payload.get("allowed_tools", []):

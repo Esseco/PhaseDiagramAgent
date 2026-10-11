@@ -245,9 +245,11 @@ function renderRecovery(status){
 function renderPlans(value){
  el('plans').replaceChildren();const heading=document.createElement('h2');heading.textContent='待审方案（'+value.count+'）';el('plans').appendChild(heading);
  value.pending.forEach(p=>{const c=p.review_card||{};const d=document.createElement('div');d.className='card';
- const title=document.createElement('h3');title.textContent=(c.title||p.recommended_action)+' · 修订 '+p.revision;d.appendChild(title);
+ const title=document.createElement('h3');title.textContent=(c.title||p.recommended_action);d.appendChild(title);
  function line(label,value){const x=document.createElement('p');x.textContent=label+'：'+value;d.appendChild(x)}
- line('方案',p.plan_id+' · '+p.proposal_hash.slice(0,12));line('目的',c.purpose||p.reason||'未记录');line('理由',c.reason||p.reason||'未记录');
+ const epoch=p.current_project?.epoch;const model=epoch&&p.model_version?.startsWith('remote-')?'微调模型':(p.model_version||'未登记');
+ line('当前项目',(p.current_project?.project||'当前项目')+(epoch?' · '+epoch:'')+' · '+model);
+ line('目的',c.purpose||p.reason||'未记录');line('理由',c.reason||p.reason||'未记录');
  line('执行范围',c.scope||((c.target_count??p.target_ids.length)+' 个目标'));line('预算',c.budget??'未记录');line('审批边界',c.approval_boundary||'仅本次展示的动作');if(c.blocked)line('暂不可批准',c.blocked);
  if(c.changes?.length){const table=document.createElement('table');const head=table.insertRow();['修改项','原值','新值'].forEach(v=>{const cell=document.createElement('th');cell.textContent=v;head.appendChild(cell)});c.changes.forEach(x=>{const row=table.insertRow();[x.field,pretty(x.before),pretty(x.after)].forEach(v=>{const cell=row.insertCell();cell.textContent=v})});d.appendChild(table);line('修订确认','旧版批准不适用于新版方案')}
  const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='查看目标、成本预估与完整参数依据';details.appendChild(summary);const pre=document.createElement('pre');pre.textContent=pretty(p);details.appendChild(pre);d.appendChild(details);

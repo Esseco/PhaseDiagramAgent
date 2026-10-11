@@ -102,10 +102,15 @@ def record_dft_products(state, result, evaluator=None, manager=None, *, refresh=
         ),
         {},
     )
+    provenance={key:deepcopy(result[key]) for key in ('shared_dft_record_id','shared_dft_source','shared_dft_source_task_id','dft_data_role') if key in result}
+    provenance.setdefault('dft_data_role','local')
+    record.update(provenance)
     _upsert_task_record(state, "dft_dataset_records", record)
     from phase_agent.science.dft.vasp_training_labels import training_records
 
     examples = training_records(record, outputs)
+    for example in examples:
+        example.update(provenance)
     history = state.setdefault("dft_training_records", [])
     known = {r.get("data_id") for r in history}
     if refresh:

@@ -8,6 +8,12 @@ def proposal_errors(action, payload):
     from phase_agent.decisions.agent.dialogue_contract import is_dialogue, dialogue_errors
 
     if is_dialogue(action):
+        if action.get("kind") in {"advance", "review"} and not (
+            payload.get("decision_context") or {}
+        ).get("conversation_controls"):
+            return [
+                "dialogue.kind: observation is already complete; return a concrete tool proposal or a factual answer, never advance/review again"
+            ]
         return dialogue_errors(action, payload.get("unified_dialogue") is True)
     errors = action_contract_errors(action)
     if errors:

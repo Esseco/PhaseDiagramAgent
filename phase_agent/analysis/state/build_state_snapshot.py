@@ -62,6 +62,9 @@ def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=Non
     snapshot["decision_context"] = build_decision_context(
         {**state, "decision_memory": state.get("decision_memory") or {}}
     )
+    from phase_agent.analysis.state.project_authority import current_project
+
+    snapshot["current_project"] = current_project(state)
     return snapshot
 
 

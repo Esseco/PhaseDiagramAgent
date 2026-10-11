@@ -51,22 +51,23 @@ def format_turn_reply(reply, state, *, configuring=False):
     if not any(line.startswith("建议：") for line in body):
         if "暂不可批准：" in text:
             body.append("建议：先核对原任务与执行回执，当前方案暂不可批准。")
-        elif (
-            state.get("generation_history")
-            and not state.get("tasks")
-            and not any(word in text for word in ("本轮失败", "本轮未执行", "未能", "错误", "缺少"))
-        ):
-            body.append(
-                "建议：是否现在审查已生成结构并准备 Relax 任务方案？确认后先展示方案，批准后生成输入与提交脚本。"
-            )
-        elif any(word in text for word in ("失败", "未执行", "缺少", "未能", "错误")):
-            body.append("建议：先处理上述问题，再继续生成方案。")
         elif configuring:
-            body.insert(0, "建议：按以下要求完成并确认初始配置。")
+            body.insert(
+                0,
+                "建议：核对并确认本次配置草稿。"
+                if state.get("confirmed_config_version")
+                else "建议：按以下要求完成并确认初始配置。",
+            )
         elif state.get("pending_execution_policies"):
             body.insert(0, "建议：核对下方方案，回复‘同意’批准或提出修改。")
-        else:
-            body.append("建议：回复‘继续’，由 Agent 检查结果并提出下一步方案。")
+        elif not state.get("pending_mc_regeneration"):
+            from phase_agent.tools.state.task_waiting import active_pending_tasks
+            from phase_agent.runtime.chat_state_presentation import waiting_training_job
+
+            if active_pending_tasks(state.get("tasks") or []) or waiting_training_job(state):
+                body.append(
+                    "建议：上传 inputs 包并提交；完成后回传 results，告知已回传即可核对分析并提出下一步方案。"
+                )
     if not configuring and state.get("pending_execution_policies"):
         from phase_agent.runtime.plan_queries import pending_plan_reply
 

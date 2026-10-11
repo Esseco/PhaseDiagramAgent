@@ -14,7 +14,12 @@ def _facts_signature(snapshot, manager, config):
     # Snapshot indexes and conversational memory do not change scientific evidence.
     facts = {
         key: snapshot.get(key)
-        for key in ("current_convex_hull", "search_coverage", "uncertainty", "available_branches")
+        for key in (
+            "current_convex_hull",
+            "search_coverage",
+            "uncertainty",
+            "available_branches",
+        )
     }
     model = snapshot.get("mlip_status") or {}
     facts["model"] = {
@@ -36,24 +41,25 @@ def decide_from_saved_facts(handler, facts, message, run_scientific, *, defer_sc
     client = handler.workflow_kwargs.get("agent_client")
     if not callable(client) or not handler.workflow_kwargs.get("config_session"):
         return run_scientific()
-    session = handler.workflow_kwargs.get("config_session") or {}
-    config = (
-        facts.get("confirmed_config")
-        or (session.get("confirmed_snapshot") or {}).get("config")
-        or session.get("config")
-        or {}
-    )
+    from phase_agent.runtime.project_context import current_config_session, handler_project_context
+    from phase_agent.analysis.state.project_authority import confirmed_configuration
+
+    session = current_config_session(handler)
+    config = confirmed_configuration(facts, session)
     manager = handler.workflow_kwargs.get("manager")
     summary = build_state_snapshot(
         facts,
         snapshot_index=int(facts.get("state_snapshot_index", 0)),
         config_version=facts.get("confirmed_config_version"),
     )
+    summary["current_project"] = handler_project_context(handler, facts)
     summary["decision_context"] = {
         **(summary.get("decision_context") or {}),
         "unified_dialogue": True,
+        "conversation_controls": True,
         "confirmed_configuration": deepcopy(config),
-        "saved_facts_notice": "这些是本轮读取的持久事实；外部任务刚产生但尚未回收的结果未知。科学动作进入原流程回收、复核和审批。",
+        "saved_facts_notice": "本轮已核对可发现的回传文件并更新结果事实。回传通知应进入原科学流程完成分析和下一步方案；缺失结果具体说明，不反复要求用户先同意读取或分析。",
+        "result_collection": deepcopy(facts.get("result_collection")),
     }
     allowed = [
         name
@@ -73,6 +79,7 @@ def decide_from_saved_facts(handler, facts, message, run_scientific, *, defer_sc
                     "reply_style": "Default to concise Chinese: answer the user's question first in 1-3 short sentences; include only a necessary next step. For progress updates use: result (only if actually available), current stage, recommended next step and approval requirement. Omit unavailable results; do not claim proposed work is completed. For an ordinary question answer directly without this template. Use familiar task names and explain necessary scientific terms briefly. Distinguish planned candidates, selected branches, generated structures and completed calculations. Show only this action's scope and budget by default; leave hypothetical future costs to detailed views. Expand when asked. Do not repeat status, boilerplate advice or raw validation traces in ordinary answers.",
                     "semantics": "Resolve short follow-ups using previous_reply, recent_turns and current project facts. A question about a failure asks for an explanation, not a retry of the failed action. Generic continuation is not approval. If no stored proposal exists, an affirmative reply to your question about preparing the next proposal means prepare and display that proposal, never execute it. After useful generation results, proactively propose the Relax input/task preparation action for approval rather than ask permission to propose it. When the user reports returned results or completed recovery, enter the scientific workflow to recover and analyze latest files, build the MLIP hull from valid Relax evidence and propose the next feasible action for approval; do not merely tell the user to ask again. An unverified completion report is not proof of task completion. Explicit configuration changes go to configure; science remains a proposal requiring approval. Ask only for genuinely missing/ambiguous information. When the user asks to continue and prerequisites are satisfied, propose the next action directly; do not ask permission merely to prepare a proposal. Execution still requires approval of the concrete stored proposal. Describe past corrected failures as historical, not as unresolved current parameter defects.",
                     "evidence": "previous_reply is historical conversation, not authoritative execution evidence. Explain the known cause and actual effect; distinguish an occupied task key from a submitted/completed task. If evidence is unavailable, say so rather than inventing a cause or re-running work.",
+                    "continuity": "A return/recovery notification or request to advance uses kind=advance when scientific observation is needed; it prepares one concrete next approval in this same turn. Do not ask permission to read, analyze or propose. When the user explicitly approves/rejects the previously displayed stored plan, use kind=review with its actual plan_id and decision; never turn approval into a fresh proposal. A question about the plan remains answer. Only a concrete missing input or consequential unresolved choice warrants clarification. Scientific tools are proposals, never permission to execute. The previous reply and presented_plan_binding identify the displayed plan; project facts remain authoritative.",
                 },
             },
             category="model",
@@ -92,6 +99,10 @@ def decide_from_saved_facts(handler, facts, message, run_scientific, *, defer_sc
             "submitted": False,
             "steps_executed": 0,
         }
+    if action.get("kind") == "advance":
+        return (defer_scientific or run_scientific)()
+    if action.get("kind") == "review":
+        return {"status": "proposal_review_requested", "review": deepcopy(action)}
     if is_dialogue(action):
         return dialogue_result(action, facts)
     if len(facts.get("pending_execution_policies") or {}) > 1:
@@ -114,7 +125,8 @@ def decide_from_saved_facts(handler, facts, message, run_scientific, *, defer_sc
         if not used and not changed:
             used = True
             process_event(
-                "复用本轮模型建议", {"重新请求模型": False, "说明": "仍须原流程校验及人工审批"}
+                "复用本轮模型建议",
+                {"重新请求模型": False, "说明": "仍须原流程校验及人工审批"},
             )
             reuse_or_refresh.last_call_reused = True
             return deepcopy(action)

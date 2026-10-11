@@ -1,10 +1,16 @@
 """Confirmed configuration and runtime dependency initialization."""
 
 from copy import deepcopy
-from phase_agent.configuration.runtime.build_effective_run_config import build_effective_run_config
-from phase_agent.configuration.runtime.authorize_budget_extension import authorize_budget_extension
+from phase_agent.configuration.runtime.build_effective_run_config import (
+    build_effective_run_config,
+)
+from phase_agent.configuration.runtime.authorize_budget_extension import (
+    authorize_budget_extension,
+)
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
-from phase_agent.tools.workflows.create_workflow_handlers import create_workflow_handlers
+from phase_agent.tools.workflows.create_workflow_handlers import (
+    create_workflow_handlers,
+)
 from phase_agent.tools.workflows.compact_action_history import compact_state_history
 from phase_agent.tools.workflows.lifecycle_support import (
     _read_state_for_runner,
@@ -41,7 +47,11 @@ def _initialize_workflow(
     """Build the effective config and run bounded validated Agent actions."""
     snapshot = config_session.get("confirmed_snapshot") or {}
     if config_session.get("status") != "confirmed" or not snapshot:
-        return {"status": "rejected", "reason": "configuration_not_confirmed", "submitted": False}
+        return {
+            "status": "rejected",
+            "reason": "configuration_not_confirmed",
+            "submitted": False,
+        }
     effective_config = build_effective_run_config(config_session, run_config)
     effective_handlers = create_workflow_handlers(
         handlers,
@@ -63,10 +73,36 @@ def _initialize_workflow(
     loaded_state = compact_state_history(
         _read_state_for_runner(state, state_path or effective_config.get("state_path"))
     )
+    if (
+        loaded_state.get("confirmed_config_version") == snapshot["config_version"]
+        and loaded_state.get("confirmed_config") is not None
+        and loaded_state["confirmed_config"] != snapshot["config"]
+    ):
+        return {
+            "status": "configuration_version_mismatch",
+            "state": loaded_state,
+            "reason": "配置版本名相同但快照内容不同，不能混用；请核对已确认配置。",
+            "submitted": False,
+            "steps_executed": 0,
+        }
     migration = authorize_budget_extension(
         loaded_state, snapshot, user_approved=approve_budget_extension
     )
     if migration["status"].startswith("rejected") or migration["status"] == "approval_required":
+        from phase_agent.tools.workflows.recover_saved_results import (
+            recover_saved_results,
+        )
+
+        loaded_state = recover_saved_results(
+            loaded_state,
+            manager=manager,
+            phase_references=phase_references,
+            run_config=run_config,
+            state_path=state_path,
+            task_runner=task_runner,
+            result_collector=result_collector,
+            **runtime_adapters,
+        )
         return {
             "status": "rejected",
             "reason": migration["status"],

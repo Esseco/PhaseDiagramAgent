@@ -245,6 +245,23 @@ def _prepare_tool_proposal(frame):
 
     pending_key = invocation_id or "__single_interactive_action__"
     stored = current["pending_execution_policies"].get(pending_key)
+    from phase_agent.analysis.state.project_authority import project_identity
+
+    if (
+        (stored or {}).get("project_identity")
+        and (
+            not isinstance(human_feedback, dict)
+            or human_feedback.get("decision") not in {"reject", "comment"}
+        )
+        and (stored["project_identity"] != project_identity(current))
+    ):
+        return {
+            "status": "proposal_context_changed",
+            "state": current,
+            "reason": "模型文件或生效设置已变化，原方案不可执行；请更新具体方案。",
+            "submitted": False,
+            "steps_executed": 0,
+        }
     rejecting = isinstance(human_feedback, dict) and human_feedback.get("decision") == "reject"
     previous = ((stored or {}).get("agent_proposal") or {}).get("raw_action") or {}
     from phase_agent.tools.state.approved_direction import direction_action_errors
@@ -685,7 +702,10 @@ def _approval_graph_node(frame):
             deepcopy((stored or {}).get("feedback_history") or []),
         )
         _upsert_record(current, record)
+        from phase_agent.analysis.state.project_authority import project_identity
+
         current["pending_execution_policies"][pending_key] = {
+            "project_identity": project_identity(current),
             "record_id": record_id,
             "agent_proposal": deepcopy(proposal),
             "revision": int((stored or {}).get("revision", 0)),

@@ -45,6 +45,7 @@ def additional_reviews(state, session=None):
             "job_id": job_id,
             "proposal": deepcopy(proposal),
             "candidate_status": candidate.get("status"),
+            "candidate_model": deepcopy(candidate.get("model")),
             "active_model_version": state.get("active_model_version"),
         }
         rows.append(
@@ -222,7 +223,7 @@ def review_additional(handler, state, row, decision, comment):
     return {"status": status, "result": result}
 
 
-def pending_reviews(state, session=None):
+def pending_reviews(state, session=None, *, state_path=None):
     """Versioned queue shared by HTTP, chat and Studio status."""
     from phase_agent.runtime.review_presentation import review_card
     from phase_agent.tools.step_runner.build_status_summary import build_status_summary
@@ -250,7 +251,18 @@ def pending_reviews(state, session=None):
             }
         )
     rows.extend(additional_reviews(state, session))
+    from phase_agent.analysis.state.project_authority import current_project, project_identity
+
+    card = current_project(state, session, state_path=state_path)
     for row in rows:
+        bound = ((state.get("pending_execution_policies") or {}).get(row["plan_id"]) or {}).get(
+            "project_identity"
+        )
+        row["current_project"] = card
+        row["bound_project_identity"] = deepcopy(bound)
+        row["context_changed"] = bool(bound) and bound != project_identity(state)
+        if row["context_changed"]:
+            row["review_card"]["blocked"] = "当前模型或生效设置与方案依据不同，需更新具体方案"
         row.update(
             state_version=version,
             config_version=state.get("confirmed_config_version"),

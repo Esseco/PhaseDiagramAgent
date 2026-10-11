@@ -8,6 +8,10 @@ def restore_session(handler, message, state):
     if handler.history_decision is not None:
         return None
     choice = _classify_history_decision(message)
+    # A bound project is already the selected run. Restoring its chat runtime
+    # must not consume configuration feedback or a pending proposal approval.
+    if choice is None and state.get("confirmed_config_version"):
+        choice = "continue"
     if choice is None:
         return format_history_prompt(state, handler.workflow_kwargs.get("manager"))
     if choice == "new":
@@ -48,4 +52,4 @@ def restore_session(handler, message, state):
 
     if state.get("pending_execution_policies") or summarize_manual_upload_wait(state):
         return None  # Route through the same decision node with fresh facts.
-    return "已继续原运行并加载 state/ledger。请发送下一条搜索指令；本次确认不会批准任何 action。"
+    return None  # Resume analysis/proposal in this same turn; continuation never approves it.

@@ -30,7 +30,9 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         environment, environment_source = training_environment(config)
     except ValueError as error:
         return {"status": "not_configured", "state": current, "reason": str(error)}
-    from phase_agent.science.training.cumulative_training_records import cumulative_training_records
+    from phase_agent.science.training.cumulative_training_records import (
+        cumulative_training_records,
+    )
 
     records = cumulative_training_records(current)
     from phase_agent.science.training.prepare_main_model import grouped_folds
@@ -69,7 +71,9 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     ]
     if existing and Path(existing["directory"]).is_dir():
         if existing.get("status") == "results_received":
-            from phase_agent.tools.local.recover_remote_training import training_result_message
+            from phase_agent.tools.local.recover_remote_training import (
+                training_result_message,
+            )
 
             return {
                 "status": "training_results_received",
@@ -79,10 +83,18 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         submission = Path(existing["directory"]) / "inputs"
         if not submission.is_dir():
             submission = Path(existing["directory"])
+        from phase_agent.tools.remote.submission_storage import restore_storage_directory
+        from phase_agent.tools.remote.submission_handoff import prepare_handoff
+
+        restore_storage_directory(Path(existing["directory"]) / "inputs", "inputs")
+        handoff = existing.get("handoff")
+        if not handoff or not Path(handoff["upload_archive"]).is_file():
+            handoff = prepare_handoff(Path(existing["directory"]), [submission / "GPU.sh"])
+            existing["handoff"] = handoff
         return {
             "status": "awaiting_remote_training",
             "state": current,
-            "reason": f"微调轮已准备：{existing['directory']}；完整上传该轮，在{submission}内sbatch GPU.sh一次，回传同轮results。未重复生成、本机训练或追加轮次。",
+            "reason": f"上传文件夹：{handoff['folder']}；上传后执行 bash submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
         }
     for job_key, job in (current.get("remote_finetune_jobs") or {}).items():
         if job not in prior:
@@ -234,7 +246,9 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     # preparation report is superseded before this directory is published.
     (inputs / "finetune_report.json").unlink(missing_ok=True)
     (inputs / "run_training.sh").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-    from phase_agent.tools.remote.write_training_submission import write_training_submission
+    from phase_agent.tools.remote.write_training_submission import (
+        write_training_submission,
+    )
 
     write_training_submission(inputs, environment)
     (directory / "results").mkdir(exist_ok=True)
@@ -250,8 +264,15 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         "submitted": False,
         "activated": False,
     }
+    from phase_agent.tools.remote.submission_handoff import prepare_handoff
+
+    handoff = prepare_handoff(directory, [inputs / "GPU.sh"])
+    current["remote_finetune_jobs"][digest]["handoff"] = handoff
+    from phase_agent.tools.remote.submission_layout import write_submission_index
+
+    write_submission_index(root, current)
     return {
         "status": "awaiting_remote_training",
         "state": current,
-        "reason": f"微调轮：{directory}；上传{upload_archive}并在远端微调轮目录解压，在inputs内sbatch GPU.sh一次。仅下载training.results.zip到本轮results，回复“继续”自动核对回收，模型留在超算inputs。未本机训练/提交；后续仍需独立验证与单独激活审批。",
+        "reason": f"上传文件夹：{handoff['folder']}；上传后执行 bash submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
     }

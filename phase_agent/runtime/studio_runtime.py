@@ -55,7 +55,9 @@ def send_project_message(text, thread_id):
                 handler = project_handler(_handler)
                 if handler is not None:
                     state = read_json(handler.state_path, {}) or {}
-                    reply = format_turn_reply(reply, state, configuring=False)
+                    reply = format_turn_reply(
+                        reply, state, configuring=handler.config_delegate is not None
+                    )
                 else:
                     from phase_agent.runtime.configuration_chat import ConfigurationChatHandler
 
@@ -71,7 +73,21 @@ def send_project_message(text, thread_id):
                 if current_handler is not None
                 else {}
             )
-            reply = format_epoch_reply(reply, current_state, configuring=current_handler is None)
+            from phase_agent.runtime.project_context import handler_project_context
+
+            owner = current_handler or _handler
+            owner_path = getattr(owner, "__dict__", {}).get("state_path")
+            if current_handler is None and isinstance(owner_path, (str, Path)):
+                current_state = read_json(owner_path, {}) or {}
+            card = (
+                handler_project_context(owner, current_state)
+                if isinstance(owner_path, (str, Path))
+                else None
+            )
+            configuring = current_handler is None or current_handler.config_delegate is not None
+            reply = format_epoch_reply(
+                reply, current_state, configuring=configuring, project_card=card
+            )
             process_event("本轮答复", {"reply": reply})
             return reply
 

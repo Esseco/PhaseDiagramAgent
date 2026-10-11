@@ -1,6 +1,7 @@
 """Conversation facts and version-bound approval; no intent classifier."""
 
 from pathlib import Path
+from copy import deepcopy
 from phase_agent.tools.step_runner.build_status_summary import build_status_summary
 from phase_agent.tools.policy.file_approval import proposal_hash
 
@@ -29,7 +30,35 @@ def _load_binding(handler):
 
     path = _binding_path(handler)
     if path is not None:
-        return (read_json(path, {}) or {}).get("binding")
+        binding = (read_json(path, {}) or {}).get("binding")
+        if binding and binding.get("state_version"):
+            from phase_agent.tools.step_runner.file_protocol import content_id
+
+            facts = read_json(handler.state_path, {}) or {}
+            summary = build_status_summary(
+                facts, config_version=facts.get("confirmed_config_version")
+            )
+            legacy = content_id(
+                {key: value for key, value in summary.items() if key != "summary_id"}, "summary"
+            )
+            previous_summary = {
+                key: value
+                for key, value in summary.items()
+                if key not in {"summary_id", "project_identity"}
+            }
+            previous_full = content_id(previous_summary, "summary")
+            budget = previous_summary["budget_usage"]
+            budget.pop("llm", None)
+            budget.setdefault("total_relative_cost", 0.0)
+            budget.setdefault("stages", {})
+            previous_scientific = content_id(previous_summary, "summary")
+            if (
+                binding["state_version"] in {legacy, previous_full, previous_scientific}
+                and binding["state_version"] != summary["summary_id"]
+            ):
+                binding = {**binding, "state_version": summary["summary_id"]}
+                _save_binding(handler, binding)
+        return binding
     return getattr(handler, "presented_plan_binding", None)
 
 
@@ -48,17 +77,45 @@ def bind_presented_proposal(handler, state):
         )
 
 
-def review_presented_proposal(handler, state, message):
+def review_presented_proposal(handler, state, message, *, requested_review=None):
     from phase_agent.runtime.plan_queries import pending_plan_reply
     from phase_agent.runtime.chat_approval_rules import is_sensitive_proposal
     from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
+    binding = _load_binding(handler) or {}
+    if requested_review is not None and binding.get("kind") == "mc_regeneration":
+        if requested_review.get("plan_id") != binding.get("plan_id") or requested_review.get(
+            "decision"
+        ) not in {"approve", "reject"}:
+            return "所指 MC 方案与刚展示的方案不一致；未执行。"
+        if _review_rows(handler, state):
+            return "同时存在其他待审批方案，请指定审批对象；未执行。"
+        from phase_agent.graphs.dialogue.maintenance.mc import handle
+
+        return (
+            handle(
+                handler,
+                "同意" if requested_review["decision"] == "approve" else "拒绝",
+                state,
+                [],
+                handler.conversation_id,
+            )
+            or "当前 MC 方案已不再待审批；未执行。"
+        )
     rows = _review_rows(handler, state)
     if len(rows) != 1:
         return "当前没有唯一待审批方案，请在审批页选择对象；未执行任务。"
     row = rows[0]
     plan_id = row["plan_id"]
-    decision = "approve" if message.strip().lower() in {"approve", "同意"} else "reject"
+    if requested_review is not None:
+        if requested_review.get("plan_id") != plan_id or requested_review.get("decision") not in {
+            "approve",
+            "reject",
+        }:
+            return "所指方案与当前待审批方案不一致；未执行，请核对具体方案。"
+        decision = requested_review["decision"]
+    else:
+        decision = "approve" if message.strip().lower() in {"approve", "同意"} else "reject"
     binding = _load_binding(handler)
     if binding is None or binding.get("plan_id") != plan_id:
         bind_presented_proposal(handler, state)
@@ -101,21 +158,21 @@ def fresh_turn_context(handler, state, messages, conversation_id):
     from phase_agent.runtime.conversation_context import conversation_context
     from phase_agent.graphs.dialogue.memory import recent_turns
 
+    from phase_agent.runtime.project_context import handler_project_context, current_config_session
+    from phase_agent.analysis.state.project_authority import confirmed_configuration
+
     context = conversation_context(state, messages)
-    config = (
-        state.get("confirmed_config")
-        or (handler.workflow_kwargs.get("config_session") or {})
-        .get("confirmed_snapshot", {})
-        .get("config")
-        or {}
-    )
+    context["current_project"] = handler_project_context(handler, state)
+    config = confirmed_configuration(state, current_config_session(handler))
     context["project_settings"] = {
         key: config.get(key)
         for key in ("system", "python_environments", "run", "calculation", "budgets", "convergence")
     }
     from phase_agent.runtime.turn_process import clean
 
-    context["project_settings"] = clean(context["project_settings"])
+    context["project_settings"] = clean(
+        context["current_project"]["configuration"]["effective_settings"]
+    )
     context["recent_turns"] = recent_turns(handler.state_path, conversation_id)
     context["previous_reply"] = (
         context["recent_turns"][-1]["assistant"]
@@ -140,5 +197,6 @@ def fresh_turn_context(handler, state, messages, conversation_id):
         }
         for plan_id, row in list((state.get("pending_execution_policies") or {}).items())[:4]
     ]
+    context["presented_plan_binding"] = deepcopy(_load_binding(handler))
     context["authority"] = "当前项目记录优先；对话记忆仅辅助理解，不是批准或完成证据。"
     return context

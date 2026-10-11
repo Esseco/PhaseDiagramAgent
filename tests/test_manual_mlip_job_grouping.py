@@ -16,17 +16,26 @@ def _prepared_task(source):
 def _make_tasks(tmp_path, count, stage):
     structure = tmp_path / "source.vasp"
     structure.write_text("mock", encoding="utf-8")
-    tasks = [{"task_id": f"T-{index}", "task_key": f"K-{index}", "stage": stage,
-              "status": "pending", "branch_id": f"B-{index // 3}",
-              "model_version": "mh-1", "source_path": str(structure)}
-             for index in range(count)]
+    tasks = [
+        {
+            "task_id": f"T-{index}",
+            "task_key": f"K-{index}",
+            "stage": stage,
+            "status": "pending",
+            "branch_id": f"B-{index // 3}",
+            "model_version": "mh-1",
+            "source_path": str(structure),
+        }
+        for index in range(count)
+    ]
     reservations = {row["task_key"]: {"status": "reserved"} for row in tasks}
     return {"tasks": tasks, "budget_reservations": reservations}
 
 
 def test_relax_101_tasks_use_two_jobs(tmp_path):
     runner = ManualUploadBatchRunner(
-        tmp_path / "upload", worker_command=["python3", "--executor", "x:y"],
+        tmp_path / "upload",
+        worker_command=["python3", "--executor", "x:y"],
         task_preparer=_prepared_task,
     )
     state = _make_tasks(tmp_path, 101, "relax_and_feature")
@@ -37,8 +46,10 @@ def test_relax_101_tasks_use_two_jobs(tmp_path):
     assert set(first["batch"]["task_ids"]).isdisjoint(second["batch"]["task_ids"])
     first_directory = Path(first["batch"]["upload_directory"])
     second_directory = Path(second["batch"]["upload_directory"])
-    assert first_directory.parts[-5:-3] == ("epoch0_mh-1", "Search-group-0001")
-    assert first_directory.parent.parent.name == "Relax-0001"
+    assert first_directory.relative_to(tmp_path / "upload").parts[0] == "epoch0_mh-1"
+    assert first["batch"]["search_group_index"] == 1
+    assert first_directory.parent.parent == Path(first["batch"]["operation_directory"])
+    assert first_directory.parent.parent.name.endswith("Relax-0001")
     assert first_directory.name == "Relax-submission-0001_remote-000001"
     assert first_directory.parent == second_directory.parent
     assert second_directory.name == "Relax-submission-0002_remote-000002"
@@ -56,7 +67,8 @@ def test_relax_101_tasks_use_two_jobs(tmp_path):
 
 def test_mc_21_tasks_use_three_jobs_without_splitting_branches(tmp_path):
     runner = ManualUploadBatchRunner(
-        tmp_path / "upload", worker_command=["python3", "--executor", "x:y"],
+        tmp_path / "upload",
+        worker_command=["python3", "--executor", "x:y"],
         task_preparer=_prepared_task,
     )
     state = _make_tasks(tmp_path, 21, "deep_search")
@@ -64,8 +76,10 @@ def test_mc_21_tasks_use_three_jobs_without_splitting_branches(tmp_path):
     second = runner.prepare(first["state"])
     third = runner.prepare(second["state"])
     assert [len(row["batch"]["task_ids"]) for row in (first, second, third)] == [9, 9, 3]
-    assert Path(first["batch"]["upload_directory"]).parts[-4] == "Search-group-0001"
-    assert Path(first["batch"]["upload_directory"]).parent.parent.name == "Relax-0001_MC-round-0001"
+    assert first["batch"]["search_group_index"] == 1
+    assert Path(first["batch"]["upload_directory"]).parent.parent.name.endswith(
+        "Relax-0001_MC-round-0001"
+    )
     assert Path(second["batch"]["upload_directory"]).name == "MC-sampling-0002_remote-000002"
     assert Path(third["batch"]["upload_directory"]).name == "MC-sampling-0003_remote-000003"
     script = Path(first["batch"]["upload_directory"], "GPU.sh").read_text(encoding="utf-8")
@@ -74,8 +88,10 @@ def test_mc_21_tasks_use_three_jobs_without_splitting_branches(tmp_path):
 
 def test_two_mc_allocations_have_separate_results_and_never_mix(tmp_path):
     runner = ManualUploadBatchRunner(
-        tmp_path / "upload", worker_command=["python3", "--executor", "x:y"],
-        task_preparer=_prepared_task)
+        tmp_path / "upload",
+        worker_command=["python3", "--executor", "x:y"],
+        task_preparer=_prepared_task,
+    )
     state = _make_tasks(tmp_path, 2, "deep_search")
     state["tasks"][0].update(upload_operation_id="first", segment_index=0)
     state["tasks"][1].update(upload_operation_id="second", segment_index=1)
@@ -84,20 +100,24 @@ def test_two_mc_allocations_have_separate_results_and_never_mix(tmp_path):
     assert first["batch"]["task_ids"] == ["T-0"]
     assert second["batch"]["task_ids"] == ["T-1"]
     assert first["batch"]["results_directory"] != second["batch"]["results_directory"]
-    assert Path(second["batch"]["upload_directory"]).parent.parent.name == "Relax-0001_MC-round-0002"
+    assert Path(second["batch"]["upload_directory"]).parent.parent.name.endswith(
+        "Relax-0001_MC-round-0002"
+    )
 
 
 def test_new_model_version_starts_a_new_mlip_round(tmp_path):
     runner = ManualUploadBatchRunner(
-        tmp_path / "upload", worker_command=["python3", "--executor", "x:y"],
+        tmp_path / "upload",
+        worker_command=["python3", "--executor", "x:y"],
         task_preparer=_prepared_task,
     )
     first_state = _make_tasks(tmp_path, 1, "deep_search")
     first_state["tasks"][0]["model_version"] = "mh-1"
     first = runner.prepare(first_state)
     second_task = _make_tasks(tmp_path, 1, "deep_search")
-    second_task["tasks"][0].update({"task_id": "T-new", "task_key": "K-new",
-                                     "model_version": "mh-2"})
+    second_task["tasks"][0].update(
+        {"task_id": "T-new", "task_key": "K-new", "model_version": "mh-2"}
+    )
     state = first["state"]
     state["tasks"].extend(second_task["tasks"])
     state["budget_reservations"]["K-new"] = {"status": "reserved"}
@@ -117,9 +137,10 @@ def test_batch_continues_after_one_failed_task(tmp_path):
         (folder / "run_mlip_task.py").write_text(
             "from pathlib import Path\n"
             "Path('task.finished.json').write_text('\\\"done\\\"')\n"
-            f"raise SystemExit({exit_code})\n", encoding="utf-8")
-        manifest.append({"task_id": f"T-{index}",
-                         "input_path": f"{folder.name}/task.json"})
+            f"raise SystemExit({exit_code})\n",
+            encoding="utf-8",
+        )
+        manifest.append({"task_id": f"T-{index}", "input_path": f"{folder.name}/task.json"})
     (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert run_mlip_batch(root / "manifest.json") == ["T-0"]
     assert (root / "00001-T-1" / "task.finished.json").is_file()
@@ -130,9 +151,10 @@ def test_batch_runner_accepts_legacy_windows_manifest_paths(tmp_path):
     task_dir = root / "00000-RELAX-old"
     task_dir.mkdir(parents=True)
     (task_dir / "task.json").write_text("{}", encoding="utf-8")
-    (root / "manifest.json").write_text(json.dumps([{
-        "task_id": "RELAX-old", "input_path": "00000-RELAX-old\\task.json"
-    }]), encoding="utf-8")
+    (root / "manifest.json").write_text(
+        json.dumps([{"task_id": "RELAX-old", "input_path": "00000-RELAX-old\\task.json"}]),
+        encoding="utf-8",
+    )
     observed = {}
 
     def fake_run(command, *, cwd, **kwargs):

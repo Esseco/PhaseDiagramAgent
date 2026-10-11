@@ -32,6 +32,11 @@ def apply_scientific_feedback(
 ):
     """Persist each terminal result once, then rebuild hull/reward summaries."""
     current = deepcopy(state)
+    from phase_agent.persistence.shared_dft import publish, import_records
+
+    if manager is not None:
+        publish(current, manager, current.get("confirmed_config") or {})
+        import_records(current, current.get("confirmed_config") or {})
     original_phase_records = deepcopy(current.get("phase_records") or [])
     processed = current.setdefault("feedback_processed_task_ids", [])
     current.setdefault("phase_records", [])
@@ -204,6 +209,7 @@ def apply_scientific_feedback(
     publish_output_catalog(current, phase_diagram_directory)
     if ledger_path is not None and (accepted or refreshed):
         manager.save(ledger_path)
+    publish(current, manager, current.get("confirmed_config") or {})
     return {
         "state": current,
         "recorded": accepted,

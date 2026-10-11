@@ -11,7 +11,6 @@ def begin_config_revision(session: dict, *, reason: str) -> dict:
     updated["status"] = "draft"
     updated["setup_stage"] = "json_ready"
     updated["config"] = deepcopy(snapshot["config"])
-    updated["draft_revision"] = int(updated.get("draft_revision", 0)) + 1
     for key in (
         "agent_reviewed_revision",
         "agent_reviewed_config_hash",

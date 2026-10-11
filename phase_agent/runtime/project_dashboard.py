@@ -157,6 +157,7 @@ def main():
     text = tk.Text(app, height=13, wrap="word", font=("Microsoft YaHei UI", 10), state="disabled")
     text.pack(fill="both", expand=True, padx=20, pady=12)
     owned, busy, replies = {}, set(), queue.Queue()
+    start_cancellations = {}
 
     def display(value):
         text.configure(state="normal")
@@ -238,12 +239,13 @@ def main():
         if path is None or path in busy:
             return
         busy.add(path)
+        start_cancellations[path] = threading.Event()
         display(f"正在启动 {path.parent.name}…")
         refresh()
 
         def worker():
             try:
-                process, token, reused = start_agent(path)
+                process, token, reused = start_agent(path, cancel_event=start_cancellations[path])
                 service = {"studio_port": process.studio_port, "control_port": process.control_port}
                 replies.put(("ready", path, (process, reused, service)))
             except Exception as error:
@@ -261,6 +263,10 @@ def main():
 
     def stop():
         path = selected()
+        if path is None:
+            return
+        if path in start_cancellations:
+            start_cancellations[path].set()
         process = owned.get(path)
         from phase_agent.runtime.local_project_launcher import stop_project_service
 
@@ -274,6 +280,8 @@ def main():
             kind, path, value = replies.get_nowait()
             if kind == "ready":
                 process, reused, service = value
+                if start_cancellations.get(path) and start_cancellations[path].is_set():
+                    continue
                 if not reused:
                     owned[path] = process
                 if selected() == path:

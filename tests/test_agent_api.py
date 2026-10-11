@@ -5,43 +5,64 @@ from unittest.mock import patch
 from pathlib import Path
 
 from phase_agent.runtime.agent_api import (
-    RunWorkflowChatHandler, classify_user_decision, create_agent_runtime,
-    handle_chat_request, format_workflow_reply,
+    RunWorkflowChatHandler,
+    classify_user_decision,
+    create_agent_runtime,
+    handle_chat_request,
+    format_workflow_reply,
     _is_config_migration_approval,
 )
 from phase_agent.runtime.configuration_chat import ConfigurationChatHandler
 from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
+
+
 def runtime_adapter_fixture():
     return "adapter-value"
 
 
 class OpenWebUIAPITest(unittest.TestCase):
-    def test_history_resume_rechecks_cached_branch_stage(self):
+    def test_history_resume_reuses_saved_branch_proposal_without_replanning(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
-            state_path.write_text(json.dumps({"action_records": [{"record_id": "finished-other", "status": "completed"}],
-                "pending_execution_policies": {"old-branch": {"agent_proposal": {
-                    "raw_action": {"tool": "generate_branches"}}}}}), encoding="utf-8")
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "action_records": [{"record_id": "finished-other", "status": "completed"}],
+                        "pending_execution_policies": {
+                            "old-branch": {
+                                "agent_proposal": {"raw_action": {"tool": "generate_branches"}}
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
             calls = []
+
             def workflow(**kwargs):
                 calls.append(kwargs)
-                return {"status": "not_configured", "state": {},
-                        "reason": "本轮 DFT 评估待完成"}
-            handler = RunWorkflowChatHandler({"state_path": str(state_path)},
-                                             workflow=workflow, history_prompt=True)
+                return {"status": "not_configured", "state": {}, "reason": "本轮 DFT 评估待完成"}
+
+            handler = RunWorkflowChatHandler(
+                {"state_path": str(state_path)}, workflow=workflow, history_prompt=True
+            )
             handler.history_decision = None
             handler([{"role": "user", "content": "查看状态"}])
             reply = handler([{"role": "user", "content": "继续"}])
-            self.assertEqual(calls[0]["invocation_id"], "old-branch")
-            self.assertIsNone(calls[0]["human_feedback"])
-            self.assertIn("本轮 DFT 评估待完成", reply)
-            self.assertNotIn("建议：生成 branch", reply)
-
+            self.assertEqual(calls, [])
+            self.assertIn("已保存方案", reply)
+            self.assertNotIn("old-branch", reply)
+            self.assertNotIn("finished-other", reply)
+            self.assertEqual(handler.presented_plan_binding["plan_id"], "old-branch")
 
     def test_invalid_action_is_not_presented_for_approval(self):
         reply = format_workflow_reply(
-            {"status": "awaiting_approval", "agent_proposal": {
-                "recommended_action": None, "raw_action": {"tool": None}}}, "state.json")
+            {
+                "status": "awaiting_approval",
+                "agent_proposal": {"recommended_action": None, "raw_action": {"tool": None}},
+            },
+            "state.json",
+        )
         self.assertIn("无效动作", reply)
         self.assertNotIn("回复“同意”", reply)
 
@@ -49,11 +70,24 @@ class OpenWebUIAPITest(unittest.TestCase):
         from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
 
         root = Path(root)
-        boundary = {"P": ["O3"], "H": {"O3": [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]]}, "TM_ratio": {"Fe": 1}}
-        confirmed = {"system": {"boundary": boundary}, "agent": {"allowed_tools": ["pause_search"]}, "budgets": {}}
-        config_session = {"status": "confirmed", "confirmed_snapshot": {
-            "config_version": "config-test", "config_hash": "hash", "config": confirmed,
-        }}
+        boundary = {
+            "P": ["O3"],
+            "H": {"O3": [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]]},
+            "TM_ratio": {"Fe": 1},
+        }
+        confirmed = {
+            "system": {"boundary": boundary},
+            "agent": {"allowed_tools": ["pause_search"]},
+            "budgets": {},
+        }
+        config_session = {
+            "status": "confirmed",
+            "confirmed_snapshot": {
+                "config_version": "config-test",
+                "config_hash": "hash",
+                "config": confirmed,
+            },
+        }
         state = {"confirmed_config": confirmed, "config_version": "config-test"}
         if history:
             state["action_records"] = [{"status": "completed"}]
@@ -65,8 +99,12 @@ class OpenWebUIAPITest(unittest.TestCase):
         (root / "phase.json").write_text("{}", encoding="utf-8")
         if session:
             (root / "session.json").write_text(json.dumps(config_session), encoding="utf-8")
-        settings = {"state_path": "state.json", "ledger_path": "ledger.json",
-                    "phase_references_path": "phase.json", "new_runs_directory": "runs"}
+        settings = {
+            "state_path": "state.json",
+            "ledger_path": "ledger.json",
+            "phase_references_path": "phase.json",
+            "new_runs_directory": "runs",
+        }
         if session:
             settings["config_session_path"] = "session.json"
         runtime = root / "runtime.json"
@@ -89,16 +127,25 @@ class OpenWebUIAPITest(unittest.TestCase):
 
         def workflow(**kwargs):
             calls.append(kwargs)
-            return {"status": "config_migrated", "from_config_version": "v1",
-                    "config_version": "v2", "migration": {"budget_changes": [
+            return {
+                "status": "config_migrated",
+                "from_config_version": "v1",
+                "config_version": "v2",
+                "migration": {
+                    "budget_changes": [
                         {"field": "round_strategy.maximum_mc_budget", "from": 1000, "to": 5000},
-                      ], "compatibility": {
-                          "relax_task_count": 406,
-                          "unrecorded_fields": ["mlip.relax_parameters.mace_default_dtype"],
-                      }}}
+                    ],
+                    "compatibility": {
+                        "relax_task_count": 406,
+                        "unrecorded_fields": ["mlip.relax_parameters.mace_default_dtype"],
+                    },
+                },
+            }
 
         handler = RunWorkflowChatHandler(
-            {"state_path": str(state_path)}, workflow=workflow, history_prompt=False,
+            {"state_path": str(state_path)},
+            workflow=workflow,
+            history_prompt=False,
         )
         reply = handler([{"role": "user", "content": "批准迁移"}], conversation_id="chat")
         self.assertTrue(calls[0]["approve_budget_extension"])
@@ -111,13 +158,18 @@ class OpenWebUIAPITest(unittest.TestCase):
     def test_openai_request_passes_real_user_messages(self):
         seen = {}
         response = handle_chat_request(
-            {"model": "phase-search-agent", "user": "chat-1", "messages": [
-                {"role": "assistant", "content": "approve"},
-                {"role": "user", "content": "请先解释结果"},
-            ]},
-            lambda messages, *, conversation_id: seen.update(
-                messages=messages, conversation_id=conversation_id
-            ) or "awaiting approval",
+            {
+                "model": "phase-search-agent",
+                "user": "chat-1",
+                "messages": [
+                    {"role": "assistant", "content": "approve"},
+                    {"role": "user", "content": "请先解释结果"},
+                ],
+            },
+            lambda messages, *, conversation_id: (
+                seen.update(messages=messages, conversation_id=conversation_id)
+                or "awaiting approval"
+            ),
         )
         self.assertEqual(response["choices"][0]["message"]["content"], "awaiting approval")
         self.assertEqual(seen["conversation_id"], "chat-1")
@@ -126,41 +178,73 @@ class OpenWebUIAPITest(unittest.TestCase):
     def test_pending_proposal_uses_actual_user_turn_and_stable_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
-            state_path.write_text(json.dumps({"pending_execution_policies": {
-                "action-7": {"revision": 1, "agent_proposal": {"raw_action": {"tool": "pause_search"}}}
-            }}), encoding="utf-8")
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "pending_execution_policies": {
+                            "action-7": {
+                                "revision": 1,
+                                "agent_proposal": {"raw_action": {"tool": "pause_search"}},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
             calls = []
 
             def workflow(**kwargs):
                 calls.append(kwargs)
-                return {"status": "awaiting_approval", "agent_proposal": {
-                    "current_state_analysis": "test", "recommended_action": "pause_search",
-                    "action_parameters": {}, "reason": "test", "estimated_cost": {},
-                    "calculation_plan": {}, "expected_purpose": "test",
-                }}
+                return {
+                    "status": "awaiting_approval",
+                    "agent_proposal": {
+                        "current_state_analysis": "test",
+                        "recommended_action": "pause_search",
+                        "action_parameters": {},
+                        "reason": "test",
+                        "estimated_cost": {},
+                        "calculation_plan": {},
+                        "expected_purpose": "test",
+                    },
+                }
 
-            handler = RunWorkflowChatHandler({
-                "state_path": str(state_path),
-                "config_session": {"status": "confirmed"},
-            }, workflow=workflow)
+            handler = RunWorkflowChatHandler(
+                {
+                    "state_path": str(state_path),
+                    "config_session": {"status": "confirmed"},
+                },
+                workflow=workflow,
+            )
             reply = handler([{"role": "user", "content": "调整预算后再看"}])
             self.assertIn("待确认", reply)
             self.assertEqual(calls[0]["invocation_id"], "action-7")
             self.assertEqual(calls[0]["execution_mode"], "interactive")
-            self.assertEqual(calls[0]["human_feedback"], {
-                "decision": "comment", "comment": "调整预算后再看",
-            })
+            self.assertEqual(
+                calls[0]["human_feedback"],
+                {
+                    "decision": "comment",
+                    "comment": "调整预算后再看",
+                },
+            )
 
     def test_simple_agreement_approves_current_non_sensitive_round(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
             proposal = {"raw_action": {"tool": "pause_search"}}
-            state_path.write_text(json.dumps({"pending_execution_policies": {
-                "action-9": {"revision": 1, "agent_proposal": proposal}
-            }}), encoding="utf-8")
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "pending_execution_policies": {
+                            "action-9": {"revision": 1, "agent_proposal": proposal}
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
             handler = RunWorkflowChatHandler({"state_path": str(state_path)})
             with patch.object(
-                handler, "review_pending",
+                handler,
+                "review_pending",
                 return_value={"status": "completed", "result": {"status": "completed"}},
             ) as review:
                 handler([{"role": "user", "content": "查看方案"}])
@@ -178,10 +262,13 @@ class OpenWebUIAPITest(unittest.TestCase):
                 observed.update(kwargs["agent_client"]({"state": "snapshot"}))
                 return {"status": "planned_only"}
 
-            handler = RunWorkflowChatHandler({
-                "state_path": str(state_path),
-                "agent_client": lambda payload: payload,
-            }, workflow=workflow)
+            handler = RunWorkflowChatHandler(
+                {
+                    "state_path": str(state_path),
+                    "agent_client": lambda payload: payload,
+                },
+                workflow=workflow,
+            )
             handler([{"role": "user", "content": "优先评估最近 DFT 误差"}])
             self.assertEqual(observed["user_instruction"], "优先评估最近 DFT 误差")
 
@@ -190,26 +277,42 @@ class OpenWebUIAPITest(unittest.TestCase):
             state_path = Path(directory) / "state.json"
             state_path.write_text(json.dumps({"tasks": [], "slurm_batches": []}), encoding="utf-8")
             calls = []
-            handler = RunWorkflowChatHandler({"state_path": str(state_path)}, workflow=lambda **kwargs: calls.append(kwargs))
+            handler = RunWorkflowChatHandler(
+                {"state_path": str(state_path)}, workflow=lambda **kwargs: calls.append(kwargs)
+            )
             reply = handler([{"role": "user", "content": "查看状态"}])
             self.assertIn("当前项目状态", reply)
             self.assertEqual(calls, [])
 
     def test_missing_user_message_is_rejected(self):
         with self.assertRaises(ValueError):
-            handle_chat_request({"messages": [{"role": "assistant", "content": "hello"}]}, lambda *_a, **_k: "x")
+            handle_chat_request(
+                {"messages": [{"role": "assistant", "content": "hello"}]}, lambda *_a, **_k: "x"
+            )
 
     def test_natural_status_bypasses_history_gate_without_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
-            state_path.write_text(json.dumps({"active_model_version": "mace-test",
-                "tasks": [{"status": "completed"}],
-                "pending_execution_policies": {"pending": {}}}), encoding="utf-8")
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "active_model_version": "mace-test",
+                        "tasks": [{"status": "completed"}],
+                        "pending_execution_policies": {"pending": {}},
+                    }
+                ),
+                encoding="utf-8",
+            )
             before = state_path.read_bytes()
             calls = []
-            handler = RunWorkflowChatHandler({"state_path": str(state_path),
-                "agent_client": lambda payload: calls.append(payload)},
-                workflow=lambda **kwargs: calls.append(kwargs), history_prompt=True)
+            handler = RunWorkflowChatHandler(
+                {
+                    "state_path": str(state_path),
+                    "agent_client": lambda payload: calls.append(payload),
+                },
+                workflow=lambda **kwargs: calls.append(kwargs),
+                history_prompt=True,
+            )
             for message in ("现在什么进度", "现在是什么进度？", "查看状态"):
                 reply = handler([{"role": "user", "content": message}], conversation_id="t")
                 self.assertIn("待审批方案 1 个", reply)
@@ -222,26 +325,44 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertIsNone(handler.conversation_id)
 
     def test_builtin_factory_composes_runtime_and_adapter(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": "local-test-key"}):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"DEEPSEEK_API_KEY": "local-test-key"}),
+        ):
             runtime = self._runtime_files(directory)
             settings = json.loads(runtime.read_text(encoding="utf-8"))
-            settings["runtime_adapters"] = {"example_adapter": "tests.test_agent_api:runtime_adapter_fixture"}
+            settings["runtime_adapters"] = {
+                "example_adapter": "tests.test_agent_api:runtime_adapter_fixture"
+            }
             runtime.write_text(json.dumps(settings), encoding="utf-8")
             handler = create_agent_runtime(runtime)
             self.assertEqual(type(handler.workflow_kwargs["manager"]).__name__, "PhaseDataManager")
             self.assertEqual(handler.workflow_kwargs["example_adapter"], "adapter-value")
-            self.assertEqual(handler.workflow_kwargs["config_session"]["confirmed_snapshot"]["config_version"], "config-test")
+            self.assertEqual(
+                handler.workflow_kwargs["config_session"]["confirmed_snapshot"]["config_version"],
+                "config-test",
+            )
 
     def test_factory_recovers_confirmed_config_from_old_state(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": "local-test-key"}):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"DEEPSEEK_API_KEY": "local-test-key"}),
+        ):
             runtime = self._runtime_files(directory, session=False)
             handler = create_agent_runtime(runtime)
             self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "confirmed")
-            self.assertEqual(handler.workflow_kwargs["config_session"]["confirmed_snapshot"]["config_version"], "config-test")
+            self.assertEqual(
+                handler.workflow_kwargs["config_session"]["confirmed_snapshot"]["config_version"],
+                "config-test",
+            )
 
     def test_confirmed_runtime_starts_without_deepseek_key_for_browser_setup(self):
-        with tempfile.TemporaryDirectory() as directory,\
-                patch("phase_agent.runtime.deepseek_credentials.load_deepseek_api_key", return_value=None):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "phase_agent.runtime.deepseek_credentials.load_deepseek_api_key", return_value=None
+            ),
+        ):
             runtime = self._runtime_files(directory, session=False)
             handler = create_agent_runtime(runtime)
             self.assertIsNone(handler.workflow_kwargs["agent_client"])
@@ -250,33 +371,49 @@ class OpenWebUIAPITest(unittest.TestCase):
     def test_history_requires_choice_before_workflow_and_continue_restores_pending(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
-            proposal = {"current_state_analysis": "old", "recommended_action": "pause_search",
-                        "action_parameters": {}, "reason": "old", "estimated_cost": {},
-                        "calculation_plan": {}, "expected_purpose": "inspect"}
-            state_path.write_text(json.dumps({"pending_execution_policies": {
-                "old-action": {"agent_proposal": proposal}
-            }}), encoding="utf-8")
+            proposal = {
+                "current_state_analysis": "old",
+                "recommended_action": "pause_search",
+                "action_parameters": {},
+                "reason": "old",
+                "estimated_cost": {},
+                "calculation_plan": {},
+                "expected_purpose": "inspect",
+            }
+            state_path.write_text(
+                json.dumps(
+                    {"pending_execution_policies": {"old-action": {"agent_proposal": proposal}}}
+                ),
+                encoding="utf-8",
+            )
             calls = []
+
             def workflow(**kwargs):
                 calls.append(kwargs)
                 return {"status": "awaiting_approval", "agent_proposal": proposal}
-            handler = RunWorkflowChatHandler({"state_path": str(state_path)}, workflow=workflow, history_prompt=True)
+
+            handler = RunWorkflowChatHandler(
+                {"state_path": str(state_path)}, workflow=workflow, history_prompt=True
+            )
             first = handler([{"role": "user", "content": "查看一下"}], conversation_id="chat-a")
             self.assertIn("继续", first)
             self.assertEqual(calls, [])
             continued = handler([{"role": "user", "content": "继续"}], conversation_id="chat-a")
             self.assertIn("待确认", continued)
-            self.assertEqual(calls[0]["invocation_id"], "old-action")
-            self.assertIsNone(calls[0]["human_feedback"])
+            self.assertEqual(calls, [])
+            self.assertEqual(handler.presented_plan_binding["plan_id"], "old-action")
 
     def test_continue_does_not_call_config_edit_classifier(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
-            state_path.write_text(json.dumps({"tasks": [{"task_id": "T1", "status": "completed"}]}),
-                                  encoding="utf-8")
-            handler = RunWorkflowChatHandler({"state_path": str(state_path)},
-                                             workflow=lambda **_: {"status": "planned_only"},
-                                             history_prompt=True)
+            state_path.write_text(
+                json.dumps({"tasks": [{"task_id": "T1", "status": "completed"}]}), encoding="utf-8"
+            )
+            handler = RunWorkflowChatHandler(
+                {"state_path": str(state_path)},
+                workflow=lambda **_: {"status": "planned_only"},
+                history_prompt=True,
+            )
             handler([{"role": "user", "content": "继续"}])
 
     def test_navigation_commands_never_open_config_revision(self):
@@ -288,12 +425,16 @@ class OpenWebUIAPITest(unittest.TestCase):
                     {"state_path": str(state_path)},
                     workflow=lambda **_: {"status": "planned_only"},
                     config_revision_factory=lambda _: (_ for _ in ()).throw(
-                        AssertionError("流程指令不应创建配置草稿")),
+                        AssertionError("流程指令不应创建配置草稿")
+                    ),
                 )
                 handler([{"role": "user", "content": command}])
 
     def test_new_run_uses_unique_paths_and_keeps_old_ledger(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": "local-test-key"}):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"DEEPSEEK_API_KEY": "local-test-key"}),
+        ):
             runtime = self._runtime_files(directory, history=True)
             old_ledger = Path(directory) / "ledger.json"
             before = old_ledger.read_bytes()
@@ -309,17 +450,25 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertTrue(descriptor.is_file())
             restored = create_agent_runtime(descriptor)
             self.assertEqual(restored.state_path, first.state_path)
-            for key in ("phase_diagram_directory", "approval_directory", "upload_batches_directory"):
-                self.assertEqual(restored.workflow_kwargs["run_config"][key],
-                                 first.workflow_kwargs["run_config"][key])
+            for key in (
+                "phase_diagram_directory",
+                "approval_directory",
+                "upload_batches_directory",
+            ):
+                self.assertEqual(
+                    restored.workflow_kwargs["run_config"][key],
+                    first.workflow_kwargs["run_config"][key],
+                )
 
     def test_no_history_runs_directly(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "state.json"
             state_path.write_text("{}", encoding="utf-8")
             calls = []
-            handler = RunWorkflowChatHandler({"state_path": str(state_path)},
-                                             workflow=lambda **kw: calls.append(kw) or {"status": "planned_only"})
+            handler = RunWorkflowChatHandler(
+                {"state_path": str(state_path)},
+                workflow=lambda **kw: calls.append(kw) or {"status": "planned_only"},
+            )
             handler([{"role": "user", "content": "开始"}], conversation_id="chat")
             self.assertEqual(len(calls), 1)
 
@@ -331,13 +480,26 @@ class OpenWebUIAPITest(unittest.TestCase):
                 create_agent_runtime(runtime)
 
     def test_first_start_enters_persistent_config_only_mode(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}), patch("phase_agent.runtime.deepseek_credentials.load_deepseek_api_key", return_value=None):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}),
+            patch(
+                "phase_agent.runtime.deepseek_credentials.load_deepseek_api_key", return_value=None
+            ),
+        ):
             root = Path(directory)
             runtime = root / "runtime.json"
-            runtime.write_text(json.dumps({
-                "config_session_path": "session.json", "state_path": "state.json",
-                "ledger_path": "ledger.json", "phase_references_path": "phase.json",
-            }), encoding="utf-8")
+            runtime.write_text(
+                json.dumps(
+                    {
+                        "config_session_path": "session.json",
+                        "state_path": "state.json",
+                        "ledger_path": "ledger.json",
+                        "phase_references_path": "phase.json",
+                    }
+                ),
+                encoding="utf-8",
+            )
             handler = create_agent_runtime(runtime)
             self.assertIsInstance(handler, ConfigurationChatHandler)
             self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "draft")
@@ -365,9 +527,7 @@ class OpenWebUIAPITest(unittest.TestCase):
                 "awaiting_storage_confirmation",
             )
             self.assertFalse(workspace.exists())
-            confirm_path = resumed(
-                [{"role": "user", "content": "确认"}], conversation_id="setup"
-            )
+            confirm_path = resumed([{"role": "user", "content": "确认"}], conversation_id="setup")
             draft = workspace / "search_config.project.json"
             self.assertIn(str(draft), confirm_path)
             self.assertIn("读取配置 JSON", confirm_path)
@@ -379,7 +539,9 @@ class OpenWebUIAPITest(unittest.TestCase):
             draft.write_text("user edit", encoding="utf-8")
             ready_handler = create_agent_runtime(runtime)
             self.assertEqual(draft.read_text(encoding="utf-8"), "user edit")
-            reply = ready_handler([{"role": "user", "content": "开始配置"}], conversation_id="setup")
+            reply = ready_handler(
+                [{"role": "user", "content": "开始配置"}], conversation_id="setup"
+            )
             self.assertIn("DeepSeek API", reply)
             self.assertFalse((root / "state.json").exists())
 
@@ -387,18 +549,32 @@ class OpenWebUIAPITest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             session_path = root / "session.json"
-            from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
-            from phase_agent.configuration.session.create_config_draft import create_config_draft
-            handler = ConfigurationChatHandler(
-                {"state_path": str(root / "state.json"),
-                 "config_session": create_config_draft(
-                     default_layered_search_config(), require_workspace_path=True
-                 )},
-                config_session_path=session_path, base_directory=root,
+            from phase_agent.configuration.defaults.default_layered_search_config import (
+                default_layered_search_config,
             )
-            reply = handler([{"role": "user", "content": (
-                str(root / "workspace") + "\\run\\### Task:\nSuggest follow-ups"
-            )}], conversation_id="setup")
+            from phase_agent.configuration.session.create_config_draft import create_config_draft
+
+            handler = ConfigurationChatHandler(
+                {
+                    "state_path": str(root / "state.json"),
+                    "config_session": create_config_draft(
+                        default_layered_search_config(), require_workspace_path=True
+                    ),
+                },
+                config_session_path=session_path,
+                base_directory=root,
+            )
+            reply = handler(
+                [
+                    {
+                        "role": "user",
+                        "content": (
+                            str(root / "workspace") + "\\run\\### Task:\nSuggest follow-ups"
+                        ),
+                    }
+                ],
+                conversation_id="setup",
+            )
             self.assertIn("首次只需提供两项", reply)
             session = handler.workflow_kwargs["config_session"]
             self.assertEqual(session["setup_stage"], "awaiting_storage_path")
@@ -406,7 +582,9 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertFalse((root / "workspace").exists())
 
     def test_workspace_and_agent_model_can_be_confirmed_together_before_config(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
 
         with tempfile.TemporaryDirectory() as directory:
@@ -415,30 +593,38 @@ class OpenWebUIAPITest(unittest.TestCase):
             agent_calls = []
             switched_models = []
             handler = ConfigurationChatHandler(
-                {"state_path": str(root / "state.json"),
-                 "config_session": create_config_draft(
-                     default_layered_search_config(), require_workspace_path=True
-                 )},
-                config_session_path=root / "session.json", base_directory=root,
+                {
+                    "state_path": str(root / "state.json"),
+                    "config_session": create_config_draft(
+                        default_layered_search_config(), require_workspace_path=True
+                    ),
+                },
+                config_session_path=root / "session.json",
+                base_directory=root,
                 current_deepseek_model="deepseek-v4-pro",
                 agent_client=lambda payload: agent_calls.append(payload),
                 deepseek_model_switcher=lambda model: (
-                    switched_models.append(model) or model, lambda _payload: {}
+                    switched_models.append(model) or model,
+                    lambda _payload: {},
                 ),
             )
 
-            preview = handler([{"role": "user", "content": (
-                f"工作区根路径：{workspace}\nAgent版本：V4.1 Flash"
-            )}], conversation_id="setup")
+            preview = handler(
+                [
+                    {
+                        "role": "user",
+                        "content": (f"工作区根路径：{workspace}\nAgent版本：V4.1 Flash"),
+                    }
+                ],
+                conversation_id="setup",
+            )
             self.assertIn(str(workspace.resolve()), preview)
             self.assertIn("deepseek-flash", preview)
             self.assertIn("回复“确认”", preview)
             self.assertFalse(workspace.exists())
             self.assertEqual(switched_models, [])
 
-            confirmed = handler(
-                [{"role": "user", "content": "确认"}], conversation_id="setup"
-            )
+            confirmed = handler([{"role": "user", "content": "确认"}], conversation_id="setup")
             self.assertIn("必须补齐或解决", confirmed)
             self.assertIn("建议检查项", confirmed)
             self.assertIn("读取配置 JSON", confirmed)
@@ -452,26 +638,29 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertFalse((root / "state.json").exists())
 
     def test_workspace_write_failure_does_not_commit_bad_session_state(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             handler = ConfigurationChatHandler(
-                {"state_path": str(root / "state.json"),
-                 "config_session": create_config_draft(
-                     default_layered_search_config(), require_workspace_path=True
-                 )},
-                config_session_path=root / "session.json", base_directory=root,
+                {
+                    "state_path": str(root / "state.json"),
+                    "config_session": create_config_draft(
+                        default_layered_search_config(), require_workspace_path=True
+                    ),
+                },
+                config_session_path=root / "session.json",
+                base_directory=root,
             )
             handler([{"role": "user", "content": str(root / "workspace")}], conversation_id="setup")
             with patch(
                 "phase_agent.configuration.session.project_config_json.create_project_config_json",
                 side_effect=OSError("permission denied"),
             ):
-                reply = handler(
-                    [{"role": "user", "content": "确认"}], conversation_id="setup"
-                )
+                reply = handler([{"role": "user", "content": "确认"}], conversation_id="setup")
             self.assertIn("设置 JSON 写入失败", reply)
             session = handler.workflow_kwargs["config_session"]
             self.assertEqual(session["setup_stage"], "awaiting_storage_confirmation")
@@ -479,25 +668,38 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertNotIn("editable_config_json_path", session)
 
     def test_corrupt_json_ready_workspace_session_recovers_to_path_prompt(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
         from phase_agent.configuration.session.save_config_session import save_config_session
 
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}),
+        ):
             root = Path(directory)
             runtime = root / "runtime.json"
-            runtime.write_text(json.dumps({
-                "config_session_path": "session.json", "state_path": "state.json",
-                "ledger_path": "ledger.json",
-            }), encoding="utf-8")
-            session = create_config_draft(default_layered_search_config(), require_workspace_path=True)
+            runtime.write_text(
+                json.dumps(
+                    {
+                        "config_session_path": "session.json",
+                        "state_path": "state.json",
+                        "ledger_path": "ledger.json",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            session = create_config_draft(
+                default_layered_search_config(), require_workspace_path=True
+            )
             session["setup_stage"] = "json_ready"
             session["config"]["storage"] = {
                 "workspace_root": str(root / "run" / "### Task:\nmalformed prompt"),
                 "paths": {},
             }
-            session["editable_config_json_path"] = (
-                str(root / "run" / "### Task:\nmalformed prompt" / "search_config.draft.json")
+            session["editable_config_json_path"] = str(
+                root / "run" / "### Task:\nmalformed prompt" / "search_config.draft.json"
             )
             save_config_session(session, root / "session.json")
 
@@ -508,13 +710,17 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertNotIn("storage", recovered["config"])
             self.assertIsNone(handler.editable_config_path)
             self.assertFalse((root / "run").exists())
-            self.assertTrue(any(
-                item.get("type") == "workspace_path_recovery"
-                for item in recovered.get("dialogue", [])
-            ))
+            self.assertTrue(
+                any(
+                    item.get("type") == "workspace_path_recovery"
+                    for item in recovered.get("dialogue", [])
+                )
+            )
 
     def test_startup_setup_stages_optional_flash_model_until_path_confirmation(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
 
         with tempfile.TemporaryDirectory() as directory:
@@ -522,15 +728,19 @@ class OpenWebUIAPITest(unittest.TestCase):
             switch_calls = []
             config_agent_calls = []
             handler = ConfigurationChatHandler(
-                {"state_path": str(root / "state.json"),
-                 "config_session": create_config_draft(
-                     default_layered_search_config(), require_workspace_path=True
-                 )},
-                config_session_path=root / "session.json", base_directory=root,
+                {
+                    "state_path": str(root / "state.json"),
+                    "config_session": create_config_draft(
+                        default_layered_search_config(), require_workspace_path=True
+                    ),
+                },
+                config_session_path=root / "session.json",
+                base_directory=root,
                 current_deepseek_model="deepseek-v4-pro",
                 agent_client=lambda payload: config_agent_calls.append(payload),
                 deepseek_model_switcher=lambda model: (
-                    switch_calls.append(model) or model, lambda _payload: {}
+                    switch_calls.append(model) or model,
+                    lambda _payload: {},
                 ),
             )
             reply = handler(
@@ -549,16 +759,16 @@ class OpenWebUIAPITest(unittest.TestCase):
             )
             self.assertIn("DeepSeek V4.1 Flash", preview)
             self.assertEqual(switch_calls, [])
-            confirmed = handler(
-                [{"role": "user", "content": "确认"}], conversation_id="setup"
-            )
+            confirmed = handler([{"role": "user", "content": "确认"}], conversation_id="setup")
             self.assertIn("DeepSeek V4.1 Flash", confirmed)
             self.assertEqual(switch_calls, ["deepseek-flash"])
             self.assertTrue((workspace / "search_config.project.json").is_file())
             self.assertEqual(config_agent_calls, [])
 
     def test_deepseek_model_request_resolves_current_flash_alias(self):
-        from phase_agent.runtime.resolve_deepseek_model_request import resolve_deepseek_model_request
+        from phase_agent.runtime.resolve_deepseek_model_request import (
+            resolve_deepseek_model_request,
+        )
 
         self.assertEqual(
             resolve_deepseek_model_request("不是 Pro，我想换成 V4 Flash"),
@@ -576,10 +786,18 @@ class OpenWebUIAPITest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime.json"
-            runtime.write_text(json.dumps({
-                "deepseek": {"model": "deepseek-v4-pro", "base_url": "https://api.deepseek.com"},
-                "state_path": "state.json",
-            }), encoding="utf-8")
+            runtime.write_text(
+                json.dumps(
+                    {
+                        "deepseek": {
+                            "model": "deepseek-v4-pro",
+                            "base_url": "https://api.deepseek.com",
+                        },
+                        "state_path": "state.json",
+                    }
+                ),
+                encoding="utf-8",
+            )
             selected = set_deepseek_runtime_model(runtime, "deepseek-flash")
             saved = json.loads(runtime.read_text(encoding="utf-8"))
             self.assertEqual(selected, "deepseek-flash")
@@ -590,19 +808,29 @@ class OpenWebUIAPITest(unittest.TestCase):
                 set_deepseek_runtime_model(runtime, "unknown-model")
 
     def test_legacy_draft_is_migrated_to_path_first_without_overwriting_json(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
         from phase_agent.configuration.session.save_config_session import save_config_session
 
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}),
+        ):
             root = Path(directory)
             runtime = root / "runtime.json"
-            runtime.write_text(json.dumps({
-                "config_session_path": "session.json",
-                "editable_config_draft_path": "search_config.draft.json",
-                "state_path": "state.json",
-                "ledger_path": "ledger.json",
-            }), encoding="utf-8")
+            runtime.write_text(
+                json.dumps(
+                    {
+                        "config_session_path": "session.json",
+                        "editable_config_draft_path": "search_config.draft.json",
+                        "state_path": "state.json",
+                        "ledger_path": "ledger.json",
+                    }
+                ),
+                encoding="utf-8",
+            )
             session_path = root / "session.json"
             save_config_session(create_config_draft(default_layered_search_config()), session_path)
             old_draft = root / "search_config.draft.json"
@@ -623,7 +851,9 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertFalse((root / "state.json").exists())
 
     def test_configuration_agent_only_edits_draft_and_cannot_start_workflow(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
 
         with tempfile.TemporaryDirectory() as directory:
@@ -634,17 +864,18 @@ class OpenWebUIAPITest(unittest.TestCase):
             calls = []
             handler = ConfigurationChatHandler(
                 {"state_path": str(state_path), "config_session": session},
-                config_session_path=session_path, base_directory=root,
+                config_session_path=session_path,
+                base_directory=root,
                 agent_client=lambda _payload: {
-                    "reply": "已记录模型版本候选。", "patch": {
-                        "calculation.mlip_version": "mace-mh-1"
-                    }, "reasons": {"calculation.mlip_version": "用户明确提供的模型信息。"},
+                    "reply": "已记录模型版本候选。",
+                    "patch": {"calculation.mlip_version": "mace-mh-1"},
+                    "reasons": {"calculation.mlip_version": "用户明确提供的模型信息。"},
                     "questions": [],
                 },
                 runtime_factory=lambda: calls.append("workflow"),
             )
             reply = handler([{"role": "user", "content": "模型使用 mh-1"}], conversation_id="setup")
-            self.assertIn("calculation.mlip_version", reply)
+            self.assertIn("已记录模型版本候选", reply)
             self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "draft")
             self.assertFalse(state_path.exists())
             self.assertEqual(calls, [])
@@ -653,7 +884,9 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertEqual(calls, [])
 
     def test_config_agent_receives_confirmed_setup_and_recent_question_context(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
 
         with tempfile.TemporaryDirectory() as directory:
@@ -664,19 +897,24 @@ class OpenWebUIAPITest(unittest.TestCase):
             config["storage"] = {"workspace_root": str(root), "paths": {}}
             session = create_config_draft(config)
             session["setup_stage"] = "json_ready"
-            session["dialogue"].append({
-                "type": "message", "role": "assistant",
-                "message": (
-                    "请确认 calculation.mlip_version 与 bohb.scope.mlip_version "
-                    "是否都填 mace-mh-1？工作区 E:\\0-FM-PhaseDiagram 已确认。"
-                ),
-            })
+            session["dialogue"].append(
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "message": (
+                        "请确认 calculation.mlip_version 与 bohb.scope.mlip_version "
+                        "是否都填 mace-mh-1？工作区 E:\\0-FM-PhaseDiagram 已确认。"
+                    ),
+                }
+            )
             payloads = []
             handler = ConfigurationChatHandler(
                 {"state_path": str(root / "state.json"), "config_session": session},
-                config_session_path=root / "session.json", base_directory=root,
+                config_session_path=root / "session.json",
+                base_directory=root,
                 agent_client=lambda payload: (
-                    payloads.append(payload) or {
+                    payloads.append(payload)
+                    or {
                         "reply": "已按刚才确认的内容记录为 mace-mh-1。",
                         "patch": {
                             "calculation.mlip_version": "mace-mh-1",
@@ -704,7 +942,9 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertEqual(updated["bohb"]["scope"]["mlip_version"], "mace-mh-1")
 
     def test_default_mlip_version_is_mh1_for_search_and_bohb(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.runtime.configuration_chat import _fill_default_mlip_versions
 
         config = default_layered_search_config()
@@ -721,7 +961,9 @@ class OpenWebUIAPITest(unittest.TestCase):
         self.assertEqual(set(filled), {"calculation.mlip_version", "bohb.scope.mlip_version"})
 
     def test_config_cannot_start_without_agent_review(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
 
         with tempfile.TemporaryDirectory() as directory:
@@ -742,10 +984,12 @@ class OpenWebUIAPITest(unittest.TestCase):
             delegate_calls = []
             handler = ConfigurationChatHandler(
                 {"state_path": str(root / "state.json"), "config_session": session},
-                config_session_path=root / "session.json", base_directory=root,
+                config_session_path=root / "session.json",
+                base_directory=root,
                 runtime_factory=lambda: (
-                    lambda _messages, *, conversation_id=None:
-                    delegate_calls.append(conversation_id) or "search mode"
+                    lambda _messages, *, conversation_id=None: (
+                        delegate_calls.append(conversation_id) or "search mode"
+                    )
                 ),
             )
             confirmation = handler(
@@ -757,10 +1001,16 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertEqual(delegate_calls, [])
 
     def test_agent_and_user_approval_enters_search_after_json_review(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
-        from phase_agent.configuration.session.create_editable_config_json import create_editable_config_json
-        from phase_agent.configuration.session.resolve_workspace_paths import default_workspace_storage
+        from phase_agent.configuration.session.create_editable_config_json import (
+            create_editable_config_json,
+        )
+        from phase_agent.configuration.session.resolve_workspace_paths import (
+            default_workspace_storage,
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -780,7 +1030,9 @@ class OpenWebUIAPITest(unittest.TestCase):
             config["storage"] = default_workspace_storage(root)
             config_file = root / "search_config.draft.json"
             create_editable_config_json(
-                config_file, config, workspace_defaults=config["storage"],
+                config_file,
+                config,
+                workspace_defaults=config["storage"],
             )
             session = create_config_draft(config)
             session["setup_stage"] = "json_ready"
@@ -789,33 +1041,37 @@ class OpenWebUIAPITest(unittest.TestCase):
             started = []
             handler = ConfigurationChatHandler(
                 {"state_path": str(root / "state.json"), "config_session": session},
-                config_session_path=root / "session.json", base_directory=root,
+                config_session_path=root / "session.json",
+                base_directory=root,
                 editable_config_path=config_file,
                 agent_client=lambda payload: (
-                    agent_reviews.append(payload) or {
+                    agent_reviews.append(payload)
+                    or {
                         "reply": "配置没有阻止搜索的问题。",
-                        "patch": {}, "questions": [], "ready_for_search": True,
+                        "patch": {},
+                        "questions": [],
+                        "ready_for_search": True,
                     }
                 ),
                 runtime_factory=lambda: (
-                    lambda messages, *, conversation_id=None:
-                    started.append((messages[-1]["content"], conversation_id)) or "search proposal"
+                    lambda messages, *, conversation_id=None: (
+                        started.append((messages[-1]["content"], conversation_id))
+                        or "search proposal"
+                    )
                 ),
             )
 
             reviewed = handler(
                 [{"role": "user", "content": "读取配置 JSON"}], conversation_id="setup"
             )
-            self.assertIn("Agent 与程序检查均通过", reviewed)
+            self.assertIn("同意", reviewed)
             self.assertEqual(agent_reviews[0]["mode"], "configuration_json_review")
             self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "draft")
             self.assertFalse((root / "state.json").exists())
             self.assertEqual(started, [])
 
-            result = handler(
-                [{"role": "user", "content": "同意"}], conversation_id="setup"
-            )
-            self.assertIn("配置已确认并保存为版本", result)
+            result = handler([{"role": "user", "content": "同意"}], conversation_id="setup")
+            self.assertIn("配置已确认并保存", result)
             self.assertIn("搜索 Agent 已启动首轮分析", result)
             self.assertIn("search proposal", result)
             self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "confirmed")
@@ -823,10 +1079,16 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertIn("不得直接执行", started[0][0])
 
     def test_json_review_command_can_conditionally_continue_after_both_checks_pass(self):
-        from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+        from phase_agent.configuration.defaults.default_layered_search_config import (
+            default_layered_search_config,
+        )
         from phase_agent.configuration.session.create_config_draft import create_config_draft
-        from phase_agent.configuration.session.create_editable_config_json import create_editable_config_json
-        from phase_agent.configuration.session.resolve_workspace_paths import default_workspace_storage
+        from phase_agent.configuration.session.create_editable_config_json import (
+            create_editable_config_json,
+        )
+        from phase_agent.configuration.session.resolve_workspace_paths import (
+            default_workspace_storage,
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -852,15 +1114,20 @@ class OpenWebUIAPITest(unittest.TestCase):
             started = []
             handler = ConfigurationChatHandler(
                 {"state_path": str(root / "state.json"), "config_session": session},
-                config_session_path=root / "session.json", base_directory=root,
+                config_session_path=root / "session.json",
+                base_directory=root,
                 editable_config_path=config_file,
                 agent_client=lambda _payload: {
-                    "reply": "Agent 检查通过。", "patch": {}, "questions": [],
+                    "reply": "Agent 检查通过。",
+                    "patch": {},
+                    "questions": [],
                     "ready_for_search": True,
                 },
                 runtime_factory=lambda: (
-                    lambda messages, *, conversation_id=None:
-                    started.append((messages[-1]["content"], conversation_id)) or "search proposal"
+                    lambda messages, *, conversation_id=None: (
+                        started.append((messages[-1]["content"], conversation_id))
+                        or "search proposal"
+                    )
                 ),
             )
 
@@ -869,12 +1136,13 @@ class OpenWebUIAPITest(unittest.TestCase):
                 conversation_id="setup",
             )
 
-            self.assertIn("配置已确认并保存为版本", reply)
+            self.assertIn("配置已确认并保存", reply)
             self.assertIn("搜索 Agent 已启动首轮分析", reply)
             self.assertEqual(handler.workflow_kwargs["config_session"]["status"], "confirmed")
             self.assertEqual(started[0][1], "setup")
             user_commands = [
-                item for item in handler.workflow_kwargs["config_session"]["dialogue"]
+                item
+                for item in handler.workflow_kwargs["config_session"]["dialogue"]
                 if item.get("role") == "user" and item.get("message") == "读取配置 JSON 并继续"
             ]
             self.assertEqual(len(user_commands), 1)
@@ -894,12 +1162,14 @@ class OpenWebUIAPITest(unittest.TestCase):
             blocked_session["editable_config_json_path"] = str(blocked_file)
             blocked_started = []
             blocked_handler = ConfigurationChatHandler(
-                {"state_path": str(root / "blocked_state.json"),
-                 "config_session": blocked_session},
-                config_session_path=root / "blocked_session.json", base_directory=root,
+                {"state_path": str(root / "blocked_state.json"), "config_session": blocked_session},
+                config_session_path=root / "blocked_session.json",
+                base_directory=root,
                 editable_config_path=blocked_file,
                 agent_client=lambda _payload: {
-                    "reply": "Agent 检查通过。", "patch": {}, "questions": [],
+                    "reply": "Agent 检查通过。",
+                    "patch": {},
+                    "questions": [],
                     "ready_for_search": True,
                 },
                 runtime_factory=lambda: blocked_started.append("created"),
@@ -908,7 +1178,7 @@ class OpenWebUIAPITest(unittest.TestCase):
                 [{"role": "user", "content": "读取配置 JSON 并继续"}],
                 conversation_id="setup",
             )
-            self.assertIn("当前仍有必填项", blocked_reply)
+            self.assertIn("mlip.model_path", blocked_reply)
             self.assertEqual(blocked_handler.workflow_kwargs["config_session"]["status"], "draft")
             self.assertEqual(blocked_started, [])
 
@@ -918,14 +1188,19 @@ class OpenWebUIAPITest(unittest.TestCase):
                 Path(directory) / "batches",
                 worker_command=["python3", "-m", "worker", "--executor", "test.worker:execute"],
                 task_preparer=lambda task: task,
-                stage_profiles={"mc": {"stages": ["deep_search"],
-                                       "slurm_options": {"partition": "REVIEW_ME"}}},
+                stage_profiles={
+                    "mc": {"stages": ["deep_search"], "slurm_options": {"partition": "REVIEW_ME"}}
+                },
             )
             task = {"task_id": "T1", "task_key": "K1", "stage": "deep_search", "status": "pending"}
-            result = runner.prepare({
-                "confirmed_config_version": "c1", "tasks": [task], "pending_tasks": [task],
-                "budget_reservations": {"K1": {"status": "reserved", "reserved_cost": 1}},
-            })
+            result = runner.prepare(
+                {
+                    "confirmed_config_version": "c1",
+                    "tasks": [task],
+                    "pending_tasks": [task],
+                    "budget_reservations": {"K1": {"status": "reserved", "reserved_cost": 1}},
+                }
+            )
             batch = result["batch"]
             root = Path(batch["upload_directory"])
             self.assertEqual(result["status"], "prepared")

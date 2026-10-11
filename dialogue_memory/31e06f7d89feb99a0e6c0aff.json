@@ -1,0 +1,7 @@
+[
+  {
+    "time": "2026-10-11T10:03:27.300578+00:00",
+    "user": "批准迁移",
+    "assistant": "运行配置已从 v1 迁移到 v2；历史任务和结果仍保留原版本归属。预算调整：round_strategy.maximum_mc_budget 1000→5000。已核对 406 条旧 Relax 结果与 mh-1 的既有默认设置一致；未记录项：mlip.relax_parameters.mace_default_dtype。本次只更新配置绑定，没有生成、提交或运行计算。请发送下一步任务指令。"
+  }
+]

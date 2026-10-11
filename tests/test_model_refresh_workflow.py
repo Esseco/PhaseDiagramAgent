@@ -115,7 +115,7 @@ def test_budget_never_silently_truncates(tmp_path):
     session["confirmed_snapshot"]["config"]["budgets"]["total_relative_cost"] = .0001
     first = run_model_refresh_gate(state, session, registry=registry, context=context)
     second = run_model_refresh_gate(first["state"], session, registry=registry, context=context, human_feedback="同意")
-    assert second["status"] == "rejected"
+    assert second["status"] == "budget_exhausted"
     assert not second["state"]["tasks"]
     assert not (tmp_path / "submissions").exists()
 

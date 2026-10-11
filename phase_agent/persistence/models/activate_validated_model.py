@@ -11,11 +11,19 @@ def activate_validated_model(
     state: dict, new_model: dict, validation: dict, *, approval_reason=None
 ) -> dict:
     if validation.get("status") != "completed" or validation.get("passed") is not True:
-        return {"status": "rejected", "state": state, "reason": "new_model_not_validated"}
+        return {
+            "status": "rejected",
+            "state": state,
+            "reason": "new_model_not_validated",
+        }
     old = state.get("active_model_version")
     new = new_model.get("version")
     if not new:
-        return {"status": "rejected", "state": state, "reason": "new_model_version_missing"}
+        return {
+            "status": "rejected",
+            "state": state,
+            "reason": "new_model_version_missing",
+        }
     if not isinstance(approval_reason, str) or not approval_reason.strip():
         return {
             "status": "awaiting_user_approval",
@@ -26,7 +34,9 @@ def activate_validated_model(
         state, old_model_version=old, new_model_version=new
     )
     updated = refreshed["state"]
-    from phase_agent.persistence.models.require_structure_refresh import require_structure_refresh
+    from phase_agent.persistence.models.require_structure_refresh import (
+        require_structure_refresh,
+    )
 
     require_structure_refresh(updated, old, new)
     registry = updated.setdefault("model_registry", {})
@@ -41,6 +51,11 @@ def activate_validated_model(
         "validation": deepcopy(validation),
         "approval_reason": approval_reason.strip(),
     }
+    if old and old != new and old in registry:
+        registry[old]["status"] = "historical_active"
+    candidate = (updated.get("candidate_models") or {}).get(new)
+    if candidate is not None:
+        candidate["status"] = "activated"
     updated["active_model"] = deepcopy(new_model)
     updated.setdefault("model_activation_history", []).append(
         {

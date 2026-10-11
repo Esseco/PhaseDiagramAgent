@@ -7,6 +7,8 @@ from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
 import zipfile
+from contextlib import contextmanager
+import time
 
 MANIFEST = "transfer_manifest.json"
 RESULT_NAMES = {
@@ -93,29 +95,88 @@ def result_bundle(results_directory, task_directories, name):
     root = Path(results_directory)
     files = []
     for directory in task_directories:
-        directory = Path(directory)
-        result = directory / "result.json"
-        extra_names = set()
-        if result.is_file():
-            payload = json.loads(result.read_text(encoding="utf-8"))
-            if payload.get("checkpoint"):
-                extra_names.add(Path(payload["checkpoint"]).name)
-        files.extend(
-            p
-            for p in Path(directory).iterdir()
-            if p.is_file()
-            and (
-                p.name in RESULT_NAMES
-                or p.name in extra_names
-                or p.suffix.lower() in {".vasp", ".poscar"}
-            )
-        )
+        files.extend(_result_files(Path(directory)))
     runtime = root / f"{name}.runtime.json"
     if runtime.is_file():
         files.append(runtime)
     if not files:
         return None
-    return create_bundle(root, files, root / f"{name}.results.zip", kind="results")
+    archive = create_bundle(root, files, root / f"{name}.results.zip", kind="results")
+    consolidate_results(root)
+    return archive
+
+
+def _result_files(directory):
+    result = directory / "result.json"
+    extra_names = set()
+    if result.is_file():
+        payload = json.loads(result.read_text(encoding="utf-8"))
+        if payload.get("checkpoint"):
+            extra_names.add(Path(payload["checkpoint"]).name)
+    return [
+        p
+        for p in directory.iterdir()
+        if p.is_file()
+        and (
+            p.name in RESULT_NAMES
+            or p.name in extra_names
+            or p.suffix.lower() in {".vasp", ".poscar"}
+        )
+    ]
+
+
+@contextmanager
+def _archive_lock(root):
+    """Serialize parallel finishers without leaving locks after process death."""
+    with (root / ".transfer_archive.lock").open("a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+
+            lock.seek(0, 2)
+            if lock.tell() == 0:
+                lock.write(b"0")
+                lock.flush()
+            deadline = time.monotonic() + 60
+            while True:
+                try:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("Result archive consolidation is busy")
+                    time.sleep(0.1)
+            try:
+                yield
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def consolidate_results(results_directory):
+    """Publish one atomically replaced round archive in a clean download folder."""
+    root = Path(results_directory)
+    with _archive_lock(root):
+        files = _result_files(root)
+        for directory in root.iterdir():
+            if (
+                directory.is_dir()
+                and (directory / "task.finished.json").is_file()
+                and (directory / "result.json").is_file()
+            ):
+                files.extend(_result_files(directory))
+        files.extend(root.glob("*.runtime.json"))
+        if not files:
+            return None
+        return create_bundle(root, files, root / "transfer/all.results.zip", kind="results")
 
 
 def _safe_name(name):
@@ -133,7 +194,7 @@ def _safe_name(name):
     return path
 
 
-def import_bundle(archive_path, directory, *, max_bytes=8 * 1024**3):
+def import_bundle(archive_path, directory, *, max_bytes=8 * 1024**3, storage_kind=None):
     """Validate the whole archive before publishing; refuse differing existing files."""
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -150,7 +211,10 @@ def import_bundle(archive_path, directory, *, max_bytes=8 * 1024**3):
         if archive.getinfo(MANIFEST).file_size > 4 * 1024**2:
             raise ValueError("Transfer manifest exceeds size limit")
         manifest = json.loads(archive.read(MANIFEST))
-        if manifest.get("schema") != 1 or manifest.get("kind") != "results":
+        allowed = {"results"} if storage_kind is None else {storage_kind}
+        if storage_kind not in {None, "storage_inputs", "storage_results"}:
+            raise ValueError("Unsupported local storage kind")
+        if manifest.get("schema") != 1 or manifest.get("kind") not in allowed:
             raise ValueError("Not a supported result archive")
         rows = manifest["files"]
         names = [r["path"] for r in rows]
@@ -161,18 +225,26 @@ def import_bundle(archive_path, directory, *, max_bytes=8 * 1024**3):
             targets = []
             for row in rows:
                 relative = _safe_name(row["path"])
-                if relative.name not in RESULT_NAMES and relative.suffix.lower() not in {
-                    ".vasp",
-                    ".poscar",
-                    ".json",
-                    ".gz",
-                }:
+                if (
+                    storage_kind is None
+                    and relative.name not in RESULT_NAMES
+                    and relative.suffix.lower()
+                    not in {
+                        ".vasp",
+                        ".poscar",
+                        ".json",
+                        ".gz",
+                    }
+                ):
                     raise ValueError(f"Unexpected result file: {relative}")
                 target = root.joinpath(*relative.parts)
                 target.resolve().relative_to(root)
                 candidate = staged.joinpath(*relative.parts)
                 candidate.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(row["path"]) as source, candidate.open("wb") as output:
+                with (
+                    archive.open(row["path"]) as source,
+                    candidate.open("wb") as output,
+                ):
                     shutil.copyfileobj(source, output, 1024 * 1024)
                 if candidate.stat().st_size != row["size"] or checksum(candidate) != row["sha256"]:
                     raise ValueError(f"Result checksum mismatch: {relative}")
@@ -193,8 +265,8 @@ def import_registered_bundles(directories):
     for root in sorted({Path(p) for p in directories if p}):
         if not root.is_dir():
             continue
-        for archive in sorted(root.glob("*.results.zip")):
-            receipt = root / ".transfer_receipts" / (archive.name + ".sha256")
+        for archive in _registered_archives(root):
+            receipt = _archive_receipt(root, archive)
             digest = checksum(archive)
             if receipt.is_file() and receipt.read_text(encoding="utf-8") == digest:
                 continue
@@ -202,7 +274,13 @@ def import_registered_bundles(directories):
                 import_bundle(archive, root)
                 receipt.parent.mkdir(exist_ok=True)
                 receipt.write_text(digest, encoding="utf-8")
-            except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as error:
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                zipfile.BadZipFile,
+            ) as error:
                 errors.append({"archive": str(archive), "reason": str(error)})
     return errors
 
@@ -210,6 +288,9 @@ def import_registered_bundles(directories):
 def registered_result_directories(state):
     directories = set()
     for row in state.get("slurm_batches", []):
+        handoff = row.get("handoff") or {}
+        if handoff.get("import_directory"):
+            directories.add(handoff["import_directory"])
         if row.get("results_directory"):
             directories.add(str(row["results_directory"]))
         elif row.get("upload_directory"):
@@ -223,8 +304,35 @@ def registered_result_directories(state):
     return directories
 
 
+def _registered_archives(root):
+    root = Path(root)
+    archives = sorted(
+        [
+            *root.glob("*.results.zip"),
+            *(root / "transfer").glob("*.results.zip"),
+            *(root / "return-results").glob("*.results.zip"),
+        ]
+    )
+    from phase_agent.tools.remote.submission_storage import is_storage_archive
+
+    return [archive for archive in archives if not is_storage_archive(archive)]
+
+
+def _archive_receipt(root, archive):
+    root = Path(root)
+    name = archive.relative_to(root).as_posix().replace("/", "__")
+    return root / ".transfer_receipts" / (name + ".sha256")
+
+
 def has_registered_return(state):
     directories = registered_result_directories(state)
+    directories.update(
+        str(Path(job["directory"]))
+        for job in (state.get("remote_finetune_jobs") or {}).values()
+        if job.get("directory")
+        and not job.get("activated")
+        and job.get("status") not in {"abandoned", "cancelled", "superseded"}
+    )
     directories.update(
         str(Path(job["directory"]) / "results")
         for job in (state.get("remote_finetune_jobs") or {}).values()
@@ -233,11 +341,39 @@ def has_registered_return(state):
         and job.get("status") not in {"abandoned", "cancelled", "superseded"}
     )
     return any(
-        not (Path(root) / ".transfer_receipts" / (archive.name + ".sha256")).is_file()
-        or (Path(root) / ".transfer_receipts" / (archive.name + ".sha256")).read_text(
-            encoding="utf-8"
-        )
-        != checksum(archive)
+        not _archive_receipt(root, archive).is_file()
+        or _archive_receipt(root, archive).read_text(encoding="utf-8") != checksum(archive)
         for root in directories
-        for archive in Path(root).glob("*.results.zip")
+        for archive in _registered_archives(root)
     )
+
+
+def publish_return(handoff_directory, results_relative):
+    """Called by each job's exit hook; publish one ZIP per result operation."""
+    handoff = Path(handoff_directory).resolve()
+    relative = _safe_name(results_relative)
+    results = handoff.joinpath(*relative.parts)
+    results.resolve().relative_to(handoff)
+    if not results.is_dir():
+        return None
+    # The operation lock covers collection and publishing, including concurrent jobs.
+    with _archive_lock(results):
+        files = _result_files(results)
+        for directory in results.iterdir():
+            if (
+                directory.is_dir()
+                and (directory / "task.finished.json").is_file()
+                and (directory / "result.json").is_file()
+            ):
+                files.extend(_result_files(directory))
+        files.extend(results.glob("*.runtime.json"))
+        if not files:
+            return None
+        name = "__".join(relative.parts) + ".results.zip"
+        return create_bundle(handoff, files, handoff / "return-results" / name, kind="results")
+
+
+if __name__ == "__main__":
+    import sys
+
+    publish_return(sys.argv[1], sys.argv[2])

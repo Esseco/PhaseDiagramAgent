@@ -21,7 +21,9 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
         first = selected[0]
         if first.get("stage") == "relax_and_feature":
             return selected  # Exactly up to 100 structures per job; branch is not a job boundary.
-        if first.get("stage") in {"dft_single_point", "dft_relax"} or not first.get("branch_id"):
+        if first.get("stage") in {"dft_single_point", "dft_relax"} or not first.get(
+            "branch_id"
+        ):
             return (
                 selected[:1]
                 if first.get("stage") in {"dft_single_point", "dft_relax"}
@@ -30,7 +32,9 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
         # Avoid splitting a branch's initial states across two jobs when the
         # configured capacity cuts through its final group.
         last_branch = selected[-1].get("branch_id")
-        if last_branch and any(task.get("branch_id") != last_branch for task in selected):
+        if last_branch and any(
+            task.get("branch_id") != last_branch for task in selected
+        ):
             selected_ids = {task["task_id"] for task in selected}
             reservations = state.get("budget_reservations") or {}
             remaining_same_branch = any(
@@ -44,7 +48,9 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 for task in tasks
             )
             if remaining_same_branch:
-                selected = [task for task in selected if task.get("branch_id") != last_branch]
+                selected = [
+                    task for task in selected if task.get("branch_id") != last_branch
+                ]
         return selected
 
     def _script(self, batch_id, count, stage):
@@ -52,7 +58,10 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
 
     def prepare(self, state):
         selected = self._select(state, state.get("tasks") or [])
-        if selected and selected[0].get("stage") not in {"dft_single_point", "dft_relax"}:
+        if selected and selected[0].get("stage") not in {
+            "dft_single_point",
+            "dft_relax",
+        }:
             if self.task_preparer is None:
                 raise ValueError("MLIP task_preparer 未配置，不能生成可运行任务")
             _executor_reference(self.worker_command)
@@ -74,7 +83,9 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 else "mlip_gpu_template.sh"
             )
             if stage in {"dft_single_point", "dft_relax"}:
-                _portable_transfer_worker(task_directory, "finalize_vasp", "_handoff_finalize_vasp")
+                _portable_transfer_worker(
+                    task_directory, "finalize_vasp", "_handoff_finalize_vasp"
+                )
                 workflow = task_directory / "workflow.py"
                 if workflow.is_file():
                     workflow.write_text(
@@ -84,9 +95,12 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                         ),
                         encoding="utf-8",
                     )
-                if json.loads((task_directory / "task.json").read_text(encoding="utf-8")).get(
-                    "atomate", {}
-                ).get("backend") in {"pycode_atomate2_relax", "pycode_atomate2_static"}:
+                if json.loads(
+                    (task_directory / "task.json").read_text(encoding="utf-8")
+                ).get("atomate", {}).get("backend") in {
+                    "pycode_atomate2_relax",
+                    "pycode_atomate2_static",
+                }:
                     write_unix_shell_script(
                         task_directory / "GPU.sh",
                         (task_directory / "submit_gpu.sh").read_text(encoding="utf-8"),
@@ -98,10 +112,14 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                     if not (task_directory / name).is_file()
                 ]
                 if missing:
-                    raise RuntimeError(f"atomate 未在 DFT 任务目录生成输入文件：{missing}")
+                    raise RuntimeError(
+                        f"atomate 未在 DFT 任务目录生成输入文件：{missing}"
+                    )
             if not mlip_batch:
                 job_name = _slurm_job_name(stage, entry["task_id"])
-                script = _render_job_name(template.read_text(encoding="utf-8"), job_name)
+                script = _render_job_name(
+                    template.read_text(encoding="utf-8"), job_name
+                )
                 vasp_command = "mpirun -np $SLURM_NPROCS vasp_std"
                 if script.count(vasp_command) != 1:
                     raise ValueError("DFT GPU 模板必须恰有一处 VASP 入口")
@@ -115,7 +133,9 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 )
                 write_unix_shell_script(task_directory / "GPU.sh", script)
         if mlip_batch:
-            _portable_transfer_worker(directory, "run_mlip_batch", "_handoff_mlip_batch")
+            _portable_transfer_worker(
+                directory, "run_mlip_batch", "_handoff_mlip_batch"
+            )
             executor = _executor_reference(self.worker_command)
             (directory / "run_mlip_batch.py").write_text(
                 "from pathlib import Path\n"
@@ -125,14 +145,20 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 f"    raise SystemExit(main(['--manifest', manifest, '--executor', {executor!r}]))\n",
                 encoding="utf-8",
             )
-            template = Path(__file__).with_name("mlip_gpu_template.sh").read_text(encoding="utf-8")
+            template = (
+                Path(__file__)
+                .with_name("mlip_gpu_template.sh")
+                .read_text(encoding="utf-8")
+            )
             command = "python3 run_mlip_task.py"
             if template.count(command) != 1:
                 raise ValueError("MLIP GPU 模板必须恰有一处单任务入口")
             job_name = _slurm_job_name(manifest[0]["stage"], batch["batch_id"])
             write_unix_shell_script(
                 directory / "GPU.sh",
-                _render_job_name(template.replace(command, "python3 run_mlip_batch.py"), job_name),
+                _render_job_name(
+                    template.replace(command, "python3 run_mlip_batch.py"), job_name
+                ),
             )
         # The parent runner creates an array script; manual mode never exposes it.
         (directory / "submit.sbatch").unlink()
@@ -146,9 +172,13 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
         checksum_path.write_text("\n".join(checksums) + "\n", encoding="utf-8")
         guide_path = directory / "UPLOAD_AND_SUBMIT.md"
         guide_path.write_text(_guide(batch["batch_id"]), encoding="utf-8")
-        script_path = directory / "GPU.sh" if mlip_batch else Path(task_directories[0]) / "GPU.sh"
+        script_path = (
+            directory / "GPU.sh" if mlip_batch else Path(task_directories[0]) / "GPU.sh"
+        )
         results_directory = (
-            directory.parent.parent if directory.parent.name == "inputs" else directory.parent
+            directory.parent.parent
+            if directory.parent.name == "inputs"
+            else directory.parent
         ) / "results"
         from phase_agent.tools.remote.transfer_bundle import input_bundle
 
@@ -229,7 +259,7 @@ This directory was generated locally. Nothing has been submitted.
    subdirectory and collects results in this allocation folder's shared `results/`.
    For DFT, change into the only task subdirectory and submit its `GPU.sh` once.
    Never submit both levels.
-6. Download only `results/*.results.zip` into the matching local `results/` directory
+6. Download only `results/transfer/all.results.zip` into the matching local `results/` directory
    and say “继续”. Code verifies and imports the archives, then checks original task identity.
    Required final structures and MC resume checkpoints are included; large logs stay remote.
    Older remote scripts may return the existing minimal results folders instead.
@@ -246,8 +276,25 @@ def _portable_transfer_worker(directory, source_name, module_name):
     root = Path(__file__).parent
     source = (root / f"{source_name}.py").read_text(encoding="utf-8")
     source = source.replace(
-        "from phase_agent.tools.remote.transfer_bundle import", "from transfer_bundle import"
+        "from phase_agent.tools.remote.transfer_bundle import",
+        "from transfer_bundle import",
     )
+    if "from phase_agent.tools.remote.export_batch_result import" in source:
+        source = source.replace(
+            "from phase_agent.tools.remote.export_batch_result import",
+            "from _handoff_export_batch_result import",
+        )
+        export_source = (
+            (root / "export_batch_result.py")
+            .read_text(encoding="utf-8")
+            .replace(
+                "from phase_agent.tools.remote.transfer_bundle import",
+                "from transfer_bundle import",
+            )
+        )
+        (directory / "_handoff_export_batch_result.py").write_text(
+            export_source, encoding="utf-8"
+        )
     (directory / f"{module_name}.py").write_text(source, encoding="utf-8")
     (directory / "transfer_bundle.py").write_text(
         (root / "transfer_bundle.py").read_text(encoding="utf-8-sig"), encoding="utf-8"
@@ -262,7 +309,9 @@ def package_existing_manual_inputs(directory):
 
     directory = Path(directory).resolve()
     destination = directory.parent / f"{directory.name}.upload.zip"
-    with tempfile.TemporaryDirectory(prefix=".phase-handoff-", dir=directory.parent) as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix=".phase-handoff-", dir=directory.parent
+    ) as temporary:
         staged = Path(temporary) / directory.name
         staged.mkdir()
         for source in input_files(directory):
@@ -283,7 +332,9 @@ def package_existing_manual_inputs(directory):
         for entry in manifest:
             if entry.get("stage") not in {"dft_single_point", "dft_relax"}:
                 continue
-            task = (staged / str(entry["input_path"]).replace("\\", "/")).parent.resolve()
+            task = (
+                staged / str(entry["input_path"]).replace("\\", "/")
+            ).parent.resolve()
             task.relative_to(staged.resolve())
             _portable_transfer_worker(task, "finalize_vasp", "_handoff_finalize_vasp")
             for name in ("workflow.py", "GPU.sh"):

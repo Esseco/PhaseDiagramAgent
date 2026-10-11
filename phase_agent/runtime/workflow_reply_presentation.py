@@ -4,7 +4,9 @@ from phase_agent.decisions.agent.dialogue_contract import DIALOGUE_STATUSES
 import os
 from pathlib import Path
 
-from phase_agent.runtime.chat_approval_rules import is_sensitive_proposal as _is_sensitive_proposal
+from phase_agent.runtime.chat_approval_rules import (
+    is_sensitive_proposal as _is_sensitive_proposal,
+)
 
 
 def _is_model_failure_proposal(proposal):
@@ -14,6 +16,28 @@ def _is_model_failure_proposal(proposal):
 
 
 def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
+    if result.get("status") == "awaiting_reference_dft_choice":
+        return result["reason"]
+    recovered = result.get("verified_recovery") or {}
+    if recovered:
+        names = {
+            "relax_and_feature": "Relax",
+            "deep_search": "MC",
+            "dft_single_point": "DFT 单点",
+            "dft_relax": "DFT 弛豫",
+        }
+        summary = "；".join(
+            f"{names.get(stage, stage)} 完成 {counts['completed']}、失败/中止 {counts['failed']}"
+            for stage, counts in recovered.items()
+        )
+        return (
+            "本次已核对回传并更新记录："
+            + summary
+            + "。\n"
+            + format_workflow_reply(
+                {**result, "verified_recovery": None}, state_path, verbose=verbose
+            )
+        )
     if result.get("status") == "awaiting_approval" and not result.get("_review_card_rendered"):
         pending = (result.get("state") or {}).get("pending_execution_policies") or {}
         proposal = result.get("agent_proposal") or {}
@@ -22,7 +46,10 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             None,
         )
         if match:
-            from phase_agent.runtime.review_presentation import review_card, revision_lines
+            from phase_agent.runtime.review_presentation import (
+                review_card,
+                revision_lines,
+            )
 
             key, row = match
             card = review_card(key, row)
@@ -33,7 +60,12 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                 {**result, "_review_card_rendered": True}, state_path, verbose=verbose
             )
             return "\n".join(
-                [heading, *revision_lines(row), original, "审批范围：" + card["approval_boundary"]]
+                [
+                    heading,
+                    *revision_lines(row),
+                    original,
+                    "审批范围：" + card["approval_boundary"],
+                ]
             )
     if result.get("status") in DIALOGUE_STATUSES:
         return str(result.get("answer") or "未取得有效答复。")
@@ -56,7 +88,10 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             lines.append("上述为只读核对；原动作不会自动重跑。没有记录或文件缺失不等于没有副作用。")
             return "\n".join(lines)
         rows = report.get("unsettled") or []
-        names = {"generate_branches": "初始结构生成", "prepare_local_batch_files": "输入文件准备"}
+        names = {
+            "generate_branches": "初始结构生成",
+            "prepare_local_batch_files": "输入文件准备",
+        }
         tools = list(
             dict.fromkeys(
                 names.get((row.get("identity") or {}).get("tool"), "旧动作") for row in rows
@@ -86,7 +121,8 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         verbose = detailed_response()
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
-        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")), {}
+        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")),
+        {},
     )
     preview = ((proposal.get("raw_action") or {}).get("parameters") or {}).get("refresh_preview")
     refresh = (result.get("state") or {}).get("model_refresh") or {}
@@ -111,6 +147,12 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             "仅生成超算输入；你提交GPU.sh并回传results。不本机计算。"
         )
     if refresh and refresh.get("status") != "completed":
+        if refresh.get("status") == "waiting_results":
+            from phase_agent.runtime.chat_state_presentation import brief_chat_state
+            from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
+
+            state = result.get("state") or {}
+            return "\n".join([brief_chat_state(state), *waiting_file_lines(state)])
         reason = result.get("reason") or next(
             (e.get("reason") for e in reversed(events) if e.get("reason")), None
         )
@@ -151,12 +193,16 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         if isinstance(result, dict)
         else ""
     )
-    from phase_agent.runtime.post_dft_presentation import post_dft_lines, post_dft_review_lines
+    from phase_agent.runtime.post_dft_presentation import (
+        post_dft_lines,
+        post_dft_review_lines,
+    )
 
     assessment = post_dft_lines(result.get("state") or {}) if isinstance(result, dict) else ""
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
-        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")), {}
+        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")),
+        {},
     )
     from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
 
@@ -212,7 +258,8 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
         return _format_workflow_reply_verbose(result, state_path, verbose=True)
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
-        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")), {}
+        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")),
+        {},
     )
     status = result.get("status")
     if status == "awaiting_approval" and proposal:
@@ -220,7 +267,9 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             return "旧建议由模型回复失败产生，不是暂停决策。请重启 Agent 服务后说“继续”刷新；未执行任务。"
         # Preserve all approval limits, budget interceptions and sensitive warnings.
         text = _format_workflow_reply_verbose(result, state_path)
-        from phase_agent.runtime.evidence_reference_presentation import evidence_reference_lines
+        from phase_agent.runtime.evidence_reference_presentation import (
+            evidence_reference_lines,
+        )
 
         evidence_lines = evidence_reference_lines(proposal.get("raw_action") or {})
         labels = {
@@ -320,6 +369,18 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             lines.extend(
                 line for line in verbose_text.splitlines() if line.startswith("预算拦截：")
             )
+        if wait.get("handoffs"):
+            lines.extend(_handoff_lines(wait["handoffs"], collection=wait.get("result_collection")))
+            return "\n".join(lines)
+        from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
+
+        file_lines = waiting_file_lines(result.get("state") or {})
+        if file_lines:
+            lines.extend(file_lines)
+            errors = collection.get("transfer_errors") or []
+            if errors:
+                lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
+            return "\n".join(lines)
         if wait.get("upload_root"):
             lines.append(f"目录：`{wait['upload_root']}`")
         else:
@@ -336,7 +397,7 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
                 "上传输入包：" + "、".join(f"`{path}`" for path in wait["upload_archives"])
             )
         lines.append(
-            "完成后仅下载 *.results.zip 到对应 results 目录，再说“继续”自动校验回收；旧批次仍可回传精简 results 文件夹。未回传任务保持等待。"
+            "完成后只需下载 results/transfer/all.results.zip 到对应 results 目录，再说“继续”自动校验回收；旧批次仍可回传精简 results 文件夹。未回传任务保持等待。"
         )
         errors = collection.get("transfer_errors") or []
         if errors:
@@ -347,7 +408,13 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
         line
         for line in text.splitlines()
         if not line.startswith(
-            ("详细记录：", "完整参数与结果：", "完整记录：", "示例目录：", "结构路径与详细结果：")
+            (
+                "详细记录：",
+                "完整参数与结果：",
+                "完整记录：",
+                "示例目录：",
+                "结构路径与详细结果：",
+            )
         )
     )
 
@@ -395,11 +462,16 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 "请拒绝旧建议后重新提出；不会执行空动作。"
             )
         cost = proposal.get("estimated_cost") or {}
-        from phase_agent.tools.policy.training_input_action import is_training_input_action
+        from phase_agent.tools.policy.training_input_action import (
+            is_training_input_action,
+        )
 
         training_inputs = is_training_input_action(
             proposal.get("raw_action")
-            or {"tool": proposed_tool, "parameters": proposal.get("action_parameters") or {}}
+            or {
+                "tool": proposed_tool,
+                "parameters": proposal.get("action_parameters") or {},
+            }
         )
         approval_files = next(
             (
@@ -456,7 +528,9 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         if recovered_count:
             lines.insert(0, f"已校验并回收 {recovered_count} 个任务结果，结果与成本已入账。")
         if proposed_tool == "generate_branches" and not verbose:
-            from phase_agent.runtime.proposal_presentation import concise_generation_lines
+            from phase_agent.runtime.proposal_presentation import (
+                concise_generation_lines,
+            )
 
             params = (
                 proposal.get("action_parameters")
@@ -645,7 +719,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         )
     )
     validation = result.get("validation") or next(
-        (event.get("validation") for event in reversed(events) if event.get("validation")), {}
+        (event.get("validation") for event in reversed(events) if event.get("validation")),
+        {},
     )
     errors = validation.get("errors") or []
     detail_path = str(Path(state_path))
@@ -696,6 +771,9 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         lines.append(
             "本机没有提交作业。请将同一阶段的批次目录放在同一轮次目录下：Relax/MC 每个批次根目录的 `GPU.sh` 提交一次；DFT 则在单任务目录提交 `GPU.sh`。"
         )
+        if wait.get("handoffs"):
+            lines.extend(_handoff_lines(wait["handoffs"], collection=wait.get("result_collection")))
+            return "\n".join(lines)
         if wait.get("upload_root"):
             lines.append(f"本地任务总目录：`{wait['upload_root']}`")
         if wait.get("upload_plan_path"):
@@ -718,7 +796,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 "本阶段统一结果目录：" + "、".join(f"`{path}`" for path in results_directories)
             )
         lines.append(
-            "本阶段任务完成后，只需下载对应的 `*.results.zip`，放到登记的本地 `results/` 目录，"
+            "本阶段任务完成后，只需下载 `results/transfer/all.results.zip`，放到登记的本地 `results/` 目录，"
             "其中含所有任务的 `result.json`、`task.finished.json` 和最终结构；再对 Agent 说“继续”。"
             "Agent 会按任务校验并回收；未回传任务继续等待，不会重复准备或提交。"
             "旧批次仍按原任务目录回收。"
@@ -726,7 +804,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         return "\n".join(lines)
     if status == "failed":
         execution = result.get("execution") or next(
-            (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+            (event.get("execution") for event in reversed(events) if event.get("execution")),
+            {},
         )
         reason = (
             (execution or {}).get("error")
@@ -743,14 +822,16 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             result.get("message")
             or result.get("reason")
             or next(
-                (event.get("reason") for event in reversed(events) if event.get("reason")), None
+                (event.get("reason") for event in reversed(events) if event.get("reason")),
+                None,
             )
         )
         if not errors and workflow_reason:
             reason = _friendly_workflow_rejection(workflow_reason)
         if not errors and not workflow_reason:
             execution = result.get("execution") or next(
-                (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+                (event.get("execution") for event in reversed(events) if event.get("execution")),
+                {},
             )
             payload = (execution or {}).get("result") or {}
             reason = _friendly_workflow_rejection(
@@ -759,7 +840,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         return f"本轮未执行：{reason}\n详细记录：`{detail_path}`"
     if status == "not_configured":
         execution = result.get("execution") or next(
-            (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+            (event.get("execution") for event in reversed(events) if event.get("execution")),
+            {},
         )
         payload = (execution or {}).get("result") or {}
         reason = (
@@ -767,7 +849,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             or payload.get("reason")
             or result.get("reason")
             or next(
-                (event.get("reason") for event in reversed(events) if event.get("reason")), None
+                (event.get("reason") for event in reversed(events) if event.get("reason")),
+                None,
             )
             or "执行接口未配置"
         )
@@ -790,7 +873,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         return f"本轮未执行：`{action or 'workflow'}` 未能准备（{reason}）。\n详细记录：`{detail_path}`"
     if status in {"prepared", "already_prepared"} and action == "prepare_local_batch_files":
         execution = result.get("execution") or next(
-            (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+            (event.get("execution") for event in reversed(events) if event.get("execution")),
+            {},
         )
         payload = (execution or {}).get("result") or {}
         if payload.get("batches"):
@@ -805,7 +889,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
     if status in {"completed", "planned_only", "tasks_in_progress"}:
         if status == "completed" and action == "generate_branches":
             execution = result.get("execution") or next(
-                (event.get("execution") for event in reversed(events) if event.get("execution")), {}
+                (event.get("execution") for event in reversed(events) if event.get("execution")),
+                {},
             )
             summary = ((execution or {}).get("result") or {}).get("summary") or {}
             if summary:
@@ -886,3 +971,43 @@ def _proposal_directory(state_path, proposal):
     if not record_id:
         return None
     return str(Path(state_path).parent / "approvals" / str(record_id))
+
+
+def _handoff_lines(handoffs, *, collection=None):
+    from phase_agent.runtime.response_preferences import detailed_response
+
+    if not detailed_response():
+        folders = list(
+            dict.fromkeys(
+                str(row.get("folder") or Path(row["upload_archive"]).parent) for row in handoffs
+            )
+        )
+        lines = ["本轮提交文件夹：" + "、".join(str(Path(folder)) for folder in folders)]
+        returns = list(
+            dict.fromkeys(
+                row.get("return_directory") for row in handoffs if row.get("return_directory")
+            )
+        )
+        if returns:
+            lines.append("结果回传文件夹：" + "、".join(returns))
+        lines.append(
+            "下一步：上传本轮文件夹，执行 `bash submit_all.sh`；完成后回传远端 return-results 文件夹，再说“继续”。压缩包自动读取，无需手动解压。"
+        )
+        errors = (collection or {}).get("transfer_errors") or []
+        if errors:
+            lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
+        return lines
+    lines = []
+    for row in handoffs:
+        lines.append(f"交互文件夹：`{row['folder']}`（{row['job_count']} 个作业）。")
+        lines.append(f"压缩包：`{row['upload_archive']}`；总提交脚本：`{row['submit_script']}`。")
+        lines.append(
+            "把两个文件上传到超算登录节点同一个新目录，在该目录执行 `bash submit_all.sh`；脚本自动校验、解压并逐批 sbatch，重复执行会跳过已有提交记录。不要对总脚本执行 sbatch。"
+        )
+        lines.append(
+            f"结束后回传远端 return-results 文件夹到本地 {row.get('return_directory') or row['results_directory']}，回复“继续”自动读取压缩包，无需手动解压。已按旧方式提交的任务不要再次提交。"
+        )
+    errors = (collection or {}).get("transfer_errors") or []
+    if errors:
+        lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
+    return lines

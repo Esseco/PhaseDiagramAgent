@@ -54,7 +54,7 @@ def pending_plan_reply(state):
             else "核对后可回复‘同意’或‘拒绝’。"
         )
         return (
-            f"已保存方案（编号：{row['plan_id']}）：\n"
+            "已保存方案：\n"
             f"{card['title']}：{card['scope']}\n依据：{row['reason']}\n"
             f"审批边界：{card['approval_boundary']}\n{approval}\n本次仅查看，未批准或执行。"
         )
@@ -68,6 +68,14 @@ def pending_plan_reply(state):
 
     plan_id, record = next(iter(pending.items()))
     proposal = record.get("agent_proposal") or {}
+    from phase_agent.analysis.state.project_authority import project_identity
+
+    identity = record.get("project_identity")
+    if identity and identity != project_identity(state):
+        return (
+            "已保存方案：\n"
+            "暂不可批准：当前模型或生效设置与方案依据不同；需更新具体方案。未执行任务。"
+        )
     if not proposal:
         return "待确认记录缺少具体方案，暂不可批准；请检查方案记录。未执行任务。"
     raw = proposal.get("raw_action") or {}
@@ -105,7 +113,7 @@ def pending_plan_reply(state):
             if not any(token in line for token in ("同意", "批准", "审批页", "详细记录："))
         )
         return (
-            f"已保存方案（编号：{plan_id}）：\n{details}\n"
+            f"已保存方案：\n{details}\n"
             + (
                 "暂不可批准：存在未核对的中断执行回执。\n"
                 if unsettled
@@ -113,4 +121,4 @@ def pending_plan_reply(state):
             )
             + "需先核对原任务与执行回执；本次仅展示方案，未批准或执行。"
         )
-    return f"已保存方案（编号：{plan_id}）：\n{details}\n本次仅查看，未批准或执行。"
+    return f"已保存方案：\n{details}\n本次仅查看，未批准或执行。"

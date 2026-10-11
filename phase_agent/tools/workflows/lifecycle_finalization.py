@@ -95,6 +95,7 @@ def _finalize_workflow(frame):
     if manual_wait and result.get("status") not in DIALOGUE_STATUSES | {
         "awaiting_approval",
         "rejected",
+        "proposal_context_changed",
     }:
         result["status"] = "awaiting_manual_submission"
         result["manual_wait"] = manual_wait
