@@ -114,12 +114,10 @@ def prepare_handoff(directory, scripts):
             identity.update(hashlib.sha256(source.read_bytes()).digest())
         key = identity.hexdigest()[:16]
         base = next((p for p in directory.parents if p.name == "submissions"), directory.parent)
-        label = (
-            directory.name.split("_", 1)[0]
-            if directory.name.startswith("epoch")
-            else directory.name
-        )
-        folder = base / "archives" / "01-upload" / (label + "__" + key)
+        from phase_agent.tools.remote.handoff_naming import handoff_label, package_folder
+
+        label = handoff_label(directory, scripts)
+        folder = package_folder(base / "archives" / "01-upload", label, key)
         archive = folder / "inputs.zip"
         if not archive.exists():
             create_bundle(portable, portable_files, archive, kind="inputs")
@@ -137,6 +135,7 @@ def prepare_handoff(directory, scripts):
         "import_directory": str(directory),
         "job_count": len(scripts),
         "layout_version": 3,
+        "package_fingerprint": key,
     }
 
 
