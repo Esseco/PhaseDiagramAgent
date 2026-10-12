@@ -71,7 +71,7 @@ def write_submission_index(root, state):
         "",
         "无需手动解压：总提交脚本自动解压输入，本地 Agent 自动校验、解压回传包并读取。",
         "",
-        "上传：使用下方本次交互文件夹，整体上传后执行一次 bash submit_all.sh；不要重复提交历史任务。",
+        "上传：使用下方本次交互文件夹，整体上传后执行一次 sbatch submit_all.sh；不要重复提交历史任务。",
         "",
         "回收：把远端 return-results 文件夹整体传回下方本地回传目录，保留压缩包即可，再说“继续”。旧提交仍支持原 results/transfer 路径。",
         "",
@@ -115,7 +115,7 @@ def write_submission_index(root, state):
         guide = [
             "## 本次交互文件夹",
             "",
-            "上传文件夹内的 inputs.zip 和 submit_all.sh 到超算登录节点同一个新目录，执行 `bash submit_all.sh`。脚本自动解压并逐批 sbatch；不要 `sbatch submit_all.sh`。已经手动提交的任务不要重交。",
+            "上传整个交互文件夹（inputs.zip、dispatch_tasks.py、submit_all.sh）到超算同一个目录，执行 `sbatch submit_all.sh`。提交脚本进入计算节点后自动解压并派发本轮任务。已经手动提交的任务不要重交。",
             "",
             "| 交互文件夹 | 作业数 | 回传本地目录 |",
             "| --- | ---: | --- |",

@@ -80,7 +80,7 @@ def _brief_waiting_file_lines(state):
     if returns:
         lines.append("结果回传文件夹：" + "、".join(returns))
         lines.append(
-            "下一步：上传提交文件夹，执行 `bash submit_all.sh`；完成后把远端 return-results 文件夹传回上述位置，再说“继续”。压缩包自动读取，无需手动解压；已提交的不要重复提交。"
+            "下一步：上传提交文件夹，执行 `sbatch submit_all.sh`；完成后把远端 return-results 文件夹传回上述位置，再说“继续”。压缩包自动读取，无需手动解压；已提交的不要重复提交。"
         )
     else:
         lines.append(
@@ -146,11 +146,11 @@ def _detailed_waiting_file_lines(state):
             if key not in shown_handoffs:
                 shown_handoffs.add(key)
                 lines.append(
-                    f"上传文件：`{key[0]}` 和 `{key[1]}`；上传到超算同一新目录，在该目录执行 `bash submit_all.sh`。"
+                    f"上传文件：`{key[0]}` 和 `{key[1]}`；上传到超算同一新目录，在该目录执行 `sbatch submit_all.sh`。"
                 )
                 lines.append(
                     "完成后下载该目录的 `return-results` 文件夹，无需手动解压。"
-                    if handoff.get("layout_version") == 2
+                    if handoff.get("layout_version", 0) >= 2
                     else "完成后下载该目录的 `results/transfer/all.results.zip`。"
                 )
         else:

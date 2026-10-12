@@ -94,7 +94,7 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         return {
             "status": "awaiting_remote_training",
             "state": current,
-            "reason": f"上传文件夹：{handoff['folder']}；上传后执行 bash submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
+            "reason": f"上传文件夹：{handoff['folder']}；上传后执行 sbatch submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
         }
     for job_key, job in (current.get("remote_finetune_jobs") or {}).items():
         if job not in prior:
@@ -274,5 +274,5 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     return {
         "status": "awaiting_remote_training",
         "state": current,
-        "reason": f"上传文件夹：{handoff['folder']}；上传后执行 bash submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
+        "reason": f"上传文件夹：{handoff['folder']}；上传后执行 sbatch submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
     }

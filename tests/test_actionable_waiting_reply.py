@@ -89,7 +89,7 @@ def test_known_handoff_uses_total_script_not_sbatch(tmp_path):
         "results_directory": "verified/results",
     }
     text = "\n".join(waiting_file_lines(data))
-    assert "bash submit_all.sh" in text and "sbatch" not in text
+    assert "sbatch submit_all.sh" in text
     assert "results/transfer/all.results.zip" in text
     assert "verified/results" in text
 
@@ -120,7 +120,7 @@ def test_brief_mode_has_one_round_folder_and_no_batch_paths(tmp_path):
         )
     for output in [text, reply]:
         assert output.count("本轮提交文件夹：") == 1
-        assert '[打开' not in output and '](' not in output
+        assert "[打开" not in output and "](" not in output
         assert "epoch1_remote-test" in output
         assert "batch-1" not in output and ".upload.zip" not in output
         assert "results" in output and "继续" in output

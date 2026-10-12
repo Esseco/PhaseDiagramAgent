@@ -991,7 +991,7 @@ def _handoff_lines(handoffs, *, collection=None):
         if returns:
             lines.append("结果回传文件夹：" + "、".join(returns))
         lines.append(
-            "下一步：上传本轮文件夹，执行 `bash submit_all.sh`；完成后回传远端 return-results 文件夹，再说“继续”。压缩包自动读取，无需手动解压。"
+            "下一步：上传本轮文件夹，执行 `sbatch submit_all.sh`；完成后回传远端 return-results 文件夹，再说“继续”。压缩包自动读取，无需手动解压。"
         )
         errors = (collection or {}).get("transfer_errors") or []
         if errors:
@@ -1002,7 +1002,7 @@ def _handoff_lines(handoffs, *, collection=None):
         lines.append(f"交互文件夹：`{row['folder']}`（{row['job_count']} 个作业）。")
         lines.append(f"压缩包：`{row['upload_archive']}`；总提交脚本：`{row['submit_script']}`。")
         lines.append(
-            "把两个文件上传到超算登录节点同一个新目录，在该目录执行 `bash submit_all.sh`；脚本自动校验、解压并逐批 sbatch，重复执行会跳过已有提交记录。不要对总脚本执行 sbatch。"
+            "把三个文件上传到超算同一个目录，在该目录执行 `sbatch submit_all.sh`；Python 在计算节点校验、解压并逐批提交，重复执行会跳过已有提交记录。总脚本只用 sbatch 提交，不直接 bash 执行。"
         )
         lines.append(
             f"结束后回传远端 return-results 文件夹到本地 {row.get('return_directory') or row['results_directory']}，回复“继续”自动读取压缩包，无需手动解压。已按旧方式提交的任务不要再次提交。"

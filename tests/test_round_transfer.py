@@ -64,7 +64,11 @@ def test_one_folder_dispatch_and_automatic_round_return(tmp_path):
     handoff = state["slurm_batches"][0]["handoff"]
     assert all(row["handoff"] == handoff for row in state["slurm_batches"])
     assert handoff["job_count"] == 3
-    assert {p.name for p in Path(handoff["folder"]).iterdir()} == {"inputs.zip", "submit_all.sh"}
+    assert {p.name for p in Path(handoff["folder"]).iterdir()} == {
+        "inputs.zip",
+        "dispatch_tasks.py",
+        "submit_all.sh",
+    }
     remote = tmp_path / "remote"
     extract(handoff, remote)
     for script in json.loads((remote / "submission_plan.json").read_text())["scripts"]:
@@ -93,7 +97,7 @@ def test_fake_sbatch_dispatch_retries_do_not_duplicate(tmp_path, monkeypatch):
     remote = tmp_path / "remote"
     remote.mkdir()
     shutil.copy2(h["upload_archive"], remote / "inputs.zip")
-    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    monkeypatch.setenv("SLURM_JOB_ID", "999")
     monkeypatch.setitem(
         sys.modules, "fcntl", types.SimpleNamespace(flock=lambda *args: None, LOCK_EX=1, LOCK_NB=2)
     )
@@ -159,3 +163,24 @@ def test_index_handles_resolved_archive_alias(tmp_path, monkeypatch):
     )
     index = write_submission_index(root.parent, state)
     assert "old.results.zip" in index.read_text(encoding="utf-8")
+
+
+def test_dispatcher_refuses_login_node_before_writing(tmp_path, monkeypatch):
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    namespace = {"__name__": "test_driver"}
+    exec(DRIVER, namespace)
+    with pytest.raises(RuntimeError, match="Submit with sbatch"):
+        namespace["run"](tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_outer_script_is_slurm_job(tmp_path):
+    _, state = setup_round(tmp_path)
+    ensure_waiting_handoffs(state)
+    handoff = state["slurm_batches"][0]["handoff"]
+    text = Path(handoff["submit_script"]).read_text()
+    assert handoff["command"] == "sbatch submit_all.sh"
+    assert "#SBATCH --job-name=phase-dispatch" in text
+    assert "SLURM_SUBMIT_DIR" in text
+    assert "python3 dispatch_tasks.py" in text
+    assert "PHASE_SUBMIT_PY" not in text

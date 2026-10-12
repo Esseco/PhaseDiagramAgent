@@ -1,4 +1,4 @@
-"""One portable ZIP plus a login-node dispatcher per calculation handoff."""
+"""Compressed inputs, a compute-node Python dispatcher and one Slurm entry script."""
 
 import hashlib
 import json
@@ -6,7 +6,35 @@ from pathlib import Path
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
 
-DRIVER = "\"\"\"Embedded in submit_all.sh. Only Python standard library is needed remotely.\"\"\"\nimport hashlib\nimport json\nimport os\nfrom pathlib import Path, PurePosixPath\nimport shutil\nimport subprocess\nimport zipfile\n\n\ndef safe_path(root, name):\n    path = PurePosixPath(name)\n    if not name or '\\\\' in name or ':' in name or path.is_absolute() or any(p in {'.', '..'} for p in name.split('/')):\n        raise ValueError('Unsafe archive path: ' + name)\n    target = root.joinpath(*path.parts)\n    if not target.resolve().is_relative_to(root.resolve()):\n        raise ValueError('Path escapes upload directory')\n    return target\n\n\ndef save(path, payload):\n    temporary = path.with_suffix('.tmp')\n    with temporary.open('w', encoding='utf-8') as stream:\n        json.dump(payload, stream, indent=2)\n        stream.flush()\n        os.fsync(stream.fileno())\n    os.replace(temporary, path)\n\n\ndef run(root):\n    root = Path(root).resolve()\n    if os.environ.get('SLURM_JOB_ID'):\n        raise RuntimeError('Run bash submit_all.sh on the login node, not sbatch submit_all.sh')\n    if not shutil.which('sbatch'):\n        raise RuntimeError('sbatch not found; run this on the supercomputer login node')\n    # Linux advisory lock prevents two simultaneous dispatchers.\n    import fcntl\n    with (root / '.submit.lock').open('a') as lock:\n        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n        archive_hash = hashlib.sha256((root / 'inputs.zip').read_bytes()).hexdigest()\n        receipt_path = root / '.submitted_jobs.json'\n        receipt = json.loads(receipt_path.read_text()) if receipt_path.exists() else {'archive_sha256': archive_hash, 'jobs': {}}\n        if receipt['archive_sha256'] != archive_hash:\n            raise RuntimeError('Different package in an already submitted directory; use a fresh directory')\n        with zipfile.ZipFile(root / 'inputs.zip') as archive:\n            manifest = json.loads(archive.read('transfer_manifest.json'))\n            rows = manifest['files']\n            if manifest.get('kind') != 'inputs' or len(rows) > 20000 or sum(r['size'] for r in rows) > 8 * 1024**3:\n                raise ValueError('Invalid or oversized input package')\n            names = [r['path'] for r in rows]\n            if len(names) != len(set(names)) or sorted(archive.namelist()) != sorted(names + ['transfer_manifest.json']):\n                raise ValueError('Archive file list mismatch')\n            # Validate every file and every destination before extracting/submitting anything.\n            for row in rows:\n                target = safe_path(root, row['path'])\n                entry = archive.getinfo(row['path'])\n                if (entry.external_attr >> 16) & 0o170000 == 0o120000:\n                    raise ValueError('Symlink in archive')\n                content = archive.read(entry)\n                if len(content) != row['size'] or hashlib.sha256(content).hexdigest() != row['sha256']:\n                    raise ValueError('Input checksum mismatch: ' + row['path'])\n                if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() != row['sha256']:\n                    raise ValueError('Existing input changed: ' + row['path'])\n            plan = json.loads(archive.read('submission_plan.json'))\n            jobs = plan['scripts']\n            if not jobs or len(jobs) != len(set(jobs)) or any(j not in names or Path(j).suffix not in {'.sh', '.sbatch'} for j in jobs):\n                raise ValueError('Invalid job script list')\n            for job in jobs:\n                if receipt['jobs'].get(job, {}).get('status') == 'submitting':\n                    raise RuntimeError('Previous submission interrupted; check squeue/sacct before resolving receipt: ' + job)\n            for row in rows:\n                target = safe_path(root, row['path'])\n                if not target.exists():\n                    target.parent.mkdir(parents=True, exist_ok=True)\n                    target.write_bytes(archive.read(row['path']))\n        submitted = 0\n        for job in jobs:\n            if receipt['jobs'].get(job, {}).get('status') == 'submitted':\n                print('Already submitted:', job, receipt['jobs'][job]['job_id'])\n                continue\n            # Persist intent first: interruption cannot cause a blind duplicate submission.\n            receipt['jobs'][job] = {'status': 'submitting'}\n            save(receipt_path, receipt)\n            target = safe_path(root, job)\n            result = subprocess.run(['sbatch', '--parsable', target.name], cwd=target.parent, capture_output=True, text=True)\n            if result.returncode:\n                raise RuntimeError('sbatch failed; check Slurm and receipt before retry: ' + result.stderr.strip())\n            job_id = result.stdout.strip().split(';')[0]\n            if not job_id.isdigit():\n                raise RuntimeError('Unexpected sbatch reply; check Slurm before retry: ' + result.stdout)\n            receipt['jobs'][job] = {'status': 'submitted', 'job_id': job_id}\n            save(receipt_path, receipt)\n            submitted += 1\n            print('Submitted:', job, job_id)\n        print('New jobs:', submitted)\n        print('Download the return-results folder after all jobs finish; keep its ZIP files compressed.')\n\n\nif __name__ == '__main__':\n    import sys\n    run(sys.argv[1])\n"
+DRIVER = Path(__file__).with_name("submission_dispatcher.py").read_text(encoding="utf-8")
+
+
+def write_dispatch_entry(folder, first_script):
+    """Write only the outer compute-job entry; input ZIP and receipts stay intact."""
+    folder = Path(folder)
+    script = folder / "submit_all.sh"
+    dispatcher = folder / "dispatch_tasks.py"
+    dispatcher.write_text(DRIVER, encoding="utf-8", newline="\n")
+    partition = next(
+        (line for line in first_script.splitlines() if line.startswith("#SBATCH --partition")), ""
+    )
+    activation = next(
+        (
+            line
+            for line in first_script.splitlines()
+            if line.startswith("source ") and "activate" in line
+        ),
+        "",
+    )
+    write_unix_shell_script(
+        script,
+        "#!/usr/bin/env bash\n#SBATCH --job-name=phase-dispatch\n#SBATCH -N 1\n#SBATCH -n 1\n#SBATCH --mem=2G\n#SBATCH --time=00:20:00\n#SBATCH --output=dispatch-%j.out\n#SBATCH --error=dispatch-%j.err\n"
+        + (partition + "\n" if partition else "")
+        + 'set -euo pipefail\n: "${SLURM_JOB_ID:?Use sbatch submit_all.sh}"\ncd -- "${SLURM_SUBMIT_DIR:?Missing Slurm submit directory}"\n'
+        + (activation + "\n" if activation else "")
+        + 'python3 dispatch_tasks.py "$PWD"\n',
+    )
+    return script, dispatcher
 
 
 def handoff_root(directory):
@@ -95,23 +123,20 @@ def prepare_handoff(directory, scripts):
         archive = folder / "inputs.zip"
         if not archive.exists():
             create_bundle(portable, portable_files, archive, kind="inputs")
-    script = folder / "submit_all.sh"
-    write_unix_shell_script(
-        script,
-        '#!/usr/bin/env bash\nset -euo pipefail\ncd -- "$(dirname -- "$0")"\npython3 - "$PWD" <<"PHASE_SUBMIT_PY"\n'
-        + DRIVER
-        + "\nPHASE_SUBMIT_PY\n",
+    script, dispatcher = write_dispatch_entry(
+        folder, (directory / scripts[0]).read_text(encoding="utf-8")
     )
     return {
         "folder": str(folder),
         "upload_archive": str(archive),
         "submit_script": str(script),
-        "command": "bash submit_all.sh",
+        "command": "sbatch submit_all.sh",
+        "dispatcher": str(dispatcher),
         "results_directory": str(directory / "results"),
         "return_directory": str(directory / "return-results"),
         "import_directory": str(directory),
         "job_count": len(scripts),
-        "layout_version": 2,
+        "layout_version": 3,
     }
 
 
