@@ -2,7 +2,9 @@ import json
 
 import pytest
 
-from phase_agent.configuration.defaults.default_slurm_cluster_config import default_slurm_cluster_config
+from phase_agent.configuration.defaults.default_slurm_cluster_config import (
+    default_slurm_cluster_config,
+)
 from phase_agent.tools.slurm.run_slurm_array_task import run_slurm_array_task
 from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
 from phase_agent.science.dft.create_atomate_workflow import generate_dft_workflow_with_atomate
@@ -37,7 +39,9 @@ def test_runner_batches_only_reserved_tasks_within_batch_budget(tmp_path):
     assert result["batch"]["planned_cost"] == 2.0
     manifest = json.loads((tmp_path / "slurm/slurm-000001/manifest.json").read_text())
     assert manifest[0]["task_key"] == "K1"
-    assert "SLURM_ARRAY_TASK_ID" in (tmp_path / "slurm/slurm-000001/submit.sbatch").read_text()
+    assert (
+        '--array-index "$task_index"' in (tmp_path / "slurm/slurm-000001/submit.sbatch").read_text()
+    )
 
     repeated = runner.prepare(result["state"])
     assert repeated["status"] == "no_tasks"
@@ -45,7 +49,8 @@ def test_runner_batches_only_reserved_tasks_within_batch_budget(tmp_path):
 
 def test_mlip_profile_is_rendered_for_mc_and_relax(tmp_path):
     runner = SlurmBatchRunner(
-        tmp_path / "slurm", worker_command=["python3", "worker.py"],
+        tmp_path / "slurm",
+        worker_command=["python3", "worker.py"],
         stage_profiles=default_slurm_cluster_config(),
     )
     result = runner.prepare(_state())
@@ -60,25 +65,24 @@ def test_mlip_profile_is_rendered_for_mc_and_relax(tmp_path):
 
 def test_dft_batch_requires_atomate_dispatcher(tmp_path):
     state = _state()
-    state["tasks"] = state["pending_tasks"] = [{
-        "task_id": "T1", "task_key": "K1", "stage": "dft_single_point", "status": "pending"
-    }]
+    state["tasks"] = state["pending_tasks"] = [
+        {"task_id": "T1", "task_key": "K1", "stage": "dft_single_point", "status": "pending"}
+    ]
     runner = SlurmBatchRunner(tmp_path / "missing", worker_command=["worker"])
     with pytest.raises(ValueError, match="atomate dispatcher"):
         runner.prepare(state)
 
     runner = SlurmBatchRunner(
-        tmp_path / "atomate", worker_command=["worker"],
+        tmp_path / "atomate",
+        worker_command=["worker"],
         stage_profiles=default_slurm_cluster_config(),
         dispatcher=lambda task: {
-            "status": "pending", "outputs": {"generator": "atomate",
-            "workflow_path": str(tmp_path / "workflow.json")},
+            "status": "pending",
+            "outputs": {"generator": "atomate", "workflow_path": str(tmp_path / "workflow.json")},
         },
     )
     result = runner.prepare(state)
-    payload = json.loads(
-        (tmp_path / "atomate/slurm-000001/00000-T1/task.json").read_text()
-    )
+    payload = json.loads((tmp_path / "atomate/slurm-000001/00000-T1/task.json").read_text())
     assert payload["atomate"]["generator"] == "atomate"
     assert result["batch"]["task_ids"] == ["T1"]
 
@@ -91,9 +95,9 @@ def test_collect_terminal_results_for_main_loop(tmp_path):
     (result_path.parent / "task.finished.json").write_text(json.dumps({"status": "completed"}))
 
     recovered = runner.collect_results(prepared)
-    assert recovered == [{
-        "status": "completed", "actual_cost": 1.5, "task_id": "T1", "task_key": "K1"
-    }]
+    assert recovered == [
+        {"status": "completed", "actual_cost": 1.5, "task_id": "T1", "task_key": "K1"}
+    ]
 
 
 def test_array_worker_always_writes_terminal_result(tmp_path):
@@ -104,7 +108,12 @@ def test_array_worker_always_writes_terminal_result(tmp_path):
         manifest, 0, executor=lambda task: {"status": "completed", "actual_cost": 1.25}
     )
     assert completed["task_id"] == "T1"
-    assert json.loads((tmp_path / "slurm/slurm-000001/00000-T1/result.json").read_text())["actual_cost"] == 1.25
+    assert (
+        json.loads((tmp_path / "slurm/slurm-000001/00000-T1/result.json").read_text())[
+            "actual_cost"
+        ]
+        == 1.25
+    )
 
     failed = run_slurm_array_task(
         manifest, 1, executor=lambda task: (_ for _ in ()).throw(RuntimeError("backend down"))
@@ -117,13 +126,17 @@ def test_dft_batch_uses_atomate_inputs_and_direct_vasp_slurm(tmp_path):
     workflow_path = tmp_path / "workflow.json"
     workflow_path.write_text(json.dumps({"name": "wf"}))
     state = _state()
-    state["tasks"] = state["pending_tasks"] = [{
-        "task_id": "T1", "task_key": "K1", "stage": "dft_single_point", "status": "pending"
-    }]
+    state["tasks"] = state["pending_tasks"] = [
+        {"task_id": "T1", "task_key": "K1", "stage": "dft_single_point", "status": "pending"}
+    ]
     runner = SlurmBatchRunner(
-        tmp_path / "atomate", worker_command=["unused"], submit=False,
-        dispatcher=lambda task: {"status": "pending", "outputs": {
-            "generator": "atomate", "workflow_path": str(workflow_path)}},
+        tmp_path / "atomate",
+        worker_command=["unused"],
+        submit=False,
+        dispatcher=lambda task: {
+            "status": "pending",
+            "outputs": {"generator": "atomate", "workflow_path": str(workflow_path)},
+        },
         stage_profiles=default_slurm_cluster_config(),
     )
     prepared = runner.prepare(state)
@@ -138,27 +151,41 @@ def test_dft_batch_uses_atomate_inputs_and_direct_vasp_slurm(tmp_path):
 def test_atomate_workflow_materializes_vasp_inputs(tmp_path):
     class Workflow:
         name = "static"
-        def to_dict(self): return {"name": self.name}
+
+        def to_dict(self):
+            return {"name": self.name}
 
     def writer(workflow, directory):
         paths = []
         for name in ("INCAR", "POSCAR", "KPOINTS", "POTCAR"):
-            path = directory / name; path.write_text(name); paths.append(str(path))
+            path = directory / name
+            path.write_text(name)
+            paths.append(str(path))
         return paths
 
     result = generate_dft_workflow_with_atomate(
-        "structure", calculation_type="singlepoint", work_directory=tmp_path / "dft",
-        workflow_factory=lambda structure, **kwargs: Workflow(), input_writer=writer,
+        "structure",
+        calculation_type="singlepoint",
+        work_directory=tmp_path / "dft",
+        workflow_factory=lambda structure, **kwargs: Workflow(),
+        input_writer=writer,
     )
     assert result["status"] == "pending"
     assert len(result["input_files"]) == 4
 
 
 def test_vasp_parser_writes_recoverable_result(tmp_path):
-    (tmp_path / "task.json").write_text(json.dumps({
-        "task_id": "D1", "task_key": "K1", "structure_id": "S1",
-        "stage": "dft_single_point", "result_path": str(tmp_path / "result.json"),
-    }))
+    (tmp_path / "task.json").write_text(
+        json.dumps(
+            {
+                "task_id": "D1",
+                "task_key": "K1",
+                "structure_id": "S1",
+                "stage": "dft_single_point",
+                "result_path": str(tmp_path / "result.json"),
+            }
+        )
+    )
     result = write_vasp_result(tmp_path, "result.json", exit_code=9)
     assert result["status"] == "failed"
     assert "code 9" in json.loads((tmp_path / "result.json").read_text())["error"]

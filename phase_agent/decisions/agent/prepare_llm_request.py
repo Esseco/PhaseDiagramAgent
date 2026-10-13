@@ -179,6 +179,8 @@ def needs_deep_reasoning(payload):
         "dialogue_contract_repair",
     }:
         return False
+    if "scientific_decision" in (payload.get("output_contracts") or {}):
+        return True
     if payload.get("decision_kind") in {
         "strategy",
         "dft_selection",

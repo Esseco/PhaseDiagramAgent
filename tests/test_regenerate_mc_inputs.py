@@ -90,7 +90,7 @@ def test_missing_directory_regenerates_approved_plan(tmp_path, monkeypatch):
     assert plan["exists"] is False
     assert plan["mc_sampling_start"] == 1
     assert plan["remote_batch_start"] == 2
-    assert plan["mc_batch_size"] == 10
+    assert plan["mc_batch_size"] == 20
     assert plan["estimated_batch_count"] == 1
     captured = {}
 

@@ -16,13 +16,16 @@ def waiting_file_lines(state):
         lines = []
         for bid in dict.fromkeys(row["relax_mc_bundle_id"] for row in owned):
             batch = (state.get("relax_mc_batches") or {}).get(bid) or {}
+            archive = batch.get("upload_archive")
+            destination = batch.get("expected_results_archive")
+            if not archive or not Path(archive).is_file() or not destination:
+                lines.append("输入包准备未完成，尚不能提交；需补齐上传包和回传位置。")
+                continue
             lines.extend(
                 [
-                    "Relax+MC 上传包：" + str(batch.get("upload_archive", "")),
-                    "上传并解压到独立目录，在该目录执行一次 `sbatch submit_all.sh`。",
-                    "将远端 results.zip 下载到："
-                    + str(batch.get("expected_results_archive", ""))
-                    + "，再说“继续”自动校验回收。",
+                    "上传：`" + str(archive) + "`",
+                    "提交：上传到超算新建的独立目录，解压后进入包目录，执行 `sbatch submit_all.sh`。",
+                    "回传：远端 `results.zip` → `" + str(destination) + "`。回传后说“已回传”。",
                 ]
             )
         other = {
@@ -70,8 +73,9 @@ def _brief_waiting_file_lines(state):
             )
         )
     )
-    if not folders or any(
+    if not batches or not folders or any(
         not h.get("folder")
+        or not h.get("return_directory")
         or not all(
             (Path(h["folder"]) / name).is_file()
             for name in ("inputs.zip", "submit_all.sh", "dispatch_tasks.py")
@@ -79,11 +83,12 @@ def _brief_waiting_file_lines(state):
         for h in handoffs
     ):
         return [
-            "本轮压缩交互包尚未准备完整，需补齐 inputs.zip 和 submit_all.sh；内部 epoch 工作目录不能作为本轮提交文件夹。"
+            "输入包尚未准备完整，尚不能提交；需补齐 inputs.zip、submit_all.sh、dispatch_tasks.py 和回传位置。"
         ]
     # Do not broaden unrelated rounds into an arbitrary common disk directory.
     links = [str(folder) for folder in folders]
-    lines = ["本轮提交文件夹：" + "、".join(links)]
+    lines = ["本轮提交文件夹：" + "、".join(f"`{path}`" for path in links)]
+    lines.append("提交：将该文件夹完整上传到超算新建的独立目录，进入该目录执行 `sbatch submit_all.sh`。")
     returns = list(
         dict.fromkeys(
             (row.get("handoff") or {}).get("return_directory")
@@ -92,9 +97,8 @@ def _brief_waiting_file_lines(state):
         )
     )
     if returns:
-        lines.append("结果回传文件夹：" + "、".join(returns))
         lines.append(
-            "下一步：上传提交文件夹，执行 `sbatch submit_all.sh`；完成后把远端 return-results 文件夹传回上述位置，再说“继续”。压缩包自动读取，无需手动解压；已提交的不要重复提交。"
+            "结果回传文件夹：" + "、".join(f"`{path}`" for path in returns) + "。将远端 `return-results` 放到这里，回传后说“已回传”，Agent 继续核对。"
         )
     else:
         lines.append(

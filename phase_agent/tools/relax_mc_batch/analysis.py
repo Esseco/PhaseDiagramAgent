@@ -50,34 +50,21 @@ def next_mc(state, manager, manifest, root, index):
     state.setdefault("branch_hull_batches", {})[pool["version"]] = pool
     state["current_branch_hull_version"] = pool["version"]
     diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
-    bootstrap = index == 0 and manifest["bootstrap_first_mc"]
-    if not bootstrap and diagram.get("status") != "completed":
+    if diagram.get("status") != "completed" or diagram.get("model_version") != version:
         return {
             "status": "phase_diagram_unavailable",
             "actions": [],
             "state": state,
-            "reason": diagram.get("reason", diagram.get("error")),
+            "reason": diagram.get("reason", diagram.get("error"))
+            or "current_model_hull_required_before_mc",
         }
     candidates, missing = rank_relaxed_branches(
-        list(manager.data["branches"].values()), pool, phase_diagram=None if bootstrap else diagram
+        list(manager.data["branches"].values()), pool, phase_diagram=diagram
     )
     if index and state.get("tiered_mc_state"):
         source = first_round_source(state, version)
         candidates, missing = second_round_candidates(candidates, state, diagram, version)
     policy = deepcopy(config["mc_policy"])
-    if bootstrap:
-        for row in candidates:
-            row.update(
-                relaxed_ehull=None,
-                relaxed_ehull_unit=None,
-                ehull_source="bootstrap_without_prior_hull",
-                hull_reference_energy_per_atom=None,
-            )
-        policy.update(
-            exploration_max_mc_steps=100,
-            exploration_patience_steps=10,
-            random_exploration_fraction=1.0,
-        )
     scheduled = schedule_tiered_mc(
         candidates,
         reconciled_mc_state(state),
@@ -86,14 +73,12 @@ def next_mc(state, manager, manifest, root, index):
         seed=manifest["seed"] + index,
         model_version=version,
         hull_reference_version=pool["version"],
-        phase_diagram_version=diagram.get("version") if not bootstrap else None,
+        phase_diagram_version=diagram.get("version"),
         scope_by_model=True,
     )
     state["tiered_mc_state"] = scheduled["state"]
     atoms = {row["branch_id"]: row["atom_count"] for row in candidates}
     for child in scheduled["actions"]:
-        if bootstrap:
-            child["bootstrap_without_prior_hull"] = True
         cost = estimate_stage_cost(
             "deep_search",
             atom_count=atoms[child["branch_id"]],

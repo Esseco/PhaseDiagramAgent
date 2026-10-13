@@ -141,11 +141,11 @@ def test_mc_inputs_use_relaxed_structure_and_full_na_template(tmp_path, second_s
             "config_version": "v1",
         },
     )
-    assert result["status"] == "prepared" and result["batch_count"] == 3
+    assert result["status"] == "prepared" and result["batch_count"] == 2
     handoffs = [b["handoff"] for b in result["state"]["slurm_batches"]]
     assert len({h["folder"] for h in handoffs}) == 1
     assert all(Path(h["upload_archive"]).is_file() for h in handoffs)
-    assert handoffs[0]["job_count"] == 3
+    assert handoffs[0]["job_count"] == 2
     again = prepare_mc_upload_batches(
         action=next_action,
         context={
@@ -159,7 +159,7 @@ def test_mc_inputs_use_relaxed_structure_and_full_na_template(tmp_path, second_s
     assert again["status"] == "already_prepared"
     assert again["state"]["tasks"] == result["state"]["tasks"]
     assert again["handoffs"][0]["folder"] == handoffs[0]["folder"]
-    assert sorted(len(batch["task_ids"]) for batch in result["batches"]) == [1, 10, 10]
+    assert sorted(len(batch["task_ids"]) for batch in result["batches"]) == [1, 20]
     first = Path(result["batches"][0]["directory"])
     task = json.loads(next(first.glob("*/task.json")).read_text(encoding="utf-8"))
     assert (first / task["calculation_directory"] / "initial.vasp").read_text() == "relaxed"

@@ -14,7 +14,7 @@ DFT_STAGES = {"dft_single_point", "dft_relax"}
 PROTOCOL_VERSION = 1
 DEFAULT_BATCH_SIZES = {
     "relax_and_feature": 100,
-    "deep_search": 10,
+    "deep_search": 20,
     "dft_single_point": 1,
     "dft_relax": 1,
 }
@@ -229,7 +229,14 @@ class RemoteBatchRunner:
             # WebUI control records are not remote scientific jobs. Legacy
             # tasks with file/batch pointers remain eligible even without stage.
             if not task.get("stage") and not any(
-                task.get(key) for key in ("batch_id", "slurm_batch_id", "input_path", "result_path", "calculation_result_path")
+                task.get(key)
+                for key in (
+                    "batch_id",
+                    "slurm_batch_id",
+                    "input_path",
+                    "result_path",
+                    "calculation_result_path",
+                )
             ):
                 continue
             task_id = task.get("task_id")
@@ -408,6 +415,12 @@ class RemoteBatchRunner:
             "array": f"0-{count - 1}",
             **(profile.get("slurm_options") or {}),
         }
+        grouped_mlip = stage in {"relax_and_feature", "deep_search"}
+        if grouped_mlip:
+            options.pop("array", None)
+            for key in ("output", "error"):
+                if key in options:
+                    options[key] = str(options[key]).replace("_%a", "").replace("%A", "%j")
         directives = "\n".join(f"#SBATCH --{k}={v}" for k, v in options.items())
         preamble = "\n".join(profile.get("shell_preamble") or [])
         root = 'batch_directory=$(cd "$(dirname "$0")" && pwd)\n'
@@ -423,7 +436,16 @@ class RemoteBatchRunner:
             )
         else:
             command = " ".join(shlex.quote(str(item)) for item in self.worker_command)
-            body = f'{command} --manifest "$batch_directory/manifest.json" --array-index "$SLURM_ARRAY_TASK_ID"\n'
+            if grouped_mlip:
+                body = (
+                    f"failures=0\nfor task_index in $(seq 0 {count - 1}); do\n"
+                    f'  if ! {command} --manifest "$batch_directory/manifest.json" --array-index "$task_index"; then\n'
+                    "    failures=$((failures + 1))\n  fi\ndone\n"
+                    'test "$failures" -eq 0\n'
+                )
+            else:
+                body = f'{command} --manifest "$batch_directory/manifest.json" --array-index "$SLURM_ARRAY_TASK_ID"\n'
+
         return f"#!/usr/bin/env bash\nset -euo pipefail\n{directives}\n{preamble}\n{root}{body}"
 
 

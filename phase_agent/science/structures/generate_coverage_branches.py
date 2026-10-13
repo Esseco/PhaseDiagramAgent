@@ -6,7 +6,9 @@ from typing import Any
 
 from phase_agent.science.structures.boundary_utils import det_H
 from phase_agent.science.structures.identify_branch import identify_branch_parameters
-from phase_agent.science.structures.generate_branch_structure import generate_branch_structure
+from phase_agent.science.structures.generate_branch_structure import (
+    generate_branch_structure,
+)
 
 
 def generate_coverage_branches(
@@ -24,7 +26,9 @@ def generate_coverage_branches(
     for framework in frameworks:
         for x in framework["allowed_x"]:
             count = sum(
-                branch["P"] == framework["P"] and branch["H"] == framework["H"] and branch["x"] == x
+                branch["P"] == framework["P"]
+                and branch["H"] == framework["H"]
+                and branch["x"] == x
                 for branch in manager.data["branches"].values()
             )
             regions_by_phase.setdefault(framework["P"], []).append(
@@ -42,6 +46,10 @@ def generate_coverage_branches(
 
     # Cover every allowed phase early; within a phase, prefer smaller cells.
     candidates = []
+    phase_counts = {
+        phase: sum(branch["P"] == phase for branch in manager.data["branches"].values())
+        for phase in regions_by_phase
+    }
     offset = 0
     while len(candidates) < quota and any(regions_by_phase.values()):
         # Keep covering sparse regions, then revisit them with a new TM seed.
@@ -50,7 +58,7 @@ def generate_coverage_branches(
             (name for name, rows in regions_by_phase.items() if rows),
             key=lambda name: (
                 regions_by_phase[name][0][0],
-                sum(item[0] for item in regions_by_phase[name]),
+                phase_counts[name],
                 name,
             ),
         )
@@ -73,10 +81,15 @@ def generate_coverage_branches(
             phase_hint=framework["P"],
         )
         candidates.append(
-            _candidate(parameters, structure, "coverage", None, current_seed, "generated")
+            _candidate(
+                parameters, structure, "coverage", None, current_seed, "generated"
+            )
         )
+        phase_counts[phase] += 1
         if not preserve_reference_tm:
-            regions_by_phase[phase].append((count + 1, size, atoms, x, matrix_key, framework))
+            regions_by_phase[phase].append(
+                (count + 1, size, atoms, x, matrix_key, framework)
+            )
             regions_by_phase[phase].sort(key=lambda item: item[:5])
         offset += 1
     return candidates
@@ -91,7 +104,9 @@ def _candidate(
     inheritance: str,
 ) -> dict[str, Any]:
     return {
-        **{key: parameters[key] for key in ("P", "H", "det_H", "x", "T", "composition")},
+        **{
+            key: parameters[key] for key in ("P", "H", "det_H", "x", "T", "composition")
+        },
         "structure": structure,
         "strategy": strategy,
         "parent_branch_id": parent,

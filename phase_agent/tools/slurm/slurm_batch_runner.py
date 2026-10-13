@@ -59,7 +59,7 @@ class SlurmBatchRunner:
         if any(size <= 0 for size in self.stage_batch_sizes.values()):
             raise ValueError("stage_batch_sizes values must be positive")
         self.stage_batch_sizes["deep_search"] = mc_batch_limit(
-            self.stage_batch_sizes.get("deep_search", self.max_batch_tasks)
+            self.stage_batch_sizes.get("deep_search", 20)
         )
         self.max_batch_cost = float(max_batch_cost) if max_batch_cost is not None else None
         self.slurm_options = dict(slurm_options or {})
@@ -252,6 +252,12 @@ class SlurmBatchRunner:
             **self.slurm_options,
             **(profile.get("slurm_options") or {}),
         }
+        grouped_mlip = stage in {"relax_and_feature", "deep_search"}
+        if grouped_mlip:
+            options.pop("array", None)
+            for key in ("output", "error"):
+                if isinstance(options.get(key), str):
+                    options[key] = options[key].replace("_%a", "").replace("%A", "%j")
         directives = "\n".join(
             f"#SBATCH --{key}" + ("" if value is True else f"={value}")
             for key, value in options.items()
@@ -279,6 +285,15 @@ class SlurmBatchRunner:
                 f"set +e\n{vasp_command}\nvasp_exit_code=$?\nset -e\n"
                 f'{parser_command} --directory . --result-path result.json --exit-code "$vasp_exit_code"\n'
                 'exit "$vasp_exit_code"\n'
+            )
+        elif grouped_mlip:
+            body = (
+                "task_failures=0\n"
+                f"for task_index in $(seq 0 {count - 1}); do\n"
+                f"  if ! {command} --manifest {shlex.quote(str(manifest_path))} "
+                '--array-index "$task_index"; then task_failures=$((task_failures + 1)); fi\n'
+                "done\n"
+                'test "$task_failures" -eq 0\n'
             )
         else:
             body = (

@@ -416,6 +416,14 @@ def select_initial_proposal(
             )
         except ValueError as error:
             return {"status": "rejected", "state": current, "reason": str(error)}
+    from phase_agent.tools.local.prepare_ordering_search import attach_ordering_preview
+
+    try:
+        action = attach_ordering_preview(
+            action, current, context or {}, (context or {}).get("effective_config") or config
+        )
+    except (ValueError, OSError, RuntimeError) as error:
+        return {"status": "not_configured", "state": current, "reason": str(error)}
     from phase_agent.analysis.cost.generation_preflight import (
         attach_generation_preflight,
     )

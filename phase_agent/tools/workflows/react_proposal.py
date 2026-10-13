@@ -13,8 +13,10 @@ def prepare_react_proposal(frame):
     context = frame.get("context") or {}
     key = frame["invocation_id"] or "__single_interactive_action__"
     from phase_agent.tools.workflows.mc_coverage_choice import resolve
-    resolved=resolve(frame)
-    if resolved is not None:return resolved
+
+    resolved = resolve(frame)
+    if resolved is not None:
+        return resolved
     stored = current["pending_execution_policies"].get(key)
     feedback = frame.get("human_feedback")
     decision = feedback.get("decision") if isinstance(feedback, dict) else feedback
@@ -109,6 +111,13 @@ def prepare_react_proposal(frame):
 
 def stale_proposal_error(proposal, current, context, config):
     action = proposal.get("raw_action") or {}
+    from phase_agent.tools.local.prepare_ordering_search import stale_ordering_error
+
+    ordering_error = stale_ordering_error(
+        action, current, context, context.get("effective_config") or config
+    )
+    if ordering_error:
+        return ordering_error
     from phase_agent.tools.state.approved_direction import direction_action_errors
 
     if direction_action_errors(action, current):

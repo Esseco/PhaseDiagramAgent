@@ -149,5 +149,5 @@ def format_epoch_reply(reply, state, *, configuring=False, project_card=None):
     if project_card is not None:
         from phase_agent.runtime.project_context import project_context_line
 
-        header = project_context_line(project_card) + "\n" + header
+        header = project_context_line(project_card) + " · " + stage
     return header + "\n" + "\n".join(lines)

@@ -325,7 +325,7 @@ def plan_mc_regeneration(state, upload_root, *, replacement_preview=None):
         strata[label] = strata.get(label, 0) + 1
     configured_batch_size = (
         ((state.get("confirmed_config") or {}).get("supercomputer") or {}).get("batch_sizes") or {}
-    ).get("deep_search", 10)
+    ).get("deep_search", 20)
     batch_size = mc_batch_limit(configured_batch_size)
     compatibility_counts = Counter(_compatibility(row) for row in allocations)
     estimated_batches = sum(

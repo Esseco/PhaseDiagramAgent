@@ -98,7 +98,13 @@ Include scientific_decision matching the schema and exact current model/config,
 one feasible alternative (or explain why unavailable), expected outcome, observable
 success criterion and limitations. These are hypotheses, never measured facts.
 For DFT assign a purpose to every selected candidate. Do not invent metrics.
-Set module_execution only for an explicit user bundled/stepwise preference; otherwise null.
+Set module_execution only for an explicit user bundled/stepwise preference; otherwise omit it.
+Be concise: each assessment is one short sentence, preferably under 80 Chinese characters.
+Do not additionally output decision_review. reason and expected_purpose are brief action
+labels, not another copy of the rationale. Omit irrelevant optional fields and empty lists.
+When post_dft_review is required, put detailed route comparisons there; scientific_decision
+contains only the concise bottleneck/conclusion, expectation and success criterion.
+Never repeat input evidence tables, raw metrics or candidate lists inside explanations.
 Modules perform Relax-MC allocation, stopping, recovery and hull updates. In default
 bundled mode do not propose standalone MC allocation or intermediate input approval.
 Explicit user maintenance and existing pending legacy work retain their original path.
@@ -112,8 +118,11 @@ def attach_decision_contract(payload):
     brief = (payload.get("decision_context") or {}).get("scientific_decision_brief") or {}
     if (brief.get("policy") or {}).get("schema_version") != 1:
         return payload
+    context = dict(payload.get("decision_context") or {})
+    context.pop("decision_review_format", None)  # The scientific contract already owns explanation.
     return {
         **payload,
+        "decision_context": context,
         "output_contracts": {
             **(payload.get("output_contracts") or {}),
             "scientific_decision": ScientificDecision.model_json_schema(),

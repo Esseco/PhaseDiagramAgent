@@ -39,7 +39,9 @@ def context_config(config, context):
 
 def relax_tasks(plan, config):
     settings = deepcopy((config.get("mlip") or {}).get("relax_parameters") or {})
-    signature = hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:12]
+    signature = hashlib.sha256(
+        json.dumps(settings, sort_keys=True).encode()
+    ).hexdigest()[:12]
     return [
         {
             "task_id": "RELAX-"
@@ -91,14 +93,20 @@ def diagnose(
             "branches_already_searched_under_current_model; use existing continuation instead of resetting MC counts"
         )
     main, models, evidence = remote_model_references(model)
-    count = min(3, int((config.get("bohb") or {}).get("relax_structures_per_branch", 3)))
+    count = min(
+        3, int((config.get("bohb") or {}).get("relax_structures_per_branch", 3))
+    )
     if count <= 0:
         raise ValueError("relax_structures_per_branch must be positive")
     records = manager.data.get("structures") or {}
-    valid_ids = set((state.get("dedup_gate") or {}).get("valid_structure_ids") or records)
+    valid_ids = set(
+        (state.get("dedup_gate") or {}).get("valid_structure_ids") or records
+    )
     selected, structures, inputs = [], [], []
     references = (
-        phase_references or (manager.data.get("system_config") or {}).get("phase_references") or {}
+        phase_references
+        or (manager.data.get("system_config") or {}).get("phase_references")
+        or {}
     )
     reference_fingerprints = {}
     for name, reference in references.items():
@@ -109,13 +117,49 @@ def diagnose(
             if not path.is_file():
                 raise ValueError(f"missing_phase_reference:{name}")
             reference_fingerprints[name] = file_checksum(path)
+    from phase_agent.science.structures.boundary_utils import allowed_phases
+
+    expected_phases = set()
+    target_structure_ids = {
+        sid
+        for bid in branch_ids
+        for sid in manager.data["branches"].get(bid, {}).get("structure_ids", [])
+    }
+    for history in state.get("generation_history") or []:
+        if not target_structure_ids.intersection(history.get("registered_ids") or []):
+            continue
+        if history.get("model_version") not in (None, version):
+            continue
+        expected_phases.update(
+            ((history.get("summary") or {}).get("phase_coverage") or {}).get("expected")
+            or []
+        )
+        for row in history.get("generation_plan") or []:
+            if row.get("quota", 0):
+                expected_phases.update(
+                    allowed_phases(manager.boundary["P"])
+                    if row["phase"] == "all"
+                    else {row["phase"]}
+                )
+    target_phases = {
+        manager.data["branches"][bid]["P"]
+        for bid in branch_ids
+        if bid in manager.data["branches"]
+    }
+    missing_phases = expected_phases - target_phases
+    if missing_phases:
+        raise ValueError(
+            "generation_phase_coverage_incomplete:" + ",".join(sorted(missing_phases))
+        )
     for bid in branch_ids:
         branch = (manager.data.get("branches") or {}).get(bid)
         if branch is None:
             raise ValueError(f"unknown_branch:{bid}")
         selected.append(deepcopy(branch))
         ids = [
-            sid for sid in branch.get("structure_ids") or [] if sid in records and sid in valid_ids
+            sid
+            for sid in branch.get("structure_ids") or []
+            if sid in records and sid in valid_ids
         ][:count]
         if not ids:
             raise ValueError(f"branch_has_no_valid_structure:{bid}")
@@ -158,7 +202,12 @@ def diagnose(
                     f"missing_full_na_template:{bid}; prepare the existing template before packaging"
                 )
             inputs.append(
-                {"kind": "full_na", "id": bid, "path": str(full), "sha256": file_checksum(full)}
+                {
+                    "kind": "full_na",
+                    "id": bid,
+                    "path": str(full),
+                    "sha256": file_checksum(full),
+                }
             )
     diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
     if diagram.get("entries") and diagram.get("model_version") != version:
@@ -201,7 +250,7 @@ def diagnose(
     sizes = (config.get("supercomputer") or {}).get("batch_sizes") or {}
     relax_size, mc_size = (
         int(sizes.get("relax_and_feature", 100)),
-        min(10, int(sizes.get("deep_search", 10))),
+        int(sizes.get("deep_search", 20)),
     )
     if min(relax_size, mc_size) <= 0:
         raise ValueError("batch_sizes must be positive")
@@ -217,11 +266,15 @@ def diagnose(
     upper = [bcount, bcount if bcount >= 10 else 0, bcount if bcount >= 10 else 0]
     reference = [bcount]
     for _ in range(2):
-        reference.append(min(bcount, max(10, math.ceil(reference[-1] / 2))) if bcount >= 10 else 0)
+        reference.append(
+            min(bcount, max(10, math.ceil(reference[-1] / 2))) if bcount >= 10 else 0
+        )
     cost_mc = sum(
         estimate_stage_cost(
             "deep_search",
-            atom_count=max(r["atom_count"] for r in structures if r["branch_id"] == b["branch_id"]),
+            atom_count=max(
+                r["atom_count"] for r in structures if r["branch_id"] == b["branch_id"]
+            ),
             mc_steps=100 + (400 if bcount >= 10 else 0),
             budgets=config["budgets"],
         )["value"]
@@ -232,7 +285,8 @@ def diagnose(
         for r in structures
     ]
     phase_counts = {
-        p: sum(b.get("P") == p for b in selected) for p in sorted({b.get("P") for b in selected})
+        p: sum(b.get("P") == p for b in selected)
+        for p in sorted({b.get("P") for b in selected})
     }
     plan = {
         "schema_version": 1,
@@ -246,6 +300,7 @@ def diagnose(
         "inputs": inputs,
         "history_records": history,
         "bootstrap_first_mc": bootstrap,
+        "require_hull_before_first_mc": True,
         "model_references": {
             "model_path": main,
             "model_paths": models,
@@ -258,9 +313,9 @@ def diagnose(
             "phases": phase_counts,
             "Na_contents": sorted({str(b["x"]) for b in selected}),
             "warnings": [
-                "After bootstrap MC, fewer than two successful Na contents pauses continuation"
+                "Relax must build a valid current-model hull before any MC; missing Na endpoints pauses the package"
             ]
-            if bootstrap and len({str(b["x"]) for b in selected}) < 2
+            if bootstrap
             else [],
         },
         "workload": {
@@ -332,7 +387,9 @@ def batch_facts(state):
                     "result_summary",
                 )
             },
-            "return_available": Path(row.get("expected_results_archive") or "").is_file(),
+            "return_available": Path(
+                row.get("expected_results_archive") or ""
+            ).is_file(),
         }
         for row in list((state.get("relax_mc_batches") or {}).values())[-5:]
     ]

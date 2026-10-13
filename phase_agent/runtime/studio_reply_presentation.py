@@ -5,6 +5,12 @@ from phase_agent.runtime.chat_state_presentation import brief_chat_state
 
 def format_turn_reply(reply, state, *, configuring=False):
     text = str(reply or "").strip()
+    if not configuring and not state.get("pending_execution_policies"):
+        from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
+
+        delivery = waiting_file_lines(state)
+        if delivery and any(marker in text for marker in ("prepare_local_batch_files", "本轮提交文件夹：", "Relax+MC 上传包：", "上传 inputs 包")) and "本轮失败" not in text and "本轮未执行" not in text:
+            return "\n".join([brief_chat_state(state).replace("当前：", "当前状态：", 1), *delivery])
     if not configuring and state.get("pending_execution_policies"):
         from phase_agent.runtime.plan_queries import pending_plan_reply
 
@@ -49,7 +55,9 @@ def format_turn_reply(reply, state, *, configuring=False):
             line = "建议：" + line.split("：", 1)[1]
         body.append(line)
     if not any(line.startswith("建议：") for line in body):
-        if "暂不可批准：" in text:
+        if "本轮未执行：" in text or "本轮失败：" in text:
+            body.append("建议：先处理上述问题。")
+        elif "暂不可批准：" in text:
             body.append("建议：先核对原任务与执行回执，当前方案暂不可批准。")
         elif configuring:
             body.insert(
@@ -65,9 +73,10 @@ def format_turn_reply(reply, state, *, configuring=False):
             from phase_agent.runtime.chat_state_presentation import waiting_training_job
 
             if active_pending_tasks(state.get("tasks") or []) or waiting_training_job(state):
-                body.append(
-                    "建议：上传 inputs 包并提交；完成后回传 results，告知已回传即可核对分析并提出下一步方案。"
-                )
+                from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
+
+                delivery = waiting_file_lines(state)
+                body.extend(delivery or ["建议：等待当前任务完成，回传结果后告知已回传。"])
     if not configuring and state.get("pending_execution_policies"):
         from phase_agent.runtime.plan_queries import pending_plan_reply
 

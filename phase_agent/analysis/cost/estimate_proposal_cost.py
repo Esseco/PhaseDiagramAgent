@@ -7,6 +7,14 @@ from phase_agent.analysis.cost.calibrate_relative_cost import calibrate_relative
 def estimate_proposal_cost(action, state):
     tool = action.get("tool")
     params = action.get("parameters") or {}
+    if tool == "prepare_local_batch_files" and params.get("mode") == "ordering_search_inputs":
+        preview = params.get("ordering_search_preview") or {}
+        return {
+            "workload": [{"stage": "independent_ordering_search", **preview.get("workload", {})}],
+            "estimated_total_cost": preview.get("estimated_relative_cost_upper"),
+            "cost_unit": "relative_cost",
+            "scope": "Input preparation only; separate manual computation",
+        }
     scope = params.get("module_execution_scope")
     if tool == "generate_branches" and scope:
         return {

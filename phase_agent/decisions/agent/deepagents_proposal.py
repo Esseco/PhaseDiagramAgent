@@ -363,6 +363,7 @@ def proposal_material(payload):
                 "early_branch_planning",
                 "workflow_policy",
                 "workflow_instruction",
+                "ordering_search_instruction",
                 "mc_entry_conditions",
                 "decision_feedback",
                 "decision_review_format",

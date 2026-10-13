@@ -106,7 +106,18 @@ def create_deepseek_client(
             count = evidence_row_count(context.get("qbc_candidates"))
         if payload.get("semantic_dialogue") is True:
             count = 0
-        json_ceiling = max(int(routine_max_tokens), min(16384, 1024 + 100 * count))
+        contracts = payload.get("output_contracts") or {}
+        scientific_json = any(
+            name in contracts
+            for name in ("scientific_decision", "post_dft_review", "generation_plan_item")
+        )
+        # Scientific reasoning plus per-candidate decisions/purposes need more
+        # space than a short dialogue. Respect the configured limit as well.
+        json_floor = 4096 if scientific_json else 1024
+        per_candidate = 160 if scientific_json else 100
+        json_ceiling = max(
+            int(max_tokens), int(routine_max_tokens), min(16384, json_floor + per_candidate * count)
+        )
         messages = [
             {
                 "role": "system",
@@ -151,6 +162,11 @@ def create_deepseek_client(
                 token_ceiling,
             )
         )
+        if scientific_json:
+            max_tokens_this_try = max(max_tokens_this_try, json_ceiling)
+        # One length retry gets real headroom, rather than reusing a capped
+        # request. Ordinary replies keep their original initial token budget.
+        retry_token_ceiling = max(token_ceiling, min(16384, token_ceiling * 2))
         input_tokens = output_tokens = 0
         last_error = None
 
@@ -232,7 +248,9 @@ def create_deepseek_client(
                     if reasoning_content:
                         thinking_this_try = "disabled"
                     token_ceiling = max(token_ceiling, json_ceiling)
-                    max_tokens_this_try = min(max(max_tokens_this_try * 2, 1200), token_ceiling)
+                    max_tokens_this_try = min(
+                        max(max_tokens_this_try * 2, 1200), retry_token_ceiling
+                    )
                 elif finish_reason in {"content_filter", "insufficient_system_resource", "aborted"}:
                     break
                 continue
@@ -250,7 +268,7 @@ def create_deepseek_client(
                 if finish_reason == "length":
                     thinking_this_try = "disabled"
                     max_tokens_this_try = min(
-                        max(max_tokens_this_try * 2, json_ceiling), token_ceiling
+                        max(max_tokens_this_try * 2, json_ceiling), retry_token_ceiling
                     )
                 elif finish_reason in {"content_filter", "insufficient_system_resource", "aborted"}:
                     break

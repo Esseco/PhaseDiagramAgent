@@ -20,6 +20,17 @@ def propose_agent_tool_action(
 
             decision_context = {
                 **(state.get("decision_context") or {}),
+                "ordering_search_instruction": (
+                    "独立TM排序搜索直接调用本地Process_AL_MC库：使用prepare_ordering_search操作，"
+                    "tool=prepare_local_batch_files、mode=ordering_search_inputs；显式给phase、tm_ratios、na_content，"
+                    "max_det_H或h_matrices二选一，可给reference_path、oxidation_states、options。"
+                    "不将例子中的元素、相或比例写死，不替用户猜Ni/Mn配比。"
+                    "Na不满时options.move_kind=na_tm，满Na时tm_only；重点输出不同TM排列，"
+                    "每个TM取已搜索到的最低能Na伴随排布，提供总排名和精确H排名CSV。"
+                    "默认pymatgen价态估算，也可提供显式中性电荷；静电能仅初始化。"
+                    "由程序冻结模型、母结构、H和工作量后经审批准备输入，不自行加载模型或提交作业。"
+                    "回收使用recover_ordering_search操作，plan_id必须来自已登记ordering_searches。"
+                ),
                 "workflow_policy": settings(config or {}),
                 "workflow_instruction": (
                     "统一闭环：Branch生成登记→Relax+MLIP-MC封装→回收→选择是否及对哪些候选做DFT→回收→比较继续搜索、补DFT、微调或数值收敛。"

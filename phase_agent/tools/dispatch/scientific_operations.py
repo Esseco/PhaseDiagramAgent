@@ -18,6 +18,20 @@ def _spec(tool, purpose, *, parameters=None, stage=None, targets="structure_ids"
 
 
 OPERATIONS = {
+    "prepare_ordering_search": _spec(
+        "prepare_local_batch_files",
+        "调用Process_AL_MC规划并准备独立TM/Na+TM搜索；需phase、tm_ratios、na_content，以及max_det_H或h_matrices二选一，可传oxidation_states与options",
+        parameters={"mode": "ordering_search_inputs"},
+        targets="none",
+        outputs=("ordering_search_preview", "input_archive", "workload"),
+    ),
+    "recover_ordering_search": _spec(
+        "prepare_local_batch_files",
+        "读取已登记独立搜索结果；parameters含plan_id和可选results_directory，结果不自动写入主相图或启动DFT",
+        parameters={"mode": "ordering_search_results"},
+        targets="none",
+        outputs=("global_ranking_csv", "all_joint_csv", "diagnostics_csv"),
+    ),
     "prepare_relax_mc_batch": _spec(
         "prepare_local_batch_files",
         "诊断并准备一次上传的Relax+最多三段MC封装",

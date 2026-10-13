@@ -174,6 +174,7 @@ def prepare_batch(*, action, context):
         "manager": data,
         "phase_references": references,
         "bootstrap_first_mc": plan["bootstrap_first_mc"],
+        "require_hull_before_first_mc": True,
         "stage_profiles": plan["stage_profiles"],
         "workload": plan["workload"],
         "seed": plan["seed"],
