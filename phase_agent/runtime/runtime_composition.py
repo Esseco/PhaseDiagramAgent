@@ -36,10 +36,16 @@ def compose_runtime(
     )
 
     base = config_file.parent
-    if (settings.get("shared_dft") or {}).get("diagram_id") == "diagram_default" and base.parent.name == "diagrams":
+    if (settings.get("shared_dft") or {}).get(
+        "diagram_id"
+    ) == "diagram_default" and base.parent.name == "diagrams":
         system_root = base.parent.parent
         descriptor_file = system_root / "system.json"
-        if descriptor_file.is_file() and json.loads(descriptor_file.read_text(encoding="utf-8")).get("default_diagram") == base.name:
+        if (
+            descriptor_file.is_file()
+            and json.loads(descriptor_file.read_text(encoding="utf-8")).get("default_diagram")
+            == base.name
+        ):
             base = system_root
     missing = [key for key in ("state_path", "ledger_path") if not settings.get(key)]
     if missing:
@@ -312,6 +318,8 @@ def compose_runtime(
     from phase_agent.runtime.runtime_backends import compose_runtime_backends
 
     kwargs = compose_runtime_backends(kwargs, settings, resolved_storage)
+    if settings.get("scientific_decision_policy"):
+        kwargs["scientific_decision_policy"] = deepcopy(settings["scientific_decision_policy"])
 
     def new_run():
         if (

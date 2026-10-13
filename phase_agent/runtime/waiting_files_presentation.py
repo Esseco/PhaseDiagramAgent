@@ -7,6 +7,29 @@ from phase_agent.runtime.response_preferences import detailed_response
 
 
 def waiting_file_lines(state):
+    owned = [
+        row
+        for row in state.get("tasks", [])
+        if awaiting_task_result(row) and row.get("relax_mc_bundle_id")
+    ]
+    if owned:
+        lines = []
+        for bid in dict.fromkeys(row["relax_mc_bundle_id"] for row in owned):
+            batch = (state.get("relax_mc_batches") or {}).get(bid) or {}
+            lines.extend(
+                [
+                    "Relax+MC 上传包：" + str(batch.get("upload_archive", "")),
+                    "上传并解压到独立目录，在该目录执行一次 `sbatch submit_all.sh`。",
+                    "将远端 results.zip 下载到："
+                    + str(batch.get("expected_results_archive", ""))
+                    + "，再说“继续”自动校验回收。",
+                ]
+            )
+        other = {
+            **state,
+            "tasks": [row for row in state.get("tasks", []) if not row.get("relax_mc_bundle_id")],
+        }
+        return lines + waiting_file_lines(other)
     if not detailed_response():
         return _brief_waiting_file_lines(state)
     return _detailed_waiting_file_lines(state)
@@ -17,6 +40,11 @@ def _brief_waiting_file_lines(state):
     refresh_ids = (
         set(refresh.get("task_ids") or []) if refresh.get("status") == "waiting_results" else None
     )
+    if refresh_ids is not None and not any(
+        awaiting_task_result(row) and row.get("task_id") in refresh_ids
+        for row in state.get("tasks", [])
+    ):
+        refresh_ids = None
     tasks = [
         row
         for row in state.get("tasks", [])
@@ -28,45 +56,31 @@ def _brief_waiting_file_lines(state):
     batches = [
         row for row in state.get("slurm_batches", []) if ids.intersection(row.get("task_ids") or [])
     ]
-    folders = []
-    for row in batches:
-        handoff = row.get("handoff") or {}
-        path = (
-            handoff.get("folder") or row.get("operation_directory") or row.get("upload_directory")
-        )
-        if path:
-            directory = Path(path)
-            # The recorded model-round directory contains all refresh operations.
-            folder = (
-                directory
-                if handoff.get("folder")
-                else next(
-                    (
-                        p
-                        for p in [directory, *directory.parents]
-                        if p.name.startswith("epoch") and "_" in p.name
-                    ),
-                    directory,
-                )
+    handoffs = [row.get("handoff") or {} for row in batches]
+    folders = list(
+        dict.fromkeys(
+            Path(h["folder"])
+            for h in handoffs
+            if h.get("folder")
+            and h.get("upload_archive")
+            and Path(h["upload_archive"]).is_file()
+            and all(
+                (Path(h["folder"]) / name).is_file()
+                for name in ("inputs.zip", "submit_all.sh", "dispatch_tasks.py")
             )
-            folders.append(folder)
-    if not folders:
-        for row in tasks:
-            if row.get("input_path"):
-                directory = Path(row["input_path"]).parent
-                folders.append(
-                    next(
-                        (
-                            p
-                            for p in [directory, *directory.parents]
-                            if p.name.startswith("epoch") and "_" in p.name
-                        ),
-                        directory,
-                    )
-                )
-    folders = list(dict.fromkeys(folders))
-    if not folders:
-        return ["本轮提交文件夹未记录，需先核对文件位置。"]
+        )
+    )
+    if not folders or any(
+        not h.get("folder")
+        or not all(
+            (Path(h["folder"]) / name).is_file()
+            for name in ("inputs.zip", "submit_all.sh", "dispatch_tasks.py")
+        )
+        for h in handoffs
+    ):
+        return [
+            "本轮压缩交互包尚未准备完整，需补齐 inputs.zip 和 submit_all.sh；内部 epoch 工作目录不能作为本轮提交文件夹。"
+        ]
     # Do not broaden unrelated rounds into an arbitrary common disk directory.
     links = [str(folder) for folder in folders]
     lines = ["本轮提交文件夹：" + "、".join(links)]
@@ -94,6 +108,11 @@ def _detailed_waiting_file_lines(state):
     refresh_ids = (
         set(refresh.get("task_ids") or []) if refresh.get("status") == "waiting_results" else None
     )
+    if refresh_ids is not None and not any(
+        awaiting_task_result(row) and row.get("task_id") in refresh_ids
+        for row in state.get("tasks", [])
+    ):
+        refresh_ids = None
     tasks = [
         row
         for row in state.get("tasks", [])

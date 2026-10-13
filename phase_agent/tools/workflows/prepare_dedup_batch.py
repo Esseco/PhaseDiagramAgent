@@ -61,7 +61,13 @@ def prepare_dedup_batch(
         total = (budget_limits or {}).get("total_relative_cost")
         used = float((current.get("budget_usage") or {}).get("total_relative_cost", 0) or 0)
         reserved = float(current.get("reserved_relative_cost", 0) or 0)
-        if total is not None and used + reserved + cost > float(total):
+        from phase_agent.tools.budget.check_budget import budget_is_hard
+
+        if (
+            budget_is_hard(budget_limits)
+            and total is not None
+            and used + reserved + cost > float(total)
+        ):
             return {"status": "budget_exhausted", "state": current, "tasks": tasks}
         current.setdefault("budget_reservations", {})[key] = {
             "status": "reserved",

@@ -12,6 +12,9 @@ def prepare_react_proposal(frame):
     current = frame["current"]
     context = frame.get("context") or {}
     key = frame["invocation_id"] or "__single_interactive_action__"
+    from phase_agent.tools.workflows.mc_coverage_choice import resolve
+    resolved=resolve(frame)
+    if resolved is not None:return resolved
     stored = current["pending_execution_policies"].get(key)
     feedback = frame.get("human_feedback")
     decision = feedback.get("decision") if isinstance(feedback, dict) else feedback

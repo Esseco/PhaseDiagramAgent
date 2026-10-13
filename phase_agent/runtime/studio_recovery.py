@@ -36,7 +36,7 @@ def can_resume_message(config_path, message_identity):
     path = state_path.resolve().parent / "langgraph_lifecycle.sqlite"
     if not path.is_file():
         return False
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     from phase_agent.graphs.scientific_graph import scientific_graph
 
     connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, check_same_thread=False)

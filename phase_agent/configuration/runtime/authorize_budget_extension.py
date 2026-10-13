@@ -18,8 +18,27 @@ _LEGACY_MC_STEP_COST_FACTOR = 1.0
 def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False):
     from phase_agent.configuration.runtime.authorize_generation_policy_revision import (
         authorize_second_mc_segment_revision,
+        authorize_generation_policy_revision,
     )
 
+    if (state.get("confirmed_config") or {}).get("workflow") != confirmed_snapshot["config"].get(
+        "workflow"
+    ):
+        policy = authorize_generation_policy_revision(
+            state,
+            confirmed_snapshot,
+            allowed_paths={
+                ("workflow", "branch_batch_size"),
+                ("workflow", "finetune_min_new_dft"),
+                ("workflow", "finetune_max_new_dft"),
+            },
+        )
+        if policy["status"] == "rebound":
+            return policy
+        if policy["status"] == "active_work":
+            return {**policy, "status": "rejected_active_work"}
+        if policy["status"] == "rejected_invalid_workflow_policy":
+            return policy
     second_mc = authorize_second_mc_segment_revision(state, confirmed_snapshot)
     if second_mc["status"] != "not_applicable":
         return second_mc
@@ -60,9 +79,9 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
     ):
         from phase_agent.tools.state.task_waiting import awaiting_task_result
 
-        if any(
-            awaiting_task_result(t) for t in current.get("tasks") or []
-        ) or current.get("pending_execution_policies"):
+        if any(awaiting_task_result(t) for t in current.get("tasks") or []) or current.get(
+            "pending_execution_policies"
+        ):
             return {
                 "status": "rejected_active_work",
                 "state": current,
@@ -85,8 +104,8 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
             "from": old_version,
             "to": new_version,
         }
-    normalized_old, compatibility, compatibility_rejection = (
-        _normalize_legacy_mace_relax_defaults(current, old or {}, new, old_version)
+    normalized_old, compatibility, compatibility_rejection = _normalize_legacy_mace_relax_defaults(
+        current, old or {}, new, old_version
     )
     comparison_old = normalized_old if normalized_old is not None else (old or {})
     policy_changes = _approved_mc_policy_changes(comparison_old, new)
@@ -111,11 +130,7 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
         compared_old,
         compared_new,
     )
-    if (
-        not old
-        or changed_fields
-        or (compatibility_rejection and normalized_old is None)
-    ):
+    if not old or changed_fields or (compatibility_rejection and normalized_old is None):
         return {
             "status": "rejected_non_budget_change",
             "state": current,
@@ -124,9 +139,7 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
             "changed_fields": changed_fields,
             "compatibility_rejection": compatibility_rejection,
         }
-    if not _non_decreasing(
-        _migratable_budget_limits(old), _migratable_budget_limits(new)
-    ):
+    if not _non_decreasing(_migratable_budget_limits(old), _migratable_budget_limits(new)):
         return {
             "status": "rejected_budget_decrease",
             "state": current,
@@ -186,18 +199,14 @@ def _approved_mc_policy_changes(old, new):
             continue
         before_is_implicit = not _path_exists(old, field)
         effective_before = _LEGACY_MC_STEP_COST_FACTOR if before_is_implicit else before
-        if not (
-            _positive_finite_number(effective_before) and _positive_finite_number(after)
-        ):
+        if not (_positive_finite_number(effective_before) and _positive_finite_number(after)):
             return None
         changes.append(
             {
                 "field": field,
                 "from": float(effective_before),
                 "to": float(after),
-                "from_basis": "implicit_default"
-                if before_is_implicit
-                else "configured",
+                "from_basis": "implicit_default" if before_is_implicit else "configured",
             }
         )
     if changes and not _mc_cost_factors_consistent(new):
@@ -312,9 +321,7 @@ def _non_decreasing(old, new):
     for key, value in old.items():
         replacement = new.get(key)
         if isinstance(value, dict):
-            if not isinstance(replacement, dict) or not _non_decreasing(
-                value, replacement
-            ):
+            if not isinstance(replacement, dict) or not _non_decreasing(value, replacement):
                 return False
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
             if (
@@ -338,8 +345,7 @@ def _migratable_budget_limits(config):
     stage_limits = {
         stage: {key: row[key] for key in ("max_cost", "max_tasks") if key in row}
         for stage, row in (budgets.get("stage_limits") or {}).items()
-        if isinstance(row, dict)
-        and any(key in row for key in ("max_cost", "max_tasks"))
+        if isinstance(row, dict) and any(key in row for key in ("max_cost", "max_tasks"))
     }
     if stage_limits:
         limits["budgets"]["stage_limits"] = stage_limits
@@ -359,9 +365,7 @@ def _migratable_budget_limits(config):
         limits["budgets"]["llm_limits"] = llm_limits
     strategy = config.get("round_strategy") or {}
     round_limits = {
-        key: strategy[key]
-        for key in ("maximum_mc_budget", "maximum_dft_budget")
-        if key in strategy
+        key: strategy[key] for key in ("maximum_mc_budget", "maximum_dft_budget") if key in strategy
     }
     if round_limits:
         limits["round_strategy"] = round_limits
@@ -410,9 +414,7 @@ def _normalize_legacy_mace_relax_defaults(state, old, new, old_version):
     if isinstance(tasks, dict):
         tasks = list(tasks.values())
     relax_tasks = [
-        task
-        for task in tasks
-        if isinstance(task, dict) and task.get("stage") in relax_stages
+        task for task in tasks if isinstance(task, dict) and task.get("stage") in relax_stages
     ]
     if not relax_tasks:
         return None, None, "没有可核对的旧 Relax 任务结果"

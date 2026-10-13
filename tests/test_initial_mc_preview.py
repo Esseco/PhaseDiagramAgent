@@ -5,6 +5,10 @@ from phase_agent.tools.workflows.prepare_mc_preview import prepare_mc_preview
 
 
 def test_model_mc_steps_cost_and_coverage_are_distinct(monkeypatch):
+    monkeypatch.setattr(
+        "phase_agent.analysis.phase.branch_relax_hull.rank_relaxed_branches",
+        lambda *args, **kwargs: ([], []),
+    )
     preview = {
         "requested_steps": 60,
         "estimated_relative_cost": 12.1,

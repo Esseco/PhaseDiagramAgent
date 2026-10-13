@@ -1,6 +1,7 @@
 """Choose the safe next preparation step from confirmed local search state."""
 
 import hashlib
+from phase_agent.tools.budget.check_budget import budget_is_hard
 import json
 from fractions import Fraction
 from pathlib import Path
@@ -106,6 +107,8 @@ def choose_debug_next_action(
         if stage_limit.get("max_tasks") is not None
         else float("inf")
     )
+    if not budget_is_hard(budget):
+        remaining, tasks_left = float("inf"), float("inf")
     count = min(3, int((config.get("bohb") or {}).get("relax_structures_per_branch", 3)))
     selected, cost, structures = [], 0.0, 0
     branches = manager.data.get("branches") or {}
@@ -366,7 +369,7 @@ def _mc_action_from_completed_relax(
         else int(raw_budget)
     )
     maximum = strategy.get("maximum_mc_budget")
-    if maximum is not None:
+    if maximum is not None and budget_is_hard(config.get("budgets")):
         mc_budget = min(mc_budget, int(maximum))
     if mc_budget <= 0:
         return None
@@ -413,7 +416,7 @@ def _mc_action_from_completed_relax(
         },
         "budget": preview["estimated_relative_cost"],
         "reason": (
-            "首轮 MC 已完成；结合首轮结果、当前相图 Ehull、相分层和预算，提出一次第二轮 MC 分配。"
+            "首轮 MC 已完成；结合首轮结果、当前相图 Ehull、相分层和预算，提出下一次 MC 追加分配（每模型最多两次追加）。"
             + (
                 f"当前相图缺少唯一 Ehull/atom 匹配的 {missing_count} 个 branch，已排除。"
                 if missing_count

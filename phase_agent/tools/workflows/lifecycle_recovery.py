@@ -29,6 +29,18 @@ def _collect_workflow_results(frame):
     from phase_agent.tools.local.recover_remote_training import recover_remote_training
 
     loaded_state, training_returns = recover_remote_training(loaded_state)
+    if loaded_state.get("relax_mc_batches"):
+        from phase_agent.tools.relax_mc_batch.results import recover_available
+
+        loaded_state = recover_available(
+            loaded_state,
+            {
+                "manager": manager,
+                "effective_config": effective_config,
+                "config_version": frame["snapshot"]["config_version"],
+                "phase_references": frame["phase_references"],
+            },
+        )
     collector = task_runner or result_collector
     if collector is not None:
         if hasattr(collector, "collect_results_with_report"):
@@ -129,6 +141,9 @@ def _analyze_workflow_results(frame):
         phase_identification_cache_path=phase_cache_path,
     )
     from phase_agent.analysis.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
+    from phase_agent.tools.cost.gpu_usage_ledger import update_gpu_usage
+
+    update_gpu_usage(feedback["state"], effective_config, combined_results)
 
     feedback["state"] = update_local_mlip_hull_pool(
         feedback["state"],
@@ -187,10 +202,16 @@ def _workflow_wait_gate(frame):
     rebuilding = frame["rebuilding"]
     runtime_path = state_path or effective_config.get("state_path")
     from phase_agent.tools.workflows.reference_dft_startup import startup_gate
-    human=frame.get('human_feedback')
-    startup=startup_gate(feedback['state'],effective_config,message=(frame.get('runtime_adapters') or {}).get('user_message'),decision=human.get('decision') if isinstance(human,dict) else human)
+
+    human = frame.get("human_feedback")
+    startup = startup_gate(
+        feedback["state"],
+        effective_config,
+        message=(frame.get("runtime_adapters") or {}).get("user_message"),
+        decision=human.get("decision") if isinstance(human, dict) else human,
+    )
     if startup is not None:
-        _save_runner_state(startup['state'],runtime_path)
+        _save_runner_state(startup["state"], runtime_path)
         return startup
     if runtime_path:
         from phase_agent.graphs.execution_recovery_graph import execution_recovery_report

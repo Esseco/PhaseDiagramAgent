@@ -4,6 +4,9 @@ from copy import deepcopy
 
 
 _ALLOWED = {
+    ("workflow", "branch_batch_size"),
+    ("workflow", "finetune_min_new_dft"),
+    ("workflow", "finetune_max_new_dft"),
     ("run", "total_quota"),
     ("run", "batch_size"),
     ("run", "initial_states_per_branch"),
@@ -28,6 +31,16 @@ def authorize_generation_policy_revision(state, confirmed_snapshot, *, allowed_p
     new = deepcopy(confirmed_snapshot.get("config") or {})
     if not old or not _same_outside_allowed(old, new, allowed_paths=allowed_paths):
         return {"status": "rejected_scientific_change", "state": current}
+    from phase_agent.tools.policy.workflow_policy import settings
+
+    try:
+        settings(new)
+    except (ValueError, TypeError) as error:
+        return {
+            "status": "rejected_invalid_workflow_policy",
+            "state": current,
+            "reason": str(error),
+        }
     if not _no_active_work(current):
         return {"status": "active_work", "state": current}
     if not _non_decreasing_relax_limit(old, new):
@@ -96,6 +109,14 @@ def _remove(tree, path):
 
 
 def _no_active_work(state):
+    from phase_agent.tools.workflows.model_refresh_state import refresh_active
+
+    if refresh_active(state) or any(
+        not row.get("activated")
+        and row.get("status") not in {"failed", "rejected", "cancelled", "abandoned", "superseded"}
+        for row in (state.get("remote_finetune_jobs") or {}).values()
+    ):
+        return False
     active = {"pending", "planned", "reserved", "submitted", "running", "queued"}
     if any((row or {}).get("status") in active for row in state.get("tasks") or []):
         return False

@@ -124,7 +124,9 @@ def request_validated_action(agent_client, payload):
 
     contracts["action_common_fields"] = ActionEnvelope.model_json_schema()
     if payload.get("unified_dialogue"):
-        from phase_agent.decisions.agent.dialogue_contract import dialogue_output_contract
+        from phase_agent.decisions.agent.dialogue_contract import (
+            dialogue_output_contract,
+        )
 
         contracts["dialogue_outcome"] = dialogue_output_contract(
             allow_controls=context.get("conversation_controls") is True
@@ -149,7 +151,9 @@ def request_validated_action(agent_client, payload):
 
         contracts["dft_decision_item"] = DFTDecision.model_json_schema()
     if "generate_branches" in payload.get("allowed_tools", []):
-        from phase_agent.decisions.agent.generation_contracts import GenerationAllocation
+        from phase_agent.decisions.agent.generation_contracts import (
+            GenerationAllocation,
+        )
 
         contracts["generation_plan_item"] = GenerationAllocation.model_json_schema()
     if contracts:
@@ -159,7 +163,10 @@ def request_validated_action(agent_client, payload):
 
         payload = {
             **payload,
-            "output_contracts": {**contracts, "post_dft_review": PostDFTReview.model_json_schema()},
+            "output_contracts": {
+                **contracts,
+                "post_dft_review": PostDFTReview.model_json_schema(),
+            },
             "instruction": payload["instruction"] + " " + review_output_instruction(),
         }
     if context.get("training_already_completed") or context.get("training_validation_planning"):
@@ -178,6 +185,9 @@ def request_validated_action(agent_client, payload):
             **payload,
             "instruction": payload.get("instruction", "") + " " + round_budget_instruction(),
         }
+    from phase_agent.decisions.agent.scientific_decisions import attach_decision_contract
+
+    payload = attach_decision_contract(payload)
     usages = []
 
     def tracked_client(request):
@@ -217,7 +227,10 @@ def request_validated_action(agent_client, payload):
     from phase_agent.decisions.agent.generation_plan import derive_generation_totals
 
     action = derive_generation_totals(action)
-    from phase_agent.decisions.agent.dialogue_contract import is_dialogue, dialogue_errors
+    from phase_agent.decisions.agent.dialogue_contract import (
+        is_dialogue,
+        dialogue_errors,
+    )
 
     if is_dialogue(action):
         from phase_agent.decisions.agent.dialogue_contract import normalize_dialogue
@@ -227,16 +240,11 @@ def request_validated_action(agent_client, payload):
         if errors and payload.get("unified_dialogue") is True:
             # One correction, still restricted to conversation; never turn an
             # invalid answer into scientific execution or approval.
-            repaired = tracked_client(
-                {
-                    **payload,
-                    "mode": "dialogue_contract_repair",
-                    "invalid_action": action,
-                    "validation_errors": errors,
-                    "instruction": payload.get("instruction", "")
-                    + " Repair the dialogue JSON once using the supplied dialogue schema and original user request. Return a dialogue kind only. Never add tools, parameters, patches or approval. Do not invent facts or claim execution.",
-                }
+            from phase_agent.decisions.agent.prepare_llm_request import (
+                dialogue_repair_request,
             )
+
+            repaired = tracked_client(dialogue_repair_request(payload, action, errors))
             if not is_dialogue(repaired):
                 errors = ["dialogue repair must remain a dialogue outcome"]
             else:
@@ -278,6 +286,32 @@ def request_validated_action(agent_client, payload):
             raise ValueError("Invalid budget trade-off: " + "; ".join(errors))
         if context.get("post_dft_assessment") and post_dft_review_errors(action):
             raise ValueError("Budget repair must preserve valid post_dft_review")
+    from phase_agent.decisions.agent.scientific_decisions import scientific_decision_errors
+
+    brief = context.get("scientific_decision_brief") or {}
+    if (brief.get("policy") or {}).get("schema_version") == 1:
+        errors = scientific_decision_errors(action, brief, context)
+        if errors:
+            action = tracked_client(
+                {
+                    **payload,
+                    "mode": "scientific_decision_repair",
+                    "invalid_action": action,
+                    "validation_errors": errors,
+                    "instruction": payload.get("instruction", "")
+                    + " Return one complete corrected action, once; do not change scientific conclusions merely to pass formatting.",
+                }
+            )
+            errors = scientific_decision_errors(action, brief, context)
+            if errors:
+                error = ValueError("Invalid scientific decision: " + "; ".join(errors))
+                if usages:
+                    error.llm_usage = combined_usage()
+                raise error
+        if context.get("post_dft_assessment") and post_dft_review_errors(action):
+            raise ValueError("Scientific decision repair must preserve post_dft_review")
+        if round_budget_review_errors(action, context):
+            raise ValueError("Scientific decision repair must preserve budget trade-off")
     action = derive_generation_totals(action)
     if usages and isinstance(action, dict):
         action["_llm_usage"] = combined_usage()

@@ -123,7 +123,13 @@ class RunWorkflowChatHandler:
             return reply  # Progress already contains its stage; avoid duplicate headers.
         from phase_agent.graphs.dialogue.memory import remember_turn
 
-        remember_turn(self.state_path, conversation_id, _latest_user_message(messages), reply)
+        remember_turn(
+            self.state_path,
+            conversation_id,
+            _latest_user_message(messages),
+            reply,
+            facts_signature=(getattr(self, "turn_context", {}) or {}).get("facts_signature"),
+        )
         if read_only_reply:
             return reply
         state = read_json(self.state_path, {}) or {}

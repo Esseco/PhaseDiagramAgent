@@ -26,12 +26,62 @@ def safe_path(root, name):
 
 
 def save(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     with temporary.open("w", encoding="utf-8") as stream:
         json.dump(payload, stream, indent=2)
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
+
+
+def preflight_models(root, jobs):
+    """Check all selected MLIP dependencies before submitting any child job."""
+    required = {}
+    for job in jobs:
+        directory = safe_path(root, job).parent
+        for source in directory.rglob("task.json"):
+            task = json.loads(source.read_text(encoding="utf-8"))
+            worker = task.get("worker_job") or {}
+            evidence = {r.get("model_path"): r for r in worker.get("model_file_evidence") or []}
+            paths = worker.get("model_paths") or (
+                [worker["model_path"]] if worker.get("model_path") else []
+            )
+            if worker and task.get("stage") in {"relax_and_feature", "deep_search"} and not paths:
+                raise ValueError("MLIP model path missing; no child jobs submitted: " + str(source))
+            for name in paths:
+                path = Path(name)
+                if not path.is_absolute():
+                    path = source.parent / path
+                row = evidence.get(name) or {}
+                key = str(path.resolve())
+                old = required.get(key)
+                if (
+                    old
+                    and old.get("sha256")
+                    and row.get("sha256")
+                    and old["sha256"] != row["sha256"]
+                ):
+                    raise ValueError("Conflicting model identity: " + key)
+                required[key] = row if row.get("sha256") or not old else old
+    missing = [name for name in required if not Path(name).is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "remote_model_not_found: HPC model files missing; no child jobs submitted. Correct the remote path or restore weights on HPC, then retry. Local weights are not required: "
+            + "; ".join(missing)
+        )
+    for name, row in required.items():
+        path = Path(name)
+        if row.get("size_bytes") is not None and path.stat().st_size != row["size_bytes"]:
+            raise ValueError("Model size mismatch; no child jobs submitted: " + name)
+        if row.get("sha256"):
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+            if digest.hexdigest() != row["sha256"]:
+                raise ValueError("Model checksum mismatch; no child jobs submitted: " + name)
+    return len(required)
 
 
 def run(root):
@@ -112,6 +162,22 @@ def run(root):
                 if not target.exists():
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(archive.read(row["path"]))
+        try:
+            preflight_models(
+                root,
+                [job for job in jobs if receipt["jobs"].get(job, {}).get("status") != "submitted"],
+            )
+        except (FileNotFoundError, ValueError, PermissionError) as error:
+            receipt["model_preflight"] = {
+                "status": "failed",
+                "error": str(error),
+                "location": "remote",
+                "remedy": "Correct the HPC model reference or restore the recorded weights on HPC; local model download is not required. Already submitted jobs must not be submitted again.",
+            }
+            save(receipt_path, receipt)
+            save(root / "return-results" / "dispatch-error.json", receipt["model_preflight"])
+            raise
+        receipt.pop("model_preflight", None)
         submitted = 0
         for job in jobs:
             if receipt["jobs"].get(job, {}).get("status") == "submitted":

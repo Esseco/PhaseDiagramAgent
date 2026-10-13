@@ -18,6 +18,10 @@ def build_tool_action_graph(
     group_actions=False,
 ):
     from langgraph.graph import StateGraph, START, END
+    from phase_agent.tools.dispatch.scientific_operations import operation_catalog
+
+    operations = operation_catalog(list(registry))
+    operation_names = {row["operation"] for row in operations}
 
     nodes = create_tool_nodes(
         initialize=initialize,
@@ -46,6 +50,8 @@ def build_tool_action_graph(
             from phase_agent.graphs.actions.groups import group_for
 
             return group_for(state["selected_tool"])
+        if state.get("selected_operation") in operation_names:
+            return "operation__" + state["selected_operation"]
         return "tool__" + state["selected_tool"] if state["selected_tool"] else "audit_outcome"
 
     graph = StateGraph(ToolActionState, context_schema=WorkflowRuntime)
@@ -68,17 +74,26 @@ def build_tool_action_graph(
             groups.setdefault(group_for(name), []).append(name)
         graph.add_conditional_edges("validate_action", route_tool, ["audit_outcome", *groups])
         for group, names in groups.items():
-            graph.add_node(group, build_action_group(names, nodes["dispatch"], group))
+            graph.add_node(
+                group, build_action_group(names, nodes["dispatch"], group, operations=operations)
+            )
             graph.add_edge(group, "audit_outcome")
     else:
         graph.add_conditional_edges(
             "validate_action",
             route_tool,
-            ["audit_outcome", *("tool__" + name for name in registry)],
+            [
+                "audit_outcome",
+                *("tool__" + name for name in registry),
+                *("operation__" + name for name in operation_names),
+            ],
         )
         for name in registry:
             graph.add_node("tool__" + name, nodes["dispatch"])
             graph.add_edge("tool__" + name, "audit_outcome")
+        for name in operation_names:
+            graph.add_node("operation__" + name, nodes["dispatch"])
+            graph.add_edge("operation__" + name, "audit_outcome")
     graph.add_edge("audit_outcome", END)
     compiled = graph.compile(checkpointer=False, name="approved_scientific_action")
     from phase_agent.graphs.subgraph_visibility import expose_child
@@ -87,6 +102,8 @@ def build_tool_action_graph(
         for group in groups:
             expose_child(compiled, group, graph.nodes[group].runnable)
     compiled.registered_scientific_tools = frozenset(registry)
+    compiled.scientific_operations = operation_catalog(registry=registry)
+    compiled.registered_operation_contracts = operations
     return compiled
 
 

@@ -1,6 +1,6 @@
 """Enforce confirmed config, frozen parameters, budget, state and ownership."""
 
-from phase_agent.tools.budget.check_budget import check_budget
+from phase_agent.tools.budget.check_budget import check_budget, budget_is_hard
 from phase_agent.science.bohb.check_bohb_task_ownership import check_bohb_task_ownership
 from phase_agent.configuration.schema.validate_strategy_adjustment import (
     validate_strategy_adjustment,
@@ -12,7 +12,10 @@ from phase_agent.configuration.schema.action_state_schema import (
 
 
 def validate_tool_action(action: dict, state: dict, session: dict, registry: dict) -> dict:
-    action = normalize_action(action)
+    try:
+        action = normalize_action(action)
+    except (ValueError, TypeError) as error:
+        return {"valid": False, "errors": [str(error)]}
     errors = []
     errors.extend(validate_action_schema(action))
     snapshot = session.get("confirmed_snapshot") if session.get("status") == "confirmed" else None
@@ -20,6 +23,33 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         errors.append("configuration_not_confirmed")
         return {"valid": False, "errors": errors}
     config = snapshot["config"]
+    from phase_agent.tools.dispatch.scientific_operations import operation_binding_errors
+
+    model = state.get("active_model") or config.get("mlip") or {}
+    errors.extend(
+        operation_binding_errors(
+            action,
+            config_version=snapshot["config_version"],
+            model_version=state.get("active_model_version")
+            or model.get("version")
+            or model.get("name"),
+        )
+    )
+    if action.get("scientific_decision") is not None:
+        from phase_agent.decisions.agent.scientific_decisions import scientific_decision_errors
+
+        errors.extend(
+            scientific_decision_errors(
+                action,
+                {
+                    "config_version": snapshot["config_version"],
+                    "model_version": state.get("active_model_version")
+                    or model.get("version")
+                    or model.get("name"),
+                },
+                {"post_dft_assessment": action.get("post_dft_review")},
+            )
+        )
     tool = action.get("tool")
     bound_version = state.get("confirmed_config_version")
     if bound_version is not None and bound_version != snapshot["config_version"]:
@@ -53,6 +83,9 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         )
         if disabled:
             errors.append(f"disabled_generation_strategies:{','.join(disabled)}")
+    from phase_agent.tools.policy.workflow_policy import action_errors
+
+    errors.extend(action_errors(action, state, config))
     supplied_paths = _flatten_paths(parameters)
     for path in config.get("frozen_parameters") or []:
         if any(
@@ -107,7 +140,11 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         used = ((state.get("budget_usage") or {}).get("total_relative_cost") or 0) + (
             state.get("reserved_relative_cost") or 0
         )
-        if total_limit is not None and used + budget > total_limit:
+        if (
+            budget_is_hard(config.get("budgets"))
+            and total_limit is not None
+            and used + budget > total_limit
+        ):
             errors.append("reserved_total_cost_limit")
     if tool == "select_dft_candidates" and registry.get(tool, {}).get("owner") != "decision_layer":
         errors.append("dft_selection_owner_invalid")
@@ -131,6 +168,7 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
             and not isinstance(mc_budget, bool)
             and maximum_mc_budget is not None
             and mc_budget > int(maximum_mc_budget)
+            and budget_is_hard(config.get("budgets"))
         ):
             errors.append("mc_budget_exceeds_configured_maximum")
         exploration = parameters.get("exploration_fraction")
@@ -162,7 +200,14 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
             if adjustment["requires_user_confirmation"]:
                 errors.append("hard_constraint_change_requires_confirmation")
             errors.extend(f"strategy_adjustment_rejected:{item}" for item in adjustment["rejected"])
-    return {"valid": not errors, "errors": errors, "config_version": snapshot["config_version"]}
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "config_version": snapshot["config_version"],
+        "budget_warnings": check.get("warnings", [])
+        if isinstance(budget, (int, float)) and budget >= 0
+        else [],
+    }
 
 
 def _flatten_paths(value, prefix=""):

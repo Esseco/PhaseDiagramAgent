@@ -148,7 +148,11 @@ def create_lifecycle_nodes(
                 if context.stages.get("durable"):
                     from phase_agent.graphs.business_checkpoint import checkpoint_frame
 
-                    update["business_frame"] = checkpoint_frame(context.frame)
+                    projected = checkpoint_frame(context.frame)
+                    if projected != (state.get("business_frame") or {}):
+                        # Preserve the existing channel version for observation
+                        # nodes that did not change durable business facts.
+                        update["business_frame"] = projected
                     if context.response is not None:
                         import json
 

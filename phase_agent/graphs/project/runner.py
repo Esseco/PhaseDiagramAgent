@@ -14,7 +14,7 @@ def run_search_workflow_graph(
         from pathlib import Path
         from copy import copy
         from filelock import FileLock
-        from langgraph.checkpoint.sqlite import SqliteSaver
+        from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
 
         path = Path(checkpoint_path)
         path.parent.mkdir(parents=True, exist_ok=True)

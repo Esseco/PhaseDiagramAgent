@@ -166,7 +166,11 @@ def run_mace_worker(job: dict) -> dict:
     parameters.pop("actual_step_limit_parameter", None)
     patience_steps = parameters.get("patience_steps", parameters.get("patience"))
     min_improvement = parameters.get("min_improvement")
-    if "patience_steps" in parameters and "patience" not in parameters:
+    if min_improvement is None or job.get("stopping_threshold_source") == "library_default":
+        # Leaving this argument absent preserves the calculation library default.
+        parameters.pop("min_improvement", None)
+        min_improvement = None
+    if "patience_steps" in parameters:
         parameters["patience"] = parameters.pop("patience_steps")
 
     model_paths = job.get("model_paths")

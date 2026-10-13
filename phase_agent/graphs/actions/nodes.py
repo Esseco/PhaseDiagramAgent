@@ -55,7 +55,11 @@ def create_tool_nodes(
                 "含义": "通过校验后的路线选择，不代表工具执行成功",
             },
         )
-        return {"phase": "validated", "selected_tool": selected}
+        return {
+            "phase": "validated",
+            "selected_tool": selected,
+            "selected_operation": context.frame["action"].get("operation", "") if selected else "",
+        }
 
     def dispatch_node(state, runtime: Runtime[WorkflowRuntime]):
         context = require_runtime(runtime)

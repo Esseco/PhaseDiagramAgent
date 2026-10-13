@@ -2,11 +2,38 @@
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
 
 DRIVER = Path(__file__).with_name("submission_dispatcher.py").read_text(encoding="utf-8")
+
+
+def dispatcher_gpu_directive(first_script):
+    """Match the child job's GPU kind but reserve only one GPU for dispatch."""
+    for line in first_script.splitlines():
+        if not line.startswith("#SBATCH"):
+            continue
+        match = re.search(r"--gres(?:=|\s+)([^\s]+)", line)
+        if match:
+            for resource in match.group(1).split(","):
+                parts = resource.split(":")
+                if parts[0] == "gpu" and (
+                    len(parts) == 1 or not parts[-1].isdigit() or int(parts[-1]) > 0
+                ):
+                    kind = ":".join(parts[1:-1]) if parts[-1].isdigit() else ":".join(parts[1:])
+                    return "#SBATCH --gres=gpu:" + (kind + ":" if kind else "") + "1"
+        match = re.search(r"(?:--gpus(?:-per-node|-per-task)?|-G)(?:=|\s+)([^\s]+)", line)
+        if match:
+            parts = match.group(1).split(":")
+            if parts[-1].isdigit() and int(parts[-1]) > 0:
+                kind = ":".join(parts[:-1])
+                return "#SBATCH --gres=gpu:" + (kind + ":" if kind else "") + "1"
+    # This project's configured queue has an explicit minimum-one-GPU policy.
+    if re.search(r"--partition(?:=|\s+)v100m3(?:\s|$)", first_script):
+        return "#SBATCH --gres=gpu:1"
+    return ""
 
 
 def write_dispatch_entry(folder, first_script):
@@ -16,8 +43,10 @@ def write_dispatch_entry(folder, first_script):
     dispatcher = folder / "dispatch_tasks.py"
     dispatcher.write_text(DRIVER, encoding="utf-8", newline="\n")
     partition = next(
-        (line for line in first_script.splitlines() if line.startswith("#SBATCH --partition")), ""
+        (line for line in first_script.splitlines() if line.startswith("#SBATCH --partition")),
+        "",
     )
+    gpu = dispatcher_gpu_directive(first_script)
     activation = next(
         (
             line
@@ -30,6 +59,7 @@ def write_dispatch_entry(folder, first_script):
         script,
         "#!/usr/bin/env bash\n#SBATCH --job-name=phase-dispatch\n#SBATCH -N 1\n#SBATCH -n 1\n#SBATCH --mem=2G\n#SBATCH --time=00:20:00\n#SBATCH --output=dispatch-%j.out\n#SBATCH --error=dispatch-%j.err\n"
         + (partition + "\n" if partition else "")
+        + (gpu + "\n" if gpu else "")
         + 'set -euo pipefail\n: "${SLURM_JOB_ID:?Use sbatch submit_all.sh}"\ncd -- "${SLURM_SUBMIT_DIR:?Missing Slurm submit directory}"\n'
         + (activation + "\n" if activation else "")
         + 'python3 dispatch_tasks.py "$PWD"\n',
@@ -79,7 +109,8 @@ def prepare_handoff(directory, scripts):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
         shutil.copy2(
-            Path(__file__).with_name("transfer_bundle.py"), portable / "_round_transfer.py"
+            Path(__file__).with_name("transfer_bundle.py"),
+            portable / "_round_transfer.py",
         )
         (portable / "submission_plan.json").write_text(
             json.dumps({"schema": 1, "scripts": scripts}), encoding="utf-8"
@@ -114,7 +145,10 @@ def prepare_handoff(directory, scripts):
             identity.update(hashlib.sha256(source.read_bytes()).digest())
         key = identity.hexdigest()[:16]
         base = next((p for p in directory.parents if p.name == "submissions"), directory.parent)
-        from phase_agent.tools.remote.handoff_naming import handoff_label, package_folder
+        from phase_agent.tools.remote.handoff_naming import (
+            handoff_label,
+            package_folder,
+        )
 
         label = handoff_label(directory, scripts)
         folder = package_folder(base / "archives" / "01-upload", label, key)
@@ -149,7 +183,11 @@ def prepare_batch_handoff(state, batch):
         if handoff_root(Path(row["upload_directory"]).parent.parent) != directory:
             continue
         members = [tasks.get(t, {}) for t in row.get("task_ids", [])]
-        if not members or any(t.get("status") != "pending" for t in members):
+        from phase_agent.tools.state.task_waiting import awaiting_task_result
+
+        if not members or any(
+            t.get("status") != "pending" or not awaiting_task_result(t) for t in members
+        ):
             continue
         selected.append(row)
     if not selected:
@@ -192,6 +230,52 @@ def ensure_waiting_handoffs(state):
         if current and current != prior:
             base = next((p for p in directory.parents if p.name == "submissions"), None)
             if base:
-                from phase_agent.tools.remote.submission_layout import write_submission_index
+                from phase_agent.tools.remote.submission_layout import (
+                    write_submission_index,
+                )
 
                 write_submission_index(base, state)
+
+
+def finalize_prepared_handoffs(state):
+    """Make delivery part of preparation, with explicit recoverable failure facts."""
+    try:
+        ensure_waiting_handoffs(state)
+    except Exception as error:
+        return {
+            "status": "not_configured",
+            "state": state,
+            "reason": f"submission_handoff_preparation_failed:{error}",
+            "submitted": False,
+        }
+    from phase_agent.tools.state.task_waiting import awaiting_task_result
+
+    waiting_ids = {t.get("task_id") for t in state.get("tasks", []) if awaiting_task_result(t)}
+    batches = [
+        b
+        for b in state.get("slurm_batches", [])
+        if waiting_ids.intersection(b.get("task_ids", []))
+        and b.get("status") == "prepared"
+        and not b.get("job_id")
+    ]
+    missing = []
+    handoffs = {}
+    for batch in batches:
+        handoff = batch.get("handoff") or {}
+        folder = Path(handoff["folder"]) if handoff.get("folder") else None
+        if folder is None or not all(
+            (folder / name).is_file()
+            for name in ("inputs.zip", "submit_all.sh", "dispatch_tasks.py")
+        ):
+            missing.append(batch.get("batch_id"))
+        else:
+            handoffs[str(folder)] = handoff
+    if missing:
+        return {
+            "status": "not_configured",
+            "state": state,
+            "reason": "submission_handoff_incomplete",
+            "batch_ids": missing,
+            "submitted": False,
+        }
+    return {"handoffs": list(handoffs.values())}

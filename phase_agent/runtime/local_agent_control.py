@@ -38,6 +38,9 @@ class LocalAgentControl:
 
     def status(self):
         state = read_json(self.state_path, {}) or {}
+        from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
+
+        state = normalize_workflow_state(state)
         from phase_agent.runtime.scientific_progress import project_progress
 
         summary = build_status_summary(state, config_version=state.get("confirmed_config_version"))
@@ -64,7 +67,9 @@ class LocalAgentControl:
         from phase_agent.runtime.project_context import current_config_session
 
         session = current_config_session(self.chat_handler)
-        rows = pending_reviews(state, session, state_path=self.state_path)
+        science_state = deepcopy(state)
+        science_state.setdefault("pending_execution_policies", {}).pop("__search_mode__", None)
+        rows = pending_reviews(science_state, session, state_path=self.state_path)
         from phase_agent.tools.state.execution_receipts import recovery_report
 
         if recovery_report(self.state_path, state)["unsettled"]:

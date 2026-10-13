@@ -62,6 +62,12 @@ def request_strategy_revision(*, action, context):
 
 
 def _known_path(config, path):
+    if path in {
+        "workflow.branch_batch_size",
+        "workflow.finetune_min_new_dft",
+        "workflow.finetune_max_new_dft",
+    }:
+        return True
     node = config
     for part in path.split("."):
         if not isinstance(node, dict) or part not in node:

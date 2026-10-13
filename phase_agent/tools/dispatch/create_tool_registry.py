@@ -2,6 +2,8 @@
 
 
 def create_tool_registry(handlers=None) -> dict:
+    from phase_agent.tools.dispatch.scientific_operations import operation_catalog
+
     handlers = handlers or {}
     specs = {
         "generate_branches": "generation",
@@ -30,6 +32,7 @@ def create_tool_registry(handlers=None) -> dict:
             "name": name,
             "owner": owner,
             "handler": handlers.get(name),
+            "operations": operation_catalog([name]) if callable(handlers.get(name)) else [],
             "reservation_mode": "children" if name in child_reservations else "action",
         }
         for name, owner in specs.items()

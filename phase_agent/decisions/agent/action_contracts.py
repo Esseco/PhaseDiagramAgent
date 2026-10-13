@@ -8,6 +8,8 @@ Identifier = Annotated[str, StringConstraints(strict=True, min_length=1, pattern
 
 class ActionEnvelope(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
+    operation: Identifier | None = None
+    operation_context: dict | None = None
     tool: Identifier
     parameters: dict = Field(default_factory=dict)
     target_ids: list[Identifier] = Field(default_factory=list)
@@ -18,6 +20,7 @@ class ActionEnvelope(BaseModel):
     evidence_refs: list[Identifier] = Field(default_factory=list)
     round_budget_review: dict | None = None
     decision_review: dict | None = None
+    scientific_decision: dict | None = None
 
 
 def action_contract_errors(action):
@@ -38,4 +41,10 @@ def action_contract_errors(action):
             "action." + ".".join(map(str, row["loc"])) + ": " + row["msg"]
             for row in error.errors(include_input=False, include_url=False)
         )
+    from phase_agent.tools.dispatch.scientific_operations import bind_operation
+
+    try:
+        bind_operation(action)
+    except (ValueError, TypeError) as error:
+        errors.append(str(error))
     return errors

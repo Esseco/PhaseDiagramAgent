@@ -15,6 +15,7 @@ from phase_agent.graphs.dialogue.nodes import (
     present,
     operation_node,
     scientific_workflow,
+    read_evidence,
 )
 
 
@@ -30,6 +31,7 @@ def build_project_turn_graph(science=None):
         ("review", review),
         ("decide", decide),
         ("present", present),
+        ("read_evidence", read_evidence),
     ):
         graph.add_node(name, timed_node(name, node))
     graph.add_node("scientific_workflow", timed_node("scientific_workflow", scientific_workflow))
@@ -81,9 +83,11 @@ def build_project_turn_graph(science=None):
             "present": "present",
             "review": "review",
             "scientific_workflow": "scientific_workflow",
+            "read_evidence": "read_evidence",
         },
     )
     graph.add_edge("scientific_workflow", "present")
+    graph.add_conditional_edges("read_evidence", lambda s: s["operation"], ["decide", "present"])
     for name in ("configure", "inspect_configuration", "review", "present"):
         graph.add_edge(name, END)
     from phase_agent.graphs.subgraph_visibility import expose_child

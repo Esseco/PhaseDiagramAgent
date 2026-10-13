@@ -133,6 +133,8 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 )
                 write_unix_shell_script(task_directory / "GPU.sh", script)
         if mlip_batch:
+            if any(entry["stage"] == "deep_search" for entry in manifest):
+                _bundle_mc_backend(directory)
             _portable_transfer_worker(
                 directory, "run_mlip_batch", "_handoff_mlip_batch"
             )
@@ -269,6 +271,18 @@ pseudopotentials, permissions, or resource requests are correct for your site.
 For DFT, the remote Python environment must import this project and pymatgen
 to parse VASP output and publish `results/` after the calculation.
 """
+
+
+def _bundle_mc_backend(directory):
+    """Carry the exact backend used by new MC jobs instead of a stale cluster copy."""
+    import shutil
+    import Process_AL_MC
+
+    source = Path(Process_AL_MC.__file__).parent
+    target = Path(directory) / "mc_backend/Process_AL_MC"
+    target.mkdir(parents=True, exist_ok=True)
+    for name in ("__init__.py", "MC_sample.py", "occupation_history.py", "relax.py"):
+        shutil.copy2(source / name, target / name)
 
 
 def _portable_transfer_worker(directory, source_name, module_name):

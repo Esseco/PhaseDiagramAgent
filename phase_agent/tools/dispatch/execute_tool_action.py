@@ -6,13 +6,51 @@ from phase_agent.tools.policy.file_approval import proposal_hash
 
 
 def execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict:
+    execution = _execute_tool_action(action, registry=registry, context=context)
+    if "operation_outcome" not in execution:
+        from phase_agent.tools.dispatch.operation_outcome import operation_outcome
+
+        execution["operation_outcome"] = operation_outcome(action, execution, context)
+    return execution
+
+
+def _execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict:
     from phase_agent.graphs.cancellation import check_cancelled
 
     check_cancelled()
+    from phase_agent.configuration.schema.action_state_schema import normalize_action
+    from phase_agent.tools.dispatch.scientific_operations import operation_binding_errors
+
+    try:
+        action = normalize_action(action) if action.get("operation") else deepcopy(action)
+    except (ValueError, TypeError) as error:
+        return {
+            "status": "rejected",
+            "tool": action.get("tool"),
+            "result": None,
+            "error": str(error),
+        }
+    state = context.get("event_state") or {}
+    model = state.get("active_model") or (context.get("effective_config") or {}).get("mlip") or {}
+    errors = operation_binding_errors(
+        action,
+        config_version=context.get("config_version") or state.get("confirmed_config_version"),
+        model_version=state.get("active_model_version")
+        or model.get("version")
+        or model.get("name"),
+    )
+    if errors:
+        return {
+            "status": "rejected",
+            "tool": action.get("tool"),
+            "result": None,
+            "error": ";".join(errors),
+        }
     from phase_agent.tools.workflows.reference_dft_startup import blocked_action
-    blocked=blocked_action(context.get('event_state') or {},action.get('tool'))
+
+    blocked = blocked_action(context.get("event_state") or {}, action.get("tool"))
     if blocked:
-        return {'status':'blocked','tool':action.get('tool'),'result':None,'error':blocked}
+        return {"status": "blocked", "tool": action.get("tool"), "result": None, "error": blocked}
     item = registry.get(action.get("tool")) or {}
     handler = item.get("handler")
     tool = action.get("tool")
@@ -65,6 +103,9 @@ def execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict:
             "result": None,
             "error": f"{type(error).__name__}: {error}",
         }
+    from phase_agent.tools.dispatch.operation_outcome import operation_outcome
+
+    execution["operation_outcome"] = operation_outcome(action, execution, context)
     if identity is not None:
         from phase_agent.tools.state.execution_receipts import record_execution_return
 

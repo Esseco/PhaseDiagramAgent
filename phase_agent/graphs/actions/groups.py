@@ -23,18 +23,29 @@ def group_for(tool):
     )
 
 
-def build_action_group(names, dispatch, group):
+def build_action_group(names, dispatch, group, *, operations=None):
     from langgraph.graph import StateGraph, START, END
     from phase_agent.graphs.state import ToolActionState
     from phase_agent.graphs.runtime_context import WorkflowRuntime
 
     graph = StateGraph(ToolActionState, context_schema=WorkflowRuntime)
 
+    operation_names = {row["operation"] for row in operations or [] if row["tool"] in names}
+
     def select(state):
+        if state.get("selected_operation") in operation_names:
+            return "operation__" + state["selected_operation"]
         return "tool__" + state["selected_tool"]
 
-    graph.add_conditional_edges(START, select, ["tool__" + name for name in names])
+    graph.add_conditional_edges(
+        START,
+        select,
+        [*("tool__" + name for name in names), *("operation__" + name for name in operation_names)],
+    )
     for name in names:
         graph.add_node("tool__" + name, dispatch)
         graph.add_edge("tool__" + name, END)
+    for name in operation_names:
+        graph.add_node("operation__" + name, dispatch)
+        graph.add_edge("operation__" + name, END)
     return graph.compile(checkpointer=False, name=group)

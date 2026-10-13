@@ -106,24 +106,29 @@ def test_old_round_uses_original_model_after_active_model_changes(tmp_path, monk
         "mlip": state["active_model"],
         "dft_comparison_location": "local",
     }
-    calls = []
+    from phase_agent.tools.remote.predict_dft_final_frame import write_prediction
 
-    def run(structure, **kwargs):
-        calls.append(kwargs)
-        return {
+    result = dft_result()
+    remote = write_prediction(
+        tmp_path,
+        result,
+        {"version": "m1", "model_path": str(old), "environment": "remote-mace"},
+        predictor=lambda *a, **kw: {
             "status": "completed",
             "energy": -7.0,
             "energy_unit": "eV",
             "forces": [[0, 0, 0]] * 2,
             "forces_unit": "eV/angstrom",
-        }
-
-    monkeypatch.setattr("phase_agent.science.mlip.run_mace_subprocess.run_mace_with_py_mace", run)
-    evaluated = create_dft_comparison_evaluator(config, state=state)(
-        result=dft_result(), structure_id="S-D1", manager=None
+        },
     )
-    assert calls[0]["model_path"] == str(old)
-    assert calls[0]["operation"] == "predict"
+    result["outputs"]["remote_mlip_prediction"] = remote
+    monkeypatch.setattr(
+        "phase_agent.science.mlip.run_mace_subprocess.run_mace_with_py_mace",
+        lambda *a, **kw: pytest.fail("local prediction forbidden"),
+    )
+    evaluated = create_dft_comparison_evaluator(config, state=state)(
+        result=result, structure_id="S-D1", manager=None
+    )
     assert evaluated["model_version"] == "m1" and evaluated["model_sha256"] == original_digest
     assert evaluated["geometry"] == "DFT_final_frame"
 

@@ -34,7 +34,19 @@ def _mc_operation_directory(input_path):
 
 def _approved_mc_preview(state):
     """Use a frozen preview or the exact legacy execution receipt, never a fresh allocation."""
-    history = state.get("mc_regeneration_history") or []
+    pending_keys = {
+        t.get("task_key")
+        for t in state.get("tasks", [])
+        if t.get("stage") == "deep_search" and t.get("status") == "pending"
+    }
+    history = [
+        h
+        for h in state.get("mc_regeneration_history") or []
+        if not pending_keys
+        or pending_keys.intersection(
+            r.get("task_key") for r in (h.get("replacement_preview") or {}).get("allocations", [])
+        )
+    ]
     if history and history[-1].get("replacement_preview"):
         preview = history[-1]["replacement_preview"]
         tasks = {row.get("task_key"): row for row in state.get("tasks") or []}
@@ -49,17 +61,50 @@ def _approved_mc_preview(state):
     records = [
         row
         for row in state.get("action_records") or []
-        if row.get("status") == "completed"
+        if row.get("status") in {"completed", "not_configured"}
         and (row.get("final_action") or {}).get("tool") == "allocate_mc_bohb"
         and (row.get("human_feedback") or {}).get("decision") == "approve"
     ]
     if not records:
         raise ValueError("没有已批准的当前轮 MC 分配方案")
-    record = records[-1]
+    matching = [
+        r
+        for r in records
+        if pending_keys.intersection(
+            a.get("task_key")
+            for a in (
+                ((r.get("final_action") or {}).get("parameters") or {}).get("budget_preview") or {}
+            ).get("allocations", [])
+        )
+        or pending_keys.intersection(
+            a.get("task_key")
+            for a in ((r.get("execution_result") or {}).get("result") or {}).get("actions", [])
+        )
+    ]
+    record = (matching or records)[-1]
     action = record["final_action"]
     parameters = action.get("parameters") or {}
     if "budget_preview" in parameters:
-        return deepcopy(parameters.get("budget_preview") or {}), "approved_budget_preview"
+        preview = parameters.get("budget_preview") or {}
+        if record.get("status") != "completed":
+            actual = {t.get("task_key"): t for t in state.get("tasks", [])}
+            accepted = {
+                t.get("task_key")
+                for t in ((record.get("execution_result") or {}).get("result") or {}).get(
+                    "actions", []
+                )
+            }
+            fields = ("branch_id", "model_version", "structure_path", "max_mc_steps", "seed")
+            if not preview.get("allocations") or any(
+                a.get("task_key") not in accepted
+                or a.get("task_key") not in actual
+                or any(actual[a["task_key"]].get(f) != a.get(f) for f in fields)
+                or (state.get("budget_reservations", {}).get(a["task_key"]) or {}).get("status")
+                != "reserved"
+                for a in preview["allocations"]
+            ):
+                raise ValueError("部分失败的 MC 分配缺少已批准且一致的任务/预算记录")
+        return deepcopy(preview), "approved_budget_preview"
     execution = record.get("execution_result") or {}
     result = execution.get("result") or {}
     children = result.get("actions") or []
@@ -240,6 +285,9 @@ def plan_mc_regeneration(state, upload_root, *, replacement_preview=None):
         "manifest.json",
         "run_mlip_batch.py",
         "_handoff_mlip_batch.py",
+        "_gpu_accounting.py",
+        "_gpu_transfer_bundle.py",
+        "_handoff_export_batch_result.py",
         "transfer_bundle.py",
         "run_mlip_task.py",
         "SHA256SUMS",
@@ -379,12 +427,37 @@ def regenerate_mc_inputs(
             "parameters": {
                 "max_mc_steps": child["max_mc_steps"],
                 "patience_steps": child["patience_steps"],
-                "min_improvement": child["min_improvement"],
+                **(
+                    {"min_improvement": child["min_improvement"]}
+                    if child.get("min_improvement") is not None
+                    else {}
+                ),
                 "seed": child["seed"],
             },
         }
         current["tasks"].append(task)
         current["pending_tasks"].append(task)
+    new_ids = [
+        row["task_id"]
+        for row in current["tasks"]
+        if row.get("task_key") in {child["task_key"] for child in allocations}
+    ]
+
+    def rebind_receipt(row):
+        ids = set(row.get("task_ids") or [])
+        if not ids & old_ids:
+            return row
+        if not ids <= old_ids:
+            raise ValueError("不能只替换同一 MC 分配中的部分任务")
+        return {**row, "task_ids": new_ids, "allocation_checksum": preview["allocation_checksum"]}
+
+    current["mc_second_round_allocations"] = [
+        rebind_receipt(row) for row in current.get("mc_second_round_allocations") or []
+    ]
+    if current.get("mc_second_round_allocation"):
+        current["mc_second_round_allocation"] = rebind_receipt(
+            current["mc_second_round_allocation"]
+        )
     tier_state = current.setdefault("tiered_mc_state", {})
     tier_state["segments"] = [
         row for row in tier_state.get("segments") or [] if row.get("task_key") not in old_keys
@@ -395,7 +468,7 @@ def regenerate_mc_inputs(
             "approved_action_task_key": next(
                 row["final_action"]["task_key"]
                 for row in reversed(current["action_records"])
-                if row.get("status") == "completed"
+                if row.get("status") in {"completed", "not_configured"}
                 and (row.get("final_action") or {}).get("tool") == "allocate_mc_bohb"
                 and (row.get("human_feedback") or {}).get("decision") == "approve"
             ),

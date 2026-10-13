@@ -32,7 +32,7 @@ def test_restart_skips_completed_collection_and_completed_invocation(tmp_path):
 
 
 def test_new_message_resumes_native_project_wait_with_fresh_records(tmp_path):
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     from phase_agent.graphs.scientific_graph import scientific_graph
     calls = []
     ready = [False]

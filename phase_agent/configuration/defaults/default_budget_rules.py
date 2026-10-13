@@ -3,6 +3,7 @@
 
 def default_budget_rules() -> dict:
     return {
+        "enforcement": "advisory",
         "total_relative_cost": 50_000.0,
         "cost_unit": "relative_cost",
         "cost_model": {

@@ -34,8 +34,8 @@ def test_historical_near_is_kept_and_wrong_model_rejected():
 
 def test_supplemental_force_is_atomic_norm():
     assert supplemental_relaxation_required(.0009, [])
-    assert supplemental_relaxation_required(.001, [[.04, .04, 0]])
-    assert not supplemental_relaxation_required(.01, [[.05, 0, 0]])
+    assert supplemental_relaxation_required(.001, [[.08, .08, 0]])
+    assert not supplemental_relaxation_required(.01, [[.1, 0, 0]])
     assert not supplemental_relaxation_required(.011, [[100, 0, 0]])
 
 
@@ -46,3 +46,18 @@ def test_cumulative_records_only_merge_mirrored_identity():
     assert len(result) == 2
     assert [r["is_current_round"] for r in result] == [False, True]
     assert "is_current_round" not in second
+
+
+@pytest.mark.parametrize("gap", [.001, .005, .01])
+def test_refresh_force_threshold_is_strictly_above_point_one(gap):
+    assert not supplemental_relaxation_required(gap, [[.099, 0, 0]])
+    assert not supplemental_relaxation_required(gap, [[.1, 0, 0]])
+    assert supplemental_relaxation_required(gap, [[.100001, 0, 0]])
+
+
+def test_plan_advertises_new_force_threshold_only():
+    plan = build_model_refresh_plan([row(0, 0)], old_version="old", new_version="new")
+    assert plan["policy"]["force_threshold"] == .1
+    assert plan["policy"]["relax_below"] == .001
+    assert plan["policy"]["predict_through"] == .01
+    assert plan["policy"]["audit_fraction"] == .1

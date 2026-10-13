@@ -5,6 +5,7 @@ import json
 import math
 import statistics
 from copy import deepcopy
+from pathlib import Path
 
 from pymatgen.core import Composition
 
@@ -65,6 +66,18 @@ def hull_energy_per_atom(pool, composition):
     return float(result.fun) if result.success else None
 
 
+def same_structure_file(left, right):
+    """Accept path aliases only when they refer to the same existing file."""
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    try:
+        return Path(left).samefile(Path(right))
+    except (OSError, ValueError):
+        return False
+
+
 def rank_relaxed_branches(candidates, pool, *, uncertainty_weight=1.0, phase_diagram=None):
     by_structure = {}
     if phase_diagram is not None:
@@ -107,7 +120,7 @@ def rank_relaxed_branches(candidates, pool, *, uncertainty_weight=1.0, phase_dia
                     rel_tol=0,
                     abs_tol=1e-6,
                 )
-                and entry.get("structure_path") == best.get("structure_path")
+                and same_structure_file(entry.get("structure_path"), best.get("structure_path"))
             ]
             if len(matches) != 1:
                 missing.append(branch["branch_id"])

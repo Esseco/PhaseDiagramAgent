@@ -25,7 +25,15 @@ def build_recovery_observation_graph(batch_graph, recovery_graph):
         from phase_agent.graphs.execution_recovery_graph import execution_recovery_report
 
         report = (
-            execution_recovery_report(state["state_path"], state["business"], graph=recovery_graph)
+            # This early receipt barrier protects training/direction decisions.
+            # The wait gate inspects full evidence after scientific feedback,
+            # so task files and hashes are not scanned twice in one observation.
+            execution_recovery_report(
+                state["state_path"],
+                state["business"],
+                graph=recovery_graph,
+                inspect_artifacts=False,
+            )
             if state["state_path"]
             else {"status": "clear", "unsettled": [], "checks": []}
         )

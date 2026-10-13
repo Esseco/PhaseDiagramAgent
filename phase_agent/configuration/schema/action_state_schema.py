@@ -10,7 +10,9 @@ STATE_REQUIRED_FIELDS = ("current_status", "available_budget", "uncertainty", "s
 def normalize_action(action: dict) -> dict:
     if not isinstance(action, dict):
         raise TypeError("action must be a dict")
-    normalized = deepcopy(action)
+    from phase_agent.tools.dispatch.scientific_operations import bind_operation
+
+    normalized = bind_operation(action)
     action_type = normalized.get("action_type") or normalized.get("tool")
     normalized["action_type"] = action_type
     normalized.setdefault("tool", action_type)  # handler compatibility

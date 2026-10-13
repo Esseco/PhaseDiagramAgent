@@ -1,6 +1,7 @@
 """Extract measured GPU-hours only from explicit scheduler accounting fields."""
 
 from __future__ import annotations
+import math
 
 
 def extract_gpu_accounting(result: dict) -> dict:
@@ -33,8 +34,12 @@ def extract_gpu_accounting(result: dict) -> dict:
             "elapsed_seconds": float(seconds),
             "job_id": record.get("job_id"),
         }
+    runtime=result.get('runtime_observation') or {}
+    count=runtime.get('gpu_count');seconds=runtime.get('elapsed_seconds')
+    if runtime.get('source')=='task_start_end' and runtime.get('allocation_basis')!='whole_batch_do_not_add_to_task_slices' and _number(count) and _number(seconds):
+        return {'actual_gpu_core_hours':float(count)*float(seconds)/3600,'source':'task_start_end_gpu_allocation','measured':True}
     return {"actual_gpu_core_hours": None, "source": source or None, "measured": False}
 
 
 def _number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value>=0

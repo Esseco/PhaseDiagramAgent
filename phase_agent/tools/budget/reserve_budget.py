@@ -28,6 +28,7 @@ def reserve_budget(
         "task_key": task_key,
         "stage": stage,
         "reserved_cost": float(amount),
+        "budget_warnings": check.get("warnings", []),
         "status": "reserved",
         "config_version": config_version,
         "model_version": model_version,

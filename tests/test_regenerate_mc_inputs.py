@@ -490,3 +490,57 @@ def test_actual_mc_result_archive_and_task_local_result_block_regeneration(tmp_p
     task_result.write_text("actual task-local result")
     with pytest.raises(ValueError, match="结果|未知"):
         module.plan_mc_regeneration(state, tmp_path)
+
+
+def test_current_wave_partial_preparation_failure_ignores_old_history(tmp_path):
+    state = _state(tmp_path)
+    state["mc_regeneration_history"] = [
+        {"replacement_preview": {"allocations": [{"task_key": "obsolete-wave"}]}}
+    ]
+    record = state["action_records"][0]
+    record["status"] = "not_configured"
+    record["execution_result"] = {"result": {"actions": [state["tasks"][0]]}}
+    directory = Path(state["tasks"][0]["input_path"]).parent.parent
+    directory.mkdir(parents=True)
+    (directory / "_gpu_accounting.py").write_text("# timing")
+    (directory / "_gpu_transfer_bundle.py").write_text("# bundle")
+    assert module.plan_mc_regeneration(state, tmp_path)["allocation_count"] == 1
+    state["budget_reservations"][state["tasks"][0]["task_key"]]["status"] = "released"
+    with pytest.raises(ValueError, match="预算"):
+        module.plan_mc_regeneration(state, tmp_path)
+
+
+def test_replacement_rebinds_second_wave_receipt(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    state = _state(tmp_path)
+    old_id = state["tasks"][0]["task_id"]
+    receipt = {"task_ids": [old_id], "allocation_checksum": "abc", "source_checksum": "first-wave"}
+    state["mc_second_round_allocations"] = [receipt]
+    state["mc_second_round_allocation"] = receipt
+    preview = deepcopy(state["action_records"][0]["final_action"]["parameters"]["budget_preview"])
+    preview["allocations"][0]["task_key"] = "tiered-mc:new"
+    preview["allocation_checksum"] = "new-checksum"
+    plan = module.plan_mc_regeneration(state, tmp_path, replacement_preview=preview)
+    monkeypatch.setattr(
+        module,
+        "prepare_mc_upload_batches",
+        lambda **kw: {"status": "prepared", "task_count": 1, "state": kw["context"]["event_state"]},
+    )
+    result = module.regenerate_mc_inputs(
+        state,
+        approved_plan=plan,
+        upload_root=tmp_path,
+        config={},
+        manager=None,
+        phase_references={},
+        config_version="new",
+        replacement_preview=preview,
+    )
+    current = result["state"]
+    new_id = current["tasks"][0]["task_id"]
+    assert new_id != old_id
+    assert current["mc_second_round_allocations"][0]["task_ids"] == [new_id]
+    assert current["mc_second_round_allocation"]["allocation_checksum"] == "new-checksum"
+    assert current["mc_second_round_allocation"]["source_checksum"] == "first-wave"
+    assert state["tasks"][0]["task_id"] == old_id

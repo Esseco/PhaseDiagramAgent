@@ -75,6 +75,7 @@ def _finalize_workflow(frame):
     )
     if (
         action_executed
+        and not result.get("module_preparation")
         and task_runner is not None
         and result["state"].get("pending_tasks")
         and not refresh_active(result["state"])
@@ -118,4 +119,5 @@ def _finalize_workflow(frame):
     )
     if result["state"].get("model_refresh"):
         result["submitted"] = False  # This workflow prepares manual HPC inputs only.
+    _save_runner_state(result["state"], state_path or effective_config.get("state_path"))
     return result

@@ -62,6 +62,11 @@ def _initialize_workflow(
     effective_registry = registry or create_tool_registry(effective_handlers)
     context = {
         "manager": manager,
+        "relax_mc_runtime": {
+            "stage_profiles": deepcopy(getattr(task_runner, "stage_profiles", {})),
+            "batch_sizes": deepcopy(getattr(task_runner, "batch_sizes", {})),
+            "worker_command": list(getattr(task_runner, "worker_command", [])),
+        },
         "phase_references": phase_references,
         "effective_config": deepcopy(effective_config),
         "dispatcher": dispatcher,
@@ -73,6 +78,9 @@ def _initialize_workflow(
     loaded_state = compact_state_history(
         _read_state_for_runner(state, state_path or effective_config.get("state_path"))
     )
+    from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
+
+    loaded_state = normalize_workflow_state(loaded_state)
     if (
         loaded_state.get("confirmed_config_version") == snapshot["config_version"]
         and loaded_state.get("confirmed_config") is not None
@@ -113,6 +121,11 @@ def _initialize_workflow(
             "message": _config_migration_block_message(migration),
         }
     loaded_state = migration["state"]
+    supplied_policy = runtime_adapters.get("scientific_decision_policy")
+    if supplied_policy:
+        if not isinstance(supplied_policy, dict) or supplied_policy.get("schema_version") != 1:
+            raise ValueError("unsupported_scientific_decision_policy")
+        loaded_state.setdefault("scientific_decision_policy", deepcopy(supplied_policy))
     if loaded_state.get("active_model"):
         effective_config["mlip"] = {
             **(effective_config.get("mlip") or {}),

@@ -54,16 +54,33 @@ def submission_moves(root, state):
     return moves
 
 
+def index_operation_path(root, directory):
+    """Read same-project pre-migration history without relocating scientific files."""
+    root, directory = Path(root).resolve(), Path(directory).resolve()
+    if directory.is_relative_to(root):
+        return directory
+    if root.name == "submissions" and root.parent.parent.name == "diagrams":
+        project = root.parent.parent.parent
+        legacy = (project / "submissions").resolve()
+        # An alias into another diagram must not grant cross-diagram access.
+        if not legacy.is_relative_to((project / "diagrams").resolve()) and directory.is_relative_to(
+            legacy
+        ):
+            return directory
+    raise ValueError(f"Submission record belongs outside this project/diagram: {directory}")
+
+
 def write_submission_index(root, state):
-    root = Path(root)
+    root = Path(root).resolve()
     rows = {}
     for batch in state.get("slurm_batches") or []:
         upload = Path(batch["upload_directory"])
-        operation = upload.parent.parent
+        operation = index_operation_path(root, upload.parent.parent)
         rows.setdefault(operation, []).append(batch)
     for job in (state.get("remote_finetune_jobs") or {}).values():
         if job.get("directory"):
-            rows.setdefault(Path(job["directory"]), [])
+            operation = index_operation_path(root, job["directory"])
+            rows.setdefault(operation, [])
     lines = [
         "# 提交与回收",
         "",
@@ -83,7 +100,7 @@ def write_submission_index(root, state):
         "| --- | ---: | --- | --- |",
     ]
     for operation, batches in sorted(rows.items()):
-        relative = operation.relative_to(root).as_posix()
+        relative = Path(os.path.relpath(operation, root)).as_posix()
         from phase_agent.tools.remote.submission_storage import storage_archive
 
         archive = storage_archive(operation / "results", "results")

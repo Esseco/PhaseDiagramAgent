@@ -66,6 +66,17 @@ def _prepare_dedup(*, action, context):
 def _generate_branches(*, action, context):
     config = context["effective_config"]
     params = deepcopy(action.get("parameters") or {})
+    from phase_agent.tools.policy.workflow_policy import branch_batch_errors, settings
+
+    if not any(key in params for key in ("generation_plan", "quotas", "total_quota")):
+        params["total_quota"] = settings(config)["branch_batch_size"]
+    errors = branch_batch_errors({**action, "parameters": params}, config)
+    if errors:
+        return {
+            "status": "rejected",
+            "reason": ";".join(errors),
+            "state": context.get("event_state") or {},
+        }
     from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
 
     if post_dft_assessment(context.get("event_state") or {}, config) and not params.get(
@@ -91,7 +102,9 @@ def _generate_branches(*, action, context):
         from phase_agent.analysis.cost.generation_preflight import attach_generation_preflight
 
         try:
-            attach_generation_preflight(action, context.get("event_state") or {}, context, config)
+            attach_generation_preflight(
+                deepcopy(action), context.get("event_state") or {}, context, config
+            )
         except ValueError as error:
             return {
                 "status": "not_configured",
@@ -126,7 +139,15 @@ def _generate_branches(*, action, context):
     first_round_cap = ((config.get("system_config") or {}).get("H_generation") or {}).get(
         "first_round_max_det_H"
     )
-    if not existing and first_round_cap is not None:
+    allocation_caps = [
+        row["max_det_H"] for row in params.get("generation_plan") or [] if "max_det_H" in row
+    ]
+    explicit_cap = "max_det_H" in params or bool(allocation_caps)
+    if explicit_cap and allocation_caps:
+        options["max_det_H"] = max(
+            allocation_caps + ([params["max_det_H"]] if "max_det_H" in params else [])
+        )
+    if not existing and first_round_cap is not None and not explicit_cap:
         options["max_det_H"] = first_round_cap
     generation_directory = config["structure_directory"]
     if config.get("upload_batches_directory"):
@@ -161,6 +182,9 @@ def _generate_branches(*, action, context):
         generation_plan=params.get("generation_plan"),
     )
     state = deepcopy(context.get("event_state") or {})
+    preference = (action.get("scientific_decision") or {}).get("module_execution")
+    if preference and state.get("scientific_decision_policy"):
+        state["scientific_decision_policy"]["mlip_execution"] = preference
     state.setdefault("generation_history", []).append(
         {
             "task_key": action.get("task_key"),
@@ -186,13 +210,16 @@ def _generate_branches(*, action, context):
             "source": "local_generation_dedup",
             "valid_structure_ids": sorted(ids),
         }
-    return {
+    generated = {
         "status": "completed",
         "state": state,
         "registered": result["registered"],
         "coverage": result["coverage"],
         "summary": result["summary"],
     }
+    from phase_agent.tools.workflows.scientific_module_scope import prepare_generated_module
+
+    return prepare_generated_module(action, generated, context)
 
 
 def _allocate_mc_bohb(*, action, context):
@@ -219,13 +246,11 @@ def _allocate_mc_bohb(*, action, context):
     )
 
     second_round = params.get("round_kind") == "second"
-    has_existing_mc = any(row.get("stage") == "deep_search" for row in state.get("tasks") or [])
-    if has_existing_mc and not second_round:
-        return {
-            "status": "not_configured",
-            "state": state,
-            "reason": "existing_mc_results_require_verified_second_round_proposal",
-        }
+    if (params.get("budget_preview") or {}).get("round_kind") == "second":
+        second_round = True
+        params["first_round_source_checksum"] = params["budget_preview"][
+            "first_round_source_checksum"
+        ]
     if second_round:
         model_version = (config.get("mlip") or {}).get("version") or (config.get("mlip") or {}).get(
             "name"
@@ -505,10 +530,17 @@ def _allocate_mc_bohb(*, action, context):
             "max_cumulative_cost_per_branch": 90,
             "random_exploration_fraction": bohb.get("random_fraction", 0.1),
         }
+        from phase_agent.science.mc.continuation_policy import effective_mc_policy
+
+        mc_policy = effective_mc_policy({**config, "mc_policy": mc_policy})
+        mc_policy["agent_branch_count"] = params.get("branch_count")
+        if params.get("exploration_fraction") is not None:
+            mc_policy["random_exploration_fraction"] = params["exploration_fraction"]
         scheduled = schedule_tiered_mc(
             candidates,
             tier_state,
             policy=mc_policy,
+            scope_by_model=True,
             total_budget=total_mc_budget,
             seed=int(params.get("seed", config.get("seed", 0))),
             model_version=bohb["scope"]["mlip_version"],
@@ -517,6 +549,14 @@ def _allocate_mc_bohb(*, action, context):
             .get("mlip", {})
             .get("version"),
         )
+        if scheduled["status"] == "continuation_pool_below_minimum":
+            return {
+                "status": "not_configured",
+                "state": context.get("event_state") or {},
+                "reason": "有效候选池不足10个；请先扩展Branch并完成Relax，未生成半批或重复MC任务。",
+                "required_tasks": scheduled["required_tasks"],
+                "eligible_task_count": scheduled["eligible_task_count"],
+            }
         tier_state = scheduled["state"]
         from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
 
@@ -543,6 +583,8 @@ def _allocate_mc_bohb(*, action, context):
                 config,
                 step_limit=total_mc_budget,
                 seed=int(params.get("seed", config.get("seed", 0))),
+                branch_count=params.get("branch_count"),
+                exploration_fraction=params.get("exploration_fraction"),
             )
             if checked["allocation_checksum"] != preview.get("allocation_checksum"):
                 return {
@@ -558,7 +600,7 @@ def _allocate_mc_bohb(*, action, context):
             not preview
             or preview.get("round_kind") != "second"
             or preview.get("first_round_source_checksum") != source["checksum"]
-            or any(child.get("segment_index") != 1 for child in scheduled["actions"])
+            or any(child.get("segment_index") not in {1, 2} for child in scheduled["actions"])
         ):
             return {
                 "status": "awaiting_approval",
@@ -665,7 +707,11 @@ def _allocate_mc_bohb(*, action, context):
                 "parameters": {
                     "max_mc_steps": child["max_mc_steps"],
                     "patience_steps": child["patience_steps"],
-                    "min_improvement": child["min_improvement"],
+                    **(
+                        {"min_improvement": child["min_improvement"]}
+                        if child.get("min_improvement") is not None
+                        else {}
+                    ),
                     "seed": child["seed"],
                 },
             }

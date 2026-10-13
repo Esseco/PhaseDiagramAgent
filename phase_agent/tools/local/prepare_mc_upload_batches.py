@@ -31,7 +31,16 @@ def prepare_mc_upload_batches(*, action, context):
         and not row.get("slurm_batch_id")
     ]
     if not pending:
-        return {"status": "already_prepared", "task_count": 0, "batch_count": 0, "state": state}
+        from phase_agent.tools.remote.submission_handoff import finalize_prepared_handoffs
+
+        delivery = finalize_prepared_handoffs(state)
+        return {
+            "status": "already_prepared",
+            "task_count": 0,
+            "batch_count": 0,
+            "state": state,
+            **delivery,
+        }
     missing = [
         row.get("task_id")
         for row in pending
@@ -75,8 +84,14 @@ def prepare_mc_upload_batches(*, action, context):
         if prepared["status"] == "no_tasks":
             break
         batches.append(prepared["batch"])
+    from phase_agent.tools.remote.submission_handoff import finalize_prepared_handoffs
+
+    delivery = finalize_prepared_handoffs(state)
+    if delivery.get("status") == "not_configured":
+        return delivery
     return {
         "status": "prepared" if batches else "already_prepared",
+        **delivery,
         "state": state,
         "task_count": sum(len(row["task_ids"]) for row in batches),
         "batch_count": len(batches),

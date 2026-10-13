@@ -35,33 +35,35 @@ def second_round_completed(state, model_version):
         return False
     ids = set(allocations[-1].get("task_ids") or [])
     keys = set(allocations[-1].get("task_keys") or [])
-    second = [row for row in tasks if row.get("segment_index") == 1]
+    second = [row for row in tasks if row.get("segment_index") == 2]
     return (
         bool(second)
-        and (not ids or ids.issubset({row.get("task_id") for row in second}))
-        and (not keys or keys.issubset({row.get("task_key") for row in second}))
+        and (not ids or ids.issubset({row.get("task_id") for row in tasks}))
+        and (not keys or keys.issubset({row.get("task_key") for row in tasks}))
     )
 
 
 def first_round_source(state, model_version):
-    """Only a fully recovered first wave can seed a second allocation."""
+    """Latest fully recovered wave seeds either addition; retain the saved field names."""
     segments = [
         row
         for row in reconciled_mc_state(state)["segments"]
         if row.get("model_version") == model_version
     ]
     indexed = _with_legacy_segment_indices(segments)
-    first = [row for row in indexed if row["_effective_segment_index"] == 0]
+    latest = max((row["_effective_segment_index"] for row in indexed), default=0)
+    first = [row for row in indexed if row["_effective_segment_index"] == latest]
     if (
         not first
-        or len(first) != len(segments)
-        or any(row.get("status") != "completed" for row in first)
+        or max((row["_effective_segment_index"] for row in indexed), default=0) >= 2
+        or any(row.get("status") != "completed" for row in indexed)
     ):
         return None
     evidence = [
         {
             "branch_id": row.get("branch_id"),
             "task_key": row.get("task_key"),
+            "segment_index": row.get("_effective_segment_index"),
             "energy_improvement": row.get("energy_improvement"),
             "stop_reason": row.get("stop_reason"),
             "result_path": row.get("result_path") or row.get("structure_path"),
@@ -73,8 +75,8 @@ def first_round_source(state, model_version):
     ).hexdigest()[:16]
     return {
         "checksum": checksum,
-        "branch_ids": [row["branch_id"] for row in evidence],
-        "completed_count": len(first),
+        "branch_ids": list(dict.fromkeys(row["branch_id"] for row in evidence)),
+        "completed_count": len({row["branch_id"] for row in evidence}),
     }
 
 

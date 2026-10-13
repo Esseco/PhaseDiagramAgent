@@ -210,15 +210,49 @@ def decide(state, runtime: Runtime[TurnRuntime]):
             state["message"],
             request_scientific,
             defer_scientific=request_scientific,
+            evidence=state.get("evidence") or {},
         )
     return {
         "result": result,
+        "facts": result.get("state") or state["facts"],
         "operation": {
             "scientific_requested": "scientific_workflow",
             "configuration_edit_requested": "configure",
             "configuration_view_requested": "inspect_configuration",
             "proposal_review_requested": "review",
+            "evidence_requested": "read_evidence",
         }.get(result.get("status"), "present"),
+    }
+
+
+def read_evidence(state, runtime: Runtime[TurnRuntime]):
+    from phase_agent.graphs.dialogue.evidence import read_topics, read_limit_reply
+    from phase_agent.runtime.turn_process import process_event
+
+    topics = state["result"]["topics"]
+    prior = set(state.get("evidence_topics") or [])
+    if int(state.get("evidence_reads", 0)) >= 2 or set(topics).issubset(prior):
+        process_event(
+            "停止重复读取", {"topics": topics, "read_count": state.get("evidence_reads", 0)}
+        )
+        return {
+            "result": {
+                "status": "answered",
+                "answer": read_limit_reply(state["facts"]),
+                "state": state["facts"],
+                "submitted": False,
+                "steps_executed": 0,
+            },
+            "operation": "present",
+        }
+    new = [topic for topic in topics if topic not in prior]
+    result = read_topics(state["facts"], new)
+    process_event("按需读取证据", {"topics": new, "read_only": True})
+    return {
+        "evidence": {**(state.get("evidence") or {}), **result},
+        "evidence_topics": sorted(prior | set(new)),
+        "evidence_reads": int(state.get("evidence_reads", 0)) + 1,
+        "operation": "decide",
     }
 
 

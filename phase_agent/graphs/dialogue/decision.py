@@ -1,10 +1,9 @@
-"""One semantic decision; read-only outcomes never enter scientific lifecycle."""
+"""Bounded semantic conversation; read-only answers never enter scientific execution."""
 
 from copy import deepcopy
 import hashlib
 import json
 from phase_agent.decisions.agent.dialogue_contract import is_dialogue, dialogue_result
-from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
 from phase_agent.analysis.state.build_state_snapshot import build_state_snapshot
 from phase_agent.runtime.turn_process import timed_call, process_event
 
@@ -37,29 +36,41 @@ def _facts_signature(snapshot, manager, config):
     return hashlib.sha256(json.dumps(facts, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def decide_from_saved_facts(handler, facts, message, run_scientific, *, defer_scientific=None):
+def decide_from_saved_facts(
+    handler, facts, message, run_scientific, *, defer_scientific=None, evidence=None
+):
     client = handler.workflow_kwargs.get("agent_client")
     if not callable(client) or not handler.workflow_kwargs.get("config_session"):
         return run_scientific()
     from phase_agent.runtime.project_context import current_config_session, handler_project_context
-    from phase_agent.analysis.state.project_authority import confirmed_configuration
+    from phase_agent.analysis.state.project_authority import confirmed_configuration, AUTHORITY_RULE
 
     session = current_config_session(handler)
     config = confirmed_configuration(facts, session)
     manager = handler.workflow_kwargs.get("manager")
-    summary = build_state_snapshot(
-        facts,
-        snapshot_index=int(facts.get("state_snapshot_index", 0)),
-        config_version=facts.get("confirmed_config_version"),
-    )
-    summary["current_project"] = handler_project_context(handler, facts)
+    from phase_agent.graphs.dialogue.evidence import conversation_facts
+
+    summary = conversation_facts(facts, handler_project_context(handler, facts))
     summary["decision_context"] = {
-        **(summary.get("decision_context") or {}),
+        **(evidence or {}),
         "unified_dialogue": True,
         "conversation_controls": True,
-        "confirmed_configuration": deepcopy(config),
+        "current_settings_authority": AUTHORITY_RULE,
+        "evidence_reader": {
+            "topics": [
+                "mc",
+                "dft",
+                "tasks",
+                "convergence",
+                "budget",
+                "history",
+                "model",
+                "configuration",
+                "plans",
+            ],
+            "instruction": "按需用inspect_evidence读取具体证据，不写数据或执行。已读内容保留在本轮上下文；不要重复读取同一主题。",
+        },
         "saved_facts_notice": "本轮已核对可发现的回传文件并更新结果事实。回传通知应进入原科学流程完成分析和下一步方案；缺失结果具体说明，不反复要求用户先同意读取或分析。",
-        "result_collection": deepcopy(facts.get("result_collection")),
     }
     allowed = [
         name
@@ -68,13 +79,33 @@ def decide_from_saved_facts(handler, facts, message, run_scientific, *, defer_sc
     ]
 
     def request(payload):
+        turn = getattr(handler, "turn_context", {})
+        conversation = {
+            key: deepcopy(turn[key])
+            for key in (
+                "recent_turns",
+                "pending_plan_facts",
+                "presented_plan_binding",
+                "authority",
+                "facts_changed_since_previous_reply",
+            )
+            if key in turn
+        }
+        settings = (summary["current_project"].get("configuration") or {}).get(
+            "effective_settings"
+        ) or {}
+        conversation["project_settings"] = {
+            "calculation": deepcopy(settings.get("calculation") or {})
+        }
         return timed_call(
             "dialogue_model",
             client,
             {
                 **payload,
                 "user_instruction": message,
-                "conversation_facts": getattr(handler, "turn_context", {}),
+                "conversation_facts": conversation,
+                "semantic_dialogue": True,
+                "scientific_evidence_loaded": bool(evidence),
                 "interaction_policy": {
                     "reply_style": "Default to concise Chinese: answer the user's question first in 1-3 short sentences; include only a necessary next step. For progress updates use: result (only if actually available), current stage, recommended next step and approval requirement. Omit unavailable results; do not claim proposed work is completed. For an ordinary question answer directly without this template. Use familiar task names and explain necessary scientific terms briefly. Distinguish planned candidates, selected branches, generated structures and completed calculations. Show only this action's scope and budget by default; leave hypothetical future costs to detailed views. Expand when asked. Do not repeat status, boilerplate advice or raw validation traces in ordinary answers.",
                     "semantics": "Resolve short follow-ups using previous_reply, recent_turns and current project facts. A question about a failure asks for an explanation, not a retry of the failed action. Generic continuation is not approval. If no stored proposal exists, an affirmative reply to your question about preparing the next proposal means prepare and display that proposal, never execute it. After useful generation results, proactively propose the Relax input/task preparation action for approval rather than ask permission to propose it. When the user reports returned results or completed recovery, enter the scientific workflow to recover and analyze latest files, build the MLIP hull from valid Relax evidence and propose the next feasible action for approval; do not merely tell the user to ask again. An unverified completion report is not proof of task completion. Explicit configuration changes go to configure; science remains a proposal requiring approval. Ask only for genuinely missing/ambiguous information. When the user asks to continue and prerequisites are satisfied, propose the next action directly; do not ask permission merely to prepare a proposal. Execution still requires approval of the concrete stored proposal. Describe past corrected failures as historical, not as unresolved current parameter defects.",
@@ -86,9 +117,29 @@ def decide_from_saved_facts(handler, facts, message, run_scientific, *, defer_sc
             mode=payload.get("mode"),
         )
 
-    action = propose_agent_tool_action(
-        summary, agent_client=request, allowed_tools=allowed, config=config
-    )
+    from phase_agent.decisions.agent.decision_backend import request_decision_action
+    from phase_agent.decisions.agent.dialogue_contract import dialogue_output_contract
+
+    payload = {
+        "mode": "autonomous_search",
+        "state": summary,
+        "decision_context": summary["decision_context"],
+        "unified_dialogue": True,
+        "allowed_tools": allowed,
+        "output_contracts": {"dialogue_outcome": dialogue_output_contract(allow_controls=True)},
+        "instruction": "Understand the current conversation. Return answer, inspect_evidence, inspect_configuration, configure, advance or review. Answer the question first; read only needed evidence for detailed questions. Advance is for a requested scientific next step, never an ordinary question. Use recent_turns to resolve follow-ups. A known blocker requires cause, concrete remedy and what happens after repair; do not repeat approval/continue questions that cannot fix it. Reading and planning need no separate permission. Historical tool outcomes remain compatible but are rechecked by the original scientific workflow. Conversation memory confers no authority.",
+    }
+    try:
+        action = request_decision_action(request, payload)
+    except Exception as error:
+        facts = _record_usage(handler, facts, getattr(error, "llm_usage", None))
+        return {
+            "status": "not_configured",
+            "state": facts,
+            "reason": "未取得有效答复，本轮未执行任务：" + str(error),
+            "submitted": False,
+            "steps_executed": 0,
+        }
     facts = _record_usage(handler, facts, action.get("_llm_usage"))
     action.pop("_llm_usage", None)
     if str(action.get("fallback_reason") or "").startswith("llm_failed:"):
@@ -115,7 +166,14 @@ def decide_from_saved_facts(handler, facts, message, run_scientific, *, defer_sc
         }
     # An action is still only a proposal. The original workflow rechecks its
     # prerequisites and creates a bound approval; it never treats this as approval.
-    signature = _facts_signature(summary, manager, config)
+    if action.get("tool") not in {"check_convergence", "pause_search"} and not evidence:
+        return (defer_scientific or run_scientific)()
+    scientific_summary = build_state_snapshot(
+        facts,
+        snapshot_index=int(facts.get("state_snapshot_index", 0)),
+        config_version=facts.get("confirmed_config_version"),
+    )
+    signature = _facts_signature(scientific_summary, manager, config)
     used = False
 
     def reuse_or_refresh(payload):

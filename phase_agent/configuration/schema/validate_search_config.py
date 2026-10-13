@@ -7,6 +7,14 @@ def validate_search_config(config: dict, *, stage="full") -> dict:
     if stage not in {"full", "startup"}:
         raise ValueError("unknown_configuration_stage")
     missing, conflicts, ambiguities = [], [], []
+    if (config.get("budgets") or {}).get("enforcement", "advisory") not in {"advisory", "hard"}:
+        conflicts.append("budgets.enforcement_invalid")
+    try:
+        from phase_agent.tools.policy.workflow_policy import settings
+
+        settings(config)
+    except (ValueError, TypeError) as error:
+        conflicts.append(str(error))
     required = [
         "system",
         "frozen_parameters",

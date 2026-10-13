@@ -16,11 +16,33 @@ async def recover_studio_runs():
     END clears queued graph nodes without invoking them. Fail startup if the
     installed dev runtime no longer supports this adapter.
     """
+    import asyncio
+
+    return await asyncio.to_thread(_recover_studio_runs_in_worker)
+
+
+def _recover_studio_runs_in_worker():
+    """The in-memory dev adapter uses synchronous checkpoints and lazy imports."""
+    import asyncio
     from langgraph_runtime_inmem.database import connect
     from langgraph_runtime_inmem.ops import Threads
 
-    async with connect() as conn:
-        return await end_orphaned_turns(conn, Threads)
+    async def recover():
+        async with connect() as conn:
+            return await end_orphaned_turns(conn, Threads)
+
+    # This private dev adapter has awaitable methods that touch sync checkpoint
+    # files. They run on a dedicated worker loop, never the ASGI event loop.
+    # Keep blocking detection enabled everywhere else, including the parent.
+    try:
+        from blockbuster.blockbuster import blockbuster_skip
+    except ImportError:
+        return asyncio.run(recover())
+    token = blockbuster_skip.set(True)
+    try:
+        return asyncio.run(recover())
+    finally:
+        blockbuster_skip.reset(token)
 
 
 async def end_orphaned_turns(conn, threads):

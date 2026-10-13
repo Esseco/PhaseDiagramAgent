@@ -34,6 +34,7 @@ class ToolActionState(TypedDict, total=False):
         "audited",
     ]
     selected_tool: str
+    selected_operation: str
     response: dict
 
 

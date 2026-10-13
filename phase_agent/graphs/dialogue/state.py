@@ -10,6 +10,9 @@ class TurnState(TypedDict, total=False):
     verified_recovery: dict
     result: dict
     reply: str
+    evidence: dict
+    evidence_topics: list[str]
+    evidence_reads: int
 
 
 @dataclass

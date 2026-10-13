@@ -12,6 +12,7 @@ import time
 
 MANIFEST = "transfer_manifest.json"
 RESULT_NAMES = {
+    "mc_occupations.bin",
     "result.json",
     "task.finished.json",
     "final.vasp",
@@ -194,7 +195,9 @@ def _safe_name(name):
     return path
 
 
-def import_bundle(archive_path, directory, *, max_bytes=8 * 1024**3, storage_kind=None):
+def import_bundle(
+    archive_path, directory, *, max_bytes=8 * 1024**3, storage_kind=None, extra_result_suffixes=()
+):
     """Validate the whole archive before publishing; refuse differing existing files."""
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -234,6 +237,7 @@ def import_bundle(archive_path, directory, *, max_bytes=8 * 1024**3, storage_kin
                         ".poscar",
                         ".json",
                         ".gz",
+                        *extra_result_suffixes,
                     }
                 ):
                     raise ValueError(f"Unexpected result file: {relative}")
@@ -325,6 +329,10 @@ def _archive_receipt(root, archive):
 
 
 def has_registered_return(state):
+    for batch in (state.get("relax_mc_batches") or {}).values():
+        archive = Path(batch.get("expected_results_archive") or "")
+        if archive.is_file() and batch.get("import_checksum") != checksum(archive):
+            return True
     directories = registered_result_directories(state)
     directories.update(
         str(Path(job["directory"]))

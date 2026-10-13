@@ -16,8 +16,58 @@ def _is_model_failure_proposal(proposal):
 
 
 def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
+    reply = _format_workflow_reply(result, state_path, verbose=verbose)
+    usage = (result.get("state") or {}).get("gpu_usage_summary") or {}
+    if usage.get("record_count") and "GPU 占用统计" not in reply:
+        line = f"GPU 占用统计：已知累计 {usage['total_gpu_hours']:.3f} GPU 小时。"
+        if usage.get("unknown_records"):
+            line += f"另有 {usage['unknown_records']} 条记录缺少 GPU 耗时，不按零结算。"
+        reply += "\n" + line
+    return reply
+
+
+def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
+    from phase_agent.tools.workflows.mc_coverage_choice import needs_choice, prompt
+
+    if result.get("status") == "awaiting_approval" and needs_choice(result.get("agent_proposal")):
+        return (
+            result.get("reason")
+            if result.get("mc_coverage_question")
+            else prompt(result["agent_proposal"])
+        )
     if result.get("status") == "awaiting_reference_dft_choice":
         return result["reason"]
+    if result.get("status") == "insufficient_evidence":
+        payload = (result.get("execution_result") or result.get("execution") or {}).get(
+            "result"
+        ) or result
+        if not payload.get("missing_evidence"):
+            for event in reversed(result.get("events") or []):
+                data = (event.get("execution_result") or event.get("execution") or {}).get(
+                    "result"
+                ) or event
+                if data.get("missing_evidence"):
+                    payload = data
+                    break
+        labels = {
+            "consecutive_unique_model_update_epochs": "连续不同模型轮次的收敛记录",
+            "model_epoch_hull_change": "模型轮次凸包变化",
+            "model_epoch_ground_state_stability": "模型轮次基态稳定性",
+            "final_frame_dft_error": "末帧 DFT 误差验证",
+            "competing_phase_same_frame_dft": "竞争相的同帧 DFT 证据",
+        }
+        missing = "、".join(
+            labels.get(value, value) for value in payload.get("missing_evidence") or []
+        )
+        return (
+            "收敛检查已完成，当前证据不足。"
+            + (
+                "缺少：" + missing + "。"
+                if missing
+                else "原因：" + str(payload.get("reason") or "必要证据未记录") + "。"
+            )
+            + "\n应基于已有结果提出可行的下一步方案；重复“同意”或检查同一批数据不会补齐证据。"
+        )
     recovered = result.get("verified_recovery") or {}
     if recovered:
         names = {
@@ -141,15 +191,36 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             "标准：<1 meV/atom弛豫，1–10单点，>10按Na×相抽样10%。\n"
             f"预计相对成本 {preview['initial_cost']:.1f}；最多追加一轮弛豫 "
             f"{preview['maximum_supplemental_count']} 个、成本上限 {preview['maximum_supplemental_cost']:.1f}。\n"
-            "补充标准：新Ehull<1，或1–10且最大原子力>0.05 eV/Å；已弛豫项不再追加。\n"
+            "补充标准：新Ehull<1，或1–10且最大原子力>0.1 eV/Å；已弛豫项不再追加。\n"
             f"未覆盖的分层 {len(preview['coverage_gaps'])} 个；{timing}，单点成本暂按弛豫上界。\n"
             "同意将批准首批及上述上限内最多一轮补充输入生成；超限另行审批。\n"
             "仅生成超算输入；你提交GPU.sh并回传results。不本机计算。"
         )
     if refresh and refresh.get("status") != "completed":
         if refresh.get("status") == "waiting_results":
+            from phase_agent.analysis.state.workflow_blockers import (
+                refresh_result_facts,
+            )
+
+            facts = refresh_result_facts(result.get("state") or {})
+            failed = sum(facts["status_counts"].get(s, 0) for s in ("failed", "timeout"))
+            if failed:
+                reason = result.get("reason")
+                if not reason:
+                    reason = next(
+                        (e.get("reason") for e in reversed(events) if e.get("reason")),
+                        None,
+                    )
+                causes = "；".join(
+                    f"{row['count']} 个：{row['reason']}" for row in facts["failure_groups"][:3]
+                )
+                return reason or (
+                    f"当前刷新 {failed}/{facts['task_count']} 个失败。\n原因：{causes}\n先修复依赖，再审核重试方案；重复“同意”不能恢复缺失文件。"
+                )
             from phase_agent.runtime.chat_state_presentation import brief_chat_state
-            from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
+            from phase_agent.runtime.waiting_files_presentation import (
+                waiting_file_lines,
+            )
 
             state = result.get("state") or {}
             return "\n".join([brief_chat_state(state), *waiting_file_lines(state)])
@@ -594,6 +665,23 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                     else "耗时：实测样本不足，暂不换算小时。"
                 )
                 lines.append("本次仅生成branch；后续Relax/MC单独审批。")
+        batch_params = (
+            proposal.get("action_parameters")
+            or (proposal.get("raw_action") or {}).get("parameters")
+            or {}
+        )
+        batch_preview = batch_params.get("relax_mc_preview") or {}
+        if batch_preview:
+            workload = batch_preview["workload"]
+            lines.append(
+                f"封装估算：Relax {workload['relax_structure_tasks']} 个结构；三段 MC 任务上限 {workload['mc_task_upper']}；GPU 计算作业最多 {sum(workload['gpu_jobs_upper_by_wave'])} 个，另 1 个控制作业；计算并发 {workload['max_concurrent_jobs']}。"
+            )
+            lines.append("人工上传并提交一次；固定当前模型，追加由已确认规则按反馈选择。")
+            if batch_preview.get("bootstrap_first_mc"):
+                lines.append("无已有相图：首轮 MC 统一 100/10；后续追加需有效相图。")
+            lines.extend(
+                "诊断提示：" + warning for warning in batch_preview["diagnosis"].get("warnings", [])
+            )
         if proposal.get("recommended_action") == "allocate_mc_bohb":
             params = (
                 proposal.get("action_parameters")
@@ -628,6 +716,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 )
             if summary.get("expected_outcome"):
                 lines.append("预期结果：" + summary["expected_outcome"])
+            if summary.get("success_criterion"):
+                lines.append("验证方式：" + summary["success_criterion"])
         fallback_reason = (proposal.get("raw_action") or {}).get("fallback_reason")
         if fallback_reason:
             lines.append(f"回退原因：`{fallback_reason}`")

@@ -43,6 +43,39 @@ def run_workflow(
     """Run the top-level recovery, analysis, waiting and action StateGraph."""
     if type(max_steps) is not int or max_steps != 1:
         raise ValueError("Scientific workflow permits exactly one action per turn")
+    # Dry-run must not reconcile files, activate a model, or invoke task preparers.
+    if execution_mode == "dry_run":
+        from phase_agent.configuration.runtime.build_effective_run_config import (
+            build_effective_run_config,
+        )
+        from phase_agent.tools.workflows.lifecycle_support import (
+            _read_state_for_runner,
+            _save_runner_state,
+        )
+        from phase_agent.tools.workflows.create_workflow_handlers import create_workflow_handlers
+        from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
+        from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
+
+        config = build_effective_run_config(config_session, run_config)
+        path = state_path or config.get("state_path")
+        current = normalize_workflow_state(_read_state_for_runner(state, path))
+        result = run_action_turn(
+            current,
+            config_session,
+            registry=registry or create_tool_registry(create_workflow_handlers(handlers)),
+            agent_client=agent_client,
+            execution_mode="dry_run",
+            state_path=path,
+            context={
+                **runtime_adapters,
+                "manager": manager,
+                "effective_config": config,
+                "phase_references": phase_references,
+            },
+            max_steps=max_steps,
+        )
+        result["submitted"] = False
+        return result
     from phase_agent.graphs.project.runner import run_search_workflow_graph
     from pathlib import Path
 

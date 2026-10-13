@@ -174,6 +174,15 @@ def fresh_turn_context(handler, state, messages, conversation_id):
         context["current_project"]["configuration"]["effective_settings"]
     )
     context["recent_turns"] = recent_turns(handler.state_path, conversation_id)
+    from phase_agent.graphs.dialogue.evidence import progress_signature
+
+    context["facts_signature"] = progress_signature(state)
+    previous_signature = (
+        context["recent_turns"][-1].get("facts_signature") if context["recent_turns"] else None
+    )
+    context["facts_changed_since_previous_reply"] = (
+        context["facts_signature"] != previous_signature if previous_signature else None
+    )
     context["previous_reply"] = (
         context["recent_turns"][-1]["assistant"]
         if context["recent_turns"]

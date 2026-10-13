@@ -77,6 +77,10 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 reviewed_settings = validate_review(review, action, context["config_version"])
             except (ValueError, OSError) as error:
                 return {"status": "rejected", "state": state, "tasks": [], "reason": str(error)}
+        purposes = {
+            row["candidate_id"]: row["purpose"]
+            for row in (action.get("scientific_decision") or {}).get("selection_purposes") or []
+        }
         state = reserve_dft_actions(state, validation["accepted"])
         tasks = []
         confirmed_parameters = deepcopy(
@@ -139,6 +143,8 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 task["dft_template_digest"] = review["digest"]
             state.setdefault("tasks", []).append(task)
             state.setdefault("pending_tasks", []).append(task)
+            task["selection_purpose"] = purposes.get(decision["candidate_id"])
+            task["scientific_parent_task_key"] = action.get("task_key")
             tasks.append(task)
         state.setdefault("qbc_selection_history", []).append(
             {
@@ -199,7 +205,9 @@ def _state_candidates(state, manager, action):
 def _remaining_dft_budget(state, config):
     limits = config.get("budget_limits") or {}
     total = limits.get("total_relative_cost")
-    if total is None:
+    from phase_agent.tools.budget.check_budget import budget_is_hard
+
+    if total is None or not budget_is_hard(limits):
         return float("inf")
     used = float((state.get("budget_usage") or {}).get("total_relative_cost", 0) or 0)
     reserved = float(state.get("reserved_relative_cost", 0) or 0)

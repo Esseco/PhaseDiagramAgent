@@ -18,6 +18,7 @@ def decision_summary(action):
     tool = action.get("tool") or action.get("action_type")
     budget = action.get("round_budget_review") or {}
     dft = action.get("post_dft_review") or {}
+    scientific = action.get("scientific_decision") or {}
     return {
         "tool": tool,
         "recommendation": NAMES.get(tool, tool),
@@ -33,7 +34,8 @@ def decision_summary(action):
             )
             if dft.get(key)
         },
-        "alternatives": budget.get("alternatives") or [],
+        "scientific_decision": scientific,
+        "alternatives": scientific.get("alternatives") or budget.get("alternatives") or [],
         "uncertainty": budget.get("uncertainty") or "",
         "evidence_refs": action.get("evidence_refs") or [],
     }
@@ -60,7 +62,9 @@ def render_decision_card(state):
     detail = {
         k: v
         for k, v in decision.items()
-        if k in {"assessments", "alternatives", "uncertainty", "evidence_refs"} and v
+        if k
+        in {"assessments", "alternatives", "uncertainty", "evidence_refs", "scientific_decision"}
+        and v
     }
     if brief != reason:
         detail["完整理由"] = reason

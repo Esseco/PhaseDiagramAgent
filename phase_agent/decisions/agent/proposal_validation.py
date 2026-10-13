@@ -8,7 +8,7 @@ def proposal_errors(action, payload):
     from phase_agent.decisions.agent.dialogue_contract import is_dialogue, dialogue_errors
 
     if is_dialogue(action):
-        if action.get("kind") in {"advance", "review"} and not (
+        if action.get("kind") in {"advance", "review", "inspect_evidence"} and not (
             payload.get("decision_context") or {}
         ).get("conversation_controls"):
             return [

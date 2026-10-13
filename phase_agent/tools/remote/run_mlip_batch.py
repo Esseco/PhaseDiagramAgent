@@ -11,6 +11,16 @@ from phase_agent.tools.remote.export_batch_result import export_batch_result
 from phase_agent.tools.cost.runtime_observation import start_timer, runtime_observation
 
 
+def _worker_environment(batch):
+    env = {**os.environ, "PHASE_DEFER_RESULT_ARCHIVE": "1"}
+    backend = Path(batch) / "mc_backend"
+    if backend.is_dir():
+        env["PYTHONPATH"] = str(backend.resolve()) + (
+            os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+        )
+    return env
+
+
 def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
     manifest = Path(manifest_path).resolve()
     entries = json.loads(manifest.read_text(encoding="utf-8"))
@@ -65,7 +75,7 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
             outcome = subprocess.run(
                 command,
                 cwd=task_dir,
-                env={**os.environ, "PHASE_DEFER_RESULT_ARCHIVE": "1"},
+                env=_worker_environment(batch),
                 stdout=stdout,
                 stderr=stderr,
                 check=False,

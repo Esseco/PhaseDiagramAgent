@@ -41,11 +41,9 @@ def post_dft_assessment(state, config=None):
         and item.get("training_ready") is True
     ]
     paired = sum(item.get("comparison_status") == "completed" for item in energies)
-    training = (config.get("mlip_finetune") or {}).get("training") or {}
-    minimum = training.get(
-        "minimum_new_dft_records",
-        ((config.get("qbc") or {}).get("retrain") or {}).get("minimum_new_dft_records", 10),
-    )
+    from phase_agent.tools.policy.workflow_policy import settings
+
+    minimum = settings(config)["finetune_min_new_dft"]
     export = next(
         (
             item

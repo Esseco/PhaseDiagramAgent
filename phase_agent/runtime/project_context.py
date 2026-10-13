@@ -8,9 +8,7 @@ from phase_agent.analysis.state.project_authority import current_project
 def current_config_session(handler):
     kwargs = getattr(handler, "workflow_kwargs", None) or {}
     supplied = kwargs.get("config_session") or {}
-    path = getattr(handler, "config_session_path", None) or kwargs.get(
-        "config_session_path"
-    )
+    path = getattr(handler, "config_session_path", None) or kwargs.get("config_session_path")
     if path is not None and Path(path).is_file():
         return read_json(path, {}) or {}
     return supplied
@@ -35,15 +33,15 @@ def handler_project_context(handler, state):
     if source.is_file():
         try:
             source.resolve().relative_to(root.resolve())
-            editable = load_editable_config_json(
-                source, confirmed_configuration(state, session)
-            )
+            editable = load_editable_config_json(source, confirmed_configuration(state, session))
             from phase_agent.runtime.editable_config_baseline import (
                 editable_comparison_baseline,
             )
 
             expected = editable_comparison_baseline(
-                confirmed_configuration(state, session), source, root
+                confirmed_configuration(state, session),
+                source,
+                getattr(handler, "base_directory", None) or root,
             )
             changed = configuration_changes(expected, editable)
             card["editable_file"] = {
@@ -67,9 +65,7 @@ def project_context_line(card):
     if card.get("epoch"):
         parts.append(card["epoch"])
     version = str((card.get("active_model") or {}).get("version") or "未登记")
-    label = (
-        "微调模型" if version.startswith("remote-") and card.get("epoch") else version
-    )
+    label = "微调模型" if version.startswith("remote-") and card.get("epoch") else version
     parts.append("当前模型 " + label)
     draft = card.get("draft") or {}
     if draft.get("status") == "file_changes_not_effective":

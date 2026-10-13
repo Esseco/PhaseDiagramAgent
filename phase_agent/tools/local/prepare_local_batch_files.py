@@ -12,6 +12,14 @@ from phase_agent.tools.step_runner.file_protocol import write_json
 
 
 def prepare_local_batch_files(*, action, context):
+    if (action.get("parameters") or {}).get("mode") == "relax_mc_inputs":
+        from phase_agent.tools.relax_mc_batch.prepare import prepare_batch
+
+        return prepare_batch(action=action, context=context)
+    if (action.get("parameters") or {}).get("mode") == "relax_mc_results":
+        from phase_agent.tools.relax_mc_batch.results import import_results
+
+        return import_results(action=action, context=context)
     if (action.get("parameters") or {}).get("mode") == "model_refresh_inputs":
         from phase_agent.tools.local.prepare_model_refresh import prepare_model_refresh
 

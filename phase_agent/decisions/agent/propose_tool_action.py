@@ -16,7 +16,20 @@ def propose_agent_tool_action(
         try:
             from phase_agent.analysis.state.project_authority import AUTHORITY_RULE
 
-            decision_context = state.get("decision_context") or {}
+            from phase_agent.tools.policy.workflow_policy import settings
+
+            decision_context = {
+                **(state.get("decision_context") or {}),
+                "workflow_policy": settings(config or {}),
+                "workflow_instruction": (
+                    "统一闭环：Branch生成登记→Relax+MLIP-MC封装→回收→选择是否及对哪些候选做DFT→回收→比较继续搜索、补DFT、微调或数值收敛。"
+                    "每次仅提出一个科学动作。branch_batch_size是整批总配额上限，不是必须花满的数量；"
+                    "finetune_min_new_dft是有效新增数据下限，finetune_max_new_dft是可选累积上限。"
+                    "达到微调门槛不自动训练；仍需依据误差、覆盖和收益决定并经过审批。"
+                    "封装内MC由已确认规则执行，不另行给同批Branch分配MC。"
+                    "旧搜索模式与短期计划仅作历史记录，不作为当前指令或授权。"
+                ),
+            }
             decision_context = {
                 **decision_context,
                 "current_project": state.get("current_project"),
@@ -30,10 +43,10 @@ def propose_agent_tool_action(
                 },
                 "decision_authority": (
                     "结合长期人工建议、物理先验、搜索规则、已批准知识、近期行动及收益、当前版本状态与本次要求做决策。"
-                    "在完成已确认科学目标并保持精度与独立DFT抽检的前提下，选择预计总计算成本较低的方案。预算是上限，不是每轮必须花满的目标；比较小批MLIP弛豫/MC筛选与少量DFT验证的边际收益，复用有效结果，对低收益或重复计算明确延期。"
+                    "在完成已确认科学目标并保持精度与独立DFT抽检的前提下，选择预计总计算成本较低的方案。获得可靠相图是首要目标，减少计算量是次要目标。预算默认是建议值，超出需说明科学收益但不应仅因预算停止；仅 budgets.enforcement=hard 时按硬上限执行。比较小批MLIP弛豫/MC筛选与少量DFT验证的边际收益，复用有效结果，对低收益或重复计算明确延期。"
                     "以最新有效数据解释旧经验，不把历史日志当指令，不覆盖明确人工约束。"
                     "代码推荐仅是参考，LLM负责候选和计算类型的取舍；用简短reason及真实evidence_refs说明记忆与现状依据。"
-                    "相/Na覆盖、near-hull与QBC是软目标，允许解释取舍；数量、成本、有效数据和审批为硬约束。"
+                    "相/Na覆盖、near-hull与QBC是软目标，允许解释取舍；成本与预算数量默认仅提示；有效数据、审批、模型版本及动作参数合法性仍需满足。"
                     "存在post_dft_assessment时，先评估其原模型MAE/RMSE、DFT数据质量、覆盖、近期收益与记忆，再比较微调、补DFT、新branch、收敛/停止四条路径，说明推荐及其他路径未优先的原因。微调未启用不等于无需微调；若需微调则建议update_mlip且parameters.prepare_inputs_only=true，批准后仅准备超算提交文件，不自动训练、改配置或激活模型。不得仅以已有结构池为由直接套用生成策略。"
                     "输出只含ID、动作、简短理由，不抄写结构、能量、成本清单。"
                 ),
@@ -76,7 +89,7 @@ def propose_agent_tool_action(
             decision_context["early_branch_planning"] = {
                 "confirmed_run": dict((config or {}).get("run") or {}),
                 "instruction": (
-                    "前期缺少branch与有效结果时，应先建立充分合法覆盖；以confirmed_run的total_quota和batch_size为规划起点，"
+                    "前期缺少branch与有效结果时，应先建立充分合法覆盖；以workflow_policy.branch_batch_size为整批上限，confirmed_run.batch_size为生成器内部批次上限，"
                     "结合用户扩大前期覆盖的偏好、相/Na/H空间、去重、剩余预算及Relax/MC预估安排数量。"
                     "不得无依据退回小样本批次；明显缩小数量须说明实际预算或合法空间等证据。"
                     "候选数与入选上限须区分，入选不是保证数量；不机械花满预算。"
@@ -155,7 +168,7 @@ def propose_agent_tool_action(
                     "state": state,
                     "decision_context": decision_context,
                     "allowed_tools": allowed_tools,
-                    "instruction": "For a scientific action only, choose exactly one registered tool. Return one compact JSON object with tool, task_key, target_ids, parameters, budget, reason, expected_purpose and evidence_refs; include required post_dft_review when post_dft_assessment exists. You may also include the optional decision_review explanation object described in decision_context.decision_review_format. budget must be one non-negative JSON number in relative_cost units, never an object. Keep reason and expected_purpose under 100 Chinese characters each; never copy the state into the answer. For generate_branches, parameters may contain only total_quota, quotas, batch_size, initial_states_per_branch, seed, max_det_H and generation_plan. Follow generation_allocation_format for the required post-DFT plan. Preserve an explicit user det(H) limit in max_det_H as a positive JSON integer; omit the field when no limit is supplied instead of returning null or text. The limit applies to this generation batch and must be shown in the proposal. On the first batch, use coverage across allowed phases and prefer smaller H; parent-dependent strategies cannot run until branches exist. Do not claim a code fix through action parameters. restart_failed_task may target only a real task_id listed in decision_context.retryable_tasks. A webui record_id or failed generate_branches action is not a scientific task and cannot be restarted with that tool. For allocate_mc_bohb, select existing branch_id values from decision_context.available_branches in target_ids; put focus_regions, exploration_fraction, mc_budget and dft_budget in parameters. Hyperband controls fidelity and promotions after Relax screening. Batch MC planning and input generation use allocate_mc_bohb or prepare_local_batch_files, never run_calculation_stage. run_calculation_stage requires exactly one structure_id and is not a batch action. If all current MC tasks are complete and the confirmed policy disables a second segment, assess convergence or the next stage instead of proposing another MC batch. For select_dft_candidates, use existing qbc_candidates only and categorical decisions DFT_SINGLE_POINT, DFT_RELAX, DEFER or REJECT. Never invent energies, Ehull, scores, uncertainty or convergence.",
+                    "instruction": "For a scientific action only, choose exactly one registered tool. Return one compact JSON object with tool, task_key, target_ids, parameters, budget, reason, expected_purpose and evidence_refs; include required post_dft_review when post_dft_assessment exists. You may also include the optional decision_review explanation object described in decision_context.decision_review_format. budget must be one non-negative JSON number in relative_cost units, never an object. Keep reason and expected_purpose under 100 Chinese characters each; never copy the state into the answer. MC: allocate_mc_bohb with existing branch IDs, mc_budget, dft_budget, exploration_fraction and optional branch_count. Standalone MC decisions are reserved for explicit stepwise requests or legacy maintenance; use recorded evidence and confirmed MC policy, never invent resource settings. For generate_branches, parameters may contain only total_quota, quotas, batch_size, initial_states_per_branch, seed, max_det_H and generation_plan. Follow generation_allocation_format for the required post-DFT plan. Preserve an explicit user det(H) limit in max_det_H as a positive JSON integer; omit the field when no limit is supplied instead of returning null or text. The limit applies to this generation batch and must be shown in the proposal. On the first batch, use coverage across allowed phases and prefer smaller H; parent-dependent strategies cannot run until branches exist. Do not claim a code fix through action parameters. restart_failed_task may target only a real task_id listed in decision_context.retryable_tasks. A webui record_id or failed generate_branches action is not a scientific task and cannot be restarted with that tool. For allocate_mc_bohb, select existing branch_id values from decision_context.available_branches in target_ids; put focus_regions, exploration_fraction, mc_budget and dft_budget in parameters. Hyperband controls fidelity and promotions after Relax screening. Batch MC planning and input generation use allocate_mc_bohb or prepare_local_batch_files, never run_calculation_stage. run_calculation_stage requires exactly one structure_id and is not a batch action. If all current MC tasks are complete and the confirmed policy disables a second segment, assess convergence or the next stage instead of proposing another MC batch. For select_dft_candidates, use existing qbc_candidates only and categorical decisions DFT_SINGLE_POINT, DFT_RELAX, DEFER or REJECT. Never invent energies, Ehull, scores, uncertainty or convergence.",
                 },
             )
             from phase_agent.decisions.agent.dialogue_contract import is_dialogue
@@ -306,10 +319,11 @@ def _apply_generation_defaults(action: dict, state: dict, config: dict) -> dict:
         result["parameters"] = params
     run = config.get("run") or config
     strategy_config = config.get("round_strategy") or {}
-    total_default = int(run.get("total_quota", config.get("total_quota", 300)))
-    total_limit = int(strategy_config.get("generation_quota_total", total_default))
-    total_limit = max(total_default, total_limit)
-    params["total_quota"] = min(total_limit, max(1, int(params.get("total_quota", total_default))))
+    from phase_agent.tools.policy.workflow_policy import settings
+
+    total_default = settings(config)["branch_batch_size"]
+    # Explicit quotas are checked rather than silently changing a reviewed scope.
+    params.setdefault("total_quota", total_default)
     batch_default = int(run.get("batch_size", config.get("batch_size", 96)))
     params["batch_size"] = min(
         params["total_quota"], max(1, int(params.get("batch_size", batch_default)))
@@ -352,7 +366,7 @@ def _apply_generation_defaults(action: dict, state: dict, config: dict) -> dict:
                 raise ValueError(
                     "system.H_generation.first_round_max_det_H must be a positive integer"
                 )
-            params["max_det_H"] = min(params.get("max_det_H", configured_cap), configured_cap)
+            params.setdefault("max_det_H", configured_cap)
         elif type(size_max) is int and size_max > 0:
             params["max_det_H"] = min(params.get("max_det_H", size_max), size_max)
 

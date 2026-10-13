@@ -10,13 +10,24 @@ class RecoveryState(TypedDict, total=False):
     receipt_report: dict
     checks: list[dict]
     report: dict
+    inspect_artifacts: bool
 
 
 def build_execution_recovery_graph():
     def receipts(state):
         from phase_agent.tools.state.execution_receipts import recovery_report
 
-        return {"receipt_report": recovery_report(state["state_path"], state["business"])}
+        return {
+            "receipt_report": recovery_report(state["state_path"], state["business"]),
+            "checks": [],
+        }
+
+    def after_receipts(state):
+        return (
+            "inspect_registered_artifacts_and_ledger"
+            if state.get("inspect_artifacts", True) and state["receipt_report"]["unsettled"]
+            else "propose_recovery_steps"
+        )
 
     def artifacts(state):
         from phase_agent.tools.state.execution_recovery_evidence import inspect_execution
@@ -42,12 +53,18 @@ def build_execution_recovery_graph():
     graph.add_node("inspect_registered_artifacts_and_ledger", artifacts)
     graph.add_node("propose_recovery_steps", report)
     graph.add_edge(START, "read_execution_receipts")
-    graph.add_edge("read_execution_receipts", "inspect_registered_artifacts_and_ledger")
+    graph.add_conditional_edges(
+        "read_execution_receipts",
+        after_receipts,
+        ["inspect_registered_artifacts_and_ledger", "propose_recovery_steps"],
+    )
     graph.add_edge("inspect_registered_artifacts_and_ledger", "propose_recovery_steps")
     graph.add_edge("propose_recovery_steps", END)
     return graph.compile(checkpointer=False, name="execution_recovery")
 
 
-def execution_recovery_report(state_path, state, *, graph=None):
+def execution_recovery_report(state_path, state, *, graph=None, inspect_artifacts=True):
     graph = graph or build_execution_recovery_graph()
-    return graph.invoke({"state_path": str(state_path), "business": state})["report"]
+    return graph.invoke(
+        {"state_path": str(state_path), "business": state, "inspect_artifacts": inspect_artifacts}
+    )["report"]

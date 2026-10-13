@@ -20,6 +20,7 @@ def reserve_dft_actions(state: dict, decisions: list[dict]) -> dict:
             "status": "reserved",
             "relative_cost": item["relative_cost"],
             "reserved_cost": item["relative_cost"],
+            "budget_warnings": deepcopy(item.get("budget_warnings") or []),
             "stage": "dft_single_point" if item["action"] == "DFT_SINGLE_POINT" else "dft_relax",
             "config_version": item["config_version"],
         }

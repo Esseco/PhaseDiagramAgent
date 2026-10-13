@@ -83,7 +83,7 @@ def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026)
             "relax_below": 0.001,
             "predict_through": 0.010,
             "audit_fraction": 0.10,
-            "force_threshold": 0.05,
+            "force_threshold": 0.1,
             "maximum_supplemental_waves": 1,
             "seed": seed,
         },
@@ -107,4 +107,4 @@ def supplemental_relaxation_required(ehull, forces):
         len(vector) != 3 or not all(math.isfinite(x) for x in vector) for vector in forces
     ):
         raise ValueError("new-model atomic force vectors missing or invalid")
-    return max(math.sqrt(sum(x * x for x in vector)) for vector in forces) > 0.05
+    return max(math.sqrt(sum(x * x for x in vector)) for vector in forces) > 0.1

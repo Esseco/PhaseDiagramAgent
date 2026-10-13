@@ -8,11 +8,55 @@ from pathlib import Path
 from phase_agent.science.mlip.mace_worker import run_mace_worker
 
 
+def remote_model_references(model):
+    """Serialize recorded HPC references verbatim; never inspect local weights."""
+    members = model.get("members") or []
+    replacements = {
+        str(member["model_path"]): str(member.get("remote_model_path") or member["model_path"])
+        for member in members
+        if member.get("model_path")
+    }
+    declared = model.get("remote_model_paths") or model.get("model_paths") or []
+    if not declared and members:
+        declared = [m.get("remote_model_path") or m.get("model_path") for m in members]
+    if not isinstance(declared, (list, tuple)):
+        raise ValueError("remote_model_reference_invalid: committee paths must be a list")
+    paths = [replacements.get(str(path), str(path)) if path else "" for path in declared]
+    main = None if paths else str(model.get("remote_model_path") or model.get("model_path") or "")
+    selected = paths or ([main] if main else [])
+    if not selected or any(not name.strip() for name in selected):
+        raise ValueError(
+            "remote_model_reference_missing: configure HPC model paths; local weights are not required"
+        )
+    if len(selected) != len(set(selected)):
+        raise ValueError("remote_model_reference_invalid: duplicate committee paths")
+    if members and len(paths) != len(members):
+        raise ValueError("remote_model_reference_invalid: committee member/path count mismatch")
+    if paths and not 0 <= int(model.get("main_model_index", 0)) < len(paths):
+        raise ValueError("remote_model_reference_invalid: main_model_index out of range")
+    evidence = []
+    for name in selected:
+        row = next(
+            (
+                m
+                for m in members
+                if str(m.get("remote_model_path") or m.get("model_path") or "") == name
+            ),
+            model if name == main else {},
+        )
+        evidence.append(
+            {"model_path": name, "sha256": row.get("sha256"), "size_bytes": row.get("size_bytes")}
+        )
+    return main, paths, evidence
+
+
 def create_mlip_task_preparer(manager, phase_references, config):
     """Capture ledger context and return a JSON-safe Slurm task preparer."""
     model = config.get("mlip") or {}
+    history_tasks = None
 
     def prepare(task):
+        nonlocal history_tasks
         if task.get("stage") not in {"relax_and_feature", "deep_search"}:
             return deepcopy(task)
         current = deepcopy(task)
@@ -26,7 +70,7 @@ def create_mlip_task_preparer(manager, phase_references, config):
         if segment_budget is None:
             budget = current.get("budget")
             segment_budget = budget.get("steps") if isinstance(budget, dict) else budget
-        model_paths = [str(path) for path in (model.get("model_paths") or [])]
+        model_path, model_paths, model_evidence = remote_model_references(model)
         base_parameters = {
             "device": model.get("device", "cuda"),
             "mace_head": _resolve_mace_head(model),
@@ -44,6 +88,26 @@ def create_mlip_task_preparer(manager, phase_references, config):
                     manager, branch, record, phase_references, config
                 )
             base_parameters["full_na_structure"] = str(full_na_path)
+            from phase_agent.science.mc.project_occupation_history import history_seed
+
+            if history_tasks is None:
+                import json
+
+                path = Path(config["state_path"]) if config.get("state_path") else None
+                saved = (
+                    json.loads(path.read_text(encoding="utf-8")) if path and path.is_file() else {}
+                )
+                history_tasks = [
+                    t for t in saved.get("tasks", []) if t.get("stage") == "deep_search"
+                ]
+
+            base_parameters["occupation_history_scope"] = record["branch_id"]
+            base_parameters["occupation_history_seed"] = history_seed(
+                config, record["branch_id"], full_na_path, tasks=history_tasks
+            )
+            base_parameters["max_duplicate_trials"] = (config.get("mc_policy") or {}).get(
+                "max_duplicate_trials", 100
+            )
         current.update(
             {
                 "structure_id": structure_id,
@@ -59,8 +123,10 @@ def create_mlip_task_preparer(manager, phase_references, config):
                         else "relax"
                     ),
                     "structure_path": str(structure_path),
-                    "model_path": None if model_paths else str(model.get("model_path") or ""),
+                    "model_path": model_path,
                     "model_paths": model_paths,
+                    "model_file_evidence": model_evidence,
+                    "model_storage": "remote",
                     "model_version": model.get("version") or model.get("name"),
                     "output_directory": current.get("calculation_directory"),
                     "parameters": {
@@ -78,6 +144,11 @@ def create_mlip_task_preparer(manager, phase_references, config):
                         **deepcopy(current.get("parameters") or {}),
                     },
                     "segment_budget": int(segment_budget) if segment_budget is not None else None,
+                    **(
+                        {"stopping_threshold_source": current["stopping_threshold_source"]}
+                        if current.get("stopping_threshold_source")
+                        else {}
+                    ),
                     "checkpoint": current.get("checkpoint"),
                     "branch": branch,
                     "boundary": deepcopy(manager.boundary),
@@ -85,6 +156,11 @@ def create_mlip_task_preparer(manager, phase_references, config):
                 },
             }
         )
+        if (
+            current["stage"] == "deep_search"
+            and current.get("stopping_threshold_source") == "library_default"
+        ):
+            current["worker_job"]["parameters"].pop("min_improvement", None)
         return current
 
     return prepare
@@ -105,7 +181,9 @@ def _resolve_mace_head(model):
 def _materialize_full_na_template(manager, branch, record, phase_references, config):
     from fractions import Fraction
     from phase_agent.science.structures.boundary_utils import normalize_fraction
-    from phase_agent.science.structures.build_mc_full_na_template import build_mc_full_na_template
+    from phase_agent.science.structures.build_mc_full_na_template import (
+        build_mc_full_na_template,
+    )
 
     if Fraction(normalize_fraction(branch["x"])) == 0:
         raise ValueError(f"branch {branch.get('branch_id')} 为 Na0，不需要也不能执行 Na/V MC")
@@ -138,6 +216,13 @@ def execute_mlip_task(task):
         job["parameters"]["full_na_structure"] = str(Path(task["result_path"]).parent / full_na)
     if not job.get("model_path") and not job.get("model_paths"):
         raise ValueError("MLIP task 缺少 model_path/model_paths")
+    root = Path(task["result_path"]).parent
+    if job.get("model_paths"):
+        job["model_paths"] = [
+            str(Path(p) if Path(p).is_absolute() else root / p) for p in job["model_paths"]
+        ]
+    elif not Path(job["model_path"]).is_absolute():
+        job["model_path"] = str(root / job["model_path"])
     result = run_mace_worker(job)
     outputs = deepcopy(result)
     outputs.setdefault("mlip_name", "MACE")

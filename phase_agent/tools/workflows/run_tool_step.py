@@ -24,6 +24,7 @@ from phase_agent.tools.workflows.tool_outcomes import (
     _store_completed,
     _policy_rejection,
     _apply_execution_result,
+    resumable_approval_wait,
 )
 from phase_agent.tools.policy.validate_tool_action import validate_tool_action
 from phase_agent.tools.state.state_manager import agent_state_summary, update_state_snapshot
@@ -136,7 +137,16 @@ def _initialize_tool_step(
     )
     current.setdefault("action_records", [])
     current.setdefault("pending_execution_policies", {})
-    if invocation_id and invocation_id in current.get("invocations", {}):
+    cached = current.get("invocations", {}).get(invocation_id)
+    waiting = (
+        cached is not None
+        and invocation_id in current["pending_execution_policies"]
+        and resumable_approval_wait(cached)
+        and not any(
+            task.get("parent_decision_id") == invocation_id for task in current.get("tasks") or []
+        )
+    )
+    if cached is not None and not waiting:
         return {
             **deepcopy(current["invocations"][invocation_id]),
             "state": current,
@@ -224,6 +234,11 @@ def _refresh_graph_gate(frame):
 
 
 def _prepare_tool_proposal(frame):
+    from phase_agent.tools.workflows.mc_coverage_choice import resolve
+
+    resolved = resolve(frame)
+    if resolved is not None:
+        return resolved
     if (frame.get("context") or {}).get("unified_dialogue"):
         from phase_agent.tools.workflows.react_proposal import prepare_react_proposal
 
@@ -670,6 +685,12 @@ def _prepare_tool_proposal(frame):
 
 
 def _approval_graph_node(frame):
+    from phase_agent.tools.workflows.mc_coverage_choice import needs_choice, preserve
+
+    feedback = frame.get("human_feedback") or {}
+    rejecting = isinstance(feedback, dict) and feedback.get("decision") == "reject"
+    if frame.get("mode") == "interactive" and not rejecting and needs_choice(frame.get("proposal")):
+        return preserve(frame)
     current = frame["current"]
     proposal = frame["proposal"]
     mode = frame["mode"]
@@ -780,6 +801,12 @@ def _validation_graph_node(frame):
 
     from phase_agent.tools.state.approved_direction import direction_action_errors
 
+    from phase_agent.tools.policy.workflow_policy import needs_human
+
+    effective = (frame.get("context") or {}).get("effective_config") or config
+    if needs_human(action, effective) and mode not in {"interactive", "dry_run"}:
+        validation["errors"].append("sensitive_action_requires_human_approval")
+        validation["valid"] = False
     direction_errors = direction_action_errors(action, current)
     if direction_errors:
         validation["valid"] = False
@@ -829,6 +856,7 @@ def _dispatch_graph_node(frame):
             **(context or {}),
             "confirmed_config": config,
             "invocation_id": record_id,
+            "approval_record_id": record_id,
             "config_version": validation["config_version"],
             "execution_mode": mode,
             "human_approved_mc_full_plan": (
@@ -1018,7 +1046,7 @@ def _is_verified_second_mc_action(action, state, config):
     allowed_targets = set(source["branch_ids"])
     allocations = preview["allocations"]
     try:
-        segment_one_only = all(int(row.get("segment_index", -1)) == 1 for row in allocations)
+        segment_one_only = all(int(row.get("segment_index", -1)) in {1, 2} for row in allocations)
     except (TypeError, ValueError):
         segment_one_only = False
     allocated_branches = {row.get("branch_id") for row in allocations}

@@ -11,6 +11,7 @@ class MCAllocationFields(BaseModel):
     exploration_fraction: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)] = 0.1
     seed: int = 0
     focus_regions: list[str] = Field(default_factory=list)
+    branch_count: Annotated[int, Field(ge=1)] | None = None
 
 
 def mc_contract_errors(parameters, *, fallback_budget=0):

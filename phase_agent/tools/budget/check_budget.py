@@ -1,6 +1,13 @@
 """只检查预算，不提前扣账。"""
 
 
+def budget_is_hard(limits):
+    policy = (limits or {}).get("enforcement", "advisory")
+    if policy not in {"advisory", "hard"}:
+        raise ValueError("budget_enforcement_must_be_advisory_or_hard")
+    return policy == "hard"
+
+
 def check_budget(state: dict, request: dict, limits: dict) -> dict:
     usage = state.get("budget_usage", {})
     reasons = []
@@ -62,4 +69,12 @@ def check_budget(state: dict, request: dict, limits: dict) -> dict:
             > llm_limits["max_calls_per_iteration"]
         ):
             reasons.append("llm_iteration_call_limit")
-    return {"allowed": not reasons, "reasons": reasons, "request": request}
+    hard = budget_is_hard(limits)
+    errors = reasons if hard else [reason for reason in reasons if reason == "unknown_stage"]
+    return {
+        "allowed": not errors,
+        "reasons": errors,
+        "warnings": [reason for reason in reasons if reason not in errors],
+        "request": request,
+        "enforcement": "hard" if hard else "advisory",
+    }

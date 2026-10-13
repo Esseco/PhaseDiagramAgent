@@ -79,6 +79,18 @@ def review_training_choice(
                 },
                 "instruction": "微调已完成。科学决策主要比较两条路线：1.activate：切换候选新模型，刷新已有结构与凸包，再进入下一轮搜索；2.supplement_dft：针对覆盖缺口或高误差区域补采样与DFT，回收新增数据后再微调。比较下一轮搜索的信息收益与新增DFT的边际收益、覆盖、误差分布和预算，推荐一条并解释另一条暂不选的原因。旧模型误差不能当作新模型误差；微调改善是用户工作假设，未测量的改善幅度不得虚构。若没有明确高收益补DFT目标，应说明切换并搜索是否更合理。不要把独立验证字段缺失自动当成这两条路线的阻塞，也不要仅凭预测力幅度小就诊断接口错误。K折不等于最终独立验证，但候选可按现有审批进入下一轮搜索，不代表已收敛。other仅限有直接证据的执行阻塞，须明确证据和解除条件。返回tool=adjust_strategy，parameters.choice=activate/supplement_dft/other，reason为简短收益比较，parameters.alternatives解释未选路线。此处只提出方案，不执行或重复本轮训练。",
             }
+            from phase_agent.analysis.state.scientific_decision_brief import decision_brief
+
+            brief = decision_brief(state)
+            enabled = (brief.get("policy") or {}).get("schema_version") == 1
+            if enabled:
+                payload["decision_context"]["scientific_decision_brief"] = brief
+                from phase_agent.decisions.agent.scientific_decisions import (
+                    INSTRUCTION,
+                    ScientificDecision,
+                )
+
+                payload["instruction"] += " " + INSTRUCTION
             if feedback:
                 payload["user_instruction"] = feedback
                 payload["instruction"] += (
@@ -100,6 +112,10 @@ def review_training_choice(
             from phase_agent.decisions.agent.decision_contracts import PostDFTReview
 
             payload["output_contracts"]["followup_action"] = ActionEnvelope.model_json_schema()
+            if enabled:
+                payload["output_contracts"]["scientific_decision"] = (
+                    ScientificDecision.model_json_schema()
+                )
             payload["output_contracts"]["post_dft_review"] = PostDFTReview.model_json_schema()
             require_round_review = bool(
                 payload["decision_context"]["search_evidence"].get("post_dft_assessment")
@@ -133,6 +149,24 @@ def review_training_choice(
                 plan_errors = followup_errors(
                     choice, followup, require_round_review=require_round_review
                 )
+                if enabled:
+                    from phase_agent.decisions.agent.scientific_decisions import (
+                        scientific_decision_errors,
+                    )
+
+                    reviewed_action = (
+                        deepcopy(followup)
+                        if isinstance(followup, dict)
+                        else {"tool": "update_mlip"}
+                    )
+                    reviewed_action["scientific_decision"] = decision.get("scientific_decision")
+                    plan_errors.extend(
+                        scientific_decision_errors(
+                            reviewed_action, brief, {"post_dft_assessment": True}
+                        )
+                    )
+                    if not plan_errors and isinstance(followup, dict):
+                        followup = reviewed_action
                 if (
                     choice in {"activate", "supplement_dft", "other"}
                     and reason
@@ -169,6 +203,7 @@ def review_training_choice(
             review = {
                 "choice": choice,
                 "review_policy": REVIEW_POLICY,
+                "scientific_decision": deepcopy(decision.get("scientific_decision")),
                 "user_feedback": feedback,
                 "reason": reason,
                 "alternatives": deepcopy(alternatives),

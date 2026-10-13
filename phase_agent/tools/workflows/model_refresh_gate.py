@@ -4,9 +4,14 @@ from copy import deepcopy
 import hashlib
 from pathlib import Path
 
-from phase_agent.analysis.feedback.model_refresh_plan import supplemental_relaxation_required
+from phase_agent.analysis.feedback.model_refresh_plan import (
+    supplemental_relaxation_required,
+)
 from phase_agent.tools.budget.release_budget import release_budget
-from phase_agent.tools.policy.execution_policy import apply_execution_policy, build_agent_proposal
+from phase_agent.tools.policy.execution_policy import (
+    apply_execution_policy,
+    build_agent_proposal,
+)
 from phase_agent.tools.policy.validate_tool_action import validate_tool_action
 from phase_agent.tools.dispatch.execute_tool_action import execute_tool_action
 from phase_agent.tools.workflows.model_refresh_state import (
@@ -50,6 +55,19 @@ def advance_refresh(state, user_message=""):
                 tasks[tid]["refresh_wait_waived"] = True
     unresolved = set(missing) - set(refresh.get("waived_task_ids", []))
     if unresolved:
+        from phase_agent.analysis.state.workflow_blockers import refresh_result_facts
+
+        facts = refresh_result_facts(current)
+        failed = sum(facts["status_counts"].get(s, 0) for s in ("failed", "timeout"))
+        if failed:
+            reasons = "；".join(
+                f"{r['count']} 个：{r['reason']}" for r in facts["failure_groups"][:3]
+            )
+            return current, (
+                f"刷新第{refresh['wave'] + 1}批：{failed} 个失败，有效回收{len(rows) - len(missing)}/{len(rows)}。\n"
+                f"失败原因：{reasons}\n"
+                "先修复上述依赖，再提出具体重试方案；反复回复“继续”或“同意”不会恢复缺失文件。原任务、结果和已用 GPU 耗时保留。"
+            )
         return (
             current,
             f"刷新第{refresh['wave'] + 1}批：有效回收{len(rows) - len(missing)}/{len(rows)}；等待或失败{len(unresolved)}。可继续回传，或明确回复“不再等待刷新”。不会标记缺失任务完成。",
@@ -60,7 +78,10 @@ def advance_refresh(state, user_message=""):
         diagram.get("status") != "completed"
         or diagram.get("model_version") != refresh["new_model_version"]
     ):
-        return current, "刷新结果尚不能构建新模型相图，请补齐相识别或Na端点；不会沿用旧模型能量。"
+        return (
+            current,
+            "刷新结果尚不能构建新模型相图，请补齐相识别或Na端点；不会沿用旧模型能量。",
+        )
     diagram_entries = diagram.get("entries") or []
     record_ids = [entry["record_id"] for entry in diagram_entries]
     if len(set(record_ids)) != len(record_ids):
@@ -72,7 +93,10 @@ def advance_refresh(state, user_message=""):
     ]
     for tid in task_ids:
         if sum(record.get("source_task_id") == tid for record in new_records) > 1:
-            return current, f"刷新任务{tid}存在多个相图记录，需核对唯一结果；尚未完成刷新。"
+            return (
+                current,
+                f"刷新任务{tid}存在多个相图记录，需核对唯一结果；尚未完成刷新。",
+            )
     entries = {e["record_id"]: e for e in diagram_entries}
     phases = {
         r.get("source_task_id"): entries.get(r.get("record_id"))
@@ -81,7 +105,10 @@ def advance_refresh(state, user_message=""):
     }
     for task in rows:
         if accepted(task) and phases.get(task["task_id"]) is None:
-            return current, f"刷新任务{task['task_id']}尚未进入新版本相图，需完成相识别和能量校验。"
+            return (
+                current,
+                f"刷新任务{task['task_id']}尚未进入新版本相图，需完成相识别和能量校验。",
+            )
     supplements = []
     if refresh["wave"] == 0:
         original = {r["structure_sha256"]: r for r in plan["candidates"]}
@@ -93,7 +120,10 @@ def advance_refresh(state, user_message=""):
                 continue
             entry = phases.get(task["task_id"])
             if entry is None or entry.get("ehull_unit") != "eV/atom":
-                return current, f"刷新任务{task['task_id']}缺少唯一新版本Ehull证据，未追加计算。"
+                return (
+                    current,
+                    f"刷新任务{task['task_id']}缺少唯一新版本Ehull证据，未追加计算。",
+                )
             outputs = task["outputs"]
             if supplemental_relaxation_required(float(entry["ehull"]), outputs.get("forces")):
                 path = Path(outputs["structure_path"])
@@ -113,7 +143,9 @@ def advance_refresh(state, user_message=""):
     key = refresh.get("supplemental_reservation_key")
     if key:
         current = release_budget(
-            current, task_key=key, reason="refresh supplemental envelope completed or unused"
+            current,
+            task_key=key,
+            reason="refresh supplemental envelope completed or unused",
         )["state"]
         refresh = current["model_refresh"]
     initial_ids = {
@@ -157,7 +189,12 @@ def run_model_refresh_gate(
             "reason": f"刷新结果证据不完整：{error}；未追加计算，原始结果保留。",
         }
     if waiting:
-        return {"status": "not_configured", "state": current, "reason": waiting, "submitted": False}
+        return {
+            "status": "not_configured",
+            "state": current,
+            "reason": waiting,
+            "submitted": False,
+        }
     if not refresh_active(current):
         return {
             "status": "completed",

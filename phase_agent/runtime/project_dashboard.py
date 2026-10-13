@@ -240,7 +240,7 @@ def main():
             return
         busy.add(path)
         start_cancellations[path] = threading.Event()
-        display(f"正在启动 {path.parent.name}…")
+        display(f"正在启动 {path.parent.name}… 初始化和旧会话恢复可能需要等待；请勿重复启动。")
         refresh()
 
         def worker():
@@ -253,7 +253,7 @@ def main():
                     (
                         "message",
                         path,
-                        f"操作失败：{error}\n查看 {path.parent / 'logs/agent_server.log'}",
+                        f"启动失败：{error}",
                     )
                 )
             finally:
@@ -319,23 +319,11 @@ def main():
 
         webbrowser.open(f"http://127.0.0.1:{service['studio_port']}/phase/process")
 
-    def manage_conversations():
-        path = selected()
-        service = read_service(path) if path else None
-        if not service:
-            display("请先启动所选项目服务。")
-            return
-        import webbrowser
-
-        webbrowser.open(f"http://127.0.0.1:{service['studio_port']}/phase/conversations")
-
     for column, (label, command) in enumerate(
         (
             ("选择文件夹", add),
             ("启动服务", launch),
-            ("查看状态", show),
             ("查看本轮过程", open_process),
-            ("管理对话", manage_conversations),
             ("停止服务", stop),
         )
     ):

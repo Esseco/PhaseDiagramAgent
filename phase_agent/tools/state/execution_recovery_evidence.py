@@ -63,10 +63,12 @@ def inspect_execution(state, issue, *, state_path=None):
     )
     files = {}
 
-    def paths(value):
+    def paths(value, *, awaiting=False):
         if isinstance(value, dict):
             for key, item in value.items():
-                if isinstance(item, str) and (key.endswith("_path") or key == "directory"):
+                if isinstance(item, str) and (
+                    key.endswith("_path") or key in {"directory", "checkpoint"}
+                ):
                     path = Path(item)
                     # Relative paths cannot safely be interpreted from the application's cwd.
                     if not path.is_absolute():
@@ -80,6 +82,13 @@ def inspect_execution(state, issue, *, state_path=None):
                             if path.is_file()
                             else "missing"
                         )
+                        if (
+                            awaiting
+                            and status == "missing"
+                            and key
+                            in {"result_path", "calculation_result_path", "results_directory"}
+                        ):
+                            status = "awaiting_result"
                         row = {"path": str(path), "status": status}
                         if status == "file":
                             row["size"] = path.stat().st_size
@@ -94,15 +103,15 @@ def inspect_execution(state, issue, *, state_path=None):
                             "error": type(error).__name__,
                         }
                 elif isinstance(item, (dict, list)):
-                    paths(item)
+                    paths(item, awaiting=awaiting)
         elif isinstance(value, list):
             for item in value:
-                paths(item)
+                paths(item, awaiting=awaiting)
 
     for row in journal:
         paths(row["payload"].get("evidence") or {})
     for task in related:
-        paths(task)
+        paths(task, awaiting=task.get("status") in {"pending", "running", "submitted"})
     for record in records:
         paths(record.get("execution_result") or record.get("execution") or {})
     completed = [row.get("task_id") for row in related if row.get("status") == "completed"]

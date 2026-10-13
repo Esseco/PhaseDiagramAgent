@@ -1,7 +1,7 @@
 """Validate categorical DFT decisions and apply deterministic hard triggers."""
 
 from phase_agent.tools.budget.estimate_stage_cost import estimate_dft_cost
-from phase_agent.tools.budget.check_budget import check_budget
+from phase_agent.tools.budget.check_budget import check_budget, budget_is_hard
 from copy import deepcopy
 from phase_agent.decisions.agent.dft_contracts import dft_contract_errors
 
@@ -118,13 +118,14 @@ def validate_dft_agent_decisions(
             )
             continue
         cost = estimate_dft_cost(action, metric, config)
-        if spent + cost > remaining_budget:
+        if budget_is_hard(config.get("budget_limits")) and spent + cost > remaining_budget:
             rejected.append(
                 {"candidate_id": candidate_id, "action": action, "reason": "dft_budget"}
             )
             continue
         spent += cost
         stage = {"DFT_SINGLE_POINT": "dft_single_point", "DFT_RELAX": "dft_relax"}.get(action)
+        budget_warnings = []
         if stage and config.get("budget_limits"):
             check = check_budget(
                 budget_state,
@@ -142,6 +143,7 @@ def validate_dft_agent_decisions(
                     }
                 )
                 continue
+            budget_warnings = check.get("warnings", [])
             budget_state.setdefault("budget_reservations", {})[task_key] = {
                 "stage": stage,
                 "reserved_cost": cost,
@@ -156,6 +158,7 @@ def validate_dft_agent_decisions(
                 "relative_cost": cost,
                 "reason": item.get("reason"),
                 "hard_trigger": hard,
+                "budget_warnings": budget_warnings,
                 "config_version": config_version,
             }
         )

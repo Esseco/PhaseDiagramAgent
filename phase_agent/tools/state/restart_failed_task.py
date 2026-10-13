@@ -52,6 +52,16 @@ def restart_failed_task(state, task_id, *, budget_limits, config_version, max_re
             "result",
             "error",
             "failure_reason",
+            "calculation_result_path",
+            "calculation_directory",
+            "runtime_observation",
+            "actual_gpu_core_hours",
+            "actual_cost",
+            "gpu_cost_source",
+            "traceback",
+            "checks_passed",
+            "converged",
+            "refresh_wait_waived",
         }
     }
     task.update(
@@ -64,4 +74,9 @@ def restart_failed_task(state, task_id, *, budget_limits, config_version, max_re
     )
     current.setdefault("tasks", []).append(task)
     current.setdefault("pending_tasks", []).append(task)
+    refresh = current.get("model_refresh") or {}
+    if original.get("model_refresh_id") and task_id in (refresh.get("task_ids") or []):
+        refresh["task_ids"] = [
+            task["task_id"] if value == task_id else value for value in refresh["task_ids"]
+        ]
     return {"status": "prepared", "state": current, "task": task}

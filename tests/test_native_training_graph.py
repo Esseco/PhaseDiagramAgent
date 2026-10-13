@@ -15,7 +15,7 @@ def test_sqlite_restart_resumes_native_interrupt_with_latest_state(tmp_path):
     assert waits[0]["stage"] == "awaiting_manifest"
     db = path.parent / "langgraph_training.sqlite"
     assert db.is_file()
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
 
     with SqliteSaver.from_conn_string(str(db)) as saver:
         entries = list(saver.list(None))
@@ -70,7 +70,7 @@ def test_native_graph_validation_wait_to_approval_to_activation_exit(tmp_path):
     assert reviewed["state"]["active_model_version"] == version
     current, waits = advance_training_handoffs(reviewed["state"], settings, state_path=path)
     assert waits == []
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
 
     with SqliteSaver.from_conn_string(str(tmp_path / "langgraph_training.sqlite")) as saver:
         thread = {
@@ -109,7 +109,7 @@ def test_training_child_is_discoverable_from_studio():
 
 
 def test_unfinished_node_recovery_rechecks_canonical_inputs(tmp_path):
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     import hashlib
 
     state, results, inputs = setup(tmp_path)

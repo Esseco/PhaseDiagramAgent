@@ -1,6 +1,7 @@
 """Agent Server owns one project handler shared by Studio and control pages."""
 
 from contextlib import asynccontextmanager
+import asyncio
 import os
 from pathlib import Path
 import threading
@@ -95,23 +96,33 @@ def send_project_message(text, thread_id):
 @asynccontextmanager
 async def lifespan(app):
     global _handler
-    from phase_agent.runtime.agent_api import create_agent_runtime
-    from phase_agent.runtime.agent_web_service import create_control_server
-
     config = os.environ.get("PHASE_AGENT_RUNTIME_CONFIG")
-    if not config or not Path(config).is_file():
+    if not config or not await asyncio.to_thread(Path(config).is_file):
         raise RuntimeError(
             "PHASE_AGENT_RUNTIME_CONFIG must identify an existing project configuration"
         )
     if _handler is not None:
         raise RuntimeError("Studio runtime already owns a project handler")
-    from phase_agent.runtime.studio_run_lifecycle import recover_studio_runs
 
+    def recovery_adapter():
+        from phase_agent.runtime.studio_run_lifecycle import recover_studio_runs
+
+        return recover_studio_runs
+
+    recover_studio_runs = await asyncio.to_thread(recovery_adapter)
     await recover_studio_runs()
-    handler = create_agent_runtime(config)
-    control = create_control_server(
-        handler, config, port=int(os.environ.get("PHASE_CONTROL_PORT", "8765"))
-    )
+
+    def initialize():
+        from phase_agent.runtime.agent_api import create_agent_runtime
+        from phase_agent.runtime.agent_web_service import create_control_server
+
+        handler = create_agent_runtime(config)
+        control = create_control_server(
+            handler, config, port=int(os.environ.get("PHASE_CONTROL_PORT", "8765"))
+        )
+        return handler, control
+
+    handler, control = await asyncio.to_thread(initialize)
     worker = threading.Thread(target=control.serve_forever, daemon=True)
     _handler = handler
     worker.start()
@@ -119,9 +130,9 @@ async def lifespan(app):
         yield
     finally:
         _handler = None
-        control.shutdown()
-        control.server_close()
-        worker.join(timeout=5)
+        await asyncio.to_thread(control.shutdown)
+        await asyncio.to_thread(control.server_close)
+        await asyncio.to_thread(worker.join, timeout=5)
 
 
 async def flow_panel(request):

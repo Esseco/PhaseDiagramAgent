@@ -320,7 +320,7 @@ def _run_job(graph, current, config, key, thread):
 def run_training_handoffs(state, config, *, state_path=None, graph=None):
     from phase_agent.tools.local.recover_remote_training import INACTIVE
     from filelock import FileLock
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     from langgraph.checkpoint.memory import InMemorySaver
 
     current = deepcopy(state)

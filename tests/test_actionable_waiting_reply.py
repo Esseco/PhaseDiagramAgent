@@ -113,6 +113,17 @@ def test_brief_mode_has_one_round_folder_and_no_batch_paths(tmp_path):
     second = deepcopy(data["slurm_batches"][0])
     second["upload_directory"] = second["upload_directory"].replace("Single-point", "Relax")
     data["slurm_batches"].append(second)
+    folder = tmp_path / "archives/01-upload/epoch1_remote-test_current"
+    folder.mkdir(parents=True)
+    (folder / "inputs.zip").write_text("synthetic archive")
+    (folder / "submit_all.sh").write_text("synthetic entry")
+    (folder / "dispatch_tasks.py").write_text("synthetic dispatcher")
+    for batch in data["slurm_batches"]:
+        batch["handoff"] = {
+            "folder": str(folder),
+            "upload_archive": str(folder / "inputs.zip"),
+            "return_directory": str(tmp_path / "return-results"),
+        }
     with response_detail("brief"):
         text = "\n".join(waiting_file_lines(data))
         reply = format_workflow_reply(
@@ -124,4 +135,35 @@ def test_brief_mode_has_one_round_folder_and_no_batch_paths(tmp_path):
         assert "epoch1_remote-test" in output
         assert "batch-1" not in output and ".upload.zip" not in output
         assert "results" in output and "继续" in output
-        assert len(output.splitlines()) <= 3
+        assert len(output.splitlines()) <= 4
+
+
+def test_brief_missing_handoff_does_not_advertise_internal_epoch(tmp_path):
+    data = state(tmp_path)
+    with response_detail("brief"):
+        text = "\n".join(waiting_file_lines(data))
+    assert "本轮提交文件夹：" not in text
+    assert "epoch1_remote-test" not in text
+    assert "尚未准备完整" in text
+
+
+def test_failed_refresh_does_not_hide_other_packages_or_restore_waived_wait(tmp_path):
+    data = state(tmp_path)
+    data["model_refresh"]["task_ids"] = ["failed-refresh"]
+    data["tasks"].append(
+        {"task_id": "failed-refresh", "status": "failed", "stage": "relax_and_feature"}
+    )
+    data["tasks"][0]["stage"] = "dft_single_point"
+    folder = tmp_path / "archives/01-upload/current"
+    folder.mkdir(parents=True)
+    for name in ("inputs.zip", "submit_all.sh", "dispatch_tasks.py"):
+        (folder / name).write_text("synthetic")
+    data["slurm_batches"][0]["handoff"] = {
+        "folder": str(folder),
+        "upload_archive": str(folder / "inputs.zip"),
+        "return_directory": str(tmp_path / "return-results"),
+    }
+    with response_detail("brief"):
+        assert "本轮提交文件夹：" in "\n".join(waiting_file_lines(data))
+        data["tasks"][0]["recovery_wait_waived"] = True
+        assert waiting_file_lines(data) == []

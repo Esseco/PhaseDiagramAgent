@@ -63,5 +63,5 @@ def mc_entry_facts(state):
         "model_version": version,
         "hull_reference_version": hull_version,
         "phase_diagram_version": diagram.get("version"),
-        "instruction": "Generated branches are initial structures, not Relax results. Before MC allocation or mc_inputs, prepare a separate prepare_local_batch_files action with mode=relax_inputs; the human uploads/submits, results are recovered and analyzed into a current-model Relax pool and completed MLIP hull. Only then choose MC steps and prepare its files. Never approve future MC allocation through the Relax preparation proposal. If inputs are already prepared or jobs pending, report upload/recovery status instead of repeating preparation.",
+        "instruction": "Generated branches are initial structures, not Relax results. The default is a prepare_relax_mc_batch package. Only for explicitly requested standalone MC allocation or mc_inputs, first prepare a separate prepare_local_batch_files action with mode=relax_inputs; the human uploads/submits, results are recovered and analyzed into a current-model Relax pool and completed MLIP hull. Only then choose MC steps and prepare its files. Never approve future MC allocation through the Relax preparation proposal. If inputs are already prepared or jobs pending, report upload/recovery status instead of repeating preparation.",
     }

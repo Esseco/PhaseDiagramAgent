@@ -34,6 +34,11 @@ def export_batch_result(task_directory, results_directory, *, create_archive=Tru
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "task.finished.json").unlink(missing_ok=True)
     outputs = result.get("outputs") or {}
+    # Small occupancy deltas are required for cross-round/model de-duplication.
+    # Do not transfer the per-worker SQLite database or structure history.
+    occupation_delta = task_dir / "mc_occupations.bin"
+    if occupation_delta.is_file():
+        _copy(occupation_delta, destination / occupation_delta.name)
     if outputs.get("mlip_result_file"):
         from phase_agent.tools.remote.dft_mlip_pair import load_pair
 

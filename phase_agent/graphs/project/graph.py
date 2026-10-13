@@ -87,6 +87,18 @@ def build_react_lifecycle_graph(*, action_graph=None, checkpointer=None, **stage
     from phase_agent.graphs.subgraph_visibility import expose_child
 
     compiled = graph.compile(checkpointer=checkpointer, name="project_react_workflow")
+    compiled.observation_contracts = {
+        "collect_and_reconcile": {
+            "inputs": ["registered_tasks", "recorded_result_paths"],
+            "outputs": ["reconciled_tasks", "collection_report"],
+            "creates_scientific_tasks": False,
+        },
+        "scientific_feedback": {
+            "inputs": ["reconciled_results", "structure_ledger", "active_model_version"],
+            "outputs": ["updated_ledger", "model_isolated_energy_pool", "phase_diagrams"],
+            "creates_scientific_tasks": False,
+        },
+    }
     expose_child(compiled, "observe", observation)
     expose_child(compiled, "react", action_graph)
     return compiled

@@ -31,6 +31,7 @@ def runtime_observation(start, task, result):
         or task.get("model_version"),
         "hardware": env.get("SLURM_JOB_PARTITION") or platform.machine(),
         "gpu_count": count("SLURM_GPUS_ON_NODE"),
+        "cluster": env.get("SLURM_CLUSTER_NAME", ""),
         "cpu_count": count("SLURM_CPUS_ON_NODE"),
         "job_id": env.get("SLURM_JOB_ID"),
         "batch_id": task.get("batch_id"),

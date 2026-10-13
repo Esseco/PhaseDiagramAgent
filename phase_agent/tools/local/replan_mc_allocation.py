@@ -23,6 +23,23 @@ def replan_mc_allocation(state, manager, config):
         for row in clean.get("tiered_mc_state", {}).get("segments", [])
         if row.get("task_key") not in keys
     ]
+    old_ids = {t["task_id"] for t in old}
+
+    def retained(record):
+        task_ids = set(record.get("task_ids") or [])
+        if task_ids.intersection(old_ids):
+            if not task_ids.issubset(old_ids):
+                raise ValueError("不能只替换同一轮次的部分 MC 任务")
+            return False
+        return True
+
+    clean["mc_second_round_allocations"] = [
+        r for r in clean.get("mc_second_round_allocations", []) if retained(r)
+    ]
+    if clean.get("mc_second_round_allocation") and not retained(
+        clean["mc_second_round_allocation"]
+    ):
+        clean.pop("mc_second_round_allocation")
     ids = sorted(
         {
             row["branch_id"]

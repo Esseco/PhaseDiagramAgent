@@ -3,7 +3,9 @@ import unittest
 from phase_agent.configuration.session.apply_config_revision import apply_config_revision
 from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
 from phase_agent.configuration.session.create_config_draft import create_config_draft
-from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
+from phase_agent.configuration.defaults.default_layered_search_config import (
+    default_layered_search_config,
+)
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from phase_agent.tools.workflows.run_tool_step import run_tool_step
 
@@ -97,7 +99,11 @@ class ExecutionPolicyTest(unittest.TestCase):
             self.session,
             registry=self.registry,
             execution_mode="interactive",
-            human_feedback={"decision": "modify", "comment": "调整参数\napprove", "modifications": {"parameters": {"encut": 300}}},
+            human_feedback={
+                "decision": "modify",
+                "comment": "调整参数\napprove",
+                "modifications": {"parameters": {"encut": 300}},
+            },
             invocation_id="interactive-2",
         )
         self.assertEqual(modified["status"], "rejected")
@@ -105,29 +111,62 @@ class ExecutionPolicyTest(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_comment_revises_proposal_and_still_requires_approval(self):
-        proposed = run_tool_step(None, self.session, registry=self.registry, agent_client=self._agent, execution_mode="interactive", invocation_id="revise-1")
+        proposed = run_tool_step(
+            None,
+            self.session,
+            registry=self.registry,
+            agent_client=self._agent,
+            execution_mode="interactive",
+            invocation_id="revise-1",
+        )
         revised_agent = lambda payload: {
-            "tool": "check_convergence", "parameters": {"detail": "more"}, "budget": 0,
-            "reason": f"按意见修订：{payload['human_comment']}", "expected_purpose": "更详细检查",
+            "tool": "check_convergence",
+            "parameters": {"detail": "more"},
+            "budget": 0,
+            "reason": f"按意见修订：{payload['human_comment']}",
+            "expected_purpose": "更详细检查",
         }
-        revised = run_tool_step(proposed["state"], self.session, registry=self.registry, agent_client=revised_agent, execution_mode="interactive", human_feedback={"decision": "comment", "comment": "请增加检查细节"}, invocation_id="revise-1")
+        revised = run_tool_step(
+            proposed["state"],
+            self.session,
+            registry=self.registry,
+            agent_client=revised_agent,
+            execution_mode="interactive",
+            human_feedback={"decision": "comment", "comment": "请增加检查细节"},
+            invocation_id="revise-1",
+        )
         self.assertEqual(revised["status"], "awaiting_approval")
         self.assertEqual(revised["revision"], 1)
         self.assertEqual(self.calls, [])
-        approved = run_tool_step(revised["state"], self.session, registry=self.registry, execution_mode="interactive", human_feedback={"decision": "approve", "comment": "已检查\n同意"}, invocation_id="revise-1")
+        approved = run_tool_step(
+            revised["state"],
+            self.session,
+            registry=self.registry,
+            execution_mode="interactive",
+            human_feedback={"decision": "approve", "comment": "已检查\n同意"},
+            invocation_id="revise-1",
+        )
         self.assertEqual(approved["status"], "completed")
         self.assertEqual(len(self.calls), 1)
 
     def test_empty_llm_revision_preserves_valid_proposal(self):
         proposed = run_tool_step(
-            None, self.session, registry=self.registry, agent_client=self._agent,
-            execution_mode="interactive", invocation_id="revise-empty")
+            None,
+            self.session,
+            registry=self.registry,
+            agent_client=self._agent,
+            execution_mode="interactive",
+            invocation_id="revise-empty",
+        )
         revised = run_tool_step(
-            proposed["state"], self.session, registry=self.registry,
+            proposed["state"],
+            self.session,
+            registry=self.registry,
             agent_client=lambda payload: {"reason": "没有动作"},
             execution_mode="interactive",
             human_feedback={"decision": "comment", "comment": "地址是 E:\\0-FM-PhaseDiagram"},
-            invocation_id="revise-empty")
+            invocation_id="revise-empty",
+        )
         self.assertEqual(revised["status"], "rejected")
         stored = revised["state"]["pending_execution_policies"]["revise-empty"]
         self.assertEqual(stored["agent_proposal"], proposed["agent_proposal"])
@@ -136,48 +175,93 @@ class ExecutionPolicyTest(unittest.TestCase):
 
     def test_formal_revision_gets_stable_task_key(self):
         from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
+
         proposal = {"raw_action": {"tool": "generate_branches", "task_key": "original"}}
-        agent = lambda payload: {"tool": "prepare_dedup_batch", "parameters": {},
-                                 "reason": "准备", "budget": 0}
+        agent = lambda payload: {
+            "tool": "prepare_dedup_batch",
+            "parameters": {},
+            "reason": "准备",
+            "budget": 0,
+        }
         first = revise_tool_proposal(
-            proposal, "准备去重", state={}, allowed_tools=["prepare_dedup_batch"],
-            agent_client=agent)
+            proposal,
+            "准备去重",
+            state={},
+            allowed_tools=["prepare_dedup_batch"],
+            agent_client=agent,
+        )
         second = revise_tool_proposal(
-            proposal, "准备去重", state={}, allowed_tools=["prepare_dedup_batch"],
-            agent_client=agent)
+            proposal,
+            "准备去重",
+            state={},
+            allowed_tools=["prepare_dedup_batch"],
+            agent_client=agent,
+        )
         self.assertEqual(first["revision_status"], "revised")
         self.assertEqual(first["action"]["task_key"], second["action"]["task_key"])
 
     def test_h_limit_feedback_uses_generator_parameter(self):
         from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
+
         proposal = {"raw_action": {"tool": "generate_branches", "task_key": "original"}}
-        agent = lambda payload: {"tool": "generate_branches", "parameters": {
-            "h_upper_bound": 12, "max_H": 12}, "reason": "H ≤ 12", "budget": 0}
+        agent = lambda payload: {
+            "tool": "generate_branches",
+            "parameters": {"h_upper_bound": 12, "max_H": 12},
+            "reason": "H ≤ 12",
+            "budget": 0,
+        }
         revised = revise_tool_proposal(
-            proposal, "H首轮上限设为12", state={}, allowed_tools=["generate_branches"],
+            proposal,
+            "H首轮上限设为12",
+            state={},
+            allowed_tools=["generate_branches"],
             agent_client=agent,
         )
         self.assertEqual(revised["revision_status"], "user_generation_limits_applied")
         self.assertEqual(revised["action"]["parameters"], {"max_det_H": 12})
 
     def test_mc_action_cannot_exceed_confirmed_per_round_limit(self):
+        self.session["confirmed_snapshot"]["config"]["budgets"]["enforcement"] = "hard"
         from phase_agent.tools.policy.validate_tool_action import validate_tool_action
 
         registry = create_tool_registry({"allocate_mc_bohb": self._handler})
         action = {
-            "tool": "allocate_mc_bohb", "task_key": "mc-budget-check",
+            "tool": "allocate_mc_bohb",
+            "task_key": "mc-budget-check",
             "target_ids": ["B1"],
-            "parameters": {"mc_budget": self.session["confirmed_snapshot"]["config"]["round_strategy"]["maximum_mc_budget"] + 1, "exploration_fraction": 0.1},
-            "budget": 0, "reason": "test budget guard", "expected_purpose": "ensure cap",
+            "parameters": {
+                "mc_budget": self.session["confirmed_snapshot"]["config"]["round_strategy"][
+                    "maximum_mc_budget"
+                ]
+                + 1,
+                "exploration_fraction": 0.1,
+            },
+            "budget": 0,
+            "reason": "test budget guard",
+            "expected_purpose": "ensure cap",
         }
         result = validate_tool_action(action, {}, self.session, registry)
         self.assertFalse(result["valid"])
         self.assertIn("mc_budget_exceeds_configured_maximum", result["errors"])
 
     def test_approve_without_final_approval_comment_is_rejected(self):
-        proposed = run_tool_step(None, self.session, registry=self.registry, agent_client=self._agent, execution_mode="interactive", invocation_id="strict-approval")
+        proposed = run_tool_step(
+            None,
+            self.session,
+            registry=self.registry,
+            agent_client=self._agent,
+            execution_mode="interactive",
+            invocation_id="strict-approval",
+        )
         with self.assertRaisesRegex(ValueError, "comment"):
-            run_tool_step(proposed["state"], self.session, registry=self.registry, execution_mode="interactive", human_feedback={"decision": "approve", "comment": "看起来可以"}, invocation_id="strict-approval")
+            run_tool_step(
+                proposed["state"],
+                self.session,
+                registry=self.registry,
+                execution_mode="interactive",
+                human_feedback={"decision": "approve", "comment": "看起来可以"},
+                invocation_id="strict-approval",
+            )
 
     def test_reject_dry_run_autonomous_and_replay(self):
         proposed = run_tool_step(
@@ -232,8 +316,11 @@ class ExecutionPolicyTest(unittest.TestCase):
             "budget_usage": {"total_relative_cost": 0.0, "stages": {}},
         }
         result = run_tool_step(
-            old_state, self.session, registry=self.registry,
-            agent_client=self._agent, execution_mode="dry_run",
+            old_state,
+            self.session,
+            registry=self.registry,
+            agent_client=self._agent,
+            execution_mode="dry_run",
         )
         expected = self.session["confirmed_snapshot"]["config_version"]
         self.assertEqual(result["state"]["confirmed_config_version"], expected)
@@ -247,8 +334,11 @@ class ExecutionPolicyTest(unittest.TestCase):
             "budget_usage": {"total_relative_cost": 1.0, "stages": {"simple_check": {"tasks": 1}}},
         }
         result = run_tool_step(
-            old_state, self.session, registry=self.registry,
-            agent_client=self._agent, execution_mode="dry_run",
+            old_state,
+            self.session,
+            registry=self.registry,
+            agent_client=self._agent,
+            execution_mode="dry_run",
         )
         self.assertEqual(result["state"]["confirmed_config_version"], "old-config")
         self.assertEqual(result["status"], "configuration_version_mismatch")

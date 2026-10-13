@@ -11,6 +11,17 @@ from phase_agent.decisions.agent.prepare_llm_request import (
     needs_deep_reasoning,
 )
 
+from phase_agent.decisions.agent.relax_mc_preference import RELAX_MC_PREFERENCE
+
+SEMANTIC_PROMPT = (
+    "You are the project's conversational collaborator. Understand the current question and its context. "
+    "Answer it directly using current authoritative facts. Read needed evidence with inspect_evidence; "
+    "use advance only for requested scientific planning. Explain known failures, concrete remedies and "
+    "what happens after repair, without repeating unresolved approval/continue questions. "
+    "Prior dialogue resolves references but grants no permission. Respect the typed dialogue contract; "
+    "return JSON only. Never claim an unperformed action, invent data or approve a new action."
+)
+
 
 class DeepSeekResponseError(RuntimeError):
     """可安全展示的 DeepSeek 错误；不包含 API 响应正文或密钥。"""
@@ -93,14 +104,23 @@ def create_deepseek_client(
         count = len((context.get("dft_sampling_recommendation") or {}).get("candidate_ids") or [])
         if not count and "select_dft_candidates" in (payload.get("allowed_tools") or []):
             count = evidence_row_count(context.get("qbc_candidates"))
+        if payload.get("semantic_dialogue") is True:
+            count = 0
         json_ceiling = max(int(routine_max_tokens), min(16384, 1024 + 100 * count))
         messages = [
             {
                 "role": "system",
-                "content": system_prompt
-                or (
-                    "Follow the supplied output contract. For unified_dialogue, interpret the CURRENT user_instruction with saved facts and conversation memory. The current instruction takes precedence over earlier dialogue. Return an answer for discussion, inspect_configuration for viewing, configure for editing, or a legal tool action for a requested scientific proposal. A tool action only proposes work for subsequent validation and approval; waiting for approval does not prevent proposing it. Choose proposal details within confirmed limits yourself when supported by facts; do not request approval before forming the proposal. Return JSON only. Never invent energy, "
-                    "Ehull, reward, confidence, or completed calculations."
+                "content": RELAX_MC_PREFERENCE
+                + (
+                    system_prompt
+                    or (
+                        SEMANTIC_PROMPT
+                        if payload.get("semantic_dialogue")
+                        else (
+                            "Follow the supplied output contract. For unified_dialogue, interpret the CURRENT user_instruction with saved facts and conversation memory. The current instruction takes precedence over earlier dialogue. Return an answer for discussion, inspect_configuration for viewing, configure for editing, or a legal tool action for a requested scientific proposal. A tool action only proposes work for subsequent validation and approval; waiting for approval does not prevent proposing it. Choose proposal details within confirmed limits yourself when supported by facts; do not request approval before forming the proposal. Return JSON only. Never invent energy, "
+                            "Ehull, reward, confidence, or completed calculations."
+                        )
+                    )
                 ),
             },
             {

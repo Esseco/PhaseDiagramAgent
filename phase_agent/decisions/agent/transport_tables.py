@@ -4,7 +4,12 @@ from copy import deepcopy
 import json
 
 
-TABLE_FIELDS = {"available_branches", "qbc_candidates", "search_coverage", "evidence_catalog"}
+TABLE_FIELDS = {
+    "available_branches",
+    "qbc_candidates",
+    "search_coverage",
+    "evidence_catalog",
+}
 
 
 def _size(value):
@@ -27,7 +32,29 @@ def table_rows(rows):
         "columns": columns,
         "rows": [[row[key] for key in columns] for row in rows],
     }
-    return table if _size(table) < _size(rows) else rows
+    best = table if _size(table) < _size(rows) else rows
+    indexed = deepcopy(table)
+    dictionaries = {}
+    for index, column in enumerate(columns):
+        values, indices, lookup = [], [], {}
+        for row in indexed["rows"]:
+            value = row[index]
+            key = json.dumps(value, sort_keys=True, default=str)
+            if key not in lookup:
+                lookup[key] = len(values)
+                values.append(value)
+            indices.append(lookup[key])
+        if _size(values) + _size(indices) + len(column) + 4 < _size(
+            [row[index] for row in indexed["rows"]]
+        ):
+            dictionaries[column] = values
+            for row, value_index in zip(indexed["rows"], indices, strict=True):
+                row[index] = value_index
+    if dictionaries:
+        indexed.update(format="dictionary_column_table_v1", dictionaries=dictionaries)
+        if _size(indexed) < _size(best):
+            best = indexed
+    return best
 
 
 def compact_evidence_tables(value):
@@ -46,11 +73,17 @@ def compact_evidence_tables(value):
 def expand_evidence_tables(value):
     """Decode transport evidence for offline consumers and equivalence checks."""
     if isinstance(value, dict):
-        if value.get("format") == "column_table_v1":
+        if value.get("format") in {"column_table_v1", "dictionary_column_table_v1"}:
+            dictionaries = value.get("dictionaries") or {}
             return [
                 {
                     **deepcopy(value["common"]),
-                    **dict(zip(value["columns"], expand_evidence_tables(row), strict=True)),
+                    **{
+                        key: expand_evidence_tables(
+                            dictionaries[key][item] if key in dictionaries else item
+                        )
+                        for key, item in zip(value["columns"], row, strict=True)
+                    },
                 }
                 for row in value["rows"]
             ]
@@ -61,6 +94,9 @@ def expand_evidence_tables(value):
 
 
 def evidence_row_count(value):
-    if isinstance(value, dict) and value.get("format") == "column_table_v1":
+    if isinstance(value, dict) and value.get("format") in {
+        "column_table_v1",
+        "dictionary_column_table_v1",
+    }:
         return value["count"]
     return len(value) if isinstance(value, list) else 0

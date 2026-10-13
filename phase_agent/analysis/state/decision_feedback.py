@@ -9,6 +9,7 @@ def _text(value, limit=240):
 
 
 def decision_summary(action, state):
+    scientific = action.get("scientific_decision") or {}
     review = action.get("decision_review")
     review = review if isinstance(review, dict) else {}
     alternatives = []
@@ -21,10 +22,15 @@ def decision_summary(action, state):
             alternatives.append({"tool": _text(row["tool"], 80), "reason": _text(row["reason"])})
     return {
         "source": "model_statement_not_verified_fact",
+        "scientific_decision": deepcopy(action.get("scientific_decision")),
         "observation": _text(review.get("observation")),
-        "rationale": _text(review.get("rationale")) or _text(action.get("reason")),
+        "rationale": _text(scientific.get("rationale"))
+        or _text(review.get("rationale"))
+        or _text(action.get("reason")),
         "alternatives": alternatives,
-        "expected_outcome": _text(review.get("expected_outcome"))
+        "success_criterion": _text(scientific.get("success_criterion")),
+        "expected_outcome": _text(scientific.get("expected_outcome"))
+        or _text(review.get("expected_outcome"))
         or _text(action.get("expected_purpose")),
         "evidence_refs": [
             x[:240] for x in (action.get("evidence_refs") or [])[:16] if isinstance(x, str)
@@ -44,7 +50,21 @@ def recent_decision_feedback(state, *, limit=5):
         if not tool or not proposal.get("decision_summary"):
             continue
         key = action.get("task_key")
-        tasks = [t for t in state.get("tasks") or [] if key and t.get("task_key") == key]
+        execution = record.get("execution_result") or {}
+        payload = execution.get("result") or execution
+        child_ids = set(payload.get("task_ids") or [])
+        child_ids.update(
+            t.get("task_id") for t in payload.get("tasks") or [] if isinstance(t, dict)
+        )
+        tasks = [
+            t
+            for t in state.get("tasks") or []
+            if (key and (t.get("task_key") == key or t.get("scientific_parent_task_key") == key))
+            or t.get("task_id") in child_ids
+            or (record.get("record_id") and t.get("parent_decision_id") == record["record_id"])
+            or (payload.get("bundle_id") and t.get("relax_mc_bundle_id") == payload["bundle_id"])
+        ]
+        tasks = list({t.get("task_id", str(i)): t for i, t in enumerate(tasks)}.values())
         counts = {}
         for task in tasks:
             status = task.get("status") or "unknown"

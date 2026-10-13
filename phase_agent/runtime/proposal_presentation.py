@@ -68,5 +68,11 @@ def concise_generation_lines(params, cost):
     estimated = cost.get("estimated_total_cost")
     if estimated is not None and estimated != 0:
         lines.append(f"本次预计相对预算：{estimated}（不是耗时）。")
-    lines.append("本次只生成结构，不运行 Relax、MC 或 DFT；本地生成仍会耗时。")
+    scope = params.get("module_execution_scope")
+    if scope:
+        lines.append(
+            f"审批包含：生成后自动准备本批Relax–MC封装，最多{scope['maximum_mc_segments']}段MC，封装相对成本上限{scope['relative_cost_upper']:.3g}；超限另行确认。人工上传提交，不本机计算。"
+        )
+    else:
+        lines.append("本次只生成结构，不运行 Relax、MC 或 DFT；本地生成仍会耗时。")
     return lines

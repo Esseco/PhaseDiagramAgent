@@ -97,14 +97,30 @@ def validate_project_paths(path):
     system_root = root if (root / "system.json").is_file() else root.parent.parent
     descriptor = _load_optional_json(system_root / "system.json")
     diagram = (settings.get("shared_dft") or {}).get("diagram_id")
-    registered = bool(diagram and diagram in descriptor.get("diagrams", []) and
-        path in {system_root / PROJECT_CONFIG_NAME, system_root / "diagrams" / diagram / PROJECT_CONFIG_NAME})
+    registered = bool(
+        diagram
+        and diagram in descriptor.get("diagrams", [])
+        and path
+        in {
+            system_root / PROJECT_CONFIG_NAME,
+            system_root / "diagrams" / diagram / PROJECT_CONFIG_NAME,
+        }
+    )
     canonical = system_root / "diagrams" / diagram if registered else root
     # Default-diagram aliases may resolve to old physical directories on Windows.
     owned = [canonical.resolve()]
     if registered:
-        owned.extend((canonical / name).resolve() for name in
-            ("workflow_state", "parameters", "structures", "submissions", "analysis_outputs", "open_webui_runs"))
+        owned.extend(
+            (canonical / name).resolve()
+            for name in (
+                "workflow_state",
+                "parameters",
+                "structures",
+                "submissions",
+                "analysis_outputs",
+                "open_webui_runs",
+            )
+        )
     keys = (
         "state_path",
         "ledger_path",
@@ -129,7 +145,11 @@ def validate_project_paths(path):
         (session.get("confirmed_snapshot") or {}).get("config") or {},
         {"storage": settings.get("runtime_storage_override") or {}},
     ):
-        if registered and diagram == descriptor.get("default_diagram") and settings.get("runtime_storage_override"):
+        if (
+            registered
+            and diagram == descriptor.get("default_diagram")
+            and settings.get("runtime_storage_override")
+        ):
             config = {"storage": settings["runtime_storage_override"]}
         if settings.get("local_path_relocations") and not registered:
             from phase_agent.configuration.session.relocate_workspace_paths import (
@@ -480,9 +500,9 @@ def _start_agent(
         raise RuntimeError(
             f"该项目服务仍存在（{owner.get('status', 'unhealthy')}），请先停止后重启；未重复启动"
         )
-    timeout = config.get("agent_startup_timeout_seconds", 90)
-    if type(timeout) not in {int, float} or not 5 <= timeout <= 600:
-        raise ValueError("agent_startup_timeout_seconds 必须在 5–600 秒之间")
+    from phase_agent.runtime.startup_diagnostics import startup_timeout, failure_summary
+
+    timeout = startup_timeout(config)
     port = port if port is not None else available_port(config.get("control_port", 8765))
     if not _port_is_free(port):
         raise RuntimeError(
@@ -499,6 +519,7 @@ def _start_agent(
         raise RuntimeError(f"聊天端口 {ui_port} 已被占用；请先停止原服务")
     env["PHASE_WEB_USERNAME"] = "phase"
     env["PHASE_WEB_PASSWORD"] = tool_token
+    deadline = time.monotonic() + timeout
     command = [
         sys.executable,
         "-u",
@@ -512,8 +533,14 @@ def _start_agent(
         str(ui_port),
         "--parent-pid",
         str(os.getpid()),
+        "--startup-deadline",
+        str(deadline),
     ]
-    log_path = path.parent / "logs" / "agent_server.log"
+    from datetime import datetime, timezone
+
+    attempt = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    log_path = path.parent / "logs" / f"agent_start_{attempt}.log"
+    env["PHASE_STARTUP_LOG"] = str(log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     stream = log_path.open("a", encoding="utf-8")
     try:
@@ -528,12 +555,11 @@ def _start_agent(
         )
     finally:
         stream.close()
-    deadline = time.monotonic() + float(timeout)
     while time.monotonic() < deadline:
         _check_start_cancelled(cancel_event, process)
         if process.poll() is not None:
             raise RuntimeError(
-                f"Agent 启动失败（退出码 {process.poll()}）；请查看 {log_path} 和同目录 studio_server.log"
+                f"Agent 启动失败（退出码 {process.poll()}）\n{failure_summary(path, log_path)}"
             )
         try:
             with urlopen(f"http://127.0.0.1:{port}/health", timeout=0.5) as response:
@@ -565,8 +591,11 @@ def _start_agent(
                             return process, tool_token, False
         except OSError:
             time.sleep(0.2)
-    _stop_owned_process(process)
-    raise RuntimeError(f"Agent 未能在 {timeout:g} 秒内就绪；已停止本次启动，请查看 {log_path}")
+    stopped = _stop_owned_process(process)
+    outcome = "已停止本次启动" if stopped else "进程仍在退出，请先停止后再启动"
+    raise RuntimeError(
+        f"Agent 未能在 {timeout:g} 秒内就绪；{outcome}\n{failure_summary(path, log_path)}"
+    )
 
 
 def main() -> None:

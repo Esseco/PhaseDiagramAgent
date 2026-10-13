@@ -1,5 +1,6 @@
 """Default user-editable layered-oxide platform configuration."""
 
+from phase_agent.science.mc.continuation_policy import shared_hb_policy
 from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
 from phase_agent.configuration.defaults.layered_oxide_system_config import (
     layered_oxide_system_config,
@@ -97,35 +98,38 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             },
         },
         "mc_policy": {
+            **shared_hb_policy(),
+            "max_duplicate_trials": 100,
             "initial_ehull_bands": [
-                {"max_ehull_ev_per_atom": 0.010, "max_mc_steps": 100, "patience_steps": 8},
-                {"max_ehull_ev_per_atom": 0.020, "max_mc_steps": 60, "patience_steps": 6},
-                {"max_ehull_ev_per_atom": 0.040, "max_mc_steps": 30, "patience_steps": 4},
+                {"max_ehull_ev_per_atom": 0.010, "max_mc_steps": 100, "patience_steps": 10},
+                {"max_ehull_ev_per_atom": 0.020, "max_mc_steps": 80, "patience_steps": 8},
+                {"max_ehull_ev_per_atom": 0.040, "max_mc_steps": 60, "patience_steps": 6},
             ],
-            "exploration_max_mc_steps": 15,
-            "exploration_patience_steps": 3,
+            "exploration_max_mc_steps": 40,
+            "exploration_patience_steps": 4,
             "second_segment_enabled": True,
             "tiers": [
                 {
-                    "name": "small",
-                    "max_mc_steps": 10,
-                    "patience_steps": 3,
+                    "name": "initial",
+                    "max_mc_steps": 100,
+                    "patience_steps": 10,
                     "min_improvement": 0.001,
                 },
                 {
-                    "name": "medium",
-                    "max_mc_steps": 30,
-                    "patience_steps": 6,
+                    "name": "first_addition",
+                    "max_mc_steps": 200,
+                    "patience_steps": 20,
                     "min_improvement": 0.001,
                 },
                 {
-                    "name": "large",
-                    "max_mc_steps": 90,
-                    "patience_steps": 12,
-                    "min_improvement": 0.0005,
+                    "name": "second_addition",
+                    "max_mc_steps": 200,
+                    "patience_steps": 20,
+                    "min_improvement": 0.001,
                 },
             ],
-            "max_segments_per_branch": 2,
+            "max_segments_per_branch": 3,
+            "minimum_continuation_tasks": 10,
             "max_cumulative_cost_per_branch": 200.0,
             "random_exploration_fraction": 0.10,
             "high_ehull_defer_threshold": 0.040,
@@ -170,6 +174,11 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             "budget_limit": 10.0,
             "resource_limit": {"max_tasks": 100, "max_concurrency": 4},
             "debug_requires_approval": True,
+        },
+        "workflow": {
+            "branch_batch_size": 900,
+            "finetune_min_new_dft": 10,
+            "finetune_max_new_dft": None,
         },
         "run": {"total_quota": 900, "batch_size": 288, "initial_states_per_branch": 4, "seed": 42},
         "qbc": default_dft_decision_config(),

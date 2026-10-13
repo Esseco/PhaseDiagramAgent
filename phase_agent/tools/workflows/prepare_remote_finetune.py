@@ -93,6 +93,8 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
             existing["handoff"] = handoff
         return {
             "status": "awaiting_remote_training",
+            "handoffs": [deepcopy(handoff)],
+            "submitted": False,
             "state": current,
             "reason": f"上传文件夹：{handoff['folder']}；上传后执行 sbatch submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
         }
@@ -273,6 +275,8 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     write_submission_index(root, current)
     return {
         "status": "awaiting_remote_training",
+        "handoffs": [deepcopy(handoff)],
+        "submitted": False,
         "state": current,
         "reason": f"上传文件夹：{handoff['folder']}；上传后执行 sbatch submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
     }

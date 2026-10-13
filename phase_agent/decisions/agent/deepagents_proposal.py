@@ -130,6 +130,9 @@ def proposal_material(payload):
             "single_point_cost_per_round",
             "max_relax_fraction",
             "minimum_new_dft_records",
+            "branch_batch_size",
+            "finetune_min_new_dft",
+            "finetune_max_new_dft",
             "finetune_enabled",
             "comparison_status",
         }
@@ -277,6 +280,27 @@ def proposal_material(payload):
         }
     )
 
+    fields.update(
+        {
+            "bundle_id",
+            "branch_ids",
+            "workload",
+            "expected_results_archive",
+            "upload_archive",
+            "script_path",
+            "return_available",
+            "return_error",
+            "result_summary",
+            "gpu_jobs_upper_by_wave",
+            "mc_task_upper",
+            "mc_task_reference",
+            "relax_structure_tasks",
+            "mc_step_upper",
+            "coordinator_jobs",
+            "max_concurrent_jobs",
+        }
+    )
+
     def summary(value, parent=None):
         if parent == "TM_ratio" and isinstance(value, dict):
             import re
@@ -322,6 +346,7 @@ def proposal_material(payload):
                 "task_stage_evidence",
                 "post_dft_assessment",
                 "qbc_candidates",
+                "relax_mc_batches",
                 "available_branches",
                 "available_budget",
                 "dft_selection_policy",
@@ -336,6 +361,8 @@ def proposal_material(payload):
                 "enabled_generation_strategies",
                 "generation_strategy_constraint",
                 "early_branch_planning",
+                "workflow_policy",
+                "workflow_instruction",
                 "mc_entry_conditions",
                 "decision_feedback",
                 "decision_review_format",
@@ -368,6 +395,8 @@ def create_proposal_client(model, *, recursion_limit=16):
             raise ValueError("Proposal harness cannot delegate or execute commands")
         return handler(request)
 
+    from phase_agent.decisions.agent.relax_mc_preference import RELAX_MC_PREFERENCE
+
     agent = create_deep_agent(
         model=model,
         backend=StateBackend(),
@@ -375,12 +404,22 @@ def create_proposal_client(model, *, recursion_limit=16):
         middleware=[restrict_tools],
         memory=["/memory/AGENTS.md"],
         name="scientific_proposal",
-        system_prompt=(
+        system_prompt=RELAX_MC_PREFERENCE
+        + (
             "Analyze supplied scientific facts and approved knowledge. "
             "Files are invocation-local scratch, not business state or durable knowledge. "
             "Do not execute, delegate, approve, submit, train or activate anything. "
-            "Return exactly one complete JSON action matching the supplied instruction. "
+            "Return exactly one complete JSON object matching the supplied instruction. "
+            "Return one scientific action or the typed dialogue response. "
             "Cite supplied evidence IDs; never invent measurements. "
+            "For the default one-upload Relax+MC package, propose operation "
+            "prepare_relax_mc_batch on prepare_local_batch_files with mode=relax_mc_inputs "
+            "and explicit existing branch IDs. Diagnosis and workload preview precede approval. "
+            "This freezes the model and shared MC rules, prepares files only, and permits "
+            "remote Relax plus initial MC and at most two feedback additions. Without a hull "
+            "bootstrap at100/10; no later MC without a valid hull. Never duplicate tasks "
+            "owned by an active relax_mc_batches entry. After verified return choose Branch "
+            "or DFT from phase diagram, coverage and QBC evidence. "
             "Distinguish human constraints from observations and check memory applicability."
         ),
     )

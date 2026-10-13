@@ -136,6 +136,9 @@ def prepare_event_loop(
     current.setdefault("event_history", [])
     reconciliation = reconcile_task_results(current, recovered_results)
     current = reconciliation["state"]
+    from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
+
+    current = normalize_workflow_state(current)
     _save_state(current, state_path)
     events = []
     final_status = "max_steps_reached"
@@ -143,6 +146,7 @@ def prepare_event_loop(
     from langgraph.graph import END
 
     def prepare_step(graph_state):
+        nonlocal current
         offset = graph_state["offset"]
         step_id = _step_invocation_id(starting_index, invocation_id, offset, max_steps)
         if execution_mode == "interactive" and offset == 0:
@@ -217,7 +221,7 @@ def prepare_event_loop(
         return {"offset": graph_state["offset"] + 1}
 
     def next_step(graph_state):
-        nonlocal final_status
+        nonlocal final_status, current
         from phase_agent.graphs.wait_contract import wait_boundary
 
         if final_status in STOP_STATUSES or wait_boundary(final_status) is not None:
@@ -238,6 +242,9 @@ def prepare_event_loop(
         )
         return {
             "status": final_status,
+            "reason": next(
+                (event.get("reason") for event in reversed(events) if event.get("reason")), None
+            ),
             "answer": terminal.get("answer"),
             "state": current,
             "events": events,

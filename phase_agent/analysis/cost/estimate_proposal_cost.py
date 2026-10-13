@@ -7,7 +7,42 @@ from phase_agent.analysis.cost.calibrate_relative_cost import calibrate_relative
 def estimate_proposal_cost(action, state):
     tool = action.get("tool")
     params = action.get("parameters") or {}
+    scope = params.get("module_execution_scope")
+    if tool == "generate_branches" and scope:
+        return {
+            "workload": [
+                {"stage": "branch_generation", "candidate_quota": params.get("total_quota")},
+                {
+                    "stage": "relax_mc_module",
+                    "branch_upper": scope["branch_upper"],
+                    "maximum_mc_segments": scope["maximum_mc_segments"],
+                },
+            ],
+            "estimated_total_cost": scope["relative_cost_upper"],
+            "cost_unit": "relative_cost",
+            "scope": "Generation and input preparation only; manual HPC submission",
+        }
     stages = []
+    if tool == "prepare_local_batch_files" and params.get("mode") == "relax_mc_inputs":
+        preview = params.get("relax_mc_preview") or {}
+        return {
+            "workload": [
+                {
+                    "stage": "relax_and_feature",
+                    "tasks": (preview.get("workload") or {}).get("relax_structure_tasks"),
+                },
+                {
+                    "stage": "deep_search",
+                    "maximum_tasks": sum(
+                        (preview.get("workload") or {}).get("mc_task_upper") or []
+                    ),
+                },
+            ],
+            "batch_workload": preview.get("workload", {}),
+            "estimated_total_cost": preview.get("estimated_relative_cost_upper"),
+            "cost_unit": "relative_cost",
+            "diagnosis": preview.get("diagnosis", {}),
+        }
     if tool == "prepare_local_batch_files" and params.get("mode") == "model_refresh_inputs":
         preview = params.get("refresh_preview") or {}
         return {

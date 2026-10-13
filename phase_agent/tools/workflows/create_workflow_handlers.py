@@ -58,23 +58,22 @@ def _update_mlip(*, action, context):
                 "reason": "本轮原模型误差评估尚未完成；先补齐模型与评估。",
                 "state": state,
             }
-        from phase_agent.science.dft.spin_acceptance import spin_standard_passed
+        from phase_agent.tools.policy.workflow_policy import settings, new_dft_ids, active_tasks
 
-        minimum = int(
-            ((config.get("mlip_finetune") or {}).get("training") or {}).get(
-                "minimum_new_dft_records",
-                ((config.get("qbc") or {}).get("retrain") or {}).get("minimum_new_dft_records", 10),
-            )
-        )
-        valid = {
-            row.get("data_id") or row.get("task_id")
-            for row in state.get("new_dft_records") or []
-            if row.get("status") == "completed"
-            and row.get("converged") is True
-            and row.get("checks_passed") is True
-            and row.get("energy") is not None
-            and spin_standard_passed(row)
-        }
+        minimum = settings(config)["finetune_min_new_dft"]
+        from copy import deepcopy
+
+        config = deepcopy(config)
+        config.setdefault("mlip_finetune", {}).setdefault("training", {})[
+            "minimum_new_dft_records"
+        ] = minimum
+        valid = new_dft_ids(state, config)
+        if active_tasks(state):
+            return {
+                "status": "not_configured",
+                "state": state,
+                "reason": "fine_tune_waits_for_inflight_tasks",
+            }
         if len(valid) < minimum:
             return {
                 "status": "insufficient_new_data",

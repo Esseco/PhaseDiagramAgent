@@ -4,6 +4,8 @@ from copy import deepcopy
 
 
 def propose_after_generation(frame, result, *, event_loop):
+    if result.get("module_preparation"):
+        return result
     if frame.get("execution_mode") != "interactive" or not callable(frame.get("agent_client")):
         return result
     if result.get("status") != "completed":
@@ -40,7 +42,7 @@ def propose_after_generation(frame, result, *, event_loop):
     context = {
         **(frame.get("context") or {}),
         "unified_dialogue": True,
-        "user_message": f"上一项 {tool} 已实际完成。审查最新产出、合法性、去重与失败记录，在本轮主动提出下一步的一项具体可执行方案供人工审批，不询问是否开始分析或准备方案。尚无当前模型弛豫结果及有效相图时，只提出 Relax 输入和提交脚本准备方案；不要分配 MC 步数。若存在真实缺失条件，具体说明。禁止执行或提交下一项任务。",
+        "user_message": f"上一项 {tool} 已实际完成。审查最新产出、合法性、去重与失败记录，在本轮主动提出下一步的一项具体可执行方案供人工审批，不询问是否开始分析或准备方案。新生成 Branch 后，诊断已登记候选并提出 Relax+MLIP-MC 封装输入准备方案（prepare_relax_mc_batch，relax_mc_inputs），展示范围与工作量供审批。封装内部 MC 使用已确认规则；不得另行分配同批 MC。若存在真实缺失条件，具体说明。禁止执行或提交下一项任务。",
     }
     try:
         following = event_loop(

@@ -57,6 +57,11 @@ def preview_dft_inputs(action, state, config):
         )
     except (KeyError, TypeError, ValueError) as error:
         return None, f"DFT 成本或筛选配置不完整：{error}"
+    warnings.extend(
+        reason
+        for row in validation.get("accepted") or []
+        for reason in row.get("budget_warnings") or []
+    )
     accepted = [
         row for row in validation["accepted"] if row["action"] in {"DFT_RELAX", "DFT_SINGLE_POINT"}
     ]

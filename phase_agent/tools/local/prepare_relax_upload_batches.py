@@ -22,8 +22,14 @@ def prepare_relax_upload_batches(*, action, context):
         return {"status": "not_configured", "reason": "structure_dedup_not_ready", "state": state}
     model = config.get("mlip") or {}
     version = model.get("version") or model.get("name")
-    if not version or not (model.get("model_path") or model.get("model_paths")):
+    from phase_agent.science.mlip.slurm_executor import remote_model_references
+
+    if not version:
         return {"status": "not_configured", "reason": "remote_mlip_model_missing", "state": state}
+    try:
+        remote_model_references(model)
+    except ValueError as error:
+        return {"status": "not_configured", "reason": str(error), "state": state}
     root = config.get("upload_batches_directory")
     command = ((config.get("supercomputer") or {}).get("worker") or {}).get("command") or []
     if not root or not command or any("YOUR_" in str(value) for value in command):
@@ -182,8 +188,14 @@ def prepare_relax_upload_batches(*, action, context):
         for row in state.get("tasks") or []
     )
     upload_plan = write_relax_upload_plan(state, root) if pending_relax else None
+    from phase_agent.tools.remote.submission_handoff import finalize_prepared_handoffs
+
+    delivery = finalize_prepared_handoffs(state)
+    if delivery.get("status") == "not_configured":
+        return delivery
     return {
         "status": "prepared" if batches else "already_prepared",
+        **delivery,
         "state": state,
         "task_count": len(created),
         "batch_count": len(batches),

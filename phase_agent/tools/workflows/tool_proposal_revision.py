@@ -1,6 +1,7 @@
 """Human feedback revision of a pending proposal; never executes tools."""
 
 from copy import deepcopy
+from phase_agent.tools.budget.check_budget import budget_is_hard
 from phase_agent.tools.budget.record_budget_usage import record_budget_usage
 from phase_agent.tools.policy.execution_policy import build_agent_proposal
 from phase_agent.tools.state.state_manager import update_state_snapshot
@@ -39,6 +40,7 @@ def revise_pending_proposal(
         requested_mc_steps is not None
         and maximum_mc_budget is not None
         and requested_mc_steps > int(maximum_mc_budget)
+        and budget_is_hard(config.get("budgets"))
     ):
         current["pending_execution_policies"].pop(pending_key, None)
         current.setdefault("cancelled_proposals", []).append(

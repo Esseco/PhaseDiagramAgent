@@ -10,6 +10,7 @@ def classify_config_permission(path: str, config: dict) -> str:
         "dft.parameters",
         "budgets.total_relative_cost",
         "convergence",
+        "workflow",
     )
     if path in set(config.get("frozen_parameters") or []) or path.startswith(hard_prefixes):
         return "hard_constraint"

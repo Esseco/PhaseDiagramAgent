@@ -154,7 +154,15 @@ def check_global_convergence(
             "model_update_epochs_counted": [row.get("model_version") for row in tail],
             "config_version": state.get("confirmed_config_version"),
         }
-    if state.get("budget_remaining") is not None and state["budget_remaining"] <= 0:
+    from phase_agent.tools.budget.check_budget import budget_is_hard
+
+    if (
+        budget_is_hard(
+            state.get("budget_limits") or (state.get("confirmed_config") or {}).get("budgets")
+        )
+        and state.get("budget_remaining") is not None
+        and state["budget_remaining"] <= 0
+    ):
         status, reason = "budget_exhausted", "budget_exhausted_before_convergence"
     elif missing:
         status, reason = "insufficient_evidence", "required_results_missing"

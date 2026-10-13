@@ -1,7 +1,6 @@
 """Initial scientific proposal selection and bounded preparation; no execution."""
 
 from copy import deepcopy
-from phase_agent.tools.state.state_manager import agent_state_summary
 from phase_agent.tools.budget.record_budget_usage import record_budget_usage
 from phase_agent.tools.policy.execution_policy import build_agent_proposal
 from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
@@ -35,6 +34,18 @@ def select_initial_proposal(
 
     facts = branch_facts(current)
     decision_state.setdefault("decision_context", {})["branch_conditions"] = facts
+    # Saved snapshots can predate a code update without any scientific change.
+    # Refresh current execution facts at the actual model boundary as well.
+    from phase_agent.analysis.state.workflow_blockers import (
+        mc_allocation_facts,
+        refresh_result_facts,
+    )
+
+    decision_state["decision_context"]["mc_entry_conditions"] = mc_allocation_facts(current)
+    decision_state["decision_context"]["refresh_result_facts"] = refresh_result_facts(current)
+    from phase_agent.analysis.state.workflow_blockers import convergence_feedback
+
+    decision_state["decision_context"]["latest_convergence_check"] = convergence_feedback(current)
     process_event("科学分支进入条件", facts)
     unified = bool((context or {}).get("unified_dialogue"))
     model_owned = callable(agent_client)
@@ -42,7 +53,9 @@ def select_initial_proposal(
         decision_state.setdefault("decision_context", {})["unified_dialogue"] = True
         # This project dispatches HPC inputs, never local scientific calculations.
         allowed = [name for name in allowed if name != "run_calculation_stage"]
-    from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+    from phase_agent.decisions.agent.choose_debug_next_action import (
+        choose_debug_next_action,
+    )
 
     mc_files_pending = any(
         row.get("stage") == "deep_search"
@@ -68,11 +81,16 @@ def select_initial_proposal(
     assessment = post_dft_assessment(current, effective)
     decision_state.setdefault("decision_context", {})["post_dft_assessment"] = assessment
     if assessment and (context or {}).get("manager") is not None:
-        from phase_agent.analysis.cost.generation_preflight import generation_framework_costs
+        from phase_agent.analysis.cost.generation_preflight import (
+            generation_framework_costs,
+        )
 
         try:
             costs = generation_framework_costs(
-                context["manager"], context.get("phase_references") or {}, effective, current
+                context["manager"],
+                context.get("phase_references") or {},
+                effective,
+                current,
             )
             decision_state["decision_context"]["generation_framework_costs"] = [
                 {
@@ -114,7 +132,9 @@ def select_initial_proposal(
         decision_state.setdefault("decision_context", {})["qbc_candidates"] = deepcopy(
             current["qbc_candidates"]
         )
-        from phase_agent.decisions.qbc_selection.recommend_post_mc_dft import recommend_post_mc_dft
+        from phase_agent.decisions.qbc_selection.recommend_post_mc_dft import (
+            recommend_post_mc_dft,
+        )
 
         recommendation = recommend_post_mc_dft(current["qbc_candidates"], effective, current)
         decision_state["decision_context"]["dft_sampling_recommendation"] = {
@@ -183,7 +203,11 @@ def select_initial_proposal(
                 "prepare_local_batch_files",
             }
         ]
-    from phase_agent.tools.state.approved_direction import action_direction, direction_hash, TOOLS
+    from phase_agent.tools.state.approved_direction import (
+        action_direction,
+        direction_hash,
+        TOOLS,
+    )
 
     direction = action_direction(current)
     if direction:
@@ -205,7 +229,9 @@ def select_initial_proposal(
         and not safe_next
     ):
         return mc_block(current, mode, (context or {}).get("effective_config") or config)
-    from phase_agent.tools.state.training_pending_validation import training_pending_validation
+    from phase_agent.tools.state.training_pending_validation import (
+        training_pending_validation,
+    )
 
     if training_pending_validation(current):
         allowed = [tool for tool in allowed if tool != "update_mlip"]
@@ -216,15 +242,28 @@ def select_initial_proposal(
         }
     from phase_agent.tools.local.training_followup_plan import saved_followup
 
+    from phase_agent.analysis.state.scientific_decision_brief import decision_brief
+
+    decision_state.setdefault("decision_context", {})["scientific_decision_brief"] = decision_brief(
+        current
+    )
     planned_action = saved_followup(direction) if direction else None
     if planned_action:
         planned_action["decision_source"] = "saved_agent_direction_plan"
     action = (
         planned_action
         or safe_next
-        or propose(decision_state, agent_client=agent_client, allowed_tools=allowed, config=config)
+        or propose(
+            decision_state,
+            agent_client=agent_client,
+            allowed_tools=allowed,
+            config=config,
+        )
     )
-    from phase_agent.decisions.agent.dialogue_contract import is_dialogue, dialogue_result
+    from phase_agent.decisions.agent.dialogue_contract import (
+        is_dialogue,
+        dialogue_result,
+    )
 
     if unified and is_dialogue(action):
         if action.get("_llm_usage"):
@@ -252,7 +291,10 @@ def select_initial_proposal(
         if action.get("_llm_usage"):
             current = record_budget_usage(
                 current,
-                {"llm_usage": action["_llm_usage"], "iteration": current.get("iteration", 0)},
+                {
+                    "llm_usage": action["_llm_usage"],
+                    "iteration": current.get("iteration", 0),
+                },
             )
         return {
             "status": "not_configured",
@@ -313,7 +355,11 @@ def select_initial_proposal(
             action["evidence_refs"] = original_evidence
     if action.get("_llm_usage"):
         current = record_budget_usage(
-            current, {"llm_usage": action["_llm_usage"], "iteration": current.get("iteration", 0)}
+            current,
+            {
+                "llm_usage": action["_llm_usage"],
+                "iteration": current.get("iteration", 0),
+            },
         )
     mc_intent = current.get("mc_budget_intent") or {}
     if action.get("tool") == "allocate_mc_bohb" and (action.get("parameters") or {}).get(
@@ -321,7 +367,9 @@ def select_initial_proposal(
     ) == mc_intent.get("steps"):
         current.pop("mc_budget_intent", None)
     if mode == "interactive" and action.get("tool") == "select_dft_candidates":
-        from phase_agent.tools.workflows.prepare_dft_proposal import prepare_dft_proposal
+        from phase_agent.tools.workflows.prepare_dft_proposal import (
+            prepare_dft_proposal,
+        )
 
         action, current, error = prepare_dft_proposal(
             action,
@@ -339,15 +387,38 @@ def select_initial_proposal(
                 "post_dft_review": action.get("post_dft_review"),
             }
     if action.get("tool") == "allocate_mc_bohb":
-        from phase_agent.tools.workflows.prepare_mc_preview import prepare_mc_preview
+        from phase_agent.tools.workflows.prepare_mc_proposal import prepare_mc_proposal
+
+        action, current, error = prepare_mc_proposal(
+            action,
+            current,
+            decision_state,
+            context or {},
+            (context or {}).get("effective_config") or config,
+            agent_client=agent_client,
+            revise=revise,
+        )
+        if error:
+            return {"status": "rejected", "state": current, "reason": error}
+    if (action.get("parameters") or {}).get("mode") == "relax_mc_inputs":
+        from phase_agent.tools.relax_mc_batch.plan import attach_preview
 
         try:
-            action = prepare_mc_preview(
-                action, current, context, (context or {}).get("effective_config") or config
+            action = attach_preview(
+                action,
+                current,
+                {
+                    **(context or {}),
+                    "config_version": current.get("confirmed_config_version")
+                    or (context or {}).get("config_version"),
+                },
+                (context or {}).get("effective_config") or config,
             )
         except ValueError as error:
             return {"status": "rejected", "state": current, "reason": str(error)}
-    from phase_agent.analysis.cost.generation_preflight import attach_generation_preflight
+    from phase_agent.analysis.cost.generation_preflight import (
+        attach_generation_preflight,
+    )
 
     try:
         action = attach_generation_preflight(

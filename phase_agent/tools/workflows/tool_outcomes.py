@@ -29,8 +29,20 @@ def _upsert_record(state, record):
     records.append(deepcopy(record))
 
 
+def resumable_approval_wait(response):
+    """A tool returning a scope question has not completed the scientific action."""
+    if response.get("status") != "awaiting_approval":
+        return False
+    execution = response.get("execution") or {}
+    payload = execution.get("result") or {}
+    if execution and payload.get("status") != "awaiting_approval":
+        return False
+    # Do not retry ambiguous records that also report side effects.
+    return not any(payload.get(key) for key in ("tasks", "task_ids", "batch_id", "prepared_paths"))
+
+
 def _store_completed(state, invocation_id, response):
-    if invocation_id:
+    if invocation_id and not resumable_approval_wait(response):
         state.setdefault("invocations", {})[invocation_id] = compact_action_history(response)
 
 

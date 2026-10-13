@@ -6,6 +6,7 @@ import json
 from phase_agent.analysis.phase.branch_relax_hull import rank_relaxed_branches
 from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
 from phase_agent.science.mc.schedule_tiered_mc import schedule_tiered_mc
+from phase_agent.science.mc.continuation_policy import effective_mc_policy
 from phase_agent.science.mc.second_round_state import (
     first_round_source,
     reconciled_mc_state,
@@ -13,7 +14,17 @@ from phase_agent.science.mc.second_round_state import (
 )
 
 
-def estimate_branch_mc_budget(candidates, pool, state, config, *, step_limit, seed):
+def estimate_branch_mc_budget(
+    candidates,
+    pool,
+    state,
+    config,
+    *,
+    step_limit,
+    seed,
+    branch_count=None,
+    exploration_fraction=None,
+):
     diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
     if (
         diagram.get("status") != "completed"
@@ -32,10 +43,15 @@ def estimate_branch_mc_budget(candidates, pool, state, config, *, step_limit, se
         ranked, missing_mc = second_round_candidates(ranked, state, diagram, pool["model_version"])
         missing = sorted(set(missing + missing_mc))
     tier_state = reconciled_mc_state(state)
+    policy = effective_mc_policy(config)
+    policy["agent_branch_count"] = branch_count
+    if exploration_fraction is not None:
+        policy["random_exploration_fraction"] = exploration_fraction
     full = schedule_tiered_mc(
         ranked,
         tier_state,
-        policy=config["mc_policy"],
+        policy=policy,
+        scope_by_model=True,
         total_budget=float("inf"),
         seed=seed,
         model_version=pool["model_version"],
@@ -59,7 +75,8 @@ def estimate_branch_mc_budget(candidates, pool, state, config, *, step_limit, se
     scheduled = schedule_tiered_mc(
         ranked,
         tier_state,
-        policy=config["mc_policy"],
+        policy=policy,
+        scope_by_model=True,
         total_budget=step_limit,
         seed=seed,
         model_version=pool["model_version"],
@@ -103,7 +120,8 @@ def estimate_branch_mc_budget(candidates, pool, state, config, *, step_limit, se
             if full_steps > step_limit
             else []
         ),
-        "compression_requires_user_choice": full_steps > step_limit,
+        "compression_requires_user_choice": full_steps > step_limit
+        and (config.get("budgets") or {}).get("enforcement") == "hard",
         "estimated_relative_cost": sum(row["planned_relative_cost"] for row in rows),
         "selected_branch_count": len(rows),
         "candidate_count": len(candidates),
@@ -113,4 +131,7 @@ def estimate_branch_mc_budget(candidates, pool, state, config, *, step_limit, se
         "allocations": rows,
         "energy_unit": "eV/atom",
         "status": scheduled["status"],
+        "selection": scheduled.get("selection", {}),
+        "minimum_continuation_tasks": scheduled.get("required_tasks", 10),
+        "eligible_task_count": scheduled.get("eligible_task_count"),
     }

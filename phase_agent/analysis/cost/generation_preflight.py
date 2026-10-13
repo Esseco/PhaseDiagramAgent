@@ -101,12 +101,16 @@ def attach_generation_preflight(action, state, context, config):
         manager, (context or {}).get("phase_references") or {}, config, state
     )
     preview = preview_generation_cost(action, frameworks, state, config)
-    if preview["status"] == "over_budget":
+    from phase_agent.tools.budget.check_budget import budget_is_hard
+
+    if preview["status"] == "over_budget" and budget_is_hard(config.get("budgets")):
         raise ValueError(
             f"扩胞前Relax+MC粗估 {preview['relax_mc_cost_upper']:.3g} 超过剩余预算 {preview['remaining_budget']:.3g}；请缩小胞/数量或修订预算，未生成结构"
         )
     action.setdefault("parameters", {})["generation_cost_preview"] = preview
-    return action
+    from phase_agent.tools.workflows.scientific_module_scope import attach_module_scope
+
+    return attach_module_scope(action, state, config)
 
 
 def preview_generation_cost(action, frameworks, state, config):

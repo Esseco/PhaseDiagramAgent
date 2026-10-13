@@ -18,7 +18,8 @@ class DialogueOutcome(BaseModel):
 
     evidence_refs: list[
         Annotated[
-            str, StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=240)
+            str,
+            StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=240),
         ]
     ] = Field(default_factory=list, max_length=32)
 
@@ -28,6 +29,33 @@ class ProposalReviewOutcome(BaseModel):
     kind: Literal["review"]
     plan_id: Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
     decision: Literal["approve", "reject"]
+
+
+class AdvanceOutcome(DialogueOutcome):
+    """Advance delegates to observation; an unused explanation is optional."""
+
+    kind: Literal["advance"]
+    answer: Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)] = (
+        "读取最新事实并准备下一步方案。"
+    )
+
+
+class EvidenceRequestOutcome(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    kind: Literal["inspect_evidence"]
+    topics: list[
+        Literal[
+            "mc",
+            "dft",
+            "tasks",
+            "convergence",
+            "budget",
+            "history",
+            "model",
+            "configuration",
+            "plans",
+        ]
+    ] = Field(min_length=1, max_length=9)
 
 
 def dialogue_output_contract(*, allow_controls=False):
@@ -50,7 +78,15 @@ def dialogue_output_contract(*, allow_controls=False):
                 else {}
             ),
         },
-        **({"review_schema": ProposalReviewOutcome.model_json_schema()} if allow_controls else {}),
+        **(
+            {
+                "review_schema": ProposalReviewOutcome.model_json_schema(),
+                "advance_schema": AdvanceOutcome.model_json_schema(),
+                "evidence_schema": EvidenceRequestOutcome.model_json_schema(),
+            }
+            if allow_controls
+            else {}
+        ),
         "controls_available": allow_controls,
         "annotation_policy": "Optional read-only annotations do not route or execute work. Put citations in evidence_refs. Tool, parameters, patch, approval and execution fields cannot accompany dialogue. Only the dedicated review schema may carry plan_id and decision, for the user's explicit decision on a displayed frozen proposal; it cannot authorize a new action. Malformed required fields require correction; the program never infers permission from model prose.",
         "exclusive": "科学动作采用工具契约；不能同时返回对话和动作。对话记忆、继续或配置查看不是执行授权。",
@@ -61,7 +97,8 @@ def is_dialogue(action):
     return (
         isinstance(action, dict)
         and isinstance(action.get("kind"), str)
-        and action["kind"] in {"answer", "inspect_configuration", "configure", "advance", "review"}
+        and action["kind"]
+        in {"answer", "inspect_configuration", "configure", "advance", "review", "inspect_evidence"}
     )
 
 
@@ -102,11 +139,30 @@ def normalize_dialogue(action):
     No inference from user words or model prose; executable/configuration fields
     remain visible to strict validation. Unknown values never enter the state.
     """
-    if not is_dialogue(action) or action["kind"] not in {"answer", "inspect_configuration"}:
+    if not is_dialogue(action):
+        return action
+    # Transport tracing never carries dialogue authority, including advance/review.
+    action = {
+        key: value
+        for key, value in action.items()
+        if key not in {"_proposal_harness", "_analysis_route"}
+    }
+    type_tag = action.get("type")
+    if isinstance(type_tag, str) and type_tag in {"dialogue", action["kind"]}:
+        action = {key: value for key, value in action.items() if key != "type"}
+    if action["kind"] not in {
+        "answer",
+        "inspect_configuration",
+        "inspect_evidence",
+    }:
         return action
     if EXECUTION_FIELDS.intersection(action):
         return action
-    known = set(DialogueOutcome.model_fields) | {"_llm_usage"}
+    known = set(
+        EvidenceRequestOutcome.model_fields
+        if action["kind"] == "inspect_evidence"
+        else DialogueOutcome.model_fields
+    ) | {"_llm_usage"}
     extras = sorted(set(action) - known)
     if not extras:
         return action
@@ -121,7 +177,15 @@ def dialogue_errors(action, enabled):
         return ["dialogue outcome is unavailable for this invocation"]
     action = normalize_dialogue(action)
     try:
-        schema = ProposalReviewOutcome if action.get("kind") == "review" else DialogueOutcome
+        schema = (
+            EvidenceRequestOutcome
+            if action.get("kind") == "inspect_evidence"
+            else ProposalReviewOutcome
+            if action.get("kind") == "review"
+            else AdvanceOutcome
+            if action.get("kind") == "advance"
+            else DialogueOutcome
+        )
         schema.model_validate({k: v for k, v in action.items() if k != "_llm_usage"})
     except ValidationError as error:
         return [
@@ -132,6 +196,14 @@ def dialogue_errors(action, enabled):
 
 
 def dialogue_result(action, state):
+    if action.get("kind") == "inspect_evidence":
+        return {
+            "status": "evidence_requested",
+            "topics": list(dict.fromkeys(action["topics"])),
+            "state": state,
+            "submitted": False,
+            "steps_executed": 0,
+        }
     action = normalize_dialogue(action)
     statuses = {
         "answer": "answered",

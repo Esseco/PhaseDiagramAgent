@@ -11,6 +11,9 @@ def check_decision_backend(backend):
 
 
 def request_decision_action(agent_client, payload):
+    from phase_agent.tools.dispatch.scientific_operations import with_operation_contracts
+
+    payload = with_operation_contracts(payload)
     backend = getattr(agent_client, "decision_backend", "langgraph")
     check_decision_backend(backend)
     if backend == "langgraph":

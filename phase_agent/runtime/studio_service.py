@@ -34,6 +34,7 @@ def main(argv=None):
     parser.add_argument("--control-port", type=int, default=8765)
     parser.add_argument("--port", type=int, default=2024)
     parser.add_argument("--parent-pid", type=int)
+    parser.add_argument("--startup-deadline", type=float)
     args = parser.parse_args(argv)
     if (
         not all(1 <= p <= 65535 for p in (args.port, args.control_port))
@@ -76,7 +77,20 @@ def run_service(args):
     }
     child = None
     failure = None
-    child_log = config_path.parent / "logs" / "studio_server.log"
+    from datetime import datetime, timezone
+
+    attempt = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    child_log = config_path.parent / "logs" / f"studio_start_{attempt}.log"
+    from phase_agent.runtime.startup_diagnostics import startup_timeout
+    import json
+
+    timeout = startup_timeout(json.loads(config_path.read_text(encoding="utf-8")))
+    deadline = getattr(args, "startup_deadline", None) or time.monotonic() + timeout
+    identity.update(
+        child_log=str(child_log),
+        startup_timeout_seconds=timeout,
+        launch_log=os.environ.get("PHASE_STARTUP_LOG"),
+    )
     child_log.parent.mkdir(parents=True, exist_ok=True)
     write_service(config_path, {**identity, "status": "starting"})
     try:
@@ -110,7 +124,6 @@ def run_service(args):
             stream.close()
         import psutil
 
-        deadline = time.monotonic() + 90
         ready = False
         while child.poll() is None:
             if args.parent_pid and not psutil.pid_exists(args.parent_pid):
@@ -149,7 +162,7 @@ def run_service(args):
                     )
                 elif time.monotonic() > deadline:
                     raise RuntimeError(
-                        "Studio API did not become ready within 90 seconds; inspect terminal errors"
+                        f"Studio API did not become ready within {timeout:g} seconds; inspect {child_log}"
                     )
             time.sleep(0.5)
         if child.poll() is not None:

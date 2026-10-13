@@ -55,7 +55,7 @@ def test_debug_relax_preparation_is_portable_and_idempotent(tmp_path):
         "config_version": "config-test", "phase_references": {},
     })
     assert again["status"] == "already_prepared" and again["task_count"] == 0
-    assert len(list((tmp_path / "upload").rglob("*remote-*"))) == 1
+    assert len([p for p in (tmp_path / "upload").rglob("*remote-*") if p.is_dir()]) == 1
 
 
 def test_relax_preparation_includes_all_registered_branches_in_one_compatible_job(tmp_path):

@@ -30,6 +30,16 @@ def brief_chat_state(state, *, configuring=False):
     refresh = state.get("model_refresh") or {}
     if refresh and refresh.get("status") != "completed":
         if refresh.get("status") == "waiting_results":
+            from phase_agent.analysis.state.workflow_blockers import (
+                refresh_result_facts,
+            )
+
+            facts = refresh_result_facts(state)
+            failed = sum(facts["status_counts"].get(s, 0) for s in ("failed", "timeout"))
+            if failed:
+                return (
+                    f"当前：新模型结构刷新 {failed}/{facts['task_count']} 个失败，需修复后再重试。"
+                )
             return "当前：用微调模型重新计算已有结构，输入已生成，等待结果。"
         authorization = refresh.get("input_authorization") or {}
         if (
