@@ -9,19 +9,58 @@ def format_turn_reply(reply, state, *, configuring=False):
         from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
 
         delivery = waiting_file_lines(state)
-        if delivery and any(marker in text for marker in ("prepare_local_batch_files", "本轮提交文件夹：", "Relax+MC 上传包：", "上传 inputs 包")) and "本轮失败" not in text and "本轮未执行" not in text:
-            return "\n".join([brief_chat_state(state).replace("当前：", "当前状态：", 1), *delivery])
+        if (
+            delivery
+            and any(
+                marker in text
+                for marker in (
+                    "prepare_local_batch_files",
+                    "本轮提交文件夹：",
+                    "Relax+MC 上传包：",
+                    "上传 inputs 包",
+                )
+            )
+            and "本轮失败" not in text
+            and "本轮未执行" not in text
+        ):
+            return "\n".join(
+                [brief_chat_state(state).replace("当前：", "当前状态：", 1), *delivery]
+            )
     if not configuring and state.get("pending_execution_policies"):
         from phase_agent.runtime.plan_queries import pending_plan_reply
 
         # A rejected new proposal must not hide the existing approval object.
-        if "已保存方案（编号：" not in text and ("建议：" not in text or "本轮未执行" in text):
+        if "已保存方案（编号：" not in text and (
+            "建议：" not in text or "本轮未执行" in text
+        ):
             text += "\n" + pending_plan_reply(state)
 
+    from phase_agent.runtime.response_preferences import detailed_response
+
+    if (
+        not configuring
+        and state.get("pending_execution_policies")
+        and not detailed_response()
+        and all(
+            row.get("agent_proposal")
+            for row in state["pending_execution_policies"].values()
+        )
+    ):
+        from phase_agent.runtime.plan_queries import pending_plan_reply
+
+        plan = pending_plan_reply(state)
+        if "暂不可批准" in plan or not any(
+            marker in text for marker in ("本轮失败：", "本轮未执行：")
+        ):
+            text = plan
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    current = next((line for line in lines if line.startswith(("当前：", "当前阶段："))), None)
+    current = next(
+        (line for line in lines if line.startswith(("当前：", "当前阶段："))), None
+    )
     if current:
-        current = current.replace("当前阶段：", "当前状态：", 1).replace("当前：", "当前状态：", 1)
+        current = current.replace("当前阶段：", "当前状态：", 1).replace(
+            "当前：", "当前状态：", 1
+        )
     else:
         current = brief_chat_state(state, configuring=configuring).replace(
             "当前：", "当前状态：", 1
@@ -72,11 +111,17 @@ def format_turn_reply(reply, state, *, configuring=False):
             from phase_agent.tools.state.task_waiting import active_pending_tasks
             from phase_agent.runtime.chat_state_presentation import waiting_training_job
 
-            if active_pending_tasks(state.get("tasks") or []) or waiting_training_job(state):
-                from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
+            if active_pending_tasks(state.get("tasks") or []) or waiting_training_job(
+                state
+            ):
+                from phase_agent.runtime.waiting_files_presentation import (
+                    waiting_file_lines,
+                )
 
                 delivery = waiting_file_lines(state)
-                body.extend(delivery or ["建议：等待当前任务完成，回传结果后告知已回传。"])
+                body.extend(
+                    delivery or ["建议：等待当前任务完成，回传结果后告知已回传。"]
+                )
     if not configuring and state.get("pending_execution_policies"):
         from phase_agent.runtime.plan_queries import pending_plan_reply
 
@@ -97,6 +142,12 @@ def format_turn_reply(reply, state, *, configuring=False):
         for line in body
         if line.startswith(result_prefixes)
     ]
-    advice = [line.replace("建议：", "下一步：", 1) for line in body if line.startswith("建议：")]
-    details = [line for line in body if not line.startswith(("建议：", *result_prefixes))]
+    advice = [
+        line.replace("建议：", "下一步：", 1)
+        for line in body
+        if line.startswith("建议：")
+    ]
+    details = [
+        line for line in body if not line.startswith(("建议：", *result_prefixes))
+    ]
     return "\n".join([*results, current, *advice, *details])

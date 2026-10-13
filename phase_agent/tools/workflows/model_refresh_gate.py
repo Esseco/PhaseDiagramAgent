@@ -44,12 +44,17 @@ def advance_refresh(state, user_message=""):
             task.get("status") == "completed"
             and task.get("model_version") == refresh["new_model_version"]
             and task.get("checks_passed", True) is True
-            and (task.get("converged") is True or outputs.get("single_point_completed") is True)
+            and (
+                task.get("converged") is True
+                or outputs.get("single_point_completed") is True
+            )
         )
 
     missing = [tid for tid in refresh["task_ids"] if not accepted(tasks.get(tid, {}))]
     if missing and user_message.strip() == "不再等待刷新":
-        refresh["waived_task_ids"] = sorted(set(refresh.get("waived_task_ids", [])) | set(missing))
+        refresh["waived_task_ids"] = sorted(
+            set(refresh.get("waived_task_ids", [])) | set(missing)
+        )
         for tid in missing:
             if tid in tasks:
                 tasks[tid]["refresh_wait_waived"] = True
@@ -115,7 +120,8 @@ def advance_refresh(state, user_message=""):
         for task in rows:
             if (
                 not accepted(task)
-                or (task.get("parameters") or {}).get("model_refresh_operation") != "predict"
+                or (task.get("parameters") or {}).get("model_refresh_operation")
+                != "predict"
             ):
                 continue
             entry = phases.get(task["task_id"])
@@ -125,15 +131,20 @@ def advance_refresh(state, user_message=""):
                     f"刷新任务{task['task_id']}缺少唯一新版本Ehull证据，未追加计算。",
                 )
             outputs = task["outputs"]
-            if supplemental_relaxation_required(float(entry["ehull"]), outputs.get("forces")):
+            if supplemental_relaxation_required(
+                float(entry["ehull"]), outputs.get("forces")
+            ):
                 path = Path(outputs["structure_path"])
                 source = original[task["input_structure_sha256"]]
                 supplements.append(
                     {
                         **source,
                         "operation": "relax",
+                        "approved_input_structure_sha256": source["structure_sha256"],
                         "structure_path": str(path),
-                        "structure_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                        "structure_sha256": hashlib.sha256(
+                            path.read_bytes()
+                        ).hexdigest(),
                     }
                 )
     refresh["supplemental_candidates"] = supplements
@@ -159,11 +170,15 @@ def advance_refresh(state, user_message=""):
         deferred=plan["total_unique"] - len(initial_ids),
         partial=len(initial_ids) < plan["total_unique"],
     )
-    diagram["refresh_coverage"] = {k: refresh[k] for k in ("refreshed", "deferred", "partial")}
-    current["phase_diagrams"]["mlip"]["refresh_coverage"] = deepcopy(diagram["refresh_coverage"])
-    current.setdefault("phase_diagrams_by_model", {}).setdefault(refresh["new_model_version"], {})[
-        "refresh_coverage"
-    ] = deepcopy(diagram["refresh_coverage"])
+    diagram["refresh_coverage"] = {
+        k: refresh[k] for k in ("refreshed", "deferred", "partial")
+    }
+    current["phase_diagrams"]["mlip"]["refresh_coverage"] = deepcopy(
+        diagram["refresh_coverage"]
+    )
+    current.setdefault("phase_diagrams_by_model", {}).setdefault(
+        refresh["new_model_version"], {}
+    )["refresh_coverage"] = deepcopy(diagram["refresh_coverage"])
     return current, None
 
 
@@ -180,7 +195,9 @@ def run_model_refresh_gate(
     if not refresh_active(state):
         return None
     try:
-        current, waiting = advance_refresh(state, str(context.get("user_message") or ""))
+        current, waiting = advance_refresh(
+            state, str(context.get("user_message") or "")
+        )
     except (ValueError, OSError, KeyError) as error:
         return {
             "status": "not_configured",
@@ -275,7 +292,9 @@ def run_model_refresh_gate(
     proposal = build_agent_proposal(action, current, runtime_state=current)
     key = pending_key
     stored = (current.get("pending_execution_policies") or {}).get(key) or {}
-    previous = ((stored.get("agent_proposal") or {}).get("raw_action") or {}).get("task_key")
+    previous = ((stored.get("agent_proposal") or {}).get("raw_action") or {}).get(
+        "task_key"
+    )
     # A previous action's approval must never approve a new refresh or changed files.
     if resume_approved:
         human_feedback = "同意"
@@ -339,7 +358,9 @@ def run_model_refresh_gate(
         "stage_cost_limit",
         "reserved_total_cost_limit",
     }
-    deferred_budget_errors = [error for error in validation["errors"] if error in budget_errors]
+    deferred_budget_errors = [
+        error for error in validation["errors"] if error in budget_errors
+    ]
     if not validation["valid"] and (
         automatic or any(error not in budget_errors for error in validation["errors"])
     ):
@@ -433,7 +454,9 @@ def run_model_refresh_gate(
             "record_id": action["task_key"],
             "final_action": action,
             "status": result.get("status", execution["status"]),
-            "approval_basis": "bounded_initial_approval" if automatic else "explicit_user_approval",
+            "approval_basis": "bounded_initial_approval"
+            if automatic
+            else "explicit_user_approval",
         }
     )
     return {

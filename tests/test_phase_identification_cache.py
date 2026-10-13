@@ -62,7 +62,7 @@ def test_unknown_phase_is_retried_and_identified_cache_survives_restart(tmp_path
         assert detector.call_count == 2
 
 
-def test_empty_na_endpoint_uses_mother_structure_and_supercell(tmp_path):
+def test_empty_na_endpoint_uses_o1_composition_rule(tmp_path):
     path = tmp_path / "empty.vasp"
     path.write_text("mock")
     lattice = Lattice.cubic(4)
@@ -82,7 +82,7 @@ def test_empty_na_endpoint_uses_mother_structure_and_supercell(tmp_path):
         identified = identify_result_phase(result, manager,
             phase_references={"O1": full, "O3": full, "P3": full}, cache={})
     assert identified["actual_phase"] == "O1"
-    assert identified["outputs"]["phase_identification"]["method"] == "reference_supercell"
+    assert identified["outputs"]["phase_identification"]["method"] == "unique_configured_phase"
 
 
 def test_unidentified_result_remains_in_ledger_but_not_hull():

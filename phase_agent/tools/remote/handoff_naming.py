@@ -7,6 +7,16 @@ import re
 import zipfile
 
 
+def batch_label(directory, state, version, operation, sequence):
+    from phase_agent.analysis.state.model_epoch import model_epoch
+    directory = Path(directory)
+    project = next((p.name for p in [directory, *directory.parents] if (p / "system.json").is_file() or re.match(r"^(O3|P2|P3)-", p.name)), "Project")
+    diagram = next((p.name for p in [directory, *directory.parents] if p.parent.name == "diagrams"), "diagram_default")
+    epoch = model_epoch(state, version) or "epoch-unregistered"
+    clean = lambda value: re.sub(r'[^A-Za-z0-9_.-]+', '_', str(value)).strip('._') or 'unknown'
+    return '_'.join(clean(v) for v in (epoch, operation, f"Batch{sequence:02d}"))
+
+
 def handoff_label(directory, scripts):
     directory = Path(directory)
     project = next(
@@ -73,14 +83,19 @@ def handoff_label(directory, scripts):
         for kind in ("SP", "Relax", "MC", "DFTSP", "DFTRelax")
         if counts.get(kind)
     )
-    return f"{material}_{operation}_Round{round_number:02d}" + (f"_{suffix}" if suffix else "")
+    diagram = next((p.name for p in directory.parents if p.parent.name == "diagrams"), "diagram_default")
+    model_dir = next((p.name for p in [directory, *directory.parents] if re.match(r"epoch\d+_", p.name)), "epoch-unregistered_model-unregistered")
+    epoch_label = f"epoch{epoch.group(1)}" if epoch else "epoch-unregistered"
+    if len(counts) > 1 and not refresh and not training:
+        operation = ''.join(kind for kind in ('SP', 'Relax', 'MC', 'DFTSP', 'DFTRelax') if counts.get(kind))
+    return f"{epoch_label}_{operation}"
 
 
 def package_folder(parent, label, fingerprint):
     """Reuse identical inputs; give different packages a visible batch sequence."""
     parent = Path(parent)
     for sequence in range(1, 10000):
-        folder = parent / (label if sequence == 1 else f"{label}_Batch{sequence:02d}")
+        folder = parent / f"{label}_Batch{sequence:02d}"
         if not folder.exists():
             return folder
         archive = folder / "inputs.zip"

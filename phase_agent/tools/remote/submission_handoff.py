@@ -158,6 +158,20 @@ def prepare_handoff(directory, scripts):
     script, dispatcher = write_dispatch_entry(
         folder, (directory / scripts[0]).read_text(encoding="utf-8")
     )
+    destination = directory / "return-results"
+    destination.mkdir(parents=True, exist_ok=True)
+    friendly_return = folder / "return-results"
+    if not friendly_return.exists():
+        import os
+        import subprocess
+
+        if os.name == "nt":
+            quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+            subprocess.run(["powershell", "-NoProfile", "-Command", "New-Item -ItemType Junction -Path " + quote(friendly_return) + " -Target " + quote(destination) + " | Out-Null"], check=True)
+        else:
+            friendly_return.symlink_to(destination, target_is_directory=True)
+    if friendly_return.resolve() != destination.resolve():
+        raise ValueError("Result return directory conflicts with package identity")
     return {
         "folder": str(folder),
         "upload_archive": str(archive),
@@ -165,7 +179,7 @@ def prepare_handoff(directory, scripts):
         "command": "sbatch submit_all.sh",
         "dispatcher": str(dispatcher),
         "results_directory": str(directory / "results"),
-        "return_directory": str(directory / "return-results"),
+        "return_directory": str(friendly_return),
         "import_directory": str(directory),
         "job_count": len(scripts),
         "layout_version": 3,

@@ -11,6 +11,7 @@ AUTHORITY_RULE = (
     "initial_model_version 是确认配置中的初始模型，模型激活后允许与当前模型不同；"
     "candidate_models 尚未激活，draft 尚未生效。历史聊天、旧方案及旧计算只能作背景，"
     "不得覆盖本轮事实或跨项目引用。设置修改、确认和模型激活的结果以程序回执为准。"
+    "display_name 是当前项目的交互名称，称呼项目时优先使用它；project 和 project_path 是内部身份。"
 )
 
 
@@ -139,8 +140,10 @@ def current_project(state, session=None, *, state_path=None):
     settings["mlip"] = {**deepcopy(config.get("mlip") or {}), **deepcopy(active)}
     if isinstance((settings.get("bohb") or {}).get("scope"), dict):
         settings["bohb"]["scope"].pop("H", None)
+    from phase_agent.runtime.project_display_name import display_name
     return {
         "project": Path(root).name if root else None,
+        "display_name": display_name(Path(root).resolve()) if root else None,
         "project_path": root,
         "epoch": model_epoch(state, active_version),
         "active_model": active,

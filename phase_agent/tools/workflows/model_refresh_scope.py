@@ -9,7 +9,9 @@ def approved_refresh_scope(plan, config_version):
         "model_version": plan["new_model_version"],
         "config_version": config_version,
         "eligible_structure_ids": [
-            row["structure_id"] for row in plan["candidates"] if row["operation"] == "predict"
+            row["structure_id"]
+            for row in plan["candidates"]
+            if row["operation"] == "predict"
         ],
         "maximum_count": plan["maximum_supplemental_count"],
         "maximum_cost": plan["maximum_supplemental_cost"],
@@ -35,8 +37,24 @@ def refresh_scope_errors(refresh, config_version):
     if scope.get("remaining_waves") != 1 or refresh.get("wave") != 1:
         errors.append("已批准的补充次数已用完或轮次不匹配")
     ids = [row["structure_id"] for row in rows]
-    if len(ids) != len(set(ids)) or not set(ids).issubset(
-        scope.get("eligible_structure_ids") or []
+    identities = [(row["structure_id"], row.get("structure_sha256")) for row in rows]
+    eligible = {
+        (row["structure_id"], row.get("structure_sha256"))
+        for row in plan["candidates"]
+        if row["operation"] == "predict"
+    }
+    sources = [
+        (
+            row["structure_id"],
+            row.get("approved_input_structure_sha256", row.get("structure_sha256")),
+        )
+        for row in rows
+    ]
+    if (
+        len(identities) != len(set(identities))
+        or not set(ids).issubset(scope.get("eligible_structure_ids") or [])
+        or not set(sources).issubset(eligible)
+        or any(not digest for _, digest in identities)
     ):
         errors.append("补充目标超出已批准范围或重复")
     if len(rows) > scope.get("maximum_count", 0):
@@ -45,7 +63,8 @@ def refresh_scope_errors(refresh, config_version):
     import math
 
     if any(
-        not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0 for cost in costs
+        not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0
+        for cost in costs
     ):
         errors.append("补充成本缺失或无效")
     elif sum(costs) > scope.get("maximum_cost", 0):
@@ -54,4 +73,7 @@ def refresh_scope_errors(refresh, config_version):
 
 
 def consume_refresh_scope(refresh):
-    refresh["approved_scope"] = {**deepcopy(refresh["approved_scope"]), "remaining_waves": 0}
+    refresh["approved_scope"] = {
+        **deepcopy(refresh["approved_scope"]),
+        "remaining_waves": 0,
+    }

@@ -16,7 +16,28 @@ def _is_model_failure_proposal(proposal):
 
 
 def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
+    from phase_agent.runtime.response_preferences import detailed_response
+
+    proposal = result.get("agent_proposal") or {}
+    if (
+        not (detailed_response() if verbose is None else verbose)
+        and result.get("status") == "awaiting_approval"
+        and not _is_sensitive_proposal(proposal)
+    ):
+        from phase_agent.tools.workflows.mc_coverage_choice import needs_choice
+
+        if not needs_choice(proposal):
+            from phase_agent.runtime.concise_dialogue import approval_reply
+
+            return approval_reply(proposal, result.get("state") or {})
     reply = _format_workflow_reply(result, state_path, verbose=verbose)
+    if detailed_response() or verbose:
+        from phase_agent.runtime.evidence_reference_presentation import evidence_reference_lines
+
+        evidence_lines = evidence_reference_lines(proposal.get("raw_action") or {})
+        for line in evidence_lines:
+            if line not in reply:
+                reply += "\n" + line
     usage = (result.get("state") or {}).get("gpu_usage_summary") or {}
     if usage.get("record_count") and "GPU 占用统计" not in reply:
         line = f"GPU 占用统计：已知累计 {usage['total_gpu_hours']:.3f} GPU 小时。"
@@ -243,6 +264,16 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             )
 
             state = result.get("state") or {}
+            if (
+                facts["task_count"]
+                and facts["status_counts"].get("completed", 0) == facts["task_count"]
+            ):
+                reason = result.get("reason") or next(
+                    (e.get("reason") for e in reversed(events) if e.get("reason")), None
+                )
+                return "\n".join(
+                    [brief_chat_state(state), *([str(reason)] if reason else [])]
+                )
             return "\n".join([brief_chat_state(state), *waiting_file_lines(state)])
         reason = result.get("reason") or next(
             (e.get("reason") for e in reversed(events) if e.get("reason")), None

@@ -35,17 +35,31 @@ def brief_chat_state(state, *, configuring=False):
             )
 
             facts = refresh_result_facts(state)
-            failed = sum(facts["status_counts"].get(s, 0) for s in ("failed", "timeout"))
+            failed = sum(
+                facts["status_counts"].get(s, 0) for s in ("failed", "timeout")
+            )
             if failed:
-                return (
-                    f"当前：新模型结构刷新 {failed}/{facts['task_count']} 个失败，需修复后再重试。"
+                return f"当前：新模型结构刷新 {failed}/{facts['task_count']} 个失败，需修复后再重试。"
+            if (
+                facts["task_count"]
+                and facts["status_counts"].get("completed", 0) == facts["task_count"]
+            ):
+                ids = set(refresh.get("task_ids") or [])
+                unknown = sum(
+                    t.get("phase_identification_status") == "unknown"
+                    for t in state.get("tasks") or []
+                    if t.get("task_id") in ids
                 )
+                if unknown:
+                    return f"当前：刷新结果已全部回收，{unknown} 个结果待相识别；正在核对相图。"
+                return "当前：刷新结果已全部回收，正在核对新相图及补充条件。"
             return "当前：用微调模型重新计算已有结构，输入已生成，等待结果。"
         authorization = refresh.get("input_authorization") or {}
         if (
             authorization.get("config_version") == state.get("confirmed_config_version")
             and authorization.get("approved_by")
-            and (authorization.get("plan") or {}).get("model") == state.get("active_model")
+            and (authorization.get("plan") or {}).get("model")
+            == state.get("active_model")
         ):
             return "当前：新模型结构刷新方案已批准，输入生成待恢复。"
         return (
@@ -66,9 +80,9 @@ def brief_chat_state(state, *, configuring=False):
         }
         if len(pending) == 1:
             proposal = next(iter(pending.values())).get("agent_proposal") or {}
-            tool = proposal.get("recommended_action") or (proposal.get("raw_action") or {}).get(
-                "tool"
-            )
+            tool = proposal.get("recommended_action") or (
+                proposal.get("raw_action") or {}
+            ).get("tool")
             return f"当前：{names.get(tool, '操作方案')}待确认。"
         return f"当前：{len(pending)} 个方案待确认。"
     training = waiting_training_job(state)
@@ -122,9 +136,15 @@ def epoch_stage_line(state, *, configuring=False):
     """Display model epoch independently of MC/DFT sub-rounds."""
     from phase_agent.analysis.state.model_epoch import model_epoch
 
-    version = state.get("active_model_version") or (state.get("active_model") or {}).get("version")
+    version = state.get("active_model_version") or (
+        state.get("active_model") or {}
+    ).get("version")
     epoch = model_epoch(state, version) or ("epoch0" if not version else "epoch未登记")
-    stage = brief_chat_state(state, configuring=configuring).removeprefix("当前：").rstrip("。")
+    stage = (
+        brief_chat_state(state, configuring=configuring)
+        .removeprefix("当前：")
+        .rstrip("。")
+    )
     if (
         not configuring
         and not state.get("tasks")
@@ -143,11 +163,40 @@ def format_epoch_reply(reply, state, *, configuring=False, project_card=None):
     stage = header.split(" · ", 1)[-1].rstrip("。")
     lines = []
     for line in str(reply).splitlines():
-        if line.startswith("当前状态：") and line.split("：", 1)[1].rstrip("。") == stage:
+        if (
+            line.startswith("当前状态：")
+            and line.split("：", 1)[1].rstrip("。") == stage
+        ):
             continue
         lines.append(line)
     if project_card is not None:
         from phase_agent.runtime.project_context import project_context_line
 
         header = project_context_line(project_card) + " · " + stage
-    return header + "\n" + "\n".join(lines)
+    from phase_agent.runtime.response_preferences import detailed_response
+    from phase_agent.runtime.concise_dialogue import concise_body
+
+    if not detailed_response():
+        card = project_card or {}
+        project = card.get("display_name") or card.get("project") or state.get("project_name")
+        root = card.get("project_path") or (
+            (state.get("confirmed_config") or {}).get("storage") or {}
+        ).get("workspace_root")
+        if root and not card.get("display_name"):
+            from pathlib import Path
+
+            path = Path(root)
+            if path.parent.name == "diagrams":
+                project = path.parent.parent.name
+            elif not project:
+                project = path.name
+        epoch = card.get("epoch") or epoch_stage_line(state).split(" · ", 1)[0]
+        header = f"{project or '当前项目'} · {epoch} · {stage}"
+        draft_status = (card.get("draft") or {}).get("status")
+        if draft_status in {
+            "file_changes_not_effective",
+            "confirmed_not_applied",
+            "pending_confirmation",
+        }:
+            lines.insert(0, "结果：设置修改尚未生效，需核对并应用。")
+    return header + "\n" + concise_body("\n".join(lines), state)

@@ -69,6 +69,7 @@ CONFIG_AGENT_SYSTEM_PROMPT += "\n" + ACTIONABLE_REPLY_RULE
 
 BOOTSTRAP_HINTS = {
     "notes": [
+        "初始时提示用户可发送‘项目名称：Cr 相图’设置交互显示名称；名称可稍后设置，不阻止配置。",
         "母结构目录使用当前项目的配置；不要沿用其他项目的目录或相列表。",
         "远端模型路径由用户提供，仅保存为元数据。",
     ],
@@ -447,6 +448,11 @@ class ConfigurationChatHandler:
         session = self.workflow_kwargs.get("config_session") or {}
 
         message = _latest_user_message(messages)
+
+        from phase_agent.runtime.project_display_name import project_name_reply
+        name_reply = project_name_reply(message, self.state_path)
+        if name_reply is not None:
+            return name_reply
 
         if session.get("status") != "confirmed" and session.get("setup_stage") == "json_ready":
             session = self._sync_editable_source(session)

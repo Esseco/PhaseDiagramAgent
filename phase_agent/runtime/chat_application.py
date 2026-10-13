@@ -85,6 +85,10 @@ class RunWorkflowChatHandler:
         # Studio often transports only the newest user turn. Keep a small local
         # tail rather than repeatedly sending the full session or summarizing it.
         with self.lock:
+            from phase_agent.runtime.project_display_name import project_name_reply
+            name_reply = project_name_reply(_latest_user_message(messages), self.state_path)
+            if name_reply is not None:
+                return name_reply
             from phase_agent.runtime.studio_session_scope import is_project_session, thread_history
 
             studio_turn = is_project_session()

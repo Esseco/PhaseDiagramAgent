@@ -16,15 +16,17 @@ def waiting_file_lines(state):
         lines = []
         for bid in dict.fromkeys(row["relax_mc_bundle_id"] for row in owned):
             batch = (state.get("relax_mc_batches") or {}).get(bid) or {}
-            archive = batch.get("upload_archive")
+            directory = batch.get("directory")
+            folder = Path(directory) if directory else None
             destination = batch.get("expected_results_archive")
-            if not archive or not Path(archive).is_file() or not destination:
+            if folder is None or not folder.is_dir() or not (folder / "submit_all.sh").is_file() or not destination:
                 lines.append("输入包准备未完成，尚不能提交；需补齐上传包和回传位置。")
                 continue
             lines.extend(
                 [
-                    "上传：`" + str(archive) + "`",
-                    "提交：上传到超算新建的独立目录，解压后进入包目录，执行 `sbatch submit_all.sh`。",
+                    "本批：" + str(batch.get("package_label") or folder.name) + " · 模型 " + str(batch.get("model_version") or "未登记"),
+                    "上传整个文件夹：`" + str(folder) + "`",
+                    "提交：保持文件夹内容及目录结构完整，进入该目录执行 `sbatch submit_all.sh`。",
                     "回传：远端 `results.zip` → `" + str(destination) + "`。回传后说“已回传”。",
                 ]
             )
@@ -88,6 +90,9 @@ def _brief_waiting_file_lines(state):
     # Do not broaden unrelated rounds into an arbitrary common disk directory.
     links = [str(folder) for folder in folders]
     lines = ["本轮提交文件夹：" + "、".join(f"`{path}`" for path in links)]
+    models = list(dict.fromkeys(row.get("model_version") for row in [*batches, *tasks] if row.get("model_version")))
+    if models:
+        lines[0] += " · 模型 " + "、".join(models)
     lines.append("提交：将该文件夹完整上传到超算新建的独立目录，进入该目录执行 `sbatch submit_all.sh`。")
     returns = list(
         dict.fromkeys(

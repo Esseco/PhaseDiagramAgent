@@ -61,7 +61,7 @@ def handler_project_context(handler, state):
 
 
 def project_context_line(card):
-    parts = [card.get("project") or "当前项目"]
+    parts = [card.get("display_name") or card.get("project") or "当前项目"]
     if card.get("epoch"):
         parts.append(card["epoch"])
     version = str((card.get("active_model") or {}).get("version") or "未登记")

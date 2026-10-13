@@ -22,15 +22,20 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
     ).get("branch_id")
     source_phase = (manager.data.get("branches", {}).get(branch_id) or {}).get("P")
     try:
-        from phase_agent.science.structures.load_result_structure import load_result_structure
+        from phase_agent.science.structures.load_result_structure import (
+            load_result_structure,
+        )
 
         structure, digest = load_result_structure(outputs)
+        configured_phase = _configured_phase(structure, manager)
     except FileNotFoundError:
         evidence = {"status": "unknown", "reason": "final_structure_missing"}
     except Exception as error:
         evidence = {"status": "unknown", "reason": f"{type(error).__name__}: {error}"}
     else:
-        scope = _classification_scope(manager, phase_references)
+        scope = _classification_scope(
+            manager, phase_references, configured_phase=configured_phase
+        )
         cache_key = f"{scope}:{digest}"
         prior = outputs.get("phase_identification") or {}
         if (
@@ -61,25 +66,44 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
                 )
 
                 mobile = (
-                    ((manager.data.get("system_config") or {}).get("species") or {}).get("mobile")
+                    (
+                        (manager.data.get("system_config") or {}).get("species") or {}
+                    ).get("mobile")
                     or ["Na"]
                 )[0]
-                if any(site.is_ordered and site.specie.symbol == mobile for site in structure):
+                if configured_phase:
+                    phase, method = configured_phase, "unique_configured_phase"
+                elif any(
+                    site.is_ordered and site.specie.symbol == mobile
+                    for site in structure
+                ):
                     detected = identify_layered_phase_fast(structure, cation=mobile)
                     if detected.get("phase") == "X":
                         detected = identify_phase(structure, cation=mobile)
                     phase, method = detected.get("phase"), detected.get("method")
                 else:
-                    references = phase_references or (
-                        (manager.data.get("system_config") or {}).get("phase_references") or {}
-                    )
-                    if not references:
-                        raise ValueError("phase_references_required_for_empty_mobile_sites")
                     boundary = manager.boundary
                     allowed = allowed_phases_at_x(boundary["P"], calculate_x(structure))
-                    from phase_agent.science.structures.boundary_utils import load_structure
+                    references = phase_references or (
+                        (manager.data.get("system_config") or {}).get(
+                            "phase_references"
+                        )
+                        or {}
+                    )
+                    if not references:
+                        raise ValueError(
+                            "phase_references_required_for_empty_mobile_sites"
+                        )
+                    boundary = manager.boundary
+                    allowed = allowed_phases_at_x(boundary["P"], calculate_x(structure))
+                    from phase_agent.science.structures.boundary_utils import (
+                        load_structure,
+                    )
 
-                    loaded = {name: load_structure(value) for name, value in references.items()}
+                    loaded = {
+                        name: load_structure(value)
+                        for name, value in references.items()
+                    }
                     hint = next(iter(allowed)) if len(allowed) == 1 else None
                     phase, _, _ = identify_supercell(
                         structure,
@@ -90,7 +114,9 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
                         ambiguity_tolerance=1e-6,
                     )
                     if phase not in allowed:
-                        raise ValueError("identified_phase_outside_composition_boundary")
+                        raise ValueError(
+                            "identified_phase_outside_composition_boundary"
+                        )
                     method = "reference_supercell"
                 boundary = getattr(manager, "boundary", None)
                 if not phase or phase == "X":
@@ -105,7 +131,8 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
                 elif (
                     boundary
                     and mobile == "Na"
-                    and phase not in allowed_phases_at_x(boundary["P"], calculate_x(structure))
+                    and phase
+                    not in allowed_phases_at_x(boundary["P"], calculate_x(structure))
                 ):
                     evidence = {
                         "status": "outside_boundary",
@@ -114,12 +141,22 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
                         "reason": "phase_outside_composition_boundary",
                     }
                 else:
-                    evidence = {"status": "identified", "phase": phase, "method": method}
+                    evidence = {
+                        "status": "identified",
+                        "phase": phase,
+                        "method": method,
+                    }
             except Exception as error:
-                evidence = {"status": "unknown", "reason": f"{type(error).__name__}: {error}"}
+                evidence = {
+                    "status": "unknown",
+                    "reason": f"{type(error).__name__}: {error}",
+                }
             evidence["structure_sha256"] = digest
             evidence["classification_scope"] = scope
-            if cache is not None and evidence.get("status") in {"identified", "outside_boundary"}:
+            if cache is not None and evidence.get("status") in {
+                "identified",
+                "outside_boundary",
+            }:
                 cache[cache_key] = deepcopy(evidence)
     current["source_phase"] = source_phase
     current["actual_phase"] = (
@@ -139,7 +176,7 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
     return current
 
 
-def _classification_scope(manager, phase_references):
+def _classification_scope(manager, phase_references, *, configured_phase=None):
     references = phase_references or (
         (manager.data.get("system_config") or {}).get("phase_references") or {}
     )
@@ -158,10 +195,27 @@ def _classification_scope(manager, phase_references):
     payload = {
         "boundary": getattr(manager, "boundary", None),
         "mobile": (
-            ((manager.data.get("system_config") or {}).get("species") or {}).get("mobile") or ["Na"]
+            ((manager.data.get("system_config") or {}).get("species") or {}).get(
+                "mobile"
+            )
+            or ["Na"]
         ),
         "references": described,
     }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[
-        :16
-    ]
+    if configured_phase:
+        payload["unique_phase_rule"] = ["current_composition_v1", configured_phase]
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode()
+    ).hexdigest()[:16]
+
+
+def _configured_phase(structure, manager):
+    """Use the final composition and confirmed boundary, never the source label."""
+    boundary = getattr(manager, "boundary", None)
+    if not boundary or not boundary.get("P"):
+        return None
+    from phase_agent.science.structures.boundary_utils import allowed_phases_at_x
+    from phase_agent.science.structures.identify_branch import calculate_x
+
+    allowed = allowed_phases_at_x(boundary["P"], calculate_x(structure))
+    return next(iter(allowed)) if len(allowed) == 1 else None

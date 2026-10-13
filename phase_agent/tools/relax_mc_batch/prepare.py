@@ -43,7 +43,11 @@ def prepare_batch(*, action, context):
             "reason": "relax_mc_inputs_changed_since_approval",
         }
     base = Path(config["upload_batches_directory"]).resolve() / "relax_mc_batches"
-    root = base / plan["bundle_id"]
+    from phase_agent.tools.remote.handoff_naming import batch_label
+
+    sequence = 1 + sum(row.get("model_version") == plan["model_version"] for row in (state.get("relax_mc_batches") or {}).values())
+    label = batch_label(base, state, plan["model_version"], "RelaxMC", sequence)
+    root = base / label
     if root.exists():
         raise FileExistsError("Unregistered bundle already exists; inspect before retry")
     tasks = relax_tasks(plan, config)
@@ -204,12 +208,12 @@ def prepare_batch(*, action, context):
         newline="\n",
     )
     guide = (
-        "Upload and extract inputs.zip, enter the extracted folder, run sbatch submit_all.sh ONCE.\n"
+        "Upload this complete folder with its inputs, references, runtime and scripts; preserve its directory structure. Enter the uploaded folder and run sbatch submit_all.sh ONCE.\n"
         "Remote coordinator submits grouped Relax/MC jobs under the approved model/rules; download results.zip after completion/pause/failure.\n"
         f"Workload upper GPU compute jobs:{sum(plan['workload']['gpu_jobs_upper_by_wave'])}; one additional coordinator job; max concurrent compute jobs:{plan['workload']['max_concurrent_jobs']}.\n"
         "No model weights are copied: model references must exist on HPC and are checked before child submission.\n"
         "The mace environment needs numpy/scipy/pymatgen/ase/torch/MACE; scientific code and Process_AL_MC are shipped.\n"
-        "Resume with the same extracted directory; do not delete its workflow_state.json or rerun a batch already active.\n"
+        "Resume with the same uploaded directory; do not delete its workflow_state.json or rerun a batch already active.\n"
     )
     (root / "README.md").write_text(guide, encoding="utf-8")
     archive = create_bundle(root, input_files(root), root / "inputs.zip", kind="inputs")
@@ -223,6 +227,8 @@ def prepare_batch(*, action, context):
         "config_version": plan["config_version"],
         "model_version": plan["model_version"],
         "branch_ids": plan["branch_ids"],
+        "package_label": label,
+        "batch_sequence": sequence,
         "status": "prepared",
         "directory": str(root),
         "upload_archive": archive,
