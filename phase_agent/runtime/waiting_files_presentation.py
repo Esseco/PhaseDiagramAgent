@@ -17,7 +17,7 @@ def waiting_file_lines(state):
         for bid in dict.fromkeys(row["relax_mc_bundle_id"] for row in owned):
             batch = (state.get("relax_mc_batches") or {}).get(bid) or {}
             directory = batch.get("directory")
-            folder = Path(directory) if directory else None
+            folder = Path(directory).resolve() if directory else None
             destination = batch.get("expected_results_archive")
             if folder is None or not folder.is_dir() or not (folder / "submit_all.sh").is_file() or not destination:
                 lines.append("输入包准备未完成，尚不能提交；需补齐上传包和回传位置。")

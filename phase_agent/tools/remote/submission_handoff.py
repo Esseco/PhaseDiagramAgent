@@ -7,7 +7,9 @@ from pathlib import Path
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
 
-DRIVER = Path(__file__).with_name("submission_dispatcher.py").read_text(encoding="utf-8")
+DRIVER = (
+    Path(__file__).with_name("submission_dispatcher.py").read_text(encoding="utf-8")
+)
 
 
 def dispatcher_gpu_directive(first_script):
@@ -22,9 +24,15 @@ def dispatcher_gpu_directive(first_script):
                 if parts[0] == "gpu" and (
                     len(parts) == 1 or not parts[-1].isdigit() or int(parts[-1]) > 0
                 ):
-                    kind = ":".join(parts[1:-1]) if parts[-1].isdigit() else ":".join(parts[1:])
+                    kind = (
+                        ":".join(parts[1:-1])
+                        if parts[-1].isdigit()
+                        else ":".join(parts[1:])
+                    )
                     return "#SBATCH --gres=gpu:" + (kind + ":" if kind else "") + "1"
-        match = re.search(r"(?:--gpus(?:-per-node|-per-task)?|-G)(?:=|\s+)([^\s]+)", line)
+        match = re.search(
+            r"(?:--gpus(?:-per-node|-per-task)?|-G)(?:=|\s+)([^\s]+)", line
+        )
         if match:
             parts = match.group(1).split(":")
             if parts[-1].isdigit() and int(parts[-1]) > 0:
@@ -43,7 +51,11 @@ def write_dispatch_entry(folder, first_script):
     dispatcher = folder / "dispatch_tasks.py"
     dispatcher.write_text(DRIVER, encoding="utf-8", newline="\n")
     partition = next(
-        (line for line in first_script.splitlines() if line.startswith("#SBATCH --partition")),
+        (
+            line
+            for line in first_script.splitlines()
+            if line.startswith("#SBATCH --partition")
+        ),
         "",
     )
     gpu = dispatcher_gpu_directive(first_script)
@@ -85,7 +97,9 @@ def prepare_handoff(directory, scripts):
     import shutil
 
     directory = Path(directory).resolve()
-    scripts = sorted({Path(p).resolve().relative_to(directory).as_posix() for p in scripts})
+    scripts = sorted(
+        {Path(p).resolve().relative_to(directory).as_posix() for p in scripts}
+    )
     if not scripts:
         return None
     files = set()
@@ -144,7 +158,9 @@ def prepare_handoff(directory, scripts):
             identity.update(source.relative_to(portable).as_posix().encode())
             identity.update(hashlib.sha256(source.read_bytes()).digest())
         key = identity.hexdigest()[:16]
-        base = next((p for p in directory.parents if p.name == "submissions"), directory.parent)
+        base = next(
+            (p for p in directory.parents if p.name == "submissions"), directory.parent
+        )
         from phase_agent.tools.remote.handoff_naming import (
             handoff_label,
             package_folder,
@@ -160,18 +176,6 @@ def prepare_handoff(directory, scripts):
     )
     destination = directory / "return-results"
     destination.mkdir(parents=True, exist_ok=True)
-    friendly_return = folder / "return-results"
-    if not friendly_return.exists():
-        import os
-        import subprocess
-
-        if os.name == "nt":
-            quote = lambda path: "'" + str(path).replace("'", "''") + "'"
-            subprocess.run(["powershell", "-NoProfile", "-Command", "New-Item -ItemType Junction -Path " + quote(friendly_return) + " -Target " + quote(destination) + " | Out-Null"], check=True)
-        else:
-            friendly_return.symlink_to(destination, target_is_directory=True)
-    if friendly_return.resolve() != destination.resolve():
-        raise ValueError("Result return directory conflicts with package identity")
     return {
         "folder": str(folder),
         "upload_archive": str(archive),
@@ -179,7 +183,7 @@ def prepare_handoff(directory, scripts):
         "command": "sbatch submit_all.sh",
         "dispatcher": str(dispatcher),
         "results_directory": str(directory / "results"),
-        "return_directory": str(friendly_return),
+        "return_directory": str(destination.resolve()),
         "import_directory": str(directory),
         "job_count": len(scripts),
         "layout_version": 3,
@@ -192,7 +196,11 @@ def prepare_batch_handoff(state, batch):
     tasks = {r["task_id"]: r for r in state.get("tasks", [])}
     selected = []
     for row in state.get("slurm_batches", []):
-        if not row.get("script_path") or row.get("job_id") or row.get("status") != "prepared":
+        if (
+            not row.get("script_path")
+            or row.get("job_id")
+            or row.get("status") != "prepared"
+        ):
             continue
         if handoff_root(Path(row["upload_directory"]).parent.parent) != directory:
             continue
@@ -264,7 +272,9 @@ def finalize_prepared_handoffs(state):
         }
     from phase_agent.tools.state.task_waiting import awaiting_task_result
 
-    waiting_ids = {t.get("task_id") for t in state.get("tasks", []) if awaiting_task_result(t)}
+    waiting_ids = {
+        t.get("task_id") for t in state.get("tasks", []) if awaiting_task_result(t)
+    }
     batches = [
         b
         for b in state.get("slurm_batches", [])
