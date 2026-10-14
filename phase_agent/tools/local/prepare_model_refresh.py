@@ -69,6 +69,14 @@ def prepare_model_refresh(*, action, context):
         requested_count = len(rows) + plan["maximum_supplemental_count"]
     else:
         plan = refresh["plan"]
+        authorization = refresh.get("supplemental_input_authorization") or {}
+        if not (
+            authorization.get("approved_by")
+            and authorization.get("approved_by") == context.get("approval_record_id")
+            and authorization.get("config_version") == context.get("config_version")
+            and authorization.get("checksum") == fingerprint(refresh.get("supplemental_candidates") or [])
+        ):
+            return {"status": "awaiting_approval", "state": state, "reason": "追加弛豫需单独批准本批具体目标；未创建任务或输入文件。"}
         if not refresh.get("approved_by") or not refresh.get("supplemental_reservation_key"):
             return {
                 "status": "rejected",

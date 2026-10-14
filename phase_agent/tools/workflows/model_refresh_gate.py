@@ -75,7 +75,9 @@ def advance_refresh(state, user_message=""):
             )
         return (
             current,
-            f"刷新第{refresh['wave'] + 1}批：有效回收{len(rows) - len(missing)}/{len(rows)}；等待或失败{len(unresolved)}。可继续回传，或明确回复“不再等待刷新”。不会标记缺失任务完成。",
+            f"本批有效回收 {len(rows) - len(missing)}/{len(rows)}，还有 {len(unresolved)} 个结果未通过回收。\n"
+            + "\n".join(f"未读到：{tid} → {tasks.get(tid, {}).get('result_path') or '结果路径未登记'}" for tid in sorted(unresolved)[:3])
+            + "\n本次只检查回传，未新增任务、未追加弛豫。",
         )
     plan = refresh["plan"]
     diagram = (current.get("phase_diagrams") or {}).get("mlip") or {}
@@ -222,6 +224,7 @@ def run_model_refresh_gate(
     config = context["effective_config"]
     refresh = current["model_refresh"]
     automatic = refresh.get("status") == "supplement_ready"
+    # Supplemental candidates are a new decision, never covered by first-wave approval.
     approval_identity = fingerprint(
         {
             "config": session["confirmed_snapshot"],
@@ -280,15 +283,17 @@ def run_model_refresh_gate(
             if automatic
             else plan["maximum_total_cost"]
         ),
-        "target_ids": [r["structure_id"] for r in plan["candidates"]],
+        "target_ids": [r["structure_id"] for r in (refresh.get("supplemental_candidates", []) if automatic else plan["candidates"])],
         "decision_source": "approved_refresh_policy",
-        "reason": "新模型激活后先刷新累计结构；不混用旧模型能量。",
+        "reason": (f"首批结果已回收，建议另行追加 {len(refresh.get('supplemental_candidates', []))} 个弛豫任务；须单独批准，当前未生成输入。" if automatic else "新模型激活后先刷新累计结构；不混用旧模型能量。"),
         "parameters": {
             "mode": "model_refresh_inputs",
             "preview_checksum": plan["checksum"],
             "refresh_preview": plan,
         },
     }
+    if automatic:
+        action["task_key"] += ":supplement:" + fingerprint(refresh.get("supplemental_candidates", []))[:16]
     proposal = build_agent_proposal(action, current, runtime_state=current)
     key = pending_key
     stored = (current.get("pending_execution_policies") or {}).get(key) or {}
@@ -298,16 +303,14 @@ def run_model_refresh_gate(
     # A previous action's approval must never approve a new refresh or changed files.
     if resume_approved:
         human_feedback = "同意"
-    elif not automatic and previous != action["task_key"]:
+    elif previous != action["task_key"]:
         human_feedback = None
     policy = apply_execution_policy(
         proposal,
-        execution_mode="autonomous"
-        if automatic
-        else ("dry_run" if mode == "dry_run" else "interactive"),
+        execution_mode="dry_run" if mode == "dry_run" else "interactive",
         human_feedback=human_feedback,
     )
-    if not automatic and not policy.get("execute"):
+    if not policy.get("execute"):
         from phase_agent.tools.policy.native_approval import native_approval_gate
 
         blocked = native_approval_gate(
@@ -370,7 +373,7 @@ def run_model_refresh_gate(
             "reason": "刷新方案校验失败，未截断：" + str(validation["errors"]),
             "submitted": False,
         }
-    if not automatic and not resume_approved:
+    if not resume_approved:
         from phase_agent.tools.policy.native_approval import native_approval_gate
 
         blocked = native_approval_gate(
@@ -416,6 +419,12 @@ def run_model_refresh_gate(
                 + ",".join(sorted(set(checked["reasons"] + deferred_budget_errors)))
                 + "。范围和配置不变时，继续将复用本次批准。",
             }
+    if automatic:
+        refresh["supplemental_input_authorization"] = {
+            "approved_by": action["task_key"],
+            "checksum": fingerprint(refresh.get("supplemental_candidates", [])),
+            "config_version": session["confirmed_snapshot"]["config_version"],
+        }
     execution = execute_tool_action(
         action,
         registry=registry,
@@ -454,9 +463,7 @@ def run_model_refresh_gate(
             "record_id": action["task_key"],
             "final_action": action,
             "status": result.get("status", execution["status"]),
-            "approval_basis": "bounded_initial_approval"
-            if automatic
-            else "explicit_user_approval",
+            "approval_basis": "explicit_user_approval",
         }
     )
     return {

@@ -67,6 +67,11 @@ def brief_chat_state(state, *, configuring=False):
             if refresh.get("status") == "approval_required"
             else f"当前：新模型结构刷新第{int(refresh.get('wave', 0)) + 1}批，等待输入准备或结果回传。"
         )
+    completed_refresh = state.get("model_refresh") or {}
+    if completed_refresh.get("status") == "completed" and completed_refresh.get("supplemental_declined_by_user") and not state.get("pending_execution_policies"):
+        cancelled = len(completed_refresh.get("cancelled_supplemental_task_ids") or [])
+        old_dft = sum(t.get("stage") in {"dft_single_point", "dft_relax"} and t.get("status") in {"pending", "running", "submitted", "unknown"} and not t.get("recovery_wait_waived") for t in state.get("tasks") or [])
+        return f"当前：已回收 {completed_refresh.get('recovered_task_count', 0)} 个刷新结果；已取消 {cancelled} 个未批准追加弛豫。" + (f"另有 {old_dft} 个旧 DFT 结果缺失。" if old_dft else "")
     if state.get("pending_dft_recovery_question"):
         return "当前：DFT 部分结果已回收，等待是否继续回收的确认。"
     pending = state.get("pending_execution_policies") or {}

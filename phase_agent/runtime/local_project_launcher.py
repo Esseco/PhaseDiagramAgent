@@ -121,6 +121,16 @@ def validate_project_paths(path):
                 "open_webui_runs",
             )
         )
+    if registered and diagram == descriptor.get("default_diagram"):
+        # Existing default diagrams retain their physical storage at system level.
+        # Other diagrams must never gain access to these legacy directories.
+        owned.extend(
+            (system_root / name).resolve()
+            for name in (
+                "workflow_state", "parameters", "structures", "submissions",
+                "analysis_outputs", "open_webui_runs",
+            )
+        )
     keys = (
         "state_path",
         "ledger_path",

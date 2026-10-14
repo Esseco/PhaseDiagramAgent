@@ -13,7 +13,10 @@ from phase_agent.science.structures.boundary_utils import load_structure
 
 
 def prepare_batch(*, action, context):
-    config, manager = context_config(context["effective_config"], context), context["manager"]
+    config, manager = (
+        context_config(context["effective_config"], context),
+        context["manager"],
+    )
     state = deepcopy(context.get("event_state") or {})
     approved = (action.get("parameters") or {}).get("relax_mc_preview")
     if not approved:
@@ -26,7 +29,20 @@ def prepare_batch(*, action, context):
     if existing:
         if existing["plan_checksum"] != approved["checksum"]:
             raise ValueError("bundle_identity_conflict")
-        return {"status": "already_prepared", "state": state, **existing, "submitted": False}
+        from phase_agent.tools.relax_mc_batch.handoff import compact_handoff
+
+        upload = compact_handoff(existing["directory"])
+        existing.update(
+            upload_folder=str(upload),
+            upload_archive=str(upload / "inputs.zip"),
+            script_path=str(upload / "submit_all.sh"),
+        )
+        return {
+            "status": "already_prepared",
+            "state": state,
+            **existing,
+            "submitted": False,
+        }
     plan = diagnose(
         action.get("target_ids") or [],
         state,
@@ -45,11 +61,16 @@ def prepare_batch(*, action, context):
     base = Path(config["upload_batches_directory"]).resolve() / "relax_mc_batches"
     from phase_agent.tools.remote.handoff_naming import batch_label
 
-    sequence = 1 + sum(row.get("model_version") == plan["model_version"] for row in (state.get("relax_mc_batches") or {}).values())
+    sequence = 1 + sum(
+        row.get("model_version") == plan["model_version"]
+        for row in (state.get("relax_mc_batches") or {}).values()
+    )
     label = batch_label(base, state, plan["model_version"], "RelaxMC", sequence)
     root = base / label
     if root.exists():
-        raise FileExistsError("Unregistered bundle already exists; inspect before retry")
+        raise FileExistsError(
+            "Unregistered bundle already exists; inspect before retry"
+        )
     tasks = relax_tasks(plan, config)
     for task in tasks:
         reservation = reserve_budget(
@@ -101,7 +122,9 @@ def prepare_batch(*, action, context):
             "source_path": mapping[row["source_path"]],
             "composition": row["composition"],
             "stage_history": {stage: [] for stage in manager.STAGES},
-            "metadata": {"initialization_method": "electrostatic_top10_random3_layer_occupied"},
+            "metadata": {
+                "initialization_method": "electrostatic_top10_random3_layer_occupied"
+            },
         }
         full = branches[row["branch_id"]].get("full_na_structure_path")
         if full:
@@ -120,7 +143,8 @@ def prepare_batch(*, action, context):
         references[name] = str(path)
     system = {
         "species": deepcopy(
-            (manager.data.get("system_config") or {}).get("species") or {"mobile": ["Na"]}
+            (manager.data.get("system_config") or {}).get("species")
+            or {"mobile": ["Na"]}
         )
     }
     data = {
@@ -163,7 +187,9 @@ def prepare_batch(*, action, context):
     runtime = root / "runtime"
     source = Path(__file__).resolve().parents[2]
     shutil.copytree(
-        source, runtime / "phase_agent", ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+        source,
+        runtime / "phase_agent",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     from phase_agent.tools.remote.manual_upload_runner import _bundle_mc_backend
 
@@ -208,7 +234,7 @@ def prepare_batch(*, action, context):
         newline="\n",
     )
     guide = (
-        "Upload this complete folder with its inputs, references, runtime and scripts; preserve its directory structure. Enter the uploaded folder and run sbatch submit_all.sh ONCE.\n"
+        "Upload only the upload folder (submit_all.sh, run_upload.py and inputs.zip). Enter it and run sbatch submit_all.sh ONCE; Python runs only on the allocated compute node and extracts inputs into work. Download work/results.zip.\n"
         "Remote coordinator submits grouped Relax/MC jobs under the approved model/rules; download results.zip after completion/pause/failure.\n"
         f"Workload upper GPU compute jobs:{sum(plan['workload']['gpu_jobs_upper_by_wave'])}; one additional coordinator job; max concurrent compute jobs:{plan['workload']['max_concurrent_jobs']}.\n"
         "No model weights are copied: model references must exist on HPC and are checked before child submission.\n"
@@ -220,7 +246,12 @@ def prepare_batch(*, action, context):
     import zipfile
 
     with zipfile.ZipFile(archive) as zipped:
-        (root / "transfer_manifest.json").write_bytes(zipped.read("transfer_manifest.json"))
+        (root / "transfer_manifest.json").write_bytes(
+            zipped.read("transfer_manifest.json")
+        )
+    from phase_agent.tools.relax_mc_batch.handoff import compact_handoff
+
+    upload = compact_handoff(root)
     record = {
         "bundle_id": plan["bundle_id"],
         "plan_checksum": plan["checksum"],
@@ -231,13 +262,16 @@ def prepare_batch(*, action, context):
         "batch_sequence": sequence,
         "status": "prepared",
         "directory": str(root),
-        "upload_archive": archive,
-        "script_path": str(root / "submit_all.sh"),
+        "upload_folder": str(upload),
+        "upload_archive": str(upload / "inputs.zip"),
+        "script_path": str(upload / "submit_all.sh"),
         "expected_results_archive": str(root / "returned" / "results.zip"),
         "workload": plan["workload"],
     }
     for row in tasks:
-        row.update(slurm_batch_id=plan["bundle_id"], relax_mc_bundle_id=plan["bundle_id"])
+        row.update(
+            slurm_batch_id=plan["bundle_id"], relax_mc_bundle_id=plan["bundle_id"]
+        )
     state.setdefault("tasks", []).extend(tasks)
     state.setdefault("pending_tasks", []).extend(deepcopy(tasks))
     state.setdefault("relax_mc_batches", {})[plan["bundle_id"]] = record
