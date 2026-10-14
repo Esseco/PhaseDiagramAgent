@@ -195,9 +195,14 @@ def create_deepseek_client(
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(request, timeout=timeout) as response:
+                with urllib.request.urlopen(request, timeout=timeout if attempt == 0 else min(120, max(timeout, timeout * 1.5))) as response:
                     raw_response = response.read()
                 check_cancelled()
+            except TimeoutError:
+                check_cancelled()
+                if attempt == 0:
+                    continue
+                raise DeepSeekResponseError("timeout", "模型服务读取超时，有限重试仍未得到回答；本次未生成方案或执行任务。") from None
             except urllib.error.HTTPError as error:
                 if error.code in {401, 403}:
                     message = "DeepSeek API Key 鉴权失败，请检查密钥是否有效。"
@@ -208,6 +213,9 @@ def create_deepseek_client(
                 raise DeepSeekResponseError("http_error", message) from None
             except urllib.error.URLError as error:
                 if isinstance(error.reason, TimeoutError):
+                    check_cancelled()
+                    if attempt == 0:
+                        continue
                     message = "连接 DeepSeek API 超时，请检查网络后重试。"
                 else:
                     message = "无法连接 DeepSeek API，请检查本机网络和 API 地址。"

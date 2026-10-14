@@ -4,6 +4,7 @@ from pathlib import Path
 
 from phase_agent.tools.state.task_waiting import awaiting_task_result
 from phase_agent.runtime.response_preferences import detailed_response
+from phase_agent.tools.relax_mc_batch.handoff import input_directory, output_directory
 
 
 def waiting_file_lines(state):
@@ -17,17 +18,17 @@ def waiting_file_lines(state):
         for bid in dict.fromkeys(row["relax_mc_bundle_id"] for row in owned):
             batch = (state.get("relax_mc_batches") or {}).get(bid) or {}
             directory = batch.get("directory")
-            folder = Path(directory).resolve() if directory else None
-            if folder is not None and (folder / "upload" / "inputs.zip").is_file():
-                folder = folder / "upload"
-            destination = batch.get("expected_results_archive")
+            folder = input_directory(directory) if directory else None
+            destination = output_directory(directory) if directory else None
+            if batch.get("return_error"):
+                lines.append("回传核对失败：" + str(batch["return_error"]))
             if (
                 folder is None
                 or not folder.is_dir()
                 or not (folder / "submit_all.sh").is_file()
                 or not (folder / "inputs.zip").is_file()
                 or not (folder / "run_upload.py").is_file()
-                or folder.name != "upload"
+                or not folder.name.endswith("_input")
                 or not destination
             ):
                 lines.append("输入包准备未完成，尚不能提交；需补齐上传包和回传位置。")
@@ -40,18 +41,14 @@ def waiting_file_lines(state):
                     + str(batch.get("model_version") or "未登记"),
                     "上传整个文件夹：`" + str(folder) + "`",
                     "提交：上传 submit_all.sh、run_upload.py 和 inputs.zip，执行 `sbatch submit_all.sh`；Python 仅在计算节点自动解压并运行。",
-                    "回传：远端 `work/results.zip` → `"
+                    "回传：将超算自动生成的同名 `_output` 文件夹整体下载至本地 `"
                     + str(destination)
                     + "`。回传后说“已回传”。",
                 ]
             )
         other = {
             **state,
-            "tasks": [
-                row
-                for row in state.get("tasks", [])
-                if not row.get("relax_mc_bundle_id")
-            ],
+            "tasks": [row for row in state.get("tasks", []) if not row.get("relax_mc_bundle_id")],
         }
         return lines + waiting_file_lines(other)
     if not detailed_response():
@@ -62,9 +59,7 @@ def waiting_file_lines(state):
 def _brief_waiting_file_lines(state):
     refresh = state.get("model_refresh") or {}
     refresh_ids = (
-        set(refresh.get("task_ids") or [])
-        if refresh.get("status") == "waiting_results"
-        else None
+        set(refresh.get("task_ids") or []) if refresh.get("status") == "waiting_results" else None
     )
     if refresh_ids is not None and not any(
         awaiting_task_result(row) and row.get("task_id") in refresh_ids
@@ -74,16 +69,13 @@ def _brief_waiting_file_lines(state):
     tasks = [
         row
         for row in state.get("tasks", [])
-        if awaiting_task_result(row)
-        and (refresh_ids is None or row.get("task_id") in refresh_ids)
+        if awaiting_task_result(row) and (refresh_ids is None or row.get("task_id") in refresh_ids)
     ]
     if not tasks:
         return []
     ids = {row.get("task_id") for row in tasks}
     batches = [
-        row
-        for row in state.get("slurm_batches", [])
-        if ids.intersection(row.get("task_ids") or [])
+        row for row in state.get("slurm_batches", []) if ids.intersection(row.get("task_ids") or [])
     ]
     handoffs = [row.get("handoff") or {} for row in batches]
     folders = list(
@@ -120,9 +112,7 @@ def _brief_waiting_file_lines(state):
     lines = ["本轮提交文件夹：" + "、".join(f"`{path}`" for path in links)]
     models = list(
         dict.fromkeys(
-            row.get("model_version")
-            for row in [*batches, *tasks]
-            if row.get("model_version")
+            row.get("model_version") for row in [*batches, *tasks] if row.get("model_version")
         )
     )
     if models:
@@ -153,9 +143,7 @@ def _brief_waiting_file_lines(state):
 def _detailed_waiting_file_lines(state):
     refresh = state.get("model_refresh") or {}
     refresh_ids = (
-        set(refresh.get("task_ids") or [])
-        if refresh.get("status") == "waiting_results"
-        else None
+        set(refresh.get("task_ids") or []) if refresh.get("status") == "waiting_results" else None
     )
     if refresh_ids is not None and not any(
         awaiting_task_result(row) and row.get("task_id") in refresh_ids
@@ -165,26 +153,19 @@ def _detailed_waiting_file_lines(state):
     tasks = [
         row
         for row in state.get("tasks", [])
-        if awaiting_task_result(row)
-        and (refresh_ids is None or row.get("task_id") in refresh_ids)
+        if awaiting_task_result(row) and (refresh_ids is None or row.get("task_id") in refresh_ids)
     ]
     if not tasks:
         return []
     ids = {row.get("task_id") for row in tasks}
     batches = [
-        row
-        for row in state.get("slurm_batches", [])
-        if ids.intersection(row.get("task_ids") or [])
+        row for row in state.get("slurm_batches", []) if ids.intersection(row.get("task_ids") or [])
     ]
     if not batches:
-        inputs = list(
-            dict.fromkeys(row["input_path"] for row in tasks if row.get("input_path"))
-        )
+        inputs = list(dict.fromkeys(row["input_path"] for row in tasks if row.get("input_path")))
         results = list(
             dict.fromkeys(
-                str(Path(row["result_path"]).parent)
-                for row in tasks
-                if row.get("result_path")
+                str(Path(row["result_path"]).parent) for row in tasks if row.get("result_path")
             )
         )
         lines = [f"输入文件：`{path}`" for path in inputs]

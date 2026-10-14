@@ -7,8 +7,11 @@ import zipfile
 
 from phase_agent.tools.remote.transfer_bundle import import_bundle, checksum
 from phase_agent.tools.relax_mc_batch.files import read, rebase, PATH_KEYS
+from phase_agent.tools.relax_mc_batch.handoff import result_archive, output_directory
 from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
-from phase_agent.tools.workflows.apply_scientific_feedback import apply_scientific_feedback
+from phase_agent.tools.workflows.apply_scientific_feedback import (
+    apply_scientific_feedback,
+)
 from phase_agent.tools.budget.reserve_budget import reserve_budget
 
 
@@ -50,7 +53,7 @@ def import_results(*, action, context):
         raise ValueError(
             "batch_model_or_config_version_mismatch; inspect historical results without activating them"
         )
-    archive = Path(record["expected_results_archive"])
+    archive = result_archive(record)
     digest = checksum(archive)
     if record.get("import_checksum") == digest:
         return {"status": "already_imported", "state": state, "submitted": False}
@@ -123,7 +126,11 @@ def import_results(*, action, context):
         ):
             raise ValueError("returned_registered_task_mismatch")
         if task["task_id"] not in existing:
-            if task.get("stage") != "deep_search" or task.get("segment_index") not in (0, 1, 2):
+            if task.get("stage") != "deep_search" or task.get("segment_index") not in (
+                0,
+                1,
+                2,
+            ):
                 raise ValueError("unexpected_remote_task")
             state.setdefault("tasks", []).append({**deepcopy(task), "status": "pending"})
             reserved = reserve_budget(
@@ -192,7 +199,19 @@ def import_results(*, action, context):
 def recover_available(state, context):
     current = deepcopy(state)
     for bid, record in list((current.get("relax_mc_batches") or {}).items()):
-        if not Path(record.get("expected_results_archive") or "").is_file():
+        if not result_archive(record).is_file():
+            status_file = output_directory(record["directory"]) / "run_status.json"
+            if status_file.is_file():
+                try:
+                    status = read(status_file)
+                    record["return_error"] = (
+                        "回传文件夹缺少 results.zip；计算节点退出码 "
+                        + str(status.get("returncode"))
+                        + "；"
+                        + str(status.get("error") or "请查看同目录 run.log")
+                    )
+                except (OSError, ValueError) as error:
+                    record["return_error"] = "回传状态文件无效：" + str(error)
             continue
         try:
             result = import_results(

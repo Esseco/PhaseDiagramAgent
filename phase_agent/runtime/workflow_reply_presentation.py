@@ -1135,6 +1135,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             "mc_requires_current_phase_diagram_ehull_per_atom": "MC 派发缺少当前相图的 Ehull/atom 证据",
         }
         reason = reason_labels.get(str(reason), str(reason))
+        if "llm_failed:" in str(reason) and any(word in str(reason).lower() for word in ("timeout", "timed out", "超时")):
+            return "本轮未执行：模型服务请求超时；已有结果仍保留，本次未生成新方案或执行任务。\n下一步：网络或服务恢复后，再重新请求下一步方案。"
         return f"本轮未执行：`{action or 'workflow'}` 未能准备（{reason}）。\n详细记录：`{detail_path}`"
     if (
         status in {"prepared", "already_prepared"}

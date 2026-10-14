@@ -29,13 +29,17 @@ def prepare_batch(*, action, context):
     if existing:
         if existing["plan_checksum"] != approved["checksum"]:
             raise ValueError("bundle_identity_conflict")
-        from phase_agent.tools.relax_mc_batch.handoff import compact_handoff
+        from phase_agent.tools.relax_mc_batch.handoff import (
+            compact_handoff,
+            output_directory,
+        )
 
         upload = compact_handoff(existing["directory"])
         existing.update(
             upload_folder=str(upload),
             upload_archive=str(upload / "inputs.zip"),
             script_path=str(upload / "submit_all.sh"),
+            expected_results_archive=str(output_directory(existing["directory"]) / "results.zip"),
         )
         return {
             "status": "already_prepared",
@@ -68,9 +72,7 @@ def prepare_batch(*, action, context):
     label = batch_label(base, state, plan["model_version"], "RelaxMC", sequence)
     root = base / label
     if root.exists():
-        raise FileExistsError(
-            "Unregistered bundle already exists; inspect before retry"
-        )
+        raise FileExistsError("Unregistered bundle already exists; inspect before retry")
     tasks = relax_tasks(plan, config)
     for task in tasks:
         reservation = reserve_budget(
@@ -122,9 +124,7 @@ def prepare_batch(*, action, context):
             "source_path": mapping[row["source_path"]],
             "composition": row["composition"],
             "stage_history": {stage: [] for stage in manager.STAGES},
-            "metadata": {
-                "initialization_method": "electrostatic_top10_random3_layer_occupied"
-            },
+            "metadata": {"initialization_method": "electrostatic_top10_random3_layer_occupied"},
         }
         full = branches[row["branch_id"]].get("full_na_structure_path")
         if full:
@@ -143,8 +143,7 @@ def prepare_batch(*, action, context):
         references[name] = str(path)
     system = {
         "species": deepcopy(
-            (manager.data.get("system_config") or {}).get("species")
-            or {"mobile": ["Na"]}
+            (manager.data.get("system_config") or {}).get("species") or {"mobile": ["Na"]}
         )
     }
     data = {
@@ -234,7 +233,7 @@ def prepare_batch(*, action, context):
         newline="\n",
     )
     guide = (
-        "Upload only the upload folder (submit_all.sh, run_upload.py and inputs.zip). Enter it and run sbatch submit_all.sh ONCE; Python runs only on the allocated compute node and extracts inputs into work. Download work/results.zip.\n"
+        "Upload the complete <batch>_input folder (submit_all.sh, run_upload.py and inputs.zip). Run sbatch submit_all.sh ONCE; Python executes on the compute node. Download the automatically generated sibling <batch>_output folder intact.\n"
         "Remote coordinator submits grouped Relax/MC jobs under the approved model/rules; download results.zip after completion/pause/failure.\n"
         f"Workload upper GPU compute jobs:{sum(plan['workload']['gpu_jobs_upper_by_wave'])}; one additional coordinator job; max concurrent compute jobs:{plan['workload']['max_concurrent_jobs']}.\n"
         "No model weights are copied: model references must exist on HPC and are checked before child submission.\n"
@@ -246,10 +245,11 @@ def prepare_batch(*, action, context):
     import zipfile
 
     with zipfile.ZipFile(archive) as zipped:
-        (root / "transfer_manifest.json").write_bytes(
-            zipped.read("transfer_manifest.json")
-        )
-    from phase_agent.tools.relax_mc_batch.handoff import compact_handoff
+        (root / "transfer_manifest.json").write_bytes(zipped.read("transfer_manifest.json"))
+    from phase_agent.tools.relax_mc_batch.handoff import (
+        compact_handoff,
+        output_directory,
+    )
 
     upload = compact_handoff(root)
     record = {
@@ -265,13 +265,11 @@ def prepare_batch(*, action, context):
         "upload_folder": str(upload),
         "upload_archive": str(upload / "inputs.zip"),
         "script_path": str(upload / "submit_all.sh"),
-        "expected_results_archive": str(root / "returned" / "results.zip"),
+        "expected_results_archive": str(output_directory(root) / "results.zip"),
         "workload": plan["workload"],
     }
     for row in tasks:
-        row.update(
-            slurm_batch_id=plan["bundle_id"], relax_mc_bundle_id=plan["bundle_id"]
-        )
+        row.update(slurm_batch_id=plan["bundle_id"], relax_mc_bundle_id=plan["bundle_id"])
     state.setdefault("tasks", []).extend(tasks)
     state.setdefault("pending_tasks", []).extend(deepcopy(tasks))
     state.setdefault("relax_mc_batches", {})[plan["bundle_id"]] = record
