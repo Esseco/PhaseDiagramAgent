@@ -163,7 +163,21 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 action={"target_ids": [row["task_id"] for row in tasks]},
                 context={**context, "event_state": state},
             )
+            from phase_agent.tools.workflows.dft_selection_artifacts import preparation_artifacts
+
+            artifacts = preparation_artifacts(
+                action, state, tasks, validation, prepared, context.get("manager")
+            )
+            state["qbc_selection_history"][-1]["artifacts"] = artifacts
+            if prepared.get("state"):
+                prepared["state"]["qbc_selection_history"][-1]["artifacts"] = artifacts
             return {**prepared, "tasks": tasks, "task_count": len(tasks), "validation": validation}
+        from phase_agent.tools.workflows.dft_selection_artifacts import preparation_artifacts
+
+        artifacts = preparation_artifacts(
+            action, state, tasks, validation, manager=context.get("manager")
+        )
+        state["qbc_selection_history"][-1]["artifacts"] = artifacts
         return {
             "status": "completed",
             "state": state,

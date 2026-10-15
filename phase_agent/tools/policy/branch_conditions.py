@@ -2,6 +2,10 @@
 
 from phase_agent.tools.state.training_pending_validation import training_pending_validation
 from phase_agent.tools.workflows.model_refresh_state import refresh_active
+from phase_agent.tools.policy.model_generation import (
+    new_model_generation_facts,
+    new_model_search_errors,
+)
 
 
 def branch_facts(state):
@@ -12,6 +16,7 @@ def branch_facts(state):
         "training_review_pending": training_pending_validation(state),
         "model_refresh_pending": refresh_active(state),
         "model_refresh_status": refresh.get("status"),
+        "new_model_generation": new_model_generation_facts(state),
         "instruction": "这是进入条件事实，不是路线推荐；微调结果回收后先评估候选，模型切换后先完成结构与相图刷新。",
     }
 
@@ -25,6 +30,27 @@ def branch_entry_errors(action, state):
     if refresh_active(state) and tool not in {"pause_search", "restart_failed_task"}:
         if tool != "prepare_local_batch_files" or parameters.get("mode") != "model_refresh_inputs":
             errors.append("new_model_structure_refresh_required")
+    mode = parameters.get("mode")
+    region_review = state.get("branch_region_review") or {}
+    if region_review.get("status") in {
+        "awaiting_agent_proposal",
+        "awaiting_approval",
+        "awaiting_sampling_continuation_review",
+    } and (
+        tool in {"select_dft_candidates", "allocate_mc_bohb"}
+        or (
+            tool == "prepare_local_batch_files"
+            and mode in {"relax_inputs", "mc_inputs", "relax_mc_inputs"}
+        )
+    ):
+        errors.append("region_branch_review_required_before_downstream_inputs")
+    if tool == "select_dft_candidates":
+        errors.extend(new_model_search_errors(state, dft=True))
+    elif tool == "allocate_mc_bohb" or (
+        tool == "prepare_local_batch_files"
+        and mode in {"relax_mc_inputs", "relax_inputs", "mc_inputs"}
+    ):
+        errors.extend(new_model_search_errors(state, action.get("target_ids")))
     mc = mc_entry_facts(state)
     if (
         mc["required"]

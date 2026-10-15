@@ -150,6 +150,9 @@ def review_additional(handler, state, row, decision, comment):
             str(Path(handler.state_path).parent / "langgraph_lifecycle.sqlite") + ".lock",
             timeout=10,
         ):
+            import hashlib
+
+            source_sha256 = hashlib.sha256(Path(handler.state_path).read_bytes()).hexdigest()
             current = read_json(handler.state_path, {}) or {}
             fresh = (current.get("pending_execution_recoveries") or {}).get(row["plan_id"]) or {}
             if proposal_hash(fresh.get("proposal") or {}) != row["proposal_hash"]:
@@ -157,7 +160,23 @@ def review_additional(handler, state, row, decision, comment):
             result = apply_reconciliation(
                 handler.state_path, current, row["plan_id"], decision, reviewer_comment=comment
             )
-            write_json(handler.state_path, result["state"])
+            if result["status"] in {"reconciled_existing_effects", "reconciled_no_effect"}:
+                from phase_agent.tools.state.workflow_control import (
+                    commit_control,
+                    reconciliation_patch,
+                )
+
+                result["state"] = commit_control(
+                    handler.state_path,
+                    current,
+                    reconciliation_patch(current, result["state"]),
+                    evidence={"reconciliation_id": row["plan_id"], "reviewer_comment": comment},
+                    expected_sha256=source_sha256,
+                    desired_state=result["state"],
+                    restore_allowed=result["status"] == "reconciled_existing_effects",
+                )
+            else:
+                write_json(handler.state_path, result["state"])
         return {"status": result["status"], "reason": result.get("reason")}
     if kind in {"model_activation", "training_direction"} and decision != "reject":
         from phase_agent.tools.state.execution_receipts import recovery_report

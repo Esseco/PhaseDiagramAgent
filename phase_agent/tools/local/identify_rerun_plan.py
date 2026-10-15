@@ -142,7 +142,7 @@ def identify_rerun_plan(message, state):
         "action": _action_summary(row),
         "affected_task_count": len(affected),
         "affected_by_stage": _count_by_stage(affected),
-        "existing_input_count": sum(_has_input_files(state, task) for task in affected),
+        "existing_input_count": _input_file_count(state, affected),
         "scope_note": (
             "已按当前 branch_batch 关联任务；执行前仍须单独核对依赖和清理范围"
             if round_number == len(anchors)
@@ -259,13 +259,31 @@ def _affected_tasks(action, tasks):
     return [row for row in tasks if row.get("stage") == stage] if stage else []
 
 
-def _has_input_files(state, task):
+def _input_file_count(state, tasks):
+    """Build the disk-backed batch index only once, and only if needed."""
+    indexed = None
+    count = 0
+    for task in tasks:
+        if task.get("input_path") and Path(task["input_path"]).is_file():
+            count += 1
+            continue
+        if indexed is None:
+            from phase_agent.tools.remote.batch_runner import _task_directories_by_id
+
+            indexed = _task_directories_by_id(state)
+        count += _has_input_files(state, task, indexed=indexed)
+    return count
+
+
+def _has_input_files(state, task, *, indexed=None):
     direct = task.get("input_path")
     if direct and Path(direct).is_file():
         return True
     from phase_agent.tools.remote.batch_runner import _task_directories_by_id
 
-    matches = _task_directories_by_id(state).get(
+    if indexed is None:
+        indexed = _task_directories_by_id(state)
+    matches = indexed.get(
         (task.get("batch_id") or task.get("slurm_batch_id"), task.get("task_id")), []
     )
     directory = matches[0][0] if len(matches) == 1 else None

@@ -111,5 +111,8 @@ def disabled_generation_allocations(parameters, enabled):
         for row in parameters.get("generation_plan") or []
         if isinstance(row, dict) and row.get("quota")
     }
+    used.update(
+        row.get("strategy") for row in parameters.get("regions") or [] if isinstance(row, dict)
+    )
     used.update(name for name, quota in (parameters.get("quotas") or {}).items() if quota)
     return sorted(used - set(enabled))

@@ -4,7 +4,9 @@ from pathlib import Path
 import shutil
 
 
-BOOTSTRAP = Path(__file__).with_name("upload_driver.py").read_text(encoding="utf-8")
+from phase_agent.tools.remote.transfer_limits import bootstrap_limits
+
+BOOTSTRAP = bootstrap_limits() + Path(__file__).with_name("upload_driver.py").read_text(encoding="utf-8")
 
 
 def input_directory(directory):
@@ -18,6 +20,8 @@ def output_directory(directory):
 
 
 def result_archive(record):
+    if not record.get("directory"):
+        return Path(record["expected_results_archive"])
     named = output_directory(record["directory"]) / "results.zip"
     for candidate in (
         named,

@@ -133,7 +133,8 @@ def run_workflow_turn(
                     "draft": actual["draft"],
                     "editable_file": actual.get("editable_file"),
                 }
-                response = base_agent_client(
+                from phase_agent.decisions.agent.summary_request import request_summary_first
+                response = request_summary_first(base_agent_client,
                     {
                         **payload,
                         "state": {**observed, "current_project": card}

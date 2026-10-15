@@ -86,6 +86,13 @@ def revise_pending_proposal(
         quota_limit = max(
             int(run.get("total_quota", 0)), int(strategy.get("generation_quota_total", 0))
         )
+        # Current user policy supersedes historical run/config batch defaults.
+        from phase_agent.tools.policy.adaptive_branch_count import VERSION
+
+        if ((proposal.get("decision_context") or {}).get("branch_count_policy") or {}).get(
+            "version"
+        ) == VERSION:
+            quota_limit = 1000
         if requested_batch > quota_limit:
             current["pending_execution_policies"].pop(pending_key, None)
             current = update_state_snapshot(

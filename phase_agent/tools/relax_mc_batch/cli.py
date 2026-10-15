@@ -11,13 +11,14 @@ def main(argv=None):
     run.add_argument("--root", required=True)
     run.add_argument("--submit", action="store_true")
     run.add_argument("--dry-run", action="store_true")
+    run.add_argument("--phase", type=int)
     inspect = sub.add_parser("inspect")
     inspect.add_argument("--archive", required=True)
     args = parser.parse_args(argv)
     if args.command == "run":
         from phase_agent.tools.relax_mc_batch.run import run_batch
 
-        result = run_batch(args.root, submit=args.submit, dry_run=args.dry_run)
+        result = run_batch(args.root, submit=args.submit, dry_run=args.dry_run, phase=args.phase)
     else:
         from phase_agent.tools.relax_mc_batch.results import inspect_archive
 

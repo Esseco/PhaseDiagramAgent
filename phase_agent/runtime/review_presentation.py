@@ -53,6 +53,16 @@ def review_card(plan_id, record):
     preview = params.get("refresh_preview") or {}
     targets = action.get("target_ids") or []
     scope = f"已指定 {len(targets)} 个目标"
+    if tool == "select_dft_candidates" and isinstance(params.get("decisions"), list):
+        selected = [
+            row
+            for row in params["decisions"]
+            if row.get("action") in {"DFT_SINGLE_POINT", "DFT_RELAX"}
+        ]
+        targets = list(dict.fromkeys(row["candidate_id"] for row in selected))
+        single = sum(row["action"] == "DFT_SINGLE_POINT" for row in selected)
+        relax = sum(row["action"] == "DFT_RELAX" for row in selected)
+        scope = f"选中 {len(targets)} 个结构；DFT单点 {single} 个，结构优化 {relax} 个"
     if tool == "generate_branches" and params.get("total_quota") is not None:
         scope = f"计划采样 {params['total_quota']} 个候选结构"
     if preview:
@@ -60,6 +70,8 @@ def review_card(plan_id, record):
     boundary = "完成本次动作后停止；后续新动作需另行审阅。"
     if tool in {"prepare_local_batch_files", "select_dft_candidates", "update_mlip"}:
         boundary = "完成本批输入准备后停止；提交超算属于后续操作。"
+    if tool == "generate_branches" and params.get("module_execution_scope"):
+        boundary = "生成并登记 branch，按已展示范围准备 Relax+MC 输入后停止；不提交超算。"
     if preview:
         boundary = (
             "首批及已展示上限内最多一轮补充输入生成；"
@@ -67,15 +79,25 @@ def review_card(plan_id, record):
         )
     from phase_agent.runtime.chat_approval_rules import is_sensitive_proposal
 
+    region_mode = tool == "generate_branches" and params.get("sampling_mode") == "region_adaptive"
+    if region_mode:
+        scope = f"重点区域 {len(params.get('regions') or [])} 个；新增branch数量生成后统计"
+        boundary = (
+            "仅生成并登记branch及初始结构，保存实际统计后停止；不准备Relax/MC输入，不计算或提交。"
+        )
+
     return {
         "plan_id": plan_id,
         "revision": record.get("revision", 0),
         "proposal_hash": proposal_hash(proposal),
-        "title": LABELS.get(tool, tool or "待审阅动作"),
+        "title": "生成branch（区域优先）"
+        if region_mode
+        else LABELS.get(tool, tool or "待审阅动作"),
         "purpose": proposal.get("expected_purpose") or proposal.get("reason") or "未记录",
         "reason": proposal.get("reason") or "未记录",
         "scope": scope,
-        "target_count": len(targets),
+        "target_count": None if region_mode else len(targets),
+        "region_count": len(params.get("regions") or []) if region_mode else None,
         "target_ids": targets,
         "estimated_cost": proposal.get("estimated_cost"),
         "budget": action.get("budget"),

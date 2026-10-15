@@ -20,7 +20,23 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
         return {"reply": metadata, "operation": "done"}
     if handler.conversation_id not in {None, context.conversation_id}:
         raise OpenWebUIRequestError("此运行时已绑定另一个会话。")
-    facts = read_json(handler.state_path, {}) or {}
+    missing = object()
+    facts = read_json(handler.state_path, missing)
+    if facts is missing:
+        from pathlib import Path
+        directory = Path(handler.state_path).parent
+        existing_project = (directory / "langgraph_lifecycle.sqlite").is_file() or (directory / "ledgers" / "phase_data.json").is_file()
+        if handler.config_delegate is None and existing_project:
+            raise OpenWebUIRequestError("项目状态文件不存在，无法核对现有任务；本次未分析或生成任务。")
+        facts = {}
+    facts = facts or {}
+    from phase_agent.runtime.read_only_queries import read_only_reply
+    from phase_agent.runtime.turn_process import timed_call
+
+    answer = timed_call("read_only_query", read_only_reply, handler, message, facts, context.conversation_id)
+    if answer is not None:
+        handler.last_turn_outcome = "answered"
+        return {"reply": answer, "operation": "done"}
     statuses = {row.get("task_id"): row.get("status") for row in facts.get("tasks") or []}
     if handler.config_delegate is None:
         from phase_agent.tools.workflows.recover_saved_results import (
@@ -186,23 +202,10 @@ def decide(state, runtime: Runtime[TurnRuntime]):
         runtime.context.scientific_call = execute
         return {"status": "scientific_requested"}
 
-    # Continuation with returned files must reach the original collector before
-    # a dialogue-only answer can mistake stale task status for missing results.
-    if state["message"].strip().lower() in {"继续", "continue", "继续原运行"}:
-        from pathlib import Path
-        from phase_agent.tools.state.task_waiting import awaiting_task_result
-
-        from phase_agent.tools.remote.transfer_bundle import has_registered_return
-
-        returned = has_registered_return(state["facts"]) or any(
-            awaiting_task_result(row)
-            and isinstance(row.get("result_path"), str)
-            and Path(row["result_path"]).is_file()
-            for row in state["facts"].get("tasks") or []
-        )
-        if returned and not pending:
-            request_scientific()
-            return {"operation": "scientific_workflow"}
+    # Known continuation enters observation/planning directly, not semantic routing.
+    if state["message"].strip().lower().rstrip("。.!！") in {"继续", "continue", "继续原运行", "回收完毕", "回收完成", "回传完成", "结果已回传", "已回传"} and not pending:
+        request_scientific()
+        return {"operation": "scientific_workflow"}
     with dialogue_message():
         result = decide_from_saved_facts(
             handler,
@@ -231,7 +234,7 @@ def read_evidence(state, runtime: Runtime[TurnRuntime]):
 
     topics = state["result"]["topics"]
     prior = set(state.get("evidence_topics") or [])
-    if int(state.get("evidence_reads", 0)) >= 2 or set(topics).issubset(prior):
+    if int(state.get("evidence_reads", 0)) >= 4 or set(topics).issubset(prior):
         process_event(
             "停止重复读取", {"topics": topics, "read_count": state.get("evidence_reads", 0)}
         )
@@ -246,10 +249,13 @@ def read_evidence(state, runtime: Runtime[TurnRuntime]):
             "operation": "present",
         }
     new = [topic for topic in topics if topic not in prior]
+    if int(state.get("evidence_reads", 0)) == 3:
+        # Complex conversation gets all remaining evidence before its final answer.
+        new = [topic for topic in ("mc", "dft", "tasks", "model", "convergence", "budget", "history", "configuration", "plans") if topic not in prior]
     result = read_topics(state["facts"], new)
     process_event("按需读取证据", {"topics": new, "read_only": True})
     return {
-        "evidence": {**(state.get("evidence") or {}), **result},
+        "evidence": {**(state.get("evidence") or {}), **result, "_loaded_topics": sorted(prior | set(new))},
         "evidence_topics": sorted(prior | set(new)),
         "evidence_reads": int(state.get("evidence_reads", 0)) + 1,
         "operation": "decide",

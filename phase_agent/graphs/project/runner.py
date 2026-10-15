@@ -4,7 +4,13 @@ from phase_agent.graphs.runtime_context import WorkflowRuntime
 
 
 def run_search_workflow_graph(
-    *, workflow_graph=None, checkpoint_path=None, invocation_id=None, project_thread=None, **stages
+    *,
+    workflow_graph=None,
+    checkpoint_path=None,
+    invocation_id=None,
+    project_thread=None,
+    business_state_path=None,
+    **stages,
 ):
     if workflow_graph is None:
         from phase_agent.graphs.scientific_graph import current_scientific_graph
@@ -18,8 +24,15 @@ def run_search_workflow_graph(
 
         path = Path(checkpoint_path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        from phase_agent.tools.state.workflow_control import current_revision
+
+        revision = current_revision(business_state_path)
+        thread = project_thread or invocation_id
+        if revision:
+            # Keep old checkpoints intact; an audited control revision starts a fresh lifecycle.
+            thread += ":control:" + revision
         config = {
-            "configurable": {"thread_id": project_thread or invocation_id},
+            "configurable": {"thread_id": thread},
             "recursion_limit": 32,
         }
         with FileLock(str(path) + ".lock", timeout=10):
@@ -60,6 +73,7 @@ def run_search_workflow_graph(
                             "Lifecycle configuration changed; cannot replay old invocation"
                         )
                     context.frame = prepared
+                    context.stages["restore_business_frame"] = True
                 from langgraph.types import Command
 
                 if snapshot.next and any(task.interrupts for task in snapshot.tasks):

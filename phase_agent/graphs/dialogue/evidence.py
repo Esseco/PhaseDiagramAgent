@@ -30,10 +30,22 @@ def progress_signature(facts):
 
 
 def conversation_facts(facts, project):
+    from phase_agent.analysis.state.batch_return_facts import batch_return_facts
+
+    from phase_agent.analysis.state.task_failure_facts import task_failure_facts
+
     tasks = facts.get("tasks") or []
+    failure_facts = task_failure_facts(facts)
+    current_failures = [
+        row
+        for row in failure_facts["actionable_failures"]
+        if not facts.get("active_model_version")
+        or row.get("model_version") in (None, facts["active_model_version"])
+    ]
     refresh = refresh_result_facts(facts)
     return {
         "current_project": deepcopy(project),
+        "batch_return_facts": batch_return_facts(facts),
         "current_status": facts.get("status"),
         "human_constraints": deepcopy(
             (facts.get("decision_memory") or {}).get("long_term_advice")
@@ -43,6 +55,10 @@ def conversation_facts(facts, project):
             or []
         ),
         "task_counts": dict(Counter(t.get("status", "unknown") for t in tasks)),
+        "task_count_scope": "all_recorded_attempts_including_history",
+        "failure_attempt_facts": {
+            key: value for key, value in failure_facts.items() if key != "actionable_failures"
+        },
         "task_stage_counts": [
             {"stage": stage, "status": status, "count": count}
             for (stage, status), count in Counter(
@@ -69,14 +85,13 @@ def conversation_facts(facts, project):
                 "stage": row.get("stage"),
                 "reason": str(row.get("error") or row.get("failure_reason") or "原因未记录")[:600],
             }
-            for row in tasks
-            if row.get("status") in {"failed", "timeout"}
+            for row in current_failures
         ][-3:],
     }
 
 
 def read_topics(facts, topics):
-    from phase_agent.analysis.state.build_state_snapshot import build_state_snapshot
+    from phase_agent.analysis.state.build_decision_context import build_decision_context
 
     fields = {
         "mc": ("mc_entry_conditions", "available_branches", "current_phase_diagram"),
@@ -105,19 +120,15 @@ def read_topics(facts, topics):
             "refresh_result_facts",
             "model_round_summary",
             "training_validation_planning",
+            "post_refresh_search",
+            "new_model_generation",
             "post_dft_assessment",
         ),
         "configuration": (),
         "plans": (),
     }
     selected = {key for topic in topics for key in fields[topic]}
-    context = (
-        build_state_snapshot(facts, snapshot_index=int(facts.get("state_snapshot_index", 0)))[
-            "decision_context"
-        ]
-        if selected
-        else {}
-    )
+    context = build_decision_context(facts) if selected else {}
     result = {key: deepcopy(context.get(key)) for key in selected}
     if "configuration" in topics:
         result["confirmed_configuration"] = deepcopy(facts.get("confirmed_config") or {})

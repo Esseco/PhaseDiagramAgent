@@ -194,17 +194,20 @@ def test_preview_diagnosis_workload_and_complete_portable_inventory(tmp_path):
     assert plan["workload"]["relax_structure_tasks"] == 13
     assert plan["workload"]["gpu_jobs_upper_by_wave"] == [3, 3, 3, 3]
     assert plan["workload"]["mc_step_upper"] == 6000
-    assert plan["workload"]["max_concurrent_jobs"] == 1
+    assert plan["workload"]["max_concurrent_jobs"] == 3
+    assert plan["workload"]["submission_policy"] == "phase_dependencies"
+    assert plan["workload"]["coordinator_jobs"] == 0
     with zipfile.ZipFile(result["upload_archive"]) as archive:
         names = archive.namelist()
         assert "batch.json" in names and "submit_all.sh" in names
         assert any(p.startswith("runtime/phase_agent/science/mc/") for p in names)
+        assert "runtime/phase_agent/tools/relax_mc_batch/dependencies.py" in names
         assert any(p.startswith("runtime/mc_backend/Process_AL_MC/") for p in names)
         assert sum(p.startswith("inputs/") for p in names) == 25
         assert not any(p.endswith(".model") for p in names)
     script = Path(result["script_path"]).read_text()
     assert script.index("#SBATCH") < script.index("set -e")
-    assert "--gres=gpu:1" in script and "--partition=v100m3" in script
+    assert "--gres" not in script and "--partition=p1" in script
     assert state["tasks"] == [] and len(result["state"]["tasks"]) == 13
 
 
@@ -351,7 +354,8 @@ def test_failure_does_not_overwrite_submission_receipt_checkpoint(tmp_path, monk
         module.checkpoint(root, current, manager)
         raise RuntimeError("submission_receipt_uncertain")
 
-    monkeypatch.setattr(module, "wave", uncertain)
+    from phase_agent.tools.relax_mc_batch import dependencies
+    monkeypatch.setattr(dependencies, "prepare_wave", uncertain)
     outcome = run_batch(result["directory"], submit=True)
     assert outcome["status"] == "failed"
     saved = read(Path(result["directory"]) / "workflow_state.json")
@@ -420,20 +424,24 @@ def test_submission_collection_loop_with_fake_slurm_only(tmp_path, monkeypatch):
         def active(self, ids):
             return set()
 
-        def submit(self, path):
-            remote = rebase(read(root / "workflow_state.json"), root)
-            batch = next(b for b in remote["slurm_batches"] if b["script_path"] == str(path))
-            execute(batch, remote, manager)
+        def submit(self, path, *, dependency=None):
+            if dependency is None:
+                remote = rebase(read(root / "workflow_state.json"), root)
+                batch = next(b for b in remote["slurm_batches"] if b["script_path"] == str(path))
+                execute(batch, remote, manager)
             self.submissions.append(str(path))
             return str(100 + len(self.submissions))
 
     io = FakeSlurm()
     outcome = run_batch(root, submit=True, io=io, poll_seconds=0)
+    assert outcome["status"] == "queued"
+    for phase in range(4):
+        outcome = run_batch(root, submit=True, io=io, phase=phase)
     assert outcome["status"] == "completed", outcome
-    assert len(calls) == 49 and len(io.submissions) == 12
-    assert len(set(io.submissions)) == 12
+    assert len(calls) == 49 and len(io.submissions) == 16
+    assert len(set(io.submissions)) == 16
     assert run_batch(root, submit=True, io=io, poll_seconds=0)["submitted"] is False
-    assert len(io.submissions) == 12
+    assert len(io.submissions) == 16
 
 
 def test_corrupt_return_is_reported_without_advancing_pending_tasks(tmp_path):

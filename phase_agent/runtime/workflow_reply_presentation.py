@@ -31,6 +31,25 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
 
             return approval_reply(proposal, result.get("state") or {})
     reply = _format_workflow_reply(result, state_path, verbose=verbose)
+    from phase_agent.runtime.review_file_presentation import file_location_lines
+    if result.get("status") == "awaiting_approval":
+        from phase_agent.tools.workflows.generation_artifacts import proposal_artifacts
+
+        plan_artifacts = proposal_artifacts(proposal, result.get("state") or {})
+        if plan_artifacts:
+            reply += "\n" + "\n".join(file_location_lines("Branch", plan_artifacts["json"]))
+        from phase_agent.tools.workflows.dft_selection_artifacts import proposal_artifacts as dft_artifacts
+
+        dft_details = dft_artifacts(proposal, result.get("state") or {})
+        if dft_details:
+            reply += "\n" + "\n".join(file_location_lines("DFT 选点", dft_details["json"]))
+    history = (result.get("state") or {}).get("generation_history") or []
+    selections = (result.get("state") or {}).get("qbc_selection_history") or []
+    if selections and selections[-1].get("artifacts"):
+        reply += "\n" + "\n".join(file_location_lines("DFT 选点及输入任务", selections[-1]["artifacts"]["json"]))
+    if history and (history[-1].get("artifacts") or {}):
+        artifacts = history[-1]["artifacts"]
+        reply += "\n" + "\n".join(file_location_lines("Branch 及结构路径", artifacts["json"]))
     if detailed_response() or verbose:
         from phase_agent.runtime.evidence_reference_presentation import evidence_reference_lines
 
@@ -797,11 +816,16 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         if batch_preview:
             workload = batch_preview["workload"]
             lines.append(
-                f"封装估算：Relax {workload['relax_structure_tasks']} 个结构；三段 MC 任务上限 {workload['mc_task_upper']}；GPU 计算作业最多 {sum(workload['gpu_jobs_upper_by_wave'])} 个，另 1 个控制作业；计算并发 {workload['max_concurrent_jobs']}。"
+                f"封装估算：Relax {workload['relax_structure_tasks']} 个结构；三段 MC 任务上限 {workload['mc_task_upper']}；GPU 计算作业最多 {sum(workload['gpu_jobs_upper_by_wave'])} 个；"
+                + (
+                    f"另最多 {workload.get('cpu_control_jobs_upper', 5)} 个短 CPU 入口/汇总作业；阶段内并行，全部结束并核验汇总后推进，无常驻总控。"
+                    if workload.get("submission_policy") == "phase_dependencies"
+                    else "另 1 个控制作业；同轮全部提交，实际并行由超算调度；回收并更新凸包后才进入下一轮。"
+                    if workload.get("submission_policy") == "whole_wave"
+                    else f"另 1 个控制作业；计算并发 {workload['max_concurrent_jobs']}。"
+                )
             )
-            lines.append(
-                "人工上传并提交一次；固定当前模型，追加由已确认规则按反馈选择。"
-            )
+            lines.append("人工上传并提交一次；固定当前模型，追加由已确认规则按反馈选择。")
             if batch_preview.get("bootstrap_first_mc"):
                 lines.append(
                     "Relax 回收后先构建当前模型凸包并计算 Ehull，再按规则派发首轮 MC；每段回收后更新凸包，再决定追加。缺少有效凸包则暂停。"

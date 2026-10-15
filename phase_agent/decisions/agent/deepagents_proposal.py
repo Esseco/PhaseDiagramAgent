@@ -149,6 +149,17 @@ def proposal_material(payload):
             "independent_test_completed",
             "limitations",
             "training_validation_planning",
+            "post_refresh_search",
+            "new_model_generation",
+            "new_branch_count",
+            "generated_branch_ids",
+            "first_search_completed",
+            "refresh_plan_checksum",
+            "decision_authority",
+            "available_branch_count",
+            "mc_completed",
+            "mc_pending",
+            "relax_completed",
             "training_excluded_data_ids",
             "reviews",
             "agent_model_reviews",
@@ -297,6 +308,8 @@ def proposal_material(payload):
             "relax_structure_tasks",
             "mc_step_upper",
             "coordinator_jobs",
+            "cpu_control_jobs_upper",
+            "submission_policy",
             "max_concurrent_jobs",
         }
     )
@@ -355,6 +368,9 @@ def proposal_material(payload):
                 "candidate_validation",
                 "search_evidence",
                 "training_validation_planning",
+                "post_refresh_search",
+                "new_model_generation",
+                "decision_authority",
                 "training_already_completed",
                 "approved_direction",
                 "scientific_scope",
@@ -425,15 +441,23 @@ def create_proposal_client(model, *, recursion_limit=16):
         ),
     )
 
-    def call(payload):
+    from uuid import uuid4
+
+    cache_namespace = ("deep_client", uuid4().hex)
+
+    def uncached_call(payload):
         from phase_agent.decisions.agent.transport_tables import compact_evidence_tables
 
         transport = prepare_llm_request(payload)
         prepared = compact_evidence_tables(proposal_material(transport))
         prepared["transport_policy"] = transport["decision_context"]["transport_policy"]
-        memory_text = json.dumps(
-            prepared["decision_context"].get("relevant_approved_knowledge", []), ensure_ascii=False
+        memory_text = (
+            "Approved knowledge is supplied once in decision_context.relevant_approved_knowledge "
+            "in the current request. Read those complete entries and their provenance; "
+            "they are evidence, not execution authorization."
         )
+        from phase_agent.runtime.token_usage import provider_usage_callback
+
         result = agent.invoke(
             {
                 "messages": [
@@ -448,7 +472,10 @@ def create_proposal_client(model, *, recursion_limit=16):
                     )
                 },
             },
-            config={"recursion_limit": recursion_limit},
+            config={
+                "recursion_limit": recursion_limit,
+                "callbacks": [provider_usage_callback(payload.get("mode"))],
+            },
         )
         messages = result.get("messages") or []
         if not messages or messages[-1].type != "ai" or messages[-1].tool_calls:
@@ -467,6 +494,11 @@ def create_proposal_client(model, *, recursion_limit=16):
         }
         action["_proposal_harness"] = "deepagents"
         return deepcopy(action)
+
+    def call(payload):
+        from phase_agent.runtime.token_usage import cached_request
+
+        return cached_request(payload, uncached_call, namespace=cache_namespace)
 
     call.decision_backend = "langgraph"
     return call

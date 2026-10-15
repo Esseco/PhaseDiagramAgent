@@ -5,7 +5,12 @@ import shutil
 from pathlib import Path
 
 from phase_agent.tools.relax_mc_batch.plan import diagnose, relax_tasks, context_config
-from phase_agent.tools.relax_mc_batch.files import write, rebase, script, gpu_profile
+from phase_agent.tools.relax_mc_batch.files import (
+    write,
+    rebase,
+    script,
+    coordinator_profile,
+)
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.integrity import file_checksum
 from phase_agent.tools.budget.reserve_budget import reserve_budget
@@ -27,6 +32,13 @@ def prepare_batch(*, action, context):
         }
     existing = (state.get("relax_mc_batches") or {}).get(approved["bundle_id"])
     if existing:
+        if existing.get("status") in {"cancelled", "superseded"}:
+            return {
+                "status": "rejected",
+                "reason": "cancelled_relax_mc_bundle_cannot_be_reused",
+                "state": state,
+                "submitted": False,
+            }
         if existing["plan_checksum"] != approved["checksum"]:
             raise ValueError("bundle_identity_conflict")
         from phase_agent.tools.relax_mc_batch.handoff import (
@@ -74,6 +86,7 @@ def prepare_batch(*, action, context):
     if root.exists():
         raise FileExistsError("Unregistered bundle already exists; inspect before retry")
     tasks = relax_tasks(plan, config)
+    coordinator_profile(plan["stage_profiles"])
     for task in tasks:
         reservation = reserve_budget(
             state,
@@ -228,14 +241,14 @@ def prepare_batch(*, action, context):
         'python3 run_batch.py run --root "$PWD" --submit'
     )
     (root / "submit_all.sh").write_text(
-        script(gpu_profile(plan["stage_profiles"]), command, name=plan["bundle_id"]),
+        script(coordinator_profile(plan["stage_profiles"]), command, name=plan["bundle_id"]),
         encoding="utf-8",
         newline="\n",
     )
     guide = (
         "Upload the complete <batch>_input folder (submit_all.sh, run_upload.py and inputs.zip). Run sbatch submit_all.sh ONCE; Python executes on the compute node. Download the automatically generated sibling <batch>_output folder intact.\n"
-        "Remote coordinator submits grouped Relax/MC jobs under the approved model/rules; download results.zip after completion/pause/failure.\n"
-        f"Workload upper GPU compute jobs:{sum(plan['workload']['gpu_jobs_upper_by_wave'])}; one additional coordinator job; max concurrent compute jobs:{plan['workload']['max_concurrent_jobs']}.\n"
+        "Short CPU entry submits grouped GPU Relax jobs and an afterany analysis job, then exits. Analysis verifies the whole phase before submitting parallel MC jobs and the next dependency analysis. No resident coordinator.\n"
+        f"Workload upper GPU compute jobs:{sum(plan['workload']['gpu_jobs_upper_by_wave'])}; up to five short CPU entry/analysis jobs.\n"
         "No model weights are copied: model references must exist on HPC and are checked before child submission.\n"
         "The mace environment needs numpy/scipy/pymatgen/ase/torch/MACE; scientific code and Process_AL_MC are shipped.\n"
         "Resume with the same uploaded directory; do not delete its workflow_state.json or rerun a batch already active.\n"

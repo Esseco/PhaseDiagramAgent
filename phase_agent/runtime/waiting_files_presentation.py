@@ -22,6 +22,10 @@ def waiting_file_lines(state):
             destination = output_directory(directory) if directory else None
             if batch.get("return_error"):
                 lines.append("回传核对失败：" + str(batch["return_error"]))
+                lines.append("结果包已回传但尚未登记；请保留原包，无需重新上传输入或提交计算。")
+                if destination:
+                    lines.append("待核对结果目录：`" + str(destination) + "`。修复接收问题后，再说“已回传”重试回收。")
+                continue
             if (
                 folder is None
                 or not folder.is_dir()

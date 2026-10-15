@@ -35,6 +35,19 @@ def agent_state_summary(state: dict) -> dict:
 
     summary = deepcopy(state.get("current_state_snapshot") or {})
     summary["current_project"] = current_project(state)
+    from phase_agent.analysis.state.training_context import (
+        validation_planning_context,
+        post_refresh_search_context,
+    )
+
+    from phase_agent.tools.policy.model_generation import new_model_generation_facts
+
+    # Refresh scoped directives even when the cached snapshot predates this code.
+    summary.setdefault("decision_context", {}).update(
+        training_validation_planning=validation_planning_context(state),
+        post_refresh_search=post_refresh_search_context(state),
+        new_model_generation=new_model_generation_facts(state),
+    )
     return summary
 
 

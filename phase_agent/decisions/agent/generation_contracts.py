@@ -22,10 +22,17 @@ class GenerationAllocation(BaseModel):
     ]
     na_min: float | None = None
     na_max: float | None = None
+    min_det_H: PositiveInteger | None = None
     max_det_H: PositiveInteger | None = None
 
     @model_validator(mode="after")
     def validate_na_range(self):
+        if (
+            self.min_det_H is not None
+            and self.max_det_H is not None
+            and self.min_det_H > self.max_det_H
+        ):
+            raise ValueError("超胞下限不能超过上限")
         lo, hi = self.na_min, self.na_max
         if lo is not None or hi is not None:
             if (

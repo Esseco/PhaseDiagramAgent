@@ -29,6 +29,11 @@ class DeepSeekResponseError(RuntimeError):
     def __init__(self, code: str, safe_message: str):
         super().__init__(safe_message)
         self.code = code
+        if code in {"timeout", "network_error", "service_unavailable"}:
+            from phase_agent.runtime.api_deadline import local_analysis
+
+            safe_message += "\n" + local_analysis({})
+            self.args = (safe_message,)
         self.safe_message = safe_message
 
 
@@ -39,6 +44,7 @@ def create_deepseek_client(
     base_url="https://api.deepseek.com",
     max_tokens=800,
     timeout=60,
+    total_timeout=120,
     system_prompt=None,
     thinking=None,
     routine_max_tokens=1600,
@@ -47,6 +53,10 @@ def create_deepseek_client(
     deepagents_max_tokens=4096,
     deepagents_recursion_limit=8,
 ):
+    import math
+
+    if not math.isfinite(float(total_timeout)) or float(total_timeout) <= 0:
+        raise ValueError("total_timeout must be positive and finite")
     key = api_key or os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         raise ValueError("需要 api_key 或 DEEPSEEK_API_KEY")
@@ -63,6 +73,7 @@ def create_deepseek_client(
             base_url=base_url,
             max_tokens=max_tokens,
             timeout=timeout,
+            total_timeout=total_timeout,
             system_prompt=system_prompt,
             thinking=thinking,
             routine_max_tokens=routine_max_tokens,
@@ -85,7 +96,9 @@ def create_deepseek_client(
 
         return create_hybrid_client(legacy, deep_factory)
     if proposal_harness == "deepagents":
-        from phase_agent.decisions.agent.deepagents_proposal import create_deepseek_proposal_client
+        from phase_agent.decisions.agent.deepagents_proposal import (
+            create_deepseek_proposal_client,
+        )
 
         return create_deepseek_proposal_client(
             api_key=key,
@@ -95,7 +108,15 @@ def create_deepseek_client(
             max_tokens=max(int(max_tokens), int(reasoning_max_tokens)),
         )
 
-    def call(payload: dict) -> dict:
+    from uuid import uuid4
+
+    cache_namespace = ("legacy_client", uuid4().hex)
+
+    def uncached_call(payload: dict) -> dict:
+        from time import monotonic
+
+        deadline = monotonic() + max(0.001, float(total_timeout))
+        planning = (payload.get("evidence_reader") or {}).get("phase") == "select_topics"
         important = needs_deep_reasoning(payload)
         payload = prepare_llm_request(payload)
         from phase_agent.decisions.agent.transport_tables import evidence_row_count
@@ -104,32 +125,46 @@ def create_deepseek_client(
         count = len((context.get("dft_sampling_recommendation") or {}).get("candidate_ids") or [])
         if not count and "select_dft_candidates" in (payload.get("allowed_tools") or []):
             count = evidence_row_count(context.get("qbc_candidates"))
-        if payload.get("semantic_dialogue") is True:
+        # Scientific input preparation may select DFT through an operation alias;
+        # its candidate evidence still needs enough output headroom on the first call.
+        if not count and important:
+            count = evidence_row_count(context.get("qbc_candidates"))
+        if planning or payload.get("semantic_dialogue") is True:
             count = 0
         contracts = payload.get("output_contracts") or {}
         scientific_json = any(
             name in contracts
-            for name in ("scientific_decision", "post_dft_review", "generation_plan_item")
+            for name in (
+                "scientific_decision",
+                "post_dft_review",
+                "generation_plan_item",
+            )
         )
         # Scientific reasoning plus per-candidate decisions/purposes need more
         # space than a short dialogue. Respect the configured limit as well.
         json_floor = 4096 if scientific_json else 1024
         per_candidate = 160 if scientific_json else 100
         json_ceiling = max(
-            int(max_tokens), int(routine_max_tokens), min(16384, json_floor + per_candidate * count)
+            int(max_tokens),
+            int(routine_max_tokens),
+            min(16384, json_floor + per_candidate * count),
         )
         messages = [
             {
                 "role": "system",
-                "content": RELAX_MC_PREFERENCE
-                + (
-                    system_prompt
-                    or (
-                        SEMANTIC_PROMPT
-                        if payload.get("semantic_dialogue")
-                        else (
-                            "Follow the supplied output contract. For unified_dialogue, interpret the CURRENT user_instruction with saved facts and conversation memory. The current instruction takes precedence over earlier dialogue. Return an answer for discussion, inspect_configuration for viewing, configure for editing, or a legal tool action for a requested scientific proposal. A tool action only proposes work for subsequent validation and approval; waiting for approval does not prevent proposing it. Choose proposal details within confirmed limits yourself when supported by facts; do not request approval before forming the proposal. Return JSON only. Never invent energy, "
-                            "Ehull, reward, confidence, or completed calculations."
+                "content": (
+                    "Select read-only evidence topics. Follow the evidence_request contract only. JSON only; no scientific action or conclusion."
+                    if planning
+                    else RELAX_MC_PREFERENCE
+                    + (
+                        system_prompt
+                        or (
+                            SEMANTIC_PROMPT
+                            if payload.get("semantic_dialogue")
+                            else (
+                                "Follow the supplied output contract. For unified_dialogue, interpret the CURRENT user_instruction with saved facts and conversation memory. The current instruction takes precedence over earlier dialogue. Return an answer for discussion, inspect_configuration for viewing, configure for editing, or a legal tool action for a requested scientific proposal. A tool action only proposes work for subsequent validation and approval; waiting for approval does not prevent proposing it. Choose proposal details within confirmed limits yourself when supported by facts; do not request approval before forming the proposal. Return JSON only. Never invent energy, "
+                                "Ehull, reward, confidence, or completed calculations."
+                            )
                         )
                     )
                 ),
@@ -139,14 +174,6 @@ def create_deepseek_client(
                 "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             },
         ]
-        if payload.get("unified_dialogue") and payload.get("user_instruction"):
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "当前请求（历史对话只是上下文；按所给契约返回 JSON）：\n"
-                    + str(payload["user_instruction"]),
-                }
-            )
         thinking_this_try = "enabled" if important and thinking != "disabled" else "disabled"
         token_ceiling = (
             max(int(max_tokens), int(reasoning_max_tokens))
@@ -164,6 +191,8 @@ def create_deepseek_client(
         )
         if scientific_json:
             max_tokens_this_try = max(max_tokens_this_try, json_ceiling)
+        if planning:
+            max_tokens_this_try = max(1024, int(routine_max_tokens))
         # One length retry gets real headroom, rather than reusing a capped
         # request. Ordinary replies keep their original initial token budget.
         retry_token_ceiling = max(token_ceiling, min(16384, token_ceiling * 2))
@@ -194,16 +223,77 @@ def create_deepseek_client(
                 },
                 method="POST",
             )
+            from phase_agent.runtime.token_usage import begin_api_call, finish_api_call
+
+            usage_entry = begin_api_call(
+                model,
+                payload.get("mode"),
+                attempt,
+                sum(len(m["content"]) for m in messages),
+                phase="evidence_topics" if planning else "analysis",
+                max_output_tokens=max_tokens_this_try,
+                reasoning_enabled=thinking_this_try == "enabled",
+            )
             try:
-                with urllib.request.urlopen(request, timeout=timeout if attempt == 0 else min(120, max(timeout, timeout * 1.5))) as response:
-                    raw_response = response.read()
+                from phase_agent.runtime.api_deadline import (
+                    read_response,
+                    APIDeadlineExceeded,
+                    APITransportBusy,
+                )
+
+                raw_response = read_response(
+                    request,
+                    timeout if attempt == 0 else min(120, max(timeout, timeout * 1.5)),
+                    deadline,
+                )
                 check_cancelled()
+            except APITransportBusy:
+                from phase_agent.runtime.api_deadline import local_analysis
+
+                raise DeepSeekResponseError(
+                    "transport_busy",
+                    "之前的模型连接尚未释放，已停止发起请求。\n" + local_analysis(payload),
+                ) from None
+            except APIDeadlineExceeded:
+                from phase_agent.runtime.api_deadline import local_analysis
+
+                failure = DeepSeekResponseError(
+                    "total_timeout",
+                    f"模型调用已达到 {float(total_timeout):g} 秒总时限（含重试），已停止等待，本轮未取得有效方案。\n"
+                    + local_analysis(payload),
+                )
+                failure.llm_usage = {
+                    "calls": attempt + 1,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "unknown_usage_calls": attempt + 1,
+                    "cost": None,
+                }
+                raise failure from None
             except TimeoutError:
                 check_cancelled()
                 if attempt == 0:
                     continue
-                raise DeepSeekResponseError("timeout", "模型服务读取超时，有限重试仍未得到回答；本次未生成方案或执行任务。") from None
+                raise DeepSeekResponseError(
+                    "timeout",
+                    "模型服务读取超时，有限重试仍未得到回答；本次未生成方案或执行任务。",
+                ) from None
             except urllib.error.HTTPError as error:
+                if error.code in {502, 503, 504}:
+                    failure = DeepSeekResponseError(
+                        "service_unavailable",
+                        f"DeepSeek 模型服务暂时不可用（HTTP {error.code}）；本轮未取得有效模型答复，未执行新任务。现有计算不因此失败，已回传文件请保留；稍后可重试分析，无需重新提交计算。",
+                    )
+                    failure.llm_usage = {
+                        "calls": attempt + 1,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "unknown_usage_calls": attempt + 1,
+                        "cost": None,
+                        "model": model,
+                        "mode": payload.get("mode", "unknown"),
+                    }
+                    raise failure from None
                 if error.code in {401, 403}:
                     message = "DeepSeek API Key 鉴权失败，请检查密钥是否有效。"
                 elif error.code in {402, 429}:
@@ -230,6 +320,7 @@ def create_deepseek_client(
                 continue
 
             usage = result.get("usage") or {}
+            finish_api_call(usage_entry, usage)
             input_tokens += int(usage.get("prompt_tokens") or 0)
             output_tokens += int(usage.get("completion_tokens") or 0)
             choices = result.get("choices") or []
@@ -241,8 +332,12 @@ def create_deepseek_client(
 
             choice = choices[0]
             finish_reason = choice.get("finish_reason")
+            if usage_entry is not None:
+                usage_entry["finish_reason"] = finish_reason
             message = choice.get("message") or {}
             content = message.get("content")
+            if usage_entry is not None:
+                usage_entry["response_chars"] = len(content) if isinstance(content, str) else 0
             if not isinstance(content, str) or not content.strip():
                 reasoning_content = message.get("reasoning_content")
                 last_error = DeepSeekResponseError(
@@ -253,13 +348,16 @@ def create_deepseek_client(
                     f"输出 token={int(usage.get('completion_tokens') or 0)}）。",
                 )
                 if finish_reason == "length":
-                    if reasoning_content:
-                        thinking_this_try = "disabled"
+                    # Keep configured scientific reasoning; enlarge output space only.
                     token_ceiling = max(token_ceiling, json_ceiling)
                     max_tokens_this_try = min(
                         max(max_tokens_this_try * 2, 1200), retry_token_ceiling
                     )
-                elif finish_reason in {"content_filter", "insufficient_system_resource", "aborted"}:
+                elif finish_reason in {
+                    "content_filter",
+                    "insufficient_system_resource",
+                    "aborted",
+                }:
                     break
                 continue
 
@@ -274,11 +372,15 @@ def create_deepseek_client(
                     f"（结束原因={finish_reason or '未知'}，字符数={len(content)}）。",
                 )
                 if finish_reason == "length":
-                    thinking_this_try = "disabled"
+                    # Do not trade away scientific reasoning after truncation.
                     max_tokens_this_try = min(
                         max(max_tokens_this_try * 2, json_ceiling), retry_token_ceiling
                     )
-                elif finish_reason in {"content_filter", "insufficient_system_resource", "aborted"}:
+                elif finish_reason in {
+                    "content_filter",
+                    "insufficient_system_resource",
+                    "aborted",
+                }:
                     break
                 continue
 
@@ -313,6 +415,19 @@ def create_deepseek_client(
             "transport_metrics": payload.get("transport_metrics"),
         }
         raise error
+
+    def call(payload):
+        from phase_agent.runtime.token_usage import cached_request
+        from phase_agent.runtime.turn_process import timed_call
+
+        return timed_call(
+            "API 总时限 " + str(total_timeout) + " 秒（含重试）",
+            cached_request,
+            payload,
+            uncached_call,
+            namespace=cache_namespace,
+            category="model",
+        )
 
     return call
 

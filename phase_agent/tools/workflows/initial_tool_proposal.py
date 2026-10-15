@@ -242,6 +242,17 @@ def select_initial_proposal(
         }
     from phase_agent.tools.local.training_followup_plan import saved_followup
 
+    if (context or {}).get("manager") is not None:
+        from phase_agent.tools.policy.region_sampling import ledger_context
+
+        decision_state.setdefault("decision_context", {})["branch_ledger_facts"] = ledger_context(
+            context["manager"]
+        )
+        if current.get("branch_region_review"):
+            decision_state["decision_context"]["branch_region_review"] = deepcopy(
+                current["branch_region_review"]
+            )
+
     from phase_agent.analysis.state.scientific_decision_brief import decision_brief
 
     decision_state.setdefault("decision_context", {})["scientific_decision_brief"] = decision_brief(
@@ -420,7 +431,10 @@ def select_initial_proposal(
 
     try:
         action = attach_ordering_preview(
-            action, current, context or {}, (context or {}).get("effective_config") or config
+            action,
+            current,
+            context or {},
+            (context or {}).get("effective_config") or config,
         )
     except (ValueError, OSError, RuntimeError) as error:
         return {"status": "not_configured", "state": current, "reason": str(error)}

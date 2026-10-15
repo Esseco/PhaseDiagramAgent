@@ -21,7 +21,11 @@ def profiles(config):
     supplied = (config.get("manual_upload") or {}).get("stage_profiles") or (
         config.get("supercomputer") or {}
     ).get("stage_profiles")
-    return deepcopy(supplied or default_slurm_cluster_config())
+    result = deepcopy(supplied or default_slurm_cluster_config())
+    from phase_agent.tools.relax_mc_batch.files import coordinator_profile
+
+    result["relax_mc_cpu"] = coordinator_profile(result)
+    return result
 
 
 def context_config(config, context):
@@ -39,9 +43,7 @@ def context_config(config, context):
 
 def relax_tasks(plan, config):
     settings = deepcopy((config.get("mlip") or {}).get("relax_parameters") or {})
-    signature = hashlib.sha256(
-        json.dumps(settings, sort_keys=True).encode()
-    ).hexdigest()[:12]
+    signature = hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:12]
     return [
         {
             "task_id": "RELAX-"
@@ -75,6 +77,11 @@ def diagnose(
     max_concurrent_jobs=None,
     phase_references=None,
 ):
+    from phase_agent.tools.policy.model_generation import new_model_search_errors
+
+    prerequisite_errors = new_model_search_errors(state, branch_ids)
+    if prerequisite_errors:
+        raise ValueError("; ".join(prerequisite_errors))
     if not branch_ids or len(branch_ids) != len(set(branch_ids)):
         raise ValueError("Explicit unique recommended branch IDs are required")
     if (state.get("dedup_gate") or {}).get("status") != "ready":
@@ -93,20 +100,14 @@ def diagnose(
             "branches_already_searched_under_current_model; use existing continuation instead of resetting MC counts"
         )
     main, models, evidence = remote_model_references(model)
-    count = min(
-        3, int((config.get("bohb") or {}).get("relax_structures_per_branch", 3))
-    )
+    count = min(3, int((config.get("bohb") or {}).get("relax_structures_per_branch", 3)))
     if count <= 0:
         raise ValueError("relax_structures_per_branch must be positive")
     records = manager.data.get("structures") or {}
-    valid_ids = set(
-        (state.get("dedup_gate") or {}).get("valid_structure_ids") or records
-    )
+    valid_ids = set((state.get("dedup_gate") or {}).get("valid_structure_ids") or records)
     selected, structures, inputs = [], [], []
     references = (
-        phase_references
-        or (manager.data.get("system_config") or {}).get("phase_references")
-        or {}
+        phase_references or (manager.data.get("system_config") or {}).get("phase_references") or {}
     )
     reference_fingerprints = {}
     for name, reference in references.items():
@@ -131,8 +132,7 @@ def diagnose(
         if history.get("model_version") not in (None, version):
             continue
         expected_phases.update(
-            ((history.get("summary") or {}).get("phase_coverage") or {}).get("expected")
-            or []
+            ((history.get("summary") or {}).get("phase_coverage") or {}).get("expected") or []
         )
         for row in history.get("generation_plan") or []:
             if row.get("quota", 0):
@@ -142,24 +142,18 @@ def diagnose(
                     else {row["phase"]}
                 )
     target_phases = {
-        manager.data["branches"][bid]["P"]
-        for bid in branch_ids
-        if bid in manager.data["branches"]
+        manager.data["branches"][bid]["P"] for bid in branch_ids if bid in manager.data["branches"]
     }
     missing_phases = expected_phases - target_phases
     if missing_phases:
-        raise ValueError(
-            "generation_phase_coverage_incomplete:" + ",".join(sorted(missing_phases))
-        )
+        raise ValueError("generation_phase_coverage_incomplete:" + ",".join(sorted(missing_phases)))
     for bid in branch_ids:
         branch = (manager.data.get("branches") or {}).get(bid)
         if branch is None:
             raise ValueError(f"unknown_branch:{bid}")
         selected.append(deepcopy(branch))
         ids = [
-            sid
-            for sid in branch.get("structure_ids") or []
-            if sid in records and sid in valid_ids
+            sid for sid in branch.get("structure_ids") or [] if sid in records and sid in valid_ids
         ][:count]
         if not ids:
             raise ValueError(f"branch_has_no_valid_structure:{bid}")
@@ -266,15 +260,12 @@ def diagnose(
     upper = [bcount, bcount if bcount >= 10 else 0, bcount if bcount >= 10 else 0]
     reference = [bcount]
     for _ in range(2):
-        reference.append(
-            min(bcount, max(10, math.ceil(reference[-1] / 2))) if bcount >= 10 else 0
-        )
+        reference.append(min(bcount, max(10, math.ceil(reference[-1] / 2))) if bcount >= 10 else 0)
+    jobs_upper = [math.ceil(len(structures) / relax_size)] + [math.ceil(n / mc_size) for n in upper]
     cost_mc = sum(
         estimate_stage_cost(
             "deep_search",
-            atom_count=max(
-                r["atom_count"] for r in structures if r["branch_id"] == b["branch_id"]
-            ),
+            atom_count=max(r["atom_count"] for r in structures if r["branch_id"] == b["branch_id"]),
             mc_steps=100 + (400 if bcount >= 10 else 0),
             budgets=config["budgets"],
         )["value"]
@@ -285,8 +276,7 @@ def diagnose(
         for r in structures
     ]
     phase_counts = {
-        p: sum(b.get("P") == p for b in selected)
-        for p in sorted({b.get("P") for b in selected})
+        p: sum(b.get("P") == p for b in selected) for p in sorted({b.get("P") for b in selected})
     }
     plan = {
         "schema_version": 1,
@@ -323,10 +313,11 @@ def diagnose(
             "mc_task_reference": reference,
             "mc_task_upper": upper,
             "mc_step_upper": bcount * (500 if bcount >= 10 else 100),
-            "gpu_jobs_upper_by_wave": [math.ceil(len(structures) / relax_size)]
-            + [math.ceil(n / mc_size) for n in upper],
-            "coordinator_jobs": 1,
-            "max_concurrent_jobs": concurrency,
+            "gpu_jobs_upper_by_wave": jobs_upper,
+            "coordinator_jobs": 0,
+            "cpu_control_jobs_upper": 5,
+            "submission_policy": "phase_dependencies",
+            "max_concurrent_jobs": max(jobs_upper),
             "relax_serial_seconds": sum(r["elapsed_seconds"] for r in timings)
             if all(r.get("elapsed_seconds") is not None for r in timings)
             else None,
@@ -384,12 +375,12 @@ def batch_facts(state):
                     "script_path",
                     "expected_results_archive",
                     "return_error",
+                    "import_checksum",
+                    "plan_checksum",
                     "result_summary",
                 )
             },
-            "return_available": Path(
-                row.get("expected_results_archive") or ""
-            ).is_file(),
+            "return_available": Path(row.get("expected_results_archive") or "").is_file(),
         }
         for row in list((state.get("relax_mc_batches") or {}).values())[-5:]
     ]

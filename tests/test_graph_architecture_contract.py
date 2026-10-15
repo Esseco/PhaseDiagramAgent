@@ -55,12 +55,13 @@ def test_dft_regeneration_needs_fresh_explicit_confirmation(tmp_path, monkeypatc
         workflow_kwargs={"run_config": {"upload_batches_directory": str(tmp_path)}},
     )
     state = {}
-    assert "尚未修改文件" in handle(handler, "重新生成当前轮DFT", state, [], None)
+    assert handle(handler, "重新生成当前轮DFT", state, [], None) is None
+    state["pending_dft_regeneration"] = {"request": "重新生成当前轮DFT", "plan": dict(plan)}
     execute.assert_not_called()
     plan["affected_task_count"] = 3
     assert "状态已变化" in handle(handler, CONFIRM, state, [], None)
     execute.assert_not_called()
-    handle(handler, "重新生成当前轮DFT", state, [], None)
+    state["pending_dft_regeneration"] = {"request": "重新生成当前轮DFT", "plan": dict(plan)}
     assert "未提交作业" in handle(handler, CONFIRM, state, [], None)
     assert execute.call_count == 1
     handle(handler, CONFIRM, state, [], None)

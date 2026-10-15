@@ -115,8 +115,7 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
         )
         if not claim["allowed"] and not recoverable:
             return {
-                "messages": [AIMessage(content="该消息已尝试发送，禁止历史重放；请核对业务状态。")],
-                "reply": None,
+                "reply": "该消息已尝试发送，禁止历史重放；请核对业务状态。",
             }
         # Captured compiled child is statically discoverable by LangGraph.
         # The existing command router decides whether this message invokes it.
@@ -143,7 +142,9 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
             reply = sender(text, thread)
             check_cancelled()
         record_execution_return(path, execution_identity, "completed")
-        return {"messages": [AIMessage(content=reply)], "reply": None}
+        if not isinstance(reply, str) or not reply.strip():
+            reply = "本轮没有可显示的回复，请核对已保存的项目状态；不要重复提交任务。"
+        return {"reply": reply}
 
     async def async_agent(state, config, runtime: Runtime[StudioContext]):
         from phase_agent.graphs.cancellation import cancellable_worker
@@ -166,7 +167,7 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
         return await async_agent(state, config, get_runtime(StudioContext))
 
     def respond(state):
-        # Successful agent turns already emitted the sole assistant message.
+        # Emit exactly one assistant message at the final node, including streaming.
         return {"messages": [AIMessage(content=state["reply"])]} if state.get("reply") else {}
 
     graph.add_node("receive_message", receive_message)

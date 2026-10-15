@@ -48,38 +48,29 @@ def send_project_message(text, thread_id):
             process_event("完整答复", {"reply": reply})
             from phase_agent.runtime.response_preferences import detailed_response
 
-            if not detailed_response():
-                from phase_agent.runtime.studio_reply_presentation import format_turn_reply
-                from phase_agent.runtime.chat_application import RunWorkflowChatHandler
-                from phase_agent.tools.step_runner.file_protocol import read_json
-
-                handler = project_handler(_handler)
-                if handler is not None:
-                    state = read_json(handler.state_path, {}) or {}
-                    reply = format_turn_reply(
-                        reply, state, configuring=handler.config_delegate is not None
-                    )
-                else:
-                    from phase_agent.runtime.configuration_chat import ConfigurationChatHandler
-
-                    if isinstance(_handler, ConfigurationChatHandler):
-                        reply = format_turn_reply(reply, {}, configuring=True)
-            # Always show the factual epoch/stage, including detailed replies.
-            from phase_agent.runtime.chat_state_presentation import format_epoch_reply
             from phase_agent.tools.step_runner.file_protocol import read_json
-
-            current_handler = project_handler(_handler)
-            current_state = (
-                read_json(current_handler.state_path, {}) or {}
-                if current_handler is not None
-                else {}
-            )
+            from phase_agent.runtime.chat_state_presentation import format_epoch_reply
             from phase_agent.runtime.project_context import handler_project_context
 
+            current_handler = project_handler(_handler)
             owner = current_handler or _handler
             owner_path = getattr(owner, "__dict__", {}).get("state_path")
-            if current_handler is None and isinstance(owner_path, (str, Path)):
-                current_state = read_json(owner_path, {}) or {}
+            current_state = (
+                read_json(owner_path, {}) or {} if isinstance(owner_path, (str, Path)) else {}
+            )
+            if not detailed_response():
+                from phase_agent.runtime.studio_reply_presentation import format_turn_reply
+                from phase_agent.runtime.configuration_chat import ConfigurationChatHandler
+
+                if current_handler is not None:
+                    reply = format_turn_reply(
+                        reply,
+                        current_state,
+                        configuring=current_handler.config_delegate is not None,
+                    )
+                elif isinstance(_handler, ConfigurationChatHandler):
+                    reply = format_turn_reply(reply, {}, configuring=True)
+            # Use the same freshly read facts for both reply renderers.
             card = (
                 handler_project_context(owner, current_state)
                 if isinstance(owner_path, (str, Path))
@@ -89,12 +80,15 @@ def send_project_message(text, thread_id):
             reply = format_epoch_reply(
                 reply, current_state, configuring=configuring, project_card=card
             )
+            from phase_agent.runtime.runtime_diagnostics import diagnostic_notice
+
+            reply += diagnostic_notice(os.environ["PHASE_AGENT_RUNTIME_CONFIG"])
             process_event("本轮答复", {"reply": reply})
             return reply
 
 
 @asynccontextmanager
-async def lifespan(app):
+async def _project_lifespan(app):
     global _handler
     config = os.environ.get("PHASE_AGENT_RUNTIME_CONFIG")
     if not config or not await asyncio.to_thread(Path(config).is_file):
@@ -104,15 +98,27 @@ async def lifespan(app):
     if _handler is not None:
         raise RuntimeError("Studio runtime already owns a project handler")
 
+    from phase_agent.runtime.studio_checkpoint_persistence import (
+        install_checkpoint_persistence,
+        flush_checkpoint_persistence,
+    )
+
+    from phase_agent.runtime.runtime_diagnostics import service_stage
+
+    await asyncio.to_thread(service_stage, config, "加载 Studio 检查点")
+    await asyncio.to_thread(install_checkpoint_persistence)
+
     def recovery_adapter():
         from phase_agent.runtime.studio_run_lifecycle import recover_studio_runs
 
         return recover_studio_runs
 
     recover_studio_runs = await asyncio.to_thread(recovery_adapter)
+    await asyncio.to_thread(service_stage, config, "核对旧 Studio 会话恢复记录")
     await recover_studio_runs()
 
     def initialize():
+        service_stage(config, "初始化项目处理器和控制页面")
         from phase_agent.runtime.agent_api import create_agent_runtime
         from phase_agent.runtime.agent_web_service import create_control_server
 
@@ -130,12 +136,39 @@ async def lifespan(app):
         yield
     finally:
         _handler = None
+        await asyncio.to_thread(flush_checkpoint_persistence)
         await asyncio.to_thread(control.shutdown)
         await asyncio.to_thread(control.server_close)
         await asyncio.to_thread(worker.join, timeout=5)
 
 
-async def flow_panel(request):
+@asynccontextmanager
+async def lifespan(app):
+    from phase_agent.runtime.runtime_diagnostics import start_monitor, stop_monitor
+
+    config = os.environ.get("PHASE_AGENT_RUNTIME_CONFIG")
+    monitor = None
+    if config and await asyncio.to_thread(Path(config).is_file):
+        try:
+            monitor = await asyncio.to_thread(start_monitor, config)
+        except (OSError, RuntimeError):
+            pass  # Observation is optional; original startup validation still applies.
+    try:
+        async with _project_lifespan(app):
+            if monitor:
+                await asyncio.to_thread(monitor.stage, "服务已就绪", ready=True)
+            yield
+    except Exception as error:
+        if monitor:
+            monitor.failure = {"stage": monitor.stage_name, "type": type(error).__name__}
+            monitor.status = "failed"
+        raise
+    finally:
+        if monitor:
+            await asyncio.to_thread(stop_monitor, config, monitor)
+
+
+def _render_flow_panel():
     from phase_agent.runtime.chat_application import RunWorkflowChatHandler
     from phase_agent.runtime.flow_panel import render_flow_panel
     from phase_agent.tools.step_runner.file_protocol import read_json
@@ -143,9 +176,10 @@ async def flow_panel(request):
     handler = project_handler(_handler)
     if handler is None:
         return HTMLResponse("配置尚未确认，请先在 Studio 完成配置。", status_code=503)
-    with handler.lock:
-        state = read_json(handler.state_path, {}) or {}
-        content = render_flow_panel(state)
+    # Writers atomically replace state.json. Show the latest committed facts
+    # without waiting for a long-running turn's business lock.
+    state = read_json(handler.state_path, {}) or {}
+    content = render_flow_panel(state)
     return HTMLResponse(
         content,
         headers={
@@ -155,11 +189,17 @@ async def flow_panel(request):
     )
 
 
+async def flow_panel(request):
+    from starlette.concurrency import run_in_threadpool
+
+    return await run_in_threadpool(_render_flow_panel)
+
+
 def _render_saved_process(config):
     from phase_agent.runtime.turn_process import render_process_panel
 
-    with _message_lock:
-        return render_process_panel(config)
+    # Diagnostics must remain available while the message worker holds its lock.
+    return render_process_panel(config)
 
 
 async def process_panel(request):

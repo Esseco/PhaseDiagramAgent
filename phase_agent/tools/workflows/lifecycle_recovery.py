@@ -237,6 +237,11 @@ def _workflow_wait_gate(frame):
     )
     if review_ready:
         feedback["state"]["training_validation_planning"] = {
+            "status": "active",
+            "scope": {
+                "model_version": feedback["state"].get("active_model_version"),
+                "config_version": feedback["state"].get("confirmed_config_version"),
+            },
             "reviews": [deepcopy(row["cv_review"]) for row in training_waits],
             "agent_model_reviews": [
                 deepcopy(candidate.get("agent_review"))

@@ -35,11 +35,11 @@ def brief_chat_state(state, *, configuring=False):
             )
 
             facts = refresh_result_facts(state)
-            failed = sum(
-                facts["status_counts"].get(s, 0) for s in ("failed", "timeout")
-            )
+            failed = sum(facts["status_counts"].get(s, 0) for s in ("failed", "timeout"))
             if failed:
-                return f"当前：新模型结构刷新 {failed}/{facts['task_count']} 个失败，需修复后再重试。"
+                return (
+                    f"当前：新模型结构刷新 {failed}/{facts['task_count']} 个失败，需修复后再重试。"
+                )
             if (
                 facts["task_count"]
                 and facts["status_counts"].get("completed", 0) == facts["task_count"]
@@ -58,8 +58,7 @@ def brief_chat_state(state, *, configuring=False):
         if (
             authorization.get("config_version") == state.get("confirmed_config_version")
             and authorization.get("approved_by")
-            and (authorization.get("plan") or {}).get("model")
-            == state.get("active_model")
+            and (authorization.get("plan") or {}).get("model") == state.get("active_model")
         ):
             return "当前：新模型结构刷新方案已批准，输入生成待恢复。"
         return (
@@ -67,11 +66,37 @@ def brief_chat_state(state, *, configuring=False):
             if refresh.get("status") == "approval_required"
             else f"当前：新模型结构刷新第{int(refresh.get('wave', 0)) + 1}批，等待输入准备或结果回传。"
         )
+    from phase_agent.tools.policy.model_generation import new_model_generation_facts
+
+    generation = new_model_generation_facts(state)
+    active = active_pending_tasks(state.get("tasks") or [])
+    if (
+        generation["required"]
+        and not generation["first_search_completed"]
+        and not active
+        and not state.get("pending_execution_policies")
+    ):
+        if generation["ready"]:
+            return "当前：本轮新branch已登记，等待准备Relax+MC搜索输入。"
+        return "当前：新模型刷新已完成，等待生成本轮新branch。"
     completed_refresh = state.get("model_refresh") or {}
-    if completed_refresh.get("status") == "completed" and completed_refresh.get("supplemental_declined_by_user") and not state.get("pending_execution_policies"):
+    if (
+        completed_refresh.get("status") == "completed"
+        and completed_refresh.get("supplemental_declined_by_user")
+        and not state.get("pending_execution_policies")
+        and not active
+    ):
         cancelled = len(completed_refresh.get("cancelled_supplemental_task_ids") or [])
-        old_dft = sum(t.get("stage") in {"dft_single_point", "dft_relax"} and t.get("status") in {"pending", "running", "submitted", "unknown"} and not t.get("recovery_wait_waived") for t in state.get("tasks") or [])
-        return f"当前：已回收 {completed_refresh.get('recovered_task_count', 0)} 个刷新结果；已取消 {cancelled} 个未批准追加弛豫。" + (f"另有 {old_dft} 个旧 DFT 结果缺失。" if old_dft else "")
+        old_dft = sum(
+            t.get("stage") in {"dft_single_point", "dft_relax"}
+            and t.get("status") in {"pending", "running", "submitted", "unknown"}
+            and not t.get("recovery_wait_waived")
+            for t in state.get("tasks") or []
+        )
+        return (
+            f"当前：已回收 {completed_refresh.get('recovered_task_count', 0)} 个刷新结果；已取消 {cancelled} 个未批准追加弛豫。"
+            + (f"另有 {old_dft} 个旧 DFT 结果缺失。" if old_dft else "")
+        )
     if state.get("pending_dft_recovery_question"):
         return "当前：DFT 部分结果已回收，等待是否继续回收的确认。"
     pending = state.get("pending_execution_policies") or {}
@@ -85,9 +110,9 @@ def brief_chat_state(state, *, configuring=False):
         }
         if len(pending) == 1:
             proposal = next(iter(pending.values())).get("agent_proposal") or {}
-            tool = proposal.get("recommended_action") or (
-                proposal.get("raw_action") or {}
-            ).get("tool")
+            tool = proposal.get("recommended_action") or (proposal.get("raw_action") or {}).get(
+                "tool"
+            )
             return f"当前：{names.get(tool, '操作方案')}待确认。"
         return f"当前：{len(pending)} 个方案待确认。"
     training = waiting_training_job(state)
@@ -141,15 +166,9 @@ def epoch_stage_line(state, *, configuring=False):
     """Display model epoch independently of MC/DFT sub-rounds."""
     from phase_agent.analysis.state.model_epoch import model_epoch
 
-    version = state.get("active_model_version") or (
-        state.get("active_model") or {}
-    ).get("version")
+    version = state.get("active_model_version") or (state.get("active_model") or {}).get("version")
     epoch = model_epoch(state, version) or ("epoch0" if not version else "epoch未登记")
-    stage = (
-        brief_chat_state(state, configuring=configuring)
-        .removeprefix("当前：")
-        .rstrip("。")
-    )
+    stage = brief_chat_state(state, configuring=configuring).removeprefix("当前：").rstrip("。")
     if (
         not configuring
         and not state.get("tasks")
@@ -168,10 +187,7 @@ def format_epoch_reply(reply, state, *, configuring=False, project_card=None):
     stage = header.split(" · ", 1)[-1].rstrip("。")
     lines = []
     for line in str(reply).splitlines():
-        if (
-            line.startswith("当前状态：")
-            and line.split("：", 1)[1].rstrip("。") == stage
-        ):
+        if line.startswith("当前状态：") and line.split("：", 1)[1].rstrip("。") == stage:
             continue
         lines.append(line)
     if project_card is not None:

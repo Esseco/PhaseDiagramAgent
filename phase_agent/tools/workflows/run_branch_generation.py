@@ -39,6 +39,8 @@ def run_branch_generation(
     framework_enumerator: Any | None = None,
     max_det_H: int | None = None,
     generation_plan: list[dict] | None = None,
+    prepared_candidates: list[dict] | None = None,
+    sampling_report: dict | None = None,
 ) -> dict[str, Any]:
     """调度完整流程；不运行 MLIP 或 DFT。"""
 
@@ -59,7 +61,9 @@ def run_branch_generation(
         )
 
     allocation_reports = []
-    if generation_plan:
+    if prepared_candidates is not None:
+        proposed = prepared_candidates
+    elif generation_plan:
         from phase_agent.decisions.agent.generation_plan import validate_generation_plan
 
         validate_generation_plan(
@@ -85,9 +89,7 @@ def run_branch_generation(
             row = dict(row)
             if row.get("max_det_H") is not None:
                 row["max_det_H"] = (
-                    min(row["max_det_H"], max_det_H)
-                    if max_det_H is not None
-                    else row["max_det_H"]
+                    min(row["max_det_H"], max_det_H) if max_det_H is not None else row["max_det_H"]
                 )
             produced = produce(
                 {row["strategy"]: row["quota"]},
@@ -112,9 +114,7 @@ def run_branch_generation(
                         "tm_ordering",
                     }
                     else (
-                        "insufficient_legal_candidates"
-                        if len(produced) < row["quota"]
-                        else None
+                        "insufficient_legal_candidates" if len(produced) < row["quota"] else None
                     ),
                 }
             )
@@ -144,10 +144,7 @@ def run_branch_generation(
     initialized = []
     initialization_failures = []
     preserve_tm = (
-        (system_config or manager.data.get("system_config") or {}).get(
-            "configuration_space"
-        )
-        or {}
+        (system_config or manager.data.get("system_config") or {}).get("configuration_space") or {}
     ).get("roles", {}).get("T") == "fixed"
     for index, branch in enumerate(selected["selected_candidates"]):
         try:
@@ -190,9 +187,7 @@ def run_branch_generation(
     for row in generation_plan or []:
         if row.get("quota", 0):
             expected_phases.update(
-                allowed_phases(manager.boundary["P"])
-                if row["phase"] == "all"
-                else {row["phase"]}
+                allowed_phases(manager.boundary["P"]) if row["phase"] == "all" else {row["phase"]}
             )
     if not generation_plan and quotas.get("coverage"):
         expected_phases = allowed_phases(manager.boundary["P"])
@@ -200,18 +195,14 @@ def run_branch_generation(
         manager.data["structures"][row["structure_id"]].get("P") for row in registered
     }
     # The structure records may store phase on their registered branch.
-    registered_phases.update(
-        manager.data["branches"][row["branch_id"]]["P"] for row in registered
-    )
+    registered_phases.update(manager.data["branches"][row["branch_id"]]["P"] for row in registered)
     phase_coverage = {
         "expected": sorted(expected_phases),
         "registered": sorted(registered_phases - {None}),
         "missing": sorted(expected_phases - registered_phases),
     }
 
-    rejected_by_reason = Counter(
-        row["reason"] for row in selected["rejected_candidates"]
-    )
+    rejected_by_reason = Counter(row["reason"] for row in selected["rejected_candidates"])
     failed_by_reason = Counter(row["reason"] for row in initialization_failures)
     return {
         "proposed_branches": proposed,
@@ -232,6 +223,7 @@ def run_branch_generation(
                 registered,
             ),
             "max_det_H": max_det_H,
+            "sampling_report": sampling_report,
             "allocation_reports": allocation_reports,
             "unfilled_quota": sum(row["unfilled"] for row in allocation_reports),
             "phase_coverage": phase_coverage,
@@ -242,9 +234,7 @@ def run_branch_generation(
     }
 
 
-def _summary(
-    proposed, branch_dedup, selected, initialized, structure_dedup, registered
-):
+def _summary(proposed, branch_dedup, selected, initialized, structure_dedup, registered):
     chosen = selected["selected_candidates"]
     phases = {}
     for item in chosen:
@@ -277,6 +267,5 @@ def _coverage(manager):
         bucket["branches"] += 1
         bucket["structures"] += len(branch.get("structure_ids", []))
     return [
-        {"P": key[0], "H": key[1], "x": key[2], **value}
-        for key, value in sorted(groups.items())
+        {"P": key[0], "H": key[1], "x": key[2], **value} for key, value in sorted(groups.items())
     ]

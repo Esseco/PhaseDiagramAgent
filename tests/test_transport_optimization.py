@@ -41,7 +41,10 @@ def test_missing_fields_remain_distinct_from_null():
     rows = [{"candidate_id": str(i), "metric": None} for i in range(8)] + [
         {"candidate_id": "missing"}
     ]
-    assert compact_evidence_tables({"qbc_candidates": rows})["qbc_candidates"] == rows
+    decoded = expand_evidence_tables(compact_evidence_tables({"qbc_candidates": rows}))
+    assert decoded["qbc_candidates"] == rows
+    assert "metric" not in decoded["qbc_candidates"][-1]
+    assert decoded["qbc_candidates"][0]["metric"] is None
 
 
 def test_nested_training_evidence_compacts_without_touching_human_constraints():

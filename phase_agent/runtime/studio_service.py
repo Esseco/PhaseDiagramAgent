@@ -57,6 +57,11 @@ def run_service(args):
     graph_config = prepare_studio_config(config_path)
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
+    # The child runs in the project data directory, outside the application source.
+    source_root = str(Path(__file__).resolve().parents[2])
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (source_root, env.get("PYTHONPATH", "")) if part
+    )
     env["LANGSMITH_TRACING"] = "false"
     env["PHASE_AGENT_RUNTIME_CONFIG"] = str(config_path)
     env["PHASE_CONTROL_PORT"] = str(args.control_port)
@@ -103,7 +108,7 @@ def run_service(args):
                     sys.executable,
                     "-u",
                     "-m",
-                    "langgraph_cli",
+                    "phase_agent.runtime.studio_server",
                     "dev",
                     "--config",
                     str(graph_config),
@@ -193,7 +198,11 @@ def run_service(args):
         finally:
             write_service(
                 config_path,
-                {**identity, "status": "failed" if failure else "stopped", **(failure or {})},
+                {
+                    **identity,
+                    "status": "failed" if failure else "stopped",
+                    **(failure or {}),
+                },
             )
 
 

@@ -42,6 +42,9 @@ def _validate_checks(checks, resolution, attestation):
         raise ValueError("需核对外部作业；未知作业不能解除阻塞")
     if checks.get("unregistered_returned_task_ids"):
         raise ValueError("工具返回的任务尚未完整登记；先核对并修复登记，不能直接解除阻塞")
+    branch_outputs = checks.get("registered_branch_outputs") or []
+    if any(row.get("status") != "verified" for row in branch_outputs):
+        raise ValueError("branch产出与账本、身份或源文件不一致；不能解除恢复阻塞")
     bad_paths = {"missing", "unreadable", "relative_path_requires_owner"}
     if any(row["status"] in bad_paths for row in checks["artifact_checks"]):
         raise ValueError("先修复或核对缺失文件及路径迁移；不能直接解除阻塞")
@@ -73,6 +76,7 @@ def _validate_checks(checks, resolution, attestation):
             raise ValueError("动作预留与总预留不一致；先核对预算台账")
         if (
             checks["task_count"]
+            or branch_outputs
             or checks["phase_record_ids"]
             or any(row["status"] == "file" for row in checks["artifact_checks"])
         ):
@@ -86,7 +90,9 @@ def _validate_checks(checks, resolution, attestation):
             raise ValueError("无副作用需要明确核对无外部作业、无产出、科学计算成本为零")
     elif attestation.get("output_inventory") != "registered_outputs":
         raise ValueError("复用前需明确核对已有登记任务和产出")
-    elif not checks["task_count"]:
+    elif not checks["task_count"] and not any(
+        row.get("registered_structure_count", 0) for row in branch_outputs
+    ):
         raise ValueError("没有已登记任务可复用；先通过原结果回收流程完成登记，不凭文件存在推定完成")
 
 
@@ -183,6 +189,8 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
                 current.update(
                     status="pending"
                     if checks["pending_task_ids"]
+                    else "superseded_after_registered_effects"
+                    if checks.get("registered_branch_outputs") and not checks["task_count"]
                     else "completed"
                     if len(checks["completed_task_ids"]) == checks["task_count"]
                     else "failed"
@@ -199,6 +207,40 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
         "proposal_hash": proposal_hash(plan),
         "reviewer_comment": str(reviewer_comment).strip(),
     }
+    for output in checks.get("registered_branch_outputs") or []:
+        gate = updated.get("dedup_gate") or {}
+        if gate.get("status") in {None, "ready"}:
+            updated["dedup_gate"] = {
+                "status": "ready",
+                "source": "verified_generation_reconciliation",
+                "valid_structure_ids": sorted(
+                    set(gate.get("valid_structure_ids") or []) | set(output["structure_ids"])
+                ),
+            }
+        if any(
+            row.get("task_key") == output["task_key"]
+            for row in updated.get("generation_history") or []
+        ):
+            continue
+        updated.setdefault("generation_history", []).append(
+            {
+                "task_key": output["task_key"],
+                "model_version": state.get("active_model_version"),
+                "refresh_plan_checksum": ((state.get("model_refresh") or {}).get("plan") or {}).get(
+                    "checksum"
+                ),
+                "new_branch_ids": output["new_branch_ids"],
+                "registered_ids": output["structure_ids"],
+                "summary": {
+                    "registered_branches": output["registered_branch_count"],
+                    "registered_structures": output["registered_structure_count"],
+                    "unique_structures": output["registered_structure_count"],
+                },
+                "artifacts": {"json": output["artifact_path"]},
+                "reconciliation_id": plan_id,
+                "recovery_scope": "registered_branch_component_only; downstream scope not completed",
+            }
+        )
     updated.setdefault("execution_reconciliations", {})[invocation] = audit
     for key, pending in list((updated.get("pending_execution_policies") or {}).items()):
         action = (pending.get("agent_proposal") or {}).get("raw_action") or {}
@@ -207,15 +249,15 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
                 {"plan_id": key, "record": deepcopy(pending), "reconciliation": plan_id}
             )
             updated["pending_execution_policies"].pop(key)
-    updated.setdefault("invocations", {}).setdefault(
-        invocation,
-        {
-            "status": recovered_status,
-            "record_id": invocation,
-            "reconciliation_id": plan_id,
-            "submitted": False,
-        },
-    )
+    updated.setdefault("invocations", {})[invocation] = {
+        "status": recovered_status,
+        "record_id": invocation,
+        "reconciliation_id": plan_id,
+        "submitted": False,
+    }
+    for record in updated.get("action_records") or []:
+        if record.get("record_id") == invocation:
+            record["status"] = recovered_status
     updated["pending_execution_recoveries"].pop(plan_id)
     updated.setdefault("invocations", {})[plan_id] = {
         "status": recovered_status,

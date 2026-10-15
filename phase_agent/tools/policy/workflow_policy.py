@@ -52,7 +52,12 @@ def normalize_workflow_state(state):
     """Archive scheduling metadata, preserving real jobs and frozen scientific approvals."""
     current = deepcopy(state)
     legacy = {}
-    for key in ("search_mode", "search_mode_review", "search_mode_reviewed_stages", "adaptive"):
+    for key in (
+        "search_mode",
+        "search_mode_review",
+        "search_mode_reviewed_stages",
+        "adaptive",
+    ):
         if key in current:
             legacy[key] = current.pop(key)
     pending = current.get("pending_execution_policies") or {}
@@ -107,6 +112,10 @@ def new_dft_ids(state, config):
 
 
 def branch_batch_errors(action, config):
+    from phase_agent.tools.policy.region_sampling import is_region, errors
+
+    if is_region(action):
+        return errors(action.get("parameters") or {})
     params = action.get("parameters") or {}
     if params.get("generation_plan"):
         rows = params["generation_plan"]
@@ -132,6 +141,12 @@ def branch_batch_errors(action, config):
         type(params["total_quota"]) is not int or params["total_quota"] != total
     ):
         return ["branch_total_quota_mismatch"]
+    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
+
+    if is_adaptive_generation(action):
+        if total < 100:
+            return ["branch_batch_below_minimum_100"]
+        return ["branch_batch_exceeds_limit"] if total > 1000 else []
     return ["branch_batch_exceeds_limit"] if total > settings(config)["branch_batch_size"] else []
 
 
@@ -146,7 +161,10 @@ def action_errors(action, state, config):
         if active_tasks(state):
             errors.append("fine_tune_waits_for_inflight_tasks")
     stage = action.get("stage") or params.get("stage")
-    direct_dft = tool == "run_calculation_stage" and stage in {"dft_single_point", "dft_relax"}
+    direct_dft = tool == "run_calculation_stage" and stage in {
+        "dft_single_point",
+        "dft_relax",
+    }
     if (tool == "select_dft_candidates" or direct_dft) and policy[
         "finetune_max_new_dft"
     ] is not None:
@@ -189,6 +207,7 @@ def needs_human(action, config):
             or (config.get("generation_actions") or {}).get("first_round_max_det_H")
         )
         caps = [params["max_det_H"]] if "max_det_H" in params else []
+        caps.extend(row["max_det_H"] for row in params.get("regions") or [])
         caps.extend(
             row["max_det_H"] for row in params.get("generation_plan") or [] if "max_det_H" in row
         )

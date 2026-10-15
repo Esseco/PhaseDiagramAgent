@@ -27,13 +27,18 @@ PATH_KEYS = {
 }
 
 
-def write(path, value):
+def write(path, value, *, sort_keys=True):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(
         json.dumps(
-            value, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False, default=str
+            value,
+            ensure_ascii=False,
+            sort_keys=sort_keys,
+            indent=2,
+            allow_nan=False,
+            default=str,
         ),
         encoding="utf-8",
     )
@@ -86,6 +91,30 @@ def script(profile, command, *, name):
 
 def gpu_profile(profiles, stage="relax_and_feature"):
     return next(row for row in profiles.values() if stage in row.get("stages", []))
+
+
+def coordinator_profile(profiles):
+    """Use an explicitly configured CPU allocation, never a guessed partition."""
+    supplied = profiles.get("relax_mc_cpu") or {
+        "slurm_options": {
+            "partition": "p1",
+            "nodes": 1,
+            "ntasks": 1,
+            "cpus-per-task": 1,
+            "mem": "8G",
+            "output": "%j.out",
+            "error": "%j.err",
+        },
+        "shell_preamble": deepcopy(gpu_profile(profiles).get("shell_preamble") or [])
+        + ["export OMP_NUM_THREADS=1", "export MKL_NUM_THREADS=1"],
+    }
+    if not supplied.get("slurm_options", {}).get("partition"):
+        raise ValueError("relax_mc_cpu_profile_required: configure CPU partition before packaging")
+    profile = deepcopy(supplied)
+    options = profile["slurm_options"]
+    if any(options.get(key) for key in ("gres", "gpus", "gpus-per-node", "gpus-per-task")):
+        raise ValueError("relax_mc_cpu_profile_must_not_request_GPU")
+    return profile
 
 
 def python_environment(root):

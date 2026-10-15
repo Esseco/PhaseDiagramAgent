@@ -1,6 +1,12 @@
 """从现有台账提取有界上下文；长期人工建议与近期观测严格分开。"""
 
 from copy import deepcopy
+from phase_agent.tools.policy.model_generation import new_model_generation_facts
+from phase_agent.analysis.state.decision_evidence import candidate_evidence, evidence_context
+from phase_agent.analysis.state.training_context import (
+    validation_planning_context,
+    post_refresh_search_context,
+)
 from phase_agent.persistence.memory.retrieve_relevant_knowledge import (
     retrieve_relevant_knowledge,
 )
@@ -110,14 +116,17 @@ def build_decision_context(state, *, recent_limit=5):
                 ],
             }
         )
+    from phase_agent.analysis.state.task_failure_facts import task_failure_facts
+
+    failure_facts = task_failure_facts(state)
     retryable_tasks = [
         {
             "task_id": row.get("task_id"),
             "stage": row.get("stage"),
             "status": row.get("status"),
         }
-        for row in (state.get("tasks") or [])
-        if row.get("task_id") and row.get("status") in {"failed", "timeout"}
+        for row in failure_facts["actionable_failures"]
+        if row.get("task_id")
     ][-recent_limit:]
     system_id = ((state.get("confirmed_config") or {}).get("system") or {}).get(
         "system_id"
@@ -184,7 +193,9 @@ def build_decision_context(state, *, recent_limit=5):
         "gpu_usage_summary": deepcopy(state.get("gpu_usage_summary") or {}),
         "decision_feedback": recent_decision_feedback(state, limit=recent_limit),
         "scientific_decision_brief": decision_brief(state),
-        "training_validation_planning": deepcopy(state.get("training_validation_planning") or {}),
+        "training_validation_planning": validation_planning_context(state),
+        "post_refresh_search": post_refresh_search_context(state),
+        "new_model_generation": new_model_generation_facts(state),
         "training_excluded_data_ids": sorted(
             {
                 str(value)
@@ -273,8 +284,8 @@ def build_decision_context(state, *, recent_limit=5):
             }
             for row in (state.get("generation_history") or [])[-5:]
         ],
-        "available_branches": deepcopy(state.get("branch_candidates") or []),
-        "qbc_candidates": deepcopy(state.get("qbc_candidates") or []),
+        "available_branches": candidate_evidence(state.get("branch_candidates") or []),
+        "qbc_candidates": candidate_evidence(state.get("qbc_candidates") or []),
         "relax_mc_batches": batch_facts(state),
         "recent_experience": {
             "limit": recent_limit,
@@ -289,6 +300,9 @@ def build_decision_context(state, *, recent_limit=5):
             "reward_count": len(state.get("rewards") or []),
         },
         "retryable_tasks": retryable_tasks,
+        "failure_attempt_facts": {
+            key: value for key, value in failure_facts.items() if key != "actionable_failures"
+        },
         "calculation_cost_reference": {
             "reports": cost_reference,
             "instruction": "参考规模粗估，不是任务报价。MC的patience=20/max=100仅为示例，不修改科学设置。实际任务按原子数、已确认步数和预算调用estimate_task_cost；无实测不声称核时。LLM决定取舍。",

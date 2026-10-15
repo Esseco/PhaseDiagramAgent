@@ -49,7 +49,15 @@ def post_dft_review_errors(action, *, include_parameters=True):
         from phase_agent.decisions.agent.generation_plan import validate_generation_plan
 
         try:
-            validate_generation_plan(action.get("parameters") or {})
+            from phase_agent.tools.policy.region_sampling import (
+                is_region,
+                errors as region_errors,
+            )
+
+            if is_region(action):
+                errors.extend(region_errors(action.get("parameters") or {}))
+            else:
+                validate_generation_plan(action.get("parameters") or {})
         except (ValueError, TypeError, AttributeError) as error:
             errors.append(f"generation_plan: {error}")
     review = action.get("post_dft_review")
@@ -155,7 +163,12 @@ def request_validated_action(agent_client, payload):
             GenerationAllocation,
         )
 
-        contracts["generation_plan_item"] = GenerationAllocation.model_json_schema()
+        from phase_agent.tools.policy.region_sampling import VERSION, INSTRUCTION
+
+        if (context.get("branch_count_policy") or {}).get("version") == VERSION:
+            contracts["generation_regions"] = INSTRUCTION
+        else:
+            contracts["generation_plan_item"] = GenerationAllocation.model_json_schema()
     if contracts:
         payload = {**payload, "output_contracts": contracts}
     if context.get("post_dft_assessment"):
@@ -169,7 +182,16 @@ def request_validated_action(agent_client, payload):
             },
             "instruction": payload["instruction"] + " " + review_output_instruction(),
         }
-    if context.get("training_already_completed") or context.get("training_validation_planning"):
+    from phase_agent.analysis.state.training_context import training_review_active
+
+    if context.get("post_refresh_search"):
+        payload = {
+            **payload,
+            "instruction": payload.get("instruction", "")
+            + " "
+            + context["post_refresh_search"]["instruction"],
+        }
+    if training_review_active(context):
         payload = {
             **payload,
             "instruction": payload.get("instruction", "")
@@ -185,7 +207,9 @@ def request_validated_action(agent_client, payload):
             **payload,
             "instruction": payload.get("instruction", "") + " " + round_budget_instruction(),
         }
-    from phase_agent.decisions.agent.scientific_decisions import attach_decision_contract
+    from phase_agent.decisions.agent.scientific_decisions import (
+        attach_decision_contract,
+    )
 
     payload = attach_decision_contract(payload)
     usages = []
@@ -286,7 +310,9 @@ def request_validated_action(agent_client, payload):
             raise ValueError("Invalid budget trade-off: " + "; ".join(errors))
         if context.get("post_dft_assessment") and post_dft_review_errors(action):
             raise ValueError("Budget repair must preserve valid post_dft_review")
-    from phase_agent.decisions.agent.scientific_decisions import scientific_decision_errors
+    from phase_agent.decisions.agent.scientific_decisions import (
+        scientific_decision_errors,
+    )
 
     brief = context.get("scientific_decision_brief") or {}
     if (brief.get("policy") or {}).get("schema_version") == 1:

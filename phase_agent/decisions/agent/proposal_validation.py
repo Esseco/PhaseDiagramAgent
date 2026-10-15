@@ -5,7 +5,10 @@ from phase_agent.decisions.agent.action_contracts import action_contract_errors
 
 
 def proposal_errors(action, payload):
-    from phase_agent.decisions.agent.dialogue_contract import is_dialogue, dialogue_errors
+    from phase_agent.decisions.agent.dialogue_contract import (
+        is_dialogue,
+        dialogue_errors,
+    )
 
     if is_dialogue(action):
         if action.get("kind") in {"advance", "review", "inspect_evidence"} and not (
@@ -18,7 +21,9 @@ def proposal_errors(action, payload):
     errors = action_contract_errors(action)
     if errors:
         return errors
-    from phase_agent.decisions.agent.round_budget_review import round_budget_review_errors
+    from phase_agent.decisions.agent.round_budget_review import (
+        round_budget_review_errors,
+    )
 
     errors.extend(round_budget_review_errors(action, payload.get("decision_context") or {}))
     tool = action.get("tool") or action.get("action_type")
@@ -56,7 +61,22 @@ def proposal_errors(action, payload):
             )
         )
     if tool == "generate_branches":
-        from phase_agent.decisions.agent.generation_plan import disabled_generation_allocations
+        from phase_agent.tools.policy.adaptive_branch_count import (
+            generation_review_errors,
+        )
+        from phase_agent.decisions.agent.generation_plan import derive_generation_totals
+
+        policy = (payload.get("decision_context") or {}).get("branch_count_policy")
+        if policy:
+            reviewed = derive_generation_totals(deepcopy(action))
+            reviewed.setdefault("decision_context", {})["branch_count_policy"] = policy
+            params = reviewed.setdefault("parameters", {})
+            if params.get("sampling_mode") != "region_adaptive":
+                params.setdefault("batch_size", params.get("total_quota"))
+            errors.extend(generation_review_errors(reviewed))
+        from phase_agent.decisions.agent.generation_plan import (
+            disabled_generation_allocations,
+        )
 
         enabled = (payload.get("decision_context") or {}).get("enabled_generation_strategies")
         if enabled is not None:
@@ -80,7 +100,10 @@ def preserve_proposal_evidence(error, action):
         return
     if action.get("_llm_usage"):
         error.llm_usage = deepcopy(action["_llm_usage"])
-    from phase_agent.decisions.agent.post_dft_review import post_dft_review_errors, REVIEW_TOOLS
+    from phase_agent.decisions.agent.post_dft_review import (
+        post_dft_review_errors,
+        REVIEW_TOOLS,
+    )
 
     tool = action.get("tool") or action.get("action_type")
     if tool in REVIEW_TOOLS and not post_dft_review_errors(action, include_parameters=False):

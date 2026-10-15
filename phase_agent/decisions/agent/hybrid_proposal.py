@@ -7,6 +7,8 @@ PROPOSAL_MODES = {"autonomous_search", "repair_post_dft_action", "round_budget_r
 
 
 def choose_harness(payload):
+    if (payload.get("evidence_reader") or {}).get("phase") == "select_topics":
+        return "legacy", "evidence_topic_selection"
     if payload.get("mode") in ROUTINE_MODES or payload.get("mode") not in PROPOSAL_MODES:
         return "legacy", "routine_or_nonproposal"
     if payload.get("analysis_harness") == "deepagents":

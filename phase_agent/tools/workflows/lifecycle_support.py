@@ -57,11 +57,17 @@ def _branch_candidates_for_agent(manager):
 
 def _read_state_for_runner(state, state_path):
     if isinstance(state, (str, Path)):
-        return json.loads(Path(state).read_text(encoding="utf-8"))
+        from phase_agent.tools.step_runner.file_protocol import read_json
+
+        return read_json(state)
     if state is not None:
-        return deepcopy(state)
+        from phase_agent.tools.state.workflow_control import restore_control
+
+        return restore_control(state_path, deepcopy(state)) if state_path else deepcopy(state)
     if state_path and Path(state_path).is_file():
-        return json.loads(Path(state_path).read_text(encoding="utf-8"))
+        from phase_agent.tools.step_runner.file_protocol import read_json
+
+        return read_json(state_path)
     return {}
 
 

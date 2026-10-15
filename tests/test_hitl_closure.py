@@ -1,4 +1,5 @@
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -200,6 +201,7 @@ def test_studio_child_failure_is_saved_with_exit_code_and_log(tmp_path):
     from phase_agent.runtime.studio_service import run_service
     from phase_agent.tools.step_runner.file_protocol import read_json
 
+    (tmp_path / "runtime.json").write_text("{}", encoding="utf-8")
     args = SimpleNamespace(
         runtime_config=str(tmp_path / "runtime.json"), port=2024, control_port=8765, parent_pid=None
     )
@@ -222,8 +224,9 @@ def test_studio_child_failure_is_saved_with_exit_code_and_log(tmp_path):
     record = read_json(tmp_path / "workflow_state/studio/service.json")
     assert record["status"] == "failed"
     assert record["child_exit_code"] == 7
-    assert record["child_log"].endswith("studio_server.log")
-    assert spawn.call_args.args[0][1:4] == ["-u", "-m", "langgraph_cli"]
+    assert Path(record["child_log"]).name.startswith("studio_start_")
+    assert record["child_log"].endswith(".log")
+    assert spawn.call_args.args[0][1:4] == ["-u", "-m", "phase_agent.runtime.studio_server"]
     assert spawn.call_args.kwargs["stdout"] is not None
 
 

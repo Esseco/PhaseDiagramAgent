@@ -51,12 +51,18 @@ def decide_from_saved_facts(
     from phase_agent.graphs.dialogue.evidence import conversation_facts
 
     summary = conversation_facts(facts, handler_project_context(handler, facts))
+    from phase_agent.decisions.agent.summary_request import project_summary
+    summary["current_project"] = project_summary(summary["current_project"])
+    refresh = summary.get("refresh_result_facts") or {}
+    summary["refresh_result_facts"] = {k: deepcopy(v) for k,v in refresh.items() if not isinstance(v, (dict,list))}
+    summary["refresh_result_facts"]["details_available"] = bool(refresh)
     summary["decision_context"] = {
         **(evidence or {}),
         "unified_dialogue": True,
         "conversation_controls": True,
         "current_settings_authority": AUTHORITY_RULE,
         "evidence_reader": {
+            "max_reads": 4,
             "topics": [
                 "mc",
                 "dft",
@@ -122,7 +128,7 @@ def decide_from_saved_facts(
 
     payload = {
         "mode": "autonomous_search",
-        "state": summary,
+        "state": {k: v for k, v in summary.items() if k != "decision_context"},
         "decision_context": summary["decision_context"],
         "unified_dialogue": True,
         "allowed_tools": allowed,
@@ -168,6 +174,13 @@ def decide_from_saved_facts(
     # prerequisites and creates a bound approval; it never treats this as approval.
     if action.get("tool") not in {"check_convergence", "pause_search"} and not evidence:
         return (defer_scientific or run_scientific)()
+    if evidence and action.get("tool") not in {"check_convergence", "pause_search"}:
+        from phase_agent.decisions.agent.summary_request import required_topics
+
+        missing = required_topics(action) - set(evidence.get("_loaded_topics") or [])
+        if missing:
+            # Reading one topic is not proof that every action prerequisite was read.
+            return dialogue_result({"kind": "inspect_evidence", "topics": sorted(missing)}, facts)
     scientific_summary = build_state_snapshot(
         facts,
         snapshot_index=int(facts.get("state_snapshot_index", 0)),
@@ -190,11 +203,13 @@ def decide_from_saved_facts(
             return deepcopy(action)
         process_event("重新分析最新事实", {"原因": "回收事实变化或原流程要求修正"})
         reuse_or_refresh.last_call_reused = False
-        response = client(payload)
+        from phase_agent.decisions.agent.summary_request import request_summary_first
+        response = request_summary_first(client, payload)
         used = True
         return response
 
     reuse_or_refresh.decision_backend = handler.decision_backend
+    reuse_or_refresh._validates_original_facts = True
     if defer_scientific is not None:
         return defer_scientific(reuse_or_refresh)
     handler.workflow_kwargs["agent_client"] = reuse_or_refresh

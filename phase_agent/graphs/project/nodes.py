@@ -137,7 +137,7 @@ def create_lifecycle_nodes(
             error = None
             try:
                 context = require_runtime(runtime)
-                if context.stages.get("durable") and name != "initialize_confirmed_run":
+                if context.stages.get("durable") and name != "initialize_confirmed_run" and context.stages.pop("restore_business_frame", False):
                     from phase_agent.graphs.business_checkpoint import restore_frame
 
                     context.frame = restore_frame(context.frame, state.get("business_frame") or {})

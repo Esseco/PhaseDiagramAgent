@@ -15,11 +15,27 @@ def estimate_proposal_cost(action, state):
             "cost_unit": "relative_cost",
             "scope": "Input preparation only; separate manual computation",
         }
+    if tool == "generate_branches" and params.get("sampling_mode") == "region_adaptive":
+        return {
+            "workload": [
+                {
+                    "stage": "branch_generation",
+                    "regions": len(params.get("regions") or []),
+                    "actual_branch_count": None,
+                }
+            ],
+            "estimated_total_cost": None,
+            "cost_unit": "relative_cost",
+            "scope": "仅本地生成登记；数量完成后统计，无后续计算授权",
+        }
     scope = params.get("module_execution_scope")
     if tool == "generate_branches" and scope:
         return {
             "workload": [
-                {"stage": "branch_generation", "candidate_quota": params.get("total_quota")},
+                {
+                    "stage": "branch_generation",
+                    "candidate_quota": params.get("total_quota"),
+                },
                 {
                     "stage": "relax_mc_module",
                     "branch_upper": scope["branch_upper"],
@@ -93,7 +109,10 @@ def estimate_proposal_cost(action, state):
                 "error": "invalid_dft_decisions_format",
                 "cost_unit": "relative_cost",
             }
-        for name, stage in (("DFT_SINGLE_POINT", "dft_single_point"), ("DFT_RELAX", "dft_relax")):
+        for name, stage in (
+            ("DFT_SINGLE_POINT", "dft_single_point"),
+            ("DFT_RELAX", "dft_relax"),
+        ):
             count = sum(row.get("action") == name for row in decisions)
             if count:
                 base = _stage_unit(state, stage)

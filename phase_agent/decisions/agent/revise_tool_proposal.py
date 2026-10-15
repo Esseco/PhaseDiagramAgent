@@ -27,6 +27,47 @@ def revise_tool_proposal(
     config=None,
 ):
     original = proposal.get("raw_action") or {}
+    from phase_agent.tools.policy.region_sampling import is_region
+
+    if is_region(original):
+        from phase_agent.decisions.agent.propose_tool_action import (
+            propose_agent_tool_action,
+        )
+
+        planning = deepcopy(state)
+        planning.setdefault("decision_context", {}).update(
+            {
+                "current_user_request": comment,
+                "prior_region_proposal": original.get("parameters"),
+                "instruction": "修订区域优先branch方案，不预设数量；不得执行生成。",
+            }
+        )
+        action = propose_agent_tool_action(
+            planning,
+            agent_client=agent_client,
+            allowed_tools=allowed_tools,
+            config=config,
+        )
+        if action.get("decision_source") != "llm_agent":
+            return {
+                "action": deepcopy(original),
+                "analysis": action.get("fallback_reason"),
+                "revision_status": "revision_failed",
+                "llm_usage": action.get("_llm_usage"),
+            }
+        digest = hashlib.sha256(
+            json.dumps(
+                [original.get("task_key"), comment, action.get("parameters")],
+                sort_keys=True,
+                ensure_ascii=False,
+            ).encode()
+        ).hexdigest()[:20]
+        action["task_key"] = f"region-revision:{digest}"
+        return {
+            "action": action,
+            "analysis": action.get("reason"),
+            "revision_status": "revised",
+        }
     requested_mc_steps = resolve_mc_budget_feedback(
         comment, original
     ) or resolve_mc_full_plan_steps(comment, original)
@@ -84,7 +125,11 @@ def revise_tool_proposal(
         action["budget"] = preview["estimated_relative_cost"]
         digest = hashlib.sha256(
             json.dumps(
-                [original.get("task_key"), requested_mc_steps, preview["allocation_checksum"]],
+                [
+                    original.get("task_key"),
+                    requested_mc_steps,
+                    preview["allocation_checksum"],
+                ],
                 sort_keys=True,
             ).encode()
         ).hexdigest()[:20]
@@ -105,10 +150,18 @@ def revise_tool_proposal(
         }
     requested_limit = _requested_max_det_H(comment)
     requested_batch_size = _requested_branch_batch_size(comment)
+    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
+
+    target_change = (
+        is_adaptive_generation(original)
+        and requested_batch_size is not None
+        and (requested_batch_size != (original.get("parameters") or {}).get("total_quota"))
+    )
     if (
         (requested_limit is not None or requested_batch_size is not None)
         and original.get("tool") == "generate_branches"
         and "generate_branches" in allowed_tools
+        and not target_change
     ):
         action = deepcopy(original)
         action.pop("_llm_usage", None)
@@ -118,7 +171,8 @@ def revise_tool_proposal(
         if requested_batch_size is not None:
             params["batch_size"] = requested_batch_size
         initial_count = re.search(
-            r"(?:取|初态(?:数)?(?:改为|为|设为)?)(\d+)个?初态?", re.sub(r"\s+", "", comment)
+            r"(?:取|初态(?:数)?(?:改为|为|设为)?)(\d+)个?初态?",
+            re.sub(r"\s+", "", comment),
         )
         if initial_count is None:
             initial_count = re.search(r"取(\d+)个初态", re.sub(r"\s+", "", comment))
@@ -166,6 +220,11 @@ def revise_tool_proposal(
         "decision_context": deepcopy(state.get("decision_context") or {}),
         "instruction": "Analyze the human comment and return a revised action with action_type, parameters, reason, expected_cost, target_ids, expected_purpose and current_state_analysis. Do not execute it.",
     }
+    branch_policy = (proposal.get("decision_context") or {}).get("branch_count_policy") or (
+        (source_state or {}).get("branch_count_policy")
+    )
+    if branch_policy:
+        payload["decision_context"]["branch_count_policy"] = deepcopy(branch_policy)
     try:
         from phase_agent.decisions.agent.decision_backend import request_decision_action
 
@@ -175,7 +234,9 @@ def revise_tool_proposal(
         if (action.get("tool") or action.get("action_type")) == "generate_branches" and (
             (original.get("parameters") or {}).get("generation_plan")
         ):
-            from phase_agent.decisions.agent.generation_plan import validate_generation_plan
+            from phase_agent.decisions.agent.generation_plan import (
+                validate_generation_plan,
+            )
 
             validate_generation_plan(action.get("parameters") or {})
         if not isinstance(action, dict):

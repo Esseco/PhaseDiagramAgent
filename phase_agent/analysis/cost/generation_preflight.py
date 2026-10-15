@@ -20,7 +20,10 @@ def generation_framework_costs(manager, phase_references, config, state):
     policy = config.get("mc_policy") or {}
     steps = [
         r.get("max_mc_steps")
-        for r in [*(policy.get("tiers") or []), *(policy.get("initial_ehull_bands") or [])]
+        for r in [
+            *(policy.get("tiers") or []),
+            *(policy.get("initial_ehull_bands") or []),
+        ]
     ]
     steps += [policy.get("exploration_max_mc_steps")]
     steps = [v for v in steps if type(v) is int and v > 0]
@@ -90,6 +93,17 @@ def generation_framework_costs(manager, phase_references, config, state):
 
 
 def attach_generation_preflight(action, state, context, config):
+    from phase_agent.tools.policy.region_sampling import is_region, preview
+
+    if is_region(action):
+        action["parameters"]["region_preview"] = preview(
+            action["parameters"],
+            context["manager"],
+            context["phase_references"],
+            config,
+            state,
+        )
+        return action
     if action.get("tool") != "generate_branches" or not (action.get("parameters") or {}).get(
         "generation_plan"
     ):
@@ -103,10 +117,20 @@ def attach_generation_preflight(action, state, context, config):
     preview = preview_generation_cost(action, frameworks, state, config)
     from phase_agent.tools.budget.check_budget import budget_is_hard
 
-    if preview["status"] == "over_budget" and budget_is_hard(config.get("budgets")):
+    from phase_agent.tools.policy.adaptive_branch_count import budget_limits_for_action
+
+    if preview["status"] == "over_budget" and budget_is_hard(
+        budget_limits_for_action(action, config.get("budgets"))
+    ):
         raise ValueError(
             f"扩胞前Relax+MC粗估 {preview['relax_mc_cost_upper']:.3g} 超过剩余预算 {preview['remaining_budget']:.3g}；请缩小胞/数量或修订预算，未生成结构"
         )
+    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
+
+    if is_adaptive_generation(action):
+        preview["budget_enforcement"] = "advisory"
+        preview["budget_reference_exceeded"] = preview["status"] == "over_budget"
+        preview["status"] = "estimate_only"
     action.setdefault("parameters", {})["generation_cost_preview"] = preview
     from phase_agent.tools.workflows.scientific_module_scope import attach_module_scope
 
@@ -127,6 +151,7 @@ def preview_generation_cost(action, frameworks, state, config):
             for f in frameworks
             if (allocation["phase"] == "all" or f["phase"] == allocation["phase"])
             and (cap is None or f["det_H"] <= cap)
+            and (allocation.get("min_det_H") is None or f["det_H"] >= allocation["min_det_H"])
             and (
                 allocation.get("na_min") is None
                 or any(allocation["na_min"] <= x <= allocation["na_max"] for x in f["allowed_x"])

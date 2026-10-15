@@ -1,6 +1,7 @@
 """Build the bounded, read-only state view consumed by decision agents."""
 
 from copy import deepcopy
+from phase_agent.analysis.state.decision_evidence import candidate_evidence, evidence_context
 
 from phase_agent.analysis.state.build_decision_context import build_decision_context
 from phase_agent.analysis.state.sanitize_untrusted_text import untrusted_text
@@ -30,7 +31,7 @@ def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=Non
         "current_convex_hull": _hull_summary(diagrams),
         "search_coverage": deepcopy(state.get("coverage") or state.get("coverage_report") or {}),
         "available_budget": deepcopy(available),
-        "budget_usage": deepcopy(state.get("budget_usage") or {}),
+        "budget_usage": evidence_context({"budget_usage": state.get("budget_usage") or {}})["budget_usage"],
         "uncertainty": uncertainty,
         "qbc_uncertainty": uncertainty,
         "mlip_status": {
@@ -57,7 +58,7 @@ def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=Non
                 "search_rules": [],
             }
         ),
-        "available_branches": deepcopy(state.get("branch_candidates") or []),
+        "available_branches": candidate_evidence(state.get("branch_candidates") or []),
     }
     snapshot["decision_context"] = build_decision_context(
         {**state, "decision_memory": state.get("decision_memory") or {}}

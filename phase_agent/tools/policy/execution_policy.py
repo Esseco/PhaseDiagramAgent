@@ -37,7 +37,9 @@ def build_agent_proposal(
 
     summary = decision_summary(action, runtime_state or state)
     raw_action = deepcopy(action)
-    raw_action.pop("decision_context", None)
+    branch_policy = (raw_action.pop("decision_context", None) or {}).get("branch_count_policy")
+    if branch_policy:
+        raw_action["decision_context"] = {"branch_count_policy": deepcopy(branch_policy)}
     return {
         "decision_owner": "llm"
         if action.get("decision_source") == "llm_agent"
@@ -69,6 +71,11 @@ def apply_execution_policy(
     if execution_mode not in EXECUTION_MODES:
         raise ValueError(f"未知 execution_mode：{execution_mode}")
     original = deepcopy(agent_proposal["raw_action"])
+    # Old envelopes stored the policy only beside raw_action. Restore this fact
+    # without importing the large evidence context or changing reviewed counts.
+    branch_policy = (agent_proposal.get("decision_context") or {}).get("branch_count_policy")
+    if branch_policy:
+        original.setdefault("decision_context", {})["branch_count_policy"] = deepcopy(branch_policy)
     if (original.get("parameters") or {}).get("rebuild_inputs") and execution_mode in {
         "autonomous",
         "replay",

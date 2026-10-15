@@ -46,4 +46,10 @@ def checkpoint_frame(frame):
 
 
 def restore_frame(runtime_frame, saved):
+    from phase_agent.tools.state.workflow_control import FIELD
+
+    current = runtime_frame.get("loaded_state") or {}
+    previous = saved.get("loaded_state") or {}
+    if current.get(FIELD) != previous.get(FIELD):
+        raise ValueError("stale_lifecycle_checkpoint_control_revision")
     return {**runtime_frame, **deepcopy(saved)}

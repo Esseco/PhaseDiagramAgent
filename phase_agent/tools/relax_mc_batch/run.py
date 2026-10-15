@@ -27,9 +27,13 @@ from phase_agent.tools.remote.integrity import file_checksum
 class SlurmIO:
     """Thin I/O adapter; existing runner owns tasks/batches, no second scheduler."""
 
-    def submit(self, path):
+    def submit(self, path, *, dependency=None):
+        command = ["sbatch", "--parsable"]
+        if dependency:
+            command.append("--dependency=" + dependency)
+        command.append(str(path))
         result = subprocess.run(
-            ["sbatch", "--parsable", str(path)],
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -54,20 +58,13 @@ class SlurmIO:
 
 def checkpoint(root, state, manager):
     write(Path(root) / "workflow_state.json", rebase(state, root, portable=True))
-    write(Path(root) / "manager_checkpoint.json", rebase(manager.data, root, portable=True))
+    write(
+        Path(root) / "manager_checkpoint.json",
+        rebase(manager.data, root, portable=True),
+    )
 
 
-def wave(
-    root,
-    state,
-    manager,
-    manifest,
-    io,
-    *,
-    batch_executor=None,
-    poll_seconds=30,
-    max_wait_seconds=604800,
-):
+def prepare_wave(root, state, manager, manifest):
     config = manifest["config"]
     runner = ManualUploadBatchRunner(
         Path(root) / "jobs",
@@ -109,6 +106,21 @@ def wave(
             for row in state.get("slurm_batches") or []
         ],
     )
+    return state, runner
+
+
+def wave(
+    root,
+    state,
+    manager,
+    manifest,
+    io,
+    *,
+    batch_executor=None,
+    poll_seconds=30,
+    max_wait_seconds=604800,
+):
+    state, runner = prepare_wave(root, state, manager, manifest)
     if batch_executor is not None:
         results = []
         for batch in state.get("slurm_batches") or []:
@@ -120,6 +132,9 @@ def wave(
     deadline = time.monotonic() + max_wait_seconds
     pending = [row for row in state.get("slurm_batches") or [] if not row.get("relax_mc_wave_done")]
     concurrency = manifest["workload"]["max_concurrent_jobs"]
+    if manifest["workload"].get("submission_policy") == "whole_wave":
+        # Missing marker preserves legacy packages' original submission limit.
+        concurrency = len(pending)
     collected = {}
     while pending:
         results = runner.collect_results(state)
@@ -226,11 +241,24 @@ def publish(root, state, manifest, status, reason=None):
     return create_bundle(root, files, root / "results.zip", kind="results")
 
 
-def run_batch(root, *, submit=False, dry_run=False, io=None, batch_executor=None, poll_seconds=30):
+def run_batch(
+    root,
+    *,
+    submit=False,
+    dry_run=False,
+    io=None,
+    batch_executor=None,
+    poll_seconds=30,
+    phase=None,
+):
     root = Path(root).resolve()
     manifest = rebase(read(root / "batch.json"), root)
     if dry_run or not submit:
-        return {"status": "planned_only", "submitted": False, "workload": manifest["workload"]}
+        return {
+            "status": "planned_only",
+            "submitted": False,
+            "workload": manifest["workload"],
+        }
     for row in read(root / "transfer_manifest.json")["files"]:
         path = (root / row["path"]).resolve()
         if (
@@ -239,6 +267,13 @@ def run_batch(root, *, submit=False, dry_run=False, io=None, batch_executor=None
             or file_checksum(path) != row["sha256"]
         ):
             raise ValueError("input_package_integrity_failed; no jobs submitted")
+    if (
+        manifest["workload"].get("submission_policy") == "phase_dependencies"
+        and batch_executor is None
+    ):
+        from phase_agent.tools.relax_mc_batch.dependencies import advance
+
+        return advance(root, manifest, io or SlurmIO(), phase=phase)
     with _archive_lock(root):
         state_file = root / "workflow_state.json"
         state = (
@@ -272,7 +307,10 @@ def run_batch(root, *, submit=False, dry_run=False, io=None, batch_executor=None
                             status = (
                                 "paused"
                                 if plan["status"]
-                                in {"phase_diagram_unavailable", "continuation_pool_below_minimum"}
+                                in {
+                                    "phase_diagram_unavailable",
+                                    "continuation_pool_below_minimum",
+                                }
                                 else "completed"
                             )
                             reason = plan.get("reason", plan["status"])
@@ -307,7 +345,10 @@ def run_batch(root, *, submit=False, dry_run=False, io=None, batch_executor=None
                     break
         except Exception as error:
             status, reason = "failed", f"{type(error).__name__}: {error}"
-            write(root / "failure.json", {"reason": reason, "traceback": traceback.format_exc()})
+            write(
+                root / "failure.json",
+                {"reason": reason, "traceback": traceback.format_exc()},
+            )
             # wave checkpoints submission intents/receipts before returning. Never
             # overwrite them with the caller's older copy after an exception.
             if state_file.is_file():
@@ -319,4 +360,9 @@ def run_batch(root, *, submit=False, dry_run=False, io=None, batch_executor=None
         state["relax_mc_remote"]["status"] = status
         checkpoint(root, state, manager)
         archive = publish(root, state, manifest, status, reason)
-        return {"status": status, "reason": reason, "archive": archive, "submitted": True}
+        return {
+            "status": status,
+            "reason": reason,
+            "archive": archive,
+            "submitted": True,
+        }

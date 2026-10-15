@@ -69,15 +69,13 @@ def test_read_state_identifies_read_operation_only():
     assert plan["read_operation"] == "read_state"
 
 
-def test_chat_only_identifies_and_does_not_call_workflow(tmp_path):
+def test_chat_rerun_defers_to_current_decision_pipeline(tmp_path):
+    from phase_agent.graphs.dialogue.maintenance.rerun import handle
     path = tmp_path / "state.json"
     state = _state()
     path.write_text(json.dumps(state), encoding="utf-8")
     calls = []
-    handler = RunWorkflowChatHandler({"state_path": str(path)},
-        workflow=lambda **kwargs: calls.append(kwargs))
-    reply = handler([{"role": "user", "content": "重新生成当前轮Relax输入"}])
-    assert "relax-1" in reply
-    assert "尚未删除文件" in reply
+    handler = RunWorkflowChatHandler({"state_path": str(path)}, workflow=lambda **kwargs: calls.append(kwargs))
+    assert handle(handler, "重新生成branch", state, [], None) is None
     assert calls == []
     assert json.loads(path.read_text(encoding="utf-8")) == state

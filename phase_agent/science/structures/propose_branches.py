@@ -97,6 +97,8 @@ def propose_branches(
             raise ValueError(f"目标相 {target_phase} 不在本轮合法框架内")
         filtered = []
         for framework in frameworks:
+            if focus.get("min_det_H") is not None and det_H(framework["H"]) < focus["min_det_H"]:
+                continue
             if focus.get("max_det_H") is not None and det_H(framework["H"]) > focus["max_det_H"]:
                 continue
             if target_phase != "all" and framework["P"] != target_phase:

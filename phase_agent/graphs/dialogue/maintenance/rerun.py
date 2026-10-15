@@ -1,4 +1,4 @@
-"""Plan DFT input regeneration; execute only an explicitly confirmed fresh plan."""
+"""Confirm existing DFT regeneration plans; ordinary requests use Agent decisions."""
 
 from phase_agent.tools.step_runner.file_protocol import write_json
 
@@ -7,7 +7,6 @@ CONFIRM = "确认重新生成当前轮DFT输入"
 
 def handle(self, user_message, state, messages, conversation_id):
     from phase_agent.tools.local.identify_rerun_plan import (
-        is_rerun_plan_request,
         identify_rerun_plan,
         format_rerun_plan,
     )
@@ -24,9 +23,11 @@ def handle(self, user_message, state, messages, conversation_id):
     confirmed = user_message.strip() == CONFIRM
     if confirmed and not pending:
         return "尚无待确认的 DFT 输入重生成方案；请先提出请求并核对范围。"
-    if not confirmed and not is_rerun_plan_request(user_message):
+    # Natural-language requests belong to the current-model decision pipeline.
+    # Only an existing, explicit DFT regeneration confirmation is handled here.
+    if not confirmed:
         return None
-    request = pending["request"] if confirmed else user_message
+    request = pending["request"]
     plan = identify_rerun_plan(request, state)
     if (
         plan.get("status") != "identified"
@@ -34,13 +35,6 @@ def handle(self, user_message, state, messages, conversation_id):
         or plan.get("action", {}).get("tool") != "select_dft_candidates"
     ):
         return format_rerun_plan(plan)
-    if not confirmed:
-        state["pending_dft_regeneration"] = {"request": request, "plan": plan}
-        write_json(self.state_path, state)
-        return (
-            format_rerun_plan(plan)
-            + f"\n尚未修改文件。核对旧任务尚未提交后，单独回复“{CONFIRM}”；拒绝可取消。"
-        )
     if plan != pending["plan"]:
         return "DFT 任务或输入状态已变化；请重新提出请求并核对方案。未执行。"
     from phase_agent.tools.local.regenerate_dft_files import regenerate_dft_files

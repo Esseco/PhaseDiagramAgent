@@ -145,6 +145,21 @@ def inspect_execution(state, issue, *, state_path=None):
         for row in files.values()
     ):
         next_action = "先核对缺失或无法读取的文件及路径迁移，再决定复用或修复台账"
+    branch_outputs = []
+    if state_path:
+        from phase_agent.tools.state.registered_branch_evidence import inspect_registered_branches
+
+        seen = set()
+        for action in actions:
+            key = action.get("task_key")
+            if key in seen:
+                continue
+            seen.add(key)
+            evidence = inspect_registered_branches(state, action, state_path)
+            if evidence:
+                branch_outputs.append(evidence)
+    if any(row.get("status") == "verified" for row in branch_outputs):
+        next_action = "复用已核验的branch与结构；旧动作未完成的后续范围另行处理，禁止重复生成。"
     return {
         "identity": identity,
         "execution_events": journal,
@@ -154,6 +169,7 @@ def inspect_execution(state, issue, *, state_path=None):
         "completed_task_ids": completed,
         "pending_task_ids": pending,
         "task_count": len(related),
+        "registered_branch_outputs": branch_outputs,
         "unregistered_returned_task_ids": unregistered,
         "artifact_checks": list(files.values()),
         "budget_reservations": reservations,

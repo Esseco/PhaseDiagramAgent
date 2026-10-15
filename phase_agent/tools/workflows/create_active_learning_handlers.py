@@ -6,21 +6,29 @@ from copy import deepcopy
 import hashlib
 import json
 
-from phase_agent.decisions.strategy.choose_generation_strategy import choose_generation_strategy
-from phase_agent.tools.dispatch.dispatch_calculation_stage import execute_registered_stage
+from phase_agent.decisions.strategy.choose_generation_strategy import (
+    choose_generation_strategy,
+)
+from phase_agent.tools.dispatch.dispatch_calculation_stage import (
+    execute_registered_stage,
+)
 from phase_agent.tools.workflows.run_branch_generation import run_branch_generation
 from phase_agent.tools.workflows.run_round_scheduler import run_round_scheduler
 from phase_agent.tools.budget.reserve_budget import reserve_budget
 from phase_agent.science.bohb.build_bohb_candidate_pool import build_bohb_candidate_pool
 from phase_agent.science.bohb.collect_bohb_results import collect_bohb_results
-from phase_agent.tools.workflows.prepare_branch_relaxation import prepare_branch_relaxation
+from phase_agent.tools.workflows.prepare_branch_relaxation import (
+    prepare_branch_relaxation,
+)
 from phase_agent.tools.state.branch_batch_state import (
     ACTIVE_BRANCH_BATCH_STATES,
     create_branch_batch,
     transition_branch_batch,
 )
 from phase_agent.science.mc.schedule_tiered_mc import schedule_tiered_mc
-from phase_agent.decisions.scoring.rank_branch_relax_prescreen import rank_branch_relax_prescreen
+from phase_agent.decisions.scoring.rank_branch_relax_prescreen import (
+    rank_branch_relax_prescreen,
+)
 from phase_agent.tools.workflows.prepare_dedup_batch import prepare_dedup_batch
 
 
@@ -64,11 +72,23 @@ def _prepare_dedup(*, action, context):
 
 
 def _generate_branches(*, action, context):
+    from phase_agent.tools.policy.region_sampling import is_region
+
+    if is_region(action):
+        from phase_agent.tools.workflows.run_region_generation import (
+            run_region_generation,
+        )
+
+        return run_region_generation(action=action, context=context)
     config = context["effective_config"]
     params = deepcopy(action.get("parameters") or {})
     from phase_agent.tools.policy.workflow_policy import branch_batch_errors, settings
 
-    if not any(key in params for key in ("generation_plan", "quotas", "total_quota")):
+    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
+
+    if not any(
+        key in params for key in ("generation_plan", "quotas", "total_quota")
+    ) and not is_adaptive_generation(action):
         params["total_quota"] = settings(config)["branch_batch_size"]
     errors = branch_batch_errors({**action, "parameters": params}, config)
     if errors:
@@ -99,7 +119,9 @@ def _generate_branches(*, action, context):
         validate_generation_plan(params)
     quotas = params.get("quotas")
     if params.get("generation_plan"):
-        from phase_agent.analysis.cost.generation_preflight import attach_generation_preflight
+        from phase_agent.analysis.cost.generation_preflight import (
+            attach_generation_preflight,
+        )
 
         try:
             attach_generation_preflight(
@@ -112,6 +134,7 @@ def _generate_branches(*, action, context):
                 "reason": str(error),
             }
     existing = context["manager"].data.get("branches") or {}
+    before_branch_ids = set(existing)
     from phase_agent.science.structures.boundary_utils import allowed_phases
 
     required_phases = allowed_phases(context["manager"].boundary["P"])
@@ -134,6 +157,24 @@ def _generate_branches(*, action, context):
             total_quota=int(params.get("total_quota", config.get("total_quota", 0))),
         )["quotas"]
     options = deepcopy(config.get("generation_options") or {})
+    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
+    from phase_agent.tools.policy.adaptive_branch_count import generation_review_errors
+
+    review_errors = generation_review_errors(action, context.get("event_state") or {})
+    if review_errors:
+        return {
+            "status": "not_configured",
+            "state": context.get("event_state") or {},
+            "reason": ";".join(review_errors),
+        }
+    adaptive_count = is_adaptive_generation(action)
+    if adaptive_count:
+        options["cost_budget"] = None  # Estimate remains visible; it cannot filter branches.
+        params["batch_size"] = sum(quotas.values())
+        # Preserve explicit reviewed guards, not the library's small defaults.
+        selection = options.setdefault("selection_config", {})
+        selection.setdefault("max_per_framework", params["batch_size"])
+        selection.setdefault("max_per_parent_branch", params["batch_size"])
     if "max_det_H" in params:
         options["max_det_H"] = params["max_det_H"]
     first_round_cap = ((config.get("system_config") or {}).get("H_generation") or {}).get(
@@ -151,7 +192,9 @@ def _generate_branches(*, action, context):
         options["max_det_H"] = first_round_cap
     generation_directory = config["structure_directory"]
     if config.get("upload_batches_directory"):
-        from phase_agent.tools.remote.model_upload_directory import model_upload_directory
+        from phase_agent.tools.remote.model_upload_directory import (
+            model_upload_directory,
+        )
 
         layout_state = deepcopy(context.get("event_state") or {})
         version = (
@@ -195,12 +238,29 @@ def _generate_branches(*, action, context):
             or (config.get("mlip") or {}).get("name"),
             "search_group_index": len(state.get("generation_history") or []) + 1,
             "registered_ids": [item.get("structure_id") for item in result["registered"]],
+            "new_branch_ids": sorted(
+                {item["branch_id"] for item in result["registered"]} - before_branch_ids
+            ),
+            "refresh_plan_checksum": ((state.get("model_refresh") or {}).get("plan") or {}).get(
+                "checksum"
+            ),
             "coverage": deepcopy(result["coverage"]),
             "summary": deepcopy(result["summary"]),
             "structure_directory": generation_directory,
         }
     )
     state["coverage"] = deepcopy(result["coverage"])
+    from phase_agent.tools.workflows.generation_artifacts import result_artifacts
+
+    artifacts = result_artifacts(
+        generation_directory,
+        state["generation_history"][-1],
+        context["manager"],
+        result["registered"],
+        state,
+        action,
+    )
+    state["generation_history"][-1]["artifacts"] = artifacts
     gate = state.get("dedup_gate") or {}
     if gate.get("status") in {None, "ready"}:
         ids = set(gate.get("valid_structure_ids") or [])
@@ -216,8 +276,11 @@ def _generate_branches(*, action, context):
         "registered": result["registered"],
         "coverage": result["coverage"],
         "summary": result["summary"],
+        "generation_artifacts": artifacts,
     }
-    from phase_agent.tools.workflows.scientific_module_scope import prepare_generated_module
+    from phase_agent.tools.workflows.scientific_module_scope import (
+        prepare_generated_module,
+    )
 
     return prepare_generated_module(action, generated, context)
 
@@ -338,7 +401,11 @@ def _allocate_mc_bohb(*, action, context):
                 if set(item.get("region_ids") or [item.get("region_id")]) & focus
             ]
     if not candidates:
-        return {"status": "not_configured", "state": state, "error": "agent_branch_batch_empty"}
+        return {
+            "status": "not_configured",
+            "state": state,
+            "error": "agent_branch_batch_empty",
+        }
     prescreen = rank_branch_relax_prescreen(
         candidates,
         count=params.get("max_relax_branches"),
@@ -424,7 +491,10 @@ def _allocate_mc_bohb(*, action, context):
         }
         bohb.setdefault("scope", {})["hull_reference_version"] = approved_hull_version
         bohb["scope"]["mlip_version"] = model_version
-        bohb["objective"] = {**bohb.get("objective", {}), "name": "relaxed_batch_hull_gap"}
+        bohb["objective"] = {
+            **bohb.get("objective", {}),
+            "name": "relaxed_batch_hull_gap",
+        }
     elif bohb.get("selection_policy") == "relax_hull_uncertainty":
         screening = prepare_branch_relaxation(
             candidates,
@@ -443,7 +513,9 @@ def _allocate_mc_bohb(*, action, context):
             batch = state.get("branch_batch")
             if batch and batch.get("status") != target_status:
                 state["branch_batch"] = transition_branch_batch(
-                    batch, target_status, unavailable=deepcopy(screening.get("unavailable") or [])
+                    batch,
+                    target_status,
+                    unavailable=deepcopy(screening.get("unavailable") or []),
                 )
             return {
                 "status": "completed"
@@ -735,7 +807,9 @@ def _allocate_mc_bohb(*, action, context):
             )
         upload = None
         if accepted and context.get("execution_mode") == "interactive":
-            from phase_agent.tools.local.prepare_mc_upload_batches import prepare_mc_upload_batches
+            from phase_agent.tools.local.prepare_mc_upload_batches import (
+                prepare_mc_upload_batches,
+            )
 
             try:
                 upload = prepare_mc_upload_batches(
@@ -822,7 +896,9 @@ def _allocate_mc_bohb(*, action, context):
         if state.get("branch_batch", {}).get("status") == "hull_ready":
             terminal = "completed" if output.get("status") == "budget_exhausted" else "hb_active"
             state["branch_batch"] = transition_branch_batch(
-                state["branch_batch"], terminal, strategy_version=output.get("strategy_version")
+                state["branch_batch"],
+                terminal,
+                strategy_version=output.get("strategy_version"),
             )
         elif (
             state.get("branch_batch", {}).get("status") == "hb_active"

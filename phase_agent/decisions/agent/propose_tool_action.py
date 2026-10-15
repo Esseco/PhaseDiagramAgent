@@ -18,6 +18,8 @@ def propose_agent_tool_action(
 
             from phase_agent.tools.policy.workflow_policy import settings
 
+            from phase_agent.tools.policy.region_sampling import policy as region_policy
+
             decision_context = {
                 **(state.get("decision_context") or {}),
                 "ordering_search_instruction": (
@@ -31,10 +33,14 @@ def propose_agent_tool_action(
                     "由程序冻结模型、母结构、H和工作量后经审批准备输入，不自行加载模型或提交作业。"
                     "回收使用recover_ordering_search操作，plan_id必须来自已登记ordering_searches。"
                 ),
-                "workflow_policy": settings(config or {}),
+                "workflow_policy": {
+                    **settings(config or {}),
+                    "branch_batch_size": 1000,
+                },
+                "branch_count_policy": region_policy(),
                 "workflow_instruction": (
                     "统一闭环：Branch生成登记→Relax+MLIP-MC封装→回收→选择是否及对哪些候选做DFT→回收→比较继续搜索、补DFT、微调或数值收敛。"
-                    "每次仅提出一个科学动作。branch_batch_size是整批总配额上限，不是必须花满的数量；"
+                    "每次仅提出一个科学动作。branch只选区域，不先定数量；"
                     "finetune_min_new_dft是有效新增数据下限，finetune_max_new_dft是可选累积上限。"
                     "达到微调门槛不自动训练；仍需依据误差、覆盖和收益决定并经过审批。"
                     "封装内MC由已确认规则执行，不另行给同批Branch分配MC。"
@@ -50,7 +56,12 @@ def propose_agent_tool_action(
                 **decision_context,
                 "decision_review_format": {
                     "instruction": "For a scientific proposal, include optional decision_review with observation, rationale, expected_outcome and alternatives (at most 3 objects with tool/reason). Keep each sentence short; compare only relevant feasible routes, not every tool. Use actual evidence_refs. Review decision_feedback: distinguish what was expected from recorded outcomes; say what changed and whether the previous choice still makes sense. Missing evidence remains unknown. This explanation grants no approval and is not an execution field.",
-                    "fields": ["observation", "rationale", "expected_outcome", "alternatives"],
+                    "fields": [
+                        "observation",
+                        "rationale",
+                        "expected_outcome",
+                        "alternatives",
+                    ],
                 },
                 "decision_authority": (
                     "结合长期人工建议、物理先验、搜索规则、已批准知识、近期行动及收益、当前版本状态与本次要求做决策。"
@@ -97,89 +108,86 @@ def propose_agent_tool_action(
                 ),
                 "instruction": "Respect fixed variables independently of element count. Fixed T preserves TM occupancy from phase references, not atomic positions. Single TM has no TM exchange freedom but still has physical interactions. Single phase has no inter-phase competition. Never use disabled strategies to fill quotas.",
             }
-            decision_context["early_branch_planning"] = {
-                "confirmed_run": dict((config or {}).get("run") or {}),
-                "instruction": (
-                    "前期缺少branch与有效结果时，应先建立充分合法覆盖；以workflow_policy.branch_batch_size为整批上限，confirmed_run.batch_size为生成器内部批次上限，"
-                    "结合用户扩大前期覆盖的偏好、相/Na/H空间、去重、剩余预算及Relax/MC预估安排数量。"
-                    "不得无依据退回小样本批次；明显缩小数量须说明实际预算或合法空间等证据。"
-                    "候选数与入选上限须区分，入选不是保证数量；不机械花满预算。"
-                    "branch方案不附带假设性DFT任务或成本；DFT以后独立分析审批。"
-                ),
-            }
-            from phase_agent.decisions.agent.generation_plan import configured_generation_strategies
+            from phase_agent.decisions.agent.generation_plan import (
+                configured_generation_strategies,
+            )
 
             decision_context["enabled_generation_strategies"] = configured_generation_strategies(
                 config or {}
             )
-            decision_context["generation_strategy_constraint"] = (
-                "generation_plan和quotas只能使用enabled_generation_strategies中的策略。"
-                "单相体系不能分配competing_phase；不得用禁用策略补足数量。"
-                "修改已有方案时重新分析合法分配，不静默转换策略或保留冲突汇总。"
+            from phase_agent.tools.policy.adaptive_branch_count import (
+                configured_selection_guards,
             )
+
             if decision_context.get("post_dft_assessment"):
-                from phase_agent.decisions.agent.post_dft_review import review_output_instruction
+                from phase_agent.decisions.agent.post_dft_review import (
+                    review_output_instruction,
+                )
 
                 decision_context["post_dft_review_format"] = (
                     "Required exception to the compact action field list: "
                     + review_output_instruction()
                 )
-                decision_context["generation_allocation_format"] = (
-                    "For generate_branches, parameters.generation_plan is REQUIRED: at most 12 objects "
-                    "with strategy, quota, phase (allowed phase or all), optional na_min/na_max in Na/O2, "
-                    "strategy MUST be exactly coverage/composition/competing_phase/periodic_extension/tm_ordering; "
-                    "quota MUST be a positive JSON integer, not text or a budget. "
-                    "optional positive integer max_det_H per allocation, and reason under160 characters. "
-                    "Use generation_framework_costs to compare atom counts and downstream Relax/MC "
-                    "cost BEFORE selecting expansion sizes and quantities. Prefer affordable smaller cells; "
-                    "do not expand first to discover cost. Cost/time are estimates, not authorizations. "
-                    "Derive allocations from coverage, valid hull/QBC, "
-                    "memory and recent strategy gains; absence of a stable phase alone is not a gap. "
-                    "Include justified exploration. Supply allocation quotas in generation_plan; the program derives "
-                    "parameters.quotas and total_quota when omitted. Explicit aggregate counts must agree. Choose batch_size within confirmed limit; defaults are ceilings, not "
-                    "mandatory counts. New exception: generation_plan is an allowed parameter. "
-                    "Never claim P3/lowNa targeting with a generic unbounded allocation."
-                )
             if decision_context.get("unified_dialogue"):
-                from phase_agent.decisions.agent.dialogue_contract import dialogue_output_contract
+                from phase_agent.decisions.agent.dialogue_contract import (
+                    dialogue_output_contract,
+                )
 
                 decision_context["dialogue_output_contract"] = dialogue_output_contract(
                     allow_controls=decision_context.get("conversation_controls") is True
                 )
-            from phase_agent.decisions.agent.round_budget_review import round_budget_instruction
+            from phase_agent.decisions.agent.round_budget_review import (
+                round_budget_instruction,
+            )
 
             decision_context["round_budget_review_format"] = round_budget_instruction()
-            if "generate_branches" in allowed_tools:
-                from phase_agent.decisions.agent.generation_contracts import GenerationAllocation
+            from phase_agent.analysis.state.training_context import (
+                validation_planning_context,
+                post_refresh_search_context,
+                training_review_active,
+            )
 
-                decision_context["generation_allocation_contract"] = {
-                    "item_schema": GenerationAllocation.model_json_schema(),
-                    "constraints": [
-                        "generation_plan contains 1..12 allocations; quota is a positive JSON integer",
-                        "generation_plan is the allocation source; omit redundant parameters.quotas and total_quota for automatic derivation",
-                        "if aggregate counts are explicitly supplied, they must equal the sums of generation_plan",
-                        "phase must belong to the confirmed allowed phases or be all",
-                        "first batch cannot use strategies requiring existing parent branches",
-                    ],
-                }
-            if decision_context.get("training_already_completed") or decision_context.get(
-                "training_validation_planning"
-            ):
+            if state.get("training_validation_planning"):
+                decision_context["training_validation_planning"] = validation_planning_context(
+                    state
+                )
+            refresh_search = post_refresh_search_context(state) or decision_context.get(
+                "post_refresh_search"
+            )
+            if refresh_search:
+                decision_context["post_refresh_search"] = refresh_search
+                decision_context["decision_authority"] = refresh_search["instruction"]
+            if training_review_active(decision_context):
                 decision_context["decision_authority"] = (
                     "本轮微调已经完成并回收；当前是微调后的策略判断。不得重复update_mlip。"
                     "比较换新模型、旧模型补DFT、接口核查或其他策略，沿用已记录的Agent模型审阅理由。"
                     "只返回allowed_tools中的动作。核查或配置修改用adjust_strategy；补DFT用select_dft_candidates。"
                     "用简短reason说明依据，不让用户做科学选择。"
                 )
+            if "generate_branches" in allowed_tools:
+                from phase_agent.tools.policy.region_sampling import INSTRUCTION
+
+                for key in (
+                    "branch_sampling_authority",
+                    "generation_allocation_format",
+                    "generation_allocation_contract",
+                    "branch_generation_instruction",
+                    "early_branch_planning",
+                    "generation_strategy_constraint",
+                ):
+                    decision_context.pop(key, None)
+                decision_context["generation_region_contract"] = INSTRUCTION
+                decision_context["workflow_instruction"] += " Branch数量为生成结果，不是预定配额。"
             action = request_validated_action(
                 agent_client,
                 {
                     "mode": "autonomous_search",
+                    "branch_count_policy": decision_context["branch_count_policy"],
                     "unified_dialogue": bool(decision_context.get("unified_dialogue")),
-                    "state": state,
+                    "state": {**state, "decision_context": decision_context},
                     "decision_context": decision_context,
                     "allowed_tools": allowed_tools,
-                    "instruction": "For a scientific action only, choose exactly one registered tool. Return one compact JSON object with tool, task_key, target_ids, parameters, budget, reason, expected_purpose and evidence_refs; include required post_dft_review when post_dft_assessment exists. You may also include the optional decision_review explanation object described in decision_context.decision_review_format. budget must be one non-negative JSON number in relative_cost units, never an object. Keep reason and expected_purpose under 100 Chinese characters each; never copy the state into the answer. MC: allocate_mc_bohb with existing branch IDs, mc_budget, dft_budget, exploration_fraction and optional branch_count. Standalone MC decisions are reserved for explicit stepwise requests or legacy maintenance; use recorded evidence and confirmed MC policy, never invent resource settings. For generate_branches, parameters may contain only total_quota, quotas, batch_size, initial_states_per_branch, seed, max_det_H and generation_plan. Follow generation_allocation_format for the required post-DFT plan. Preserve an explicit user det(H) limit in max_det_H as a positive JSON integer; omit the field when no limit is supplied instead of returning null or text. The limit applies to this generation batch and must be shown in the proposal. On the first batch, use coverage across allowed phases and prefer smaller H; parent-dependent strategies cannot run until branches exist. Do not claim a code fix through action parameters. restart_failed_task may target only a real task_id listed in decision_context.retryable_tasks. A webui record_id or failed generate_branches action is not a scientific task and cannot be restarted with that tool. For allocate_mc_bohb, select existing branch_id values from decision_context.available_branches in target_ids; put focus_regions, exploration_fraction, mc_budget and dft_budget in parameters. Hyperband controls fidelity and promotions after Relax screening. Batch MC planning and input generation use allocate_mc_bohb or prepare_local_batch_files, never run_calculation_stage. run_calculation_stage requires exactly one structure_id and is not a batch action. If all current MC tasks are complete and the confirmed policy disables a second segment, assess convergence or the next stage instead of proposing another MC batch. For select_dft_candidates, use existing qbc_candidates only and categorical decisions DFT_SINGLE_POINT, DFT_RELAX, DEFER or REJECT. Never invent energies, Ehull, scores, uncertainty or convergence.",
+                    "instruction": "For a scientific action only, choose exactly one registered tool. Return one compact JSON object with tool, task_key, target_ids, parameters, budget, reason, expected_purpose and evidence_refs; include required post_dft_review when post_dft_assessment exists. You may also include the optional decision_review explanation object described in decision_context.decision_review_format. budget must be one non-negative JSON number in relative_cost units, never an object. Keep reason and expected_purpose under 100 Chinese characters each; never copy the state into the answer. MC: allocate_mc_bohb with existing branch IDs, mc_budget, dft_budget, exploration_fraction and optional branch_count. Standalone MC decisions are reserved for explicit stepwise requests or legacy maintenance; use recorded evidence and confirmed MC policy, never invent resource settings. For generate_branches, follow generation_region_contract exclusively: sampling_mode=region_adaptive, regions without any quota or target count; allowed additional parameters are initial_states_per_branch, seed, max_det_H, defer_reason.  restart_failed_task may target only a real task_id listed in decision_context.retryable_tasks. A webui record_id or failed generate_branches action is not a scientific task and cannot be restarted with that tool. For allocate_mc_bohb, select existing branch_id values from decision_context.available_branches in target_ids; put focus_regions, exploration_fraction, mc_budget and dft_budget in parameters. Hyperband controls fidelity and promotions after Relax screening. Batch MC planning and input generation use allocate_mc_bohb or prepare_local_batch_files, never run_calculation_stage. run_calculation_stage requires exactly one structure_id and is not a batch action. If all current MC tasks are complete and the confirmed policy disables a second segment, assess convergence or the next stage instead of proposing another MC batch. For select_dft_candidates, use existing qbc_candidates only and categorical decisions DFT_SINGLE_POINT, DFT_RELAX, DEFER or REJECT. Never invent energies, Ehull, scores, uncertainty or convergence.",
                 },
             )
             from phase_agent.decisions.agent.dialogue_contract import is_dialogue
@@ -197,12 +205,16 @@ def propose_agent_tool_action(
                 tool = action.get("tool") or action.get("action_type")
             if not isinstance(tool, str) or tool not in allowed_tools:
                 raise ValueError(f"Agent 返回未注册的动作：{tool!r}")
-            from phase_agent.decisions.agent.action_contracts import action_contract_errors
+            from phase_agent.decisions.agent.action_contracts import (
+                action_contract_errors,
+            )
 
             envelope_errors = action_contract_errors(action)
             if envelope_errors:
                 raise ValueError("Invalid LLM action: " + "; ".join(envelope_errors))
-            from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
+            from phase_agent.decisions.agent.post_dft_review import (
+                valid_post_dft_review,
+            )
 
             if decision_context.get("post_dft_assessment") and not valid_post_dft_review(action):
                 raise ValueError(
@@ -224,16 +236,30 @@ def propose_agent_tool_action(
                     "seed",
                     "max_det_H",
                     "generation_plan",
+                    "sampling_mode",
+                    "regions",
+                    "defer_reason",
                 }
                 if unsupported:
                     raise ValueError(
                         f"unsupported generate_branches parameters: {sorted(unsupported)}"
                     )
+                action = {**action, "decision_context": decision_context}
                 action = _apply_generation_defaults(action, state, config or {})
-                if decision_context.get("post_dft_assessment") or (
-                    action.get("parameters") or {}
-                ).get("generation_plan"):
-                    from phase_agent.decisions.agent.generation_plan import validate_generation_plan
+                from phase_agent.tools.policy.adaptive_branch_count import (
+                    generation_review_errors,
+                )
+
+                review_errors = generation_review_errors(action)
+                if review_errors:
+                    raise ValueError(";".join(review_errors))
+                if not (action.get("parameters") or {}).get("sampling_mode") and (
+                    decision_context.get("post_dft_assessment")
+                    or (action.get("parameters") or {}).get("generation_plan")
+                ):
+                    from phase_agent.decisions.agent.generation_plan import (
+                        validate_generation_plan,
+                    )
 
                     validate_generation_plan(action["parameters"])
             action = _ensure_task_key(action, state)
@@ -242,7 +268,8 @@ def propose_agent_tool_action(
             )
 
             evidence_check = check_decision_evidence_refs(
-                action.get("evidence_refs") or [], decision_context.get("evidence_catalog") or {}
+                action.get("evidence_refs") or [],
+                decision_context.get("evidence_catalog") or {},
             )
             return normalize_action(
                 {
@@ -268,7 +295,11 @@ def propose_agent_tool_action(
             fallback_reason = f"llm_failed: {type(error).__name__}: {error}"
     else:
         fallback_reason = "llm_not_configured"
-    if _needs_initial_generation(state) and "generate_branches" in allowed_tools:
+    if (
+        agent_client is None
+        and _needs_initial_generation(state)
+        and "generate_branches" in allowed_tools
+    ):
         config_version = state.get("config_version") or "unversioned"
         action = {
             "tool": "generate_branches",
@@ -328,10 +359,47 @@ def _apply_generation_defaults(action: dict, state: dict, config: dict) -> dict:
     if not isinstance(params, dict):
         params = {}
         result["parameters"] = params
+    from phase_agent.tools.policy.region_sampling import (
+        is_region,
+        errors,
+        CONTROLS,
+        VERSION,
+    )
+
+    if is_region(result):
+        problems = errors(params)
+        if problems:
+            raise ValueError(";".join(problems))
+        params.setdefault("sampling_controls", deepcopy(CONTROLS))
+        params.setdefault("initial_states_per_branch", 3)
+        params.setdefault("seed", (config.get("run") or config).get("seed", 0))
+        return result
+    if ((result.get("decision_context") or {}).get("branch_count_policy") or {}).get(
+        "version"
+    ) == VERSION:
+        raise ValueError("region_sampling_requires_proposal_revision")
     run = config.get("run") or config
     strategy_config = config.get("round_strategy") or {}
     from phase_agent.tools.policy.workflow_policy import settings
 
+    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
+
+    if is_adaptive_generation(result):
+        from phase_agent.decisions.agent.generation_plan import derive_generation_totals
+        from phase_agent.tools.policy.workflow_policy import branch_batch_errors
+
+        result = derive_generation_totals(result)
+        params = result["parameters"]
+        if "total_quota" not in params and isinstance(params.get("quotas"), dict):
+            params["total_quota"] = sum(params["quotas"].values())
+        errors = branch_batch_errors(result, config)
+        if errors:
+            raise ValueError(";".join(errors))
+        if params.get("batch_size", params["total_quota"]) != params["total_quota"]:
+            raise ValueError(
+                "branch_target_mismatch: batch_size must match total_quota; revise the proposal"
+            )
+        params["batch_size"] = params["total_quota"]
     total_default = settings(config)["branch_batch_size"]
     # Explicit quotas are checked rather than silently changing a reviewed scope.
     params.setdefault("total_quota", total_default)
@@ -388,7 +456,13 @@ def _apply_generation_defaults(action: dict, state: dict, config: dict) -> dict:
     configured = strategy.get("generation_quotas") or {}
     enabled = set(
         (config.get("generation_actions") or {}).get("enabled")
-        or ("coverage", "composition", "competing_phase", "tm_ordering", "periodic_extension")
+        or (
+            "coverage",
+            "composition",
+            "competing_phase",
+            "tm_ordering",
+            "periodic_extension",
+        )
     )
 
     def valid_quotas(source):

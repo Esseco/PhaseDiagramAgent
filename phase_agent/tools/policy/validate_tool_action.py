@@ -23,7 +23,9 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         errors.append("configuration_not_confirmed")
         return {"valid": False, "errors": errors}
     config = snapshot["config"]
-    from phase_agent.tools.dispatch.scientific_operations import operation_binding_errors
+    from phase_agent.tools.dispatch.scientific_operations import (
+        operation_binding_errors,
+    )
 
     model = state.get("active_model") or config.get("mlip") or {}
     errors.extend(
@@ -36,7 +38,9 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         )
     )
     if action.get("scientific_decision") is not None:
-        from phase_agent.decisions.agent.scientific_decisions import scientific_decision_errors
+        from phase_agent.decisions.agent.scientific_decisions import (
+            scientific_decision_errors,
+        )
 
         errors.extend(
             scientific_decision_errors(
@@ -66,7 +70,23 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
     from phase_agent.tools.policy.branch_conditions import branch_entry_errors
 
     errors.extend(branch_entry_errors(action, state))
+    from phase_agent.tools.policy.adaptive_branch_count import generation_review_errors
+
+    errors.extend(generation_review_errors(action, state))
     if tool == "generate_branches":
+        from phase_agent.tools.policy.region_sampling import is_region, CONTROLS
+
+        if is_region(action):
+            if parameters.get("sampling_controls") != CONTROLS:
+                errors.append("region_sampling_controls_not_frozen")
+            preview = parameters.get("region_preview") or {}
+            if not preview.get("ledger_fingerprint"):
+                errors.append("region_sampling_requires_metadata_preview")
+            if (
+                preview.get("model_version") != state.get("active_model_version")
+                or preview.get("config_version") != snapshot["config_version"]
+            ):
+                errors.append("region_sampling_preview_version_changed")
         from phase_agent.decisions.agent.generation_plan import (
             configured_generation_strategies,
             disabled_generation_allocations,
@@ -130,10 +150,15 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
     if not isinstance(budget, (int, float)) or budget < 0:
         errors.append("invalid_budget")
     else:
+        from phase_agent.tools.policy.adaptive_branch_count import (
+            budget_limits_for_action,
+        )
+
+        branch_limits = budget_limits_for_action(action, config["budgets"])
         check = check_budget(
             state,
             {"stage": action.get("stage"), "tasks": 1, "relative_cost": budget},
-            config["budgets"],
+            branch_limits,
         )
         errors.extend(check["reasons"])
         total_limit = (config.get("budgets") or {}).get("total_relative_cost")
@@ -141,7 +166,7 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
             state.get("reserved_relative_cost") or 0
         )
         if (
-            budget_is_hard(config.get("budgets"))
+            budget_is_hard(branch_limits)
             and total_limit is not None
             and used + budget > total_limit
         ):
@@ -184,7 +209,9 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         errors.append(ownership["reason"])
     if tool == "adjust_strategy":
         if parameters.get("request_configuration_revision") is True:
-            from phase_agent.tools.workflows.request_strategy_revision import _known_path
+            from phase_agent.tools.workflows.request_strategy_revision import (
+                _known_path,
+            )
 
             patch = parameters.get("patch") or {}
             if (

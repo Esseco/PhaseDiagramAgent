@@ -11,6 +11,9 @@ from contextlib import contextmanager
 import time
 
 MANIFEST = "transfer_manifest.json"
+from phase_agent.tools.remote.transfer_limits import (
+    MAX_ARCHIVE_FILES, MAX_MANIFEST_BYTES, MAX_ARCHIVE_BYTES, validate_capacity,
+)
 RESULT_NAMES = {
     "mc_occupations.bin",
     "result.json",
@@ -55,10 +58,14 @@ def create_bundle(root, files, destination, *, kind, prefix=""):
             raise ValueError("Archive cannot include itself")
         rows.append({"path": name, "size": source.stat().st_size, "sha256": checksum(source)})
         sources.append(source)
+    if len({row["path"].casefold() for row in rows}) != len(rows) or any(row["path"].casefold() == MANIFEST.casefold() for row in rows):
+        raise ValueError("Duplicate or reserved transfer paths")
+    manifest_bytes = json.dumps({"schema": 1, "kind": kind, "files": rows}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    validate_capacity(len(rows) + 1, len(manifest_bytes), sum(row["size"] for row in rows) + len(manifest_bytes))
     temporary = destination.with_name(destination.name + ".part")
     try:
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(MANIFEST, json.dumps({"schema": 1, "kind": kind, "files": rows}))
+            archive.writestr(MANIFEST, manifest_bytes)
             for source, row in zip(sources, rows):
                 archive.write(source, row["path"])
         os.replace(temporary, destination)
@@ -195,34 +202,38 @@ def _safe_name(name):
     return path
 
 
+def _validated_inventory(archive, max_bytes, storage_kind):
+    infos = archive.infolist()
+    if len({i.filename.casefold() for i in infos}) != len(infos):
+        raise ValueError("Duplicate paths or too many files")
+    validate_capacity(len(infos), archive.getinfo(MANIFEST).file_size, sum(i.file_size for i in infos), max_bytes=max_bytes)
+    for info in infos:
+        _safe_name(info.filename)
+        if info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000:
+            raise ValueError("Archive directories/symlinks are not supported")
+    if archive.getinfo(MANIFEST).file_size > MAX_MANIFEST_BYTES:
+        raise ValueError("Transfer manifest exceeds size limit")
+    manifest = json.loads(archive.read(MANIFEST))
+    allowed = {"results"} if storage_kind is None else {storage_kind}
+    if storage_kind not in {None, "storage_inputs", "storage_results"}:
+        raise ValueError("Unsupported local storage kind")
+    if manifest.get("schema") != 1 or manifest.get("kind") not in allowed:
+        raise ValueError("Not a supported result archive")
+    rows = manifest["files"]
+    names = [r["path"] for r in rows]
+    if len(names) != len(set(names)) or set(names) | {MANIFEST} != {i.filename for i in infos}:
+        raise ValueError("Transfer manifest file list mismatch")
+    return rows
+
+
 def import_bundle(
-    archive_path, directory, *, max_bytes=8 * 1024**3, storage_kind=None, extra_result_suffixes=()
+    archive_path, directory, *, max_bytes=MAX_ARCHIVE_BYTES, storage_kind=None, extra_result_suffixes=()
 ):
     """Validate the whole archive before publishing; refuse differing existing files."""
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive_path) as archive:
-        infos = archive.infolist()
-        if len(infos) > 20000 or len({i.filename.casefold() for i in infos}) != len(infos):
-            raise ValueError("Duplicate paths or too many files")
-        if sum(i.file_size for i in infos) > max_bytes:
-            raise ValueError("Result archive exceeds size limit")
-        for info in infos:
-            _safe_name(info.filename)
-            if info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000:
-                raise ValueError("Archive directories/symlinks are not supported")
-        if archive.getinfo(MANIFEST).file_size > 4 * 1024**2:
-            raise ValueError("Transfer manifest exceeds size limit")
-        manifest = json.loads(archive.read(MANIFEST))
-        allowed = {"results"} if storage_kind is None else {storage_kind}
-        if storage_kind not in {None, "storage_inputs", "storage_results"}:
-            raise ValueError("Unsupported local storage kind")
-        if manifest.get("schema") != 1 or manifest.get("kind") not in allowed:
-            raise ValueError("Not a supported result archive")
-        rows = manifest["files"]
-        names = [r["path"] for r in rows]
-        if len(names) != len(set(names)) or set(names) | {MANIFEST} != {i.filename for i in infos}:
-            raise ValueError("Transfer manifest file list mismatch")
+        rows = _validated_inventory(archive, max_bytes, storage_kind)
         with tempfile.TemporaryDirectory(prefix=".transfer-", dir=root) as temp:
             staged = Path(temp)
             targets = []
@@ -385,3 +396,22 @@ if __name__ == "__main__":
     import sys
 
     publish_return(sys.argv[1], sys.argv[2])
+
+
+def validate_bundle(archive_path, *, max_bytes=MAX_ARCHIVE_BYTES, extra_result_suffixes=()):
+    """Check every payload without extracting or writing any file."""
+    with zipfile.ZipFile(archive_path) as archive:
+        rows = _validated_inventory(archive, max_bytes, None)
+        for row in rows:
+            relative = _safe_name(row["path"])
+            if relative.name not in RESULT_NAMES and relative.suffix.lower() not in {".vasp", ".poscar", ".json", ".gz", *extra_result_suffixes}:
+                raise ValueError(f"Unexpected result file: {relative}")
+            digest = hashlib.sha256()
+            size = 0
+            with archive.open(row["path"]) as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    size += len(chunk)
+                    digest.update(chunk)
+            if size != row["size"] or digest.hexdigest() != row["sha256"]:
+                raise ValueError(f"Result checksum mismatch: {relative}")
+        return len(rows)
