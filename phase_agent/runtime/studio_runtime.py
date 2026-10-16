@@ -33,6 +33,9 @@ def send_project_message(text, thread_id):
     from phase_agent.runtime.agent_api import _chat_content
 
     with _message_lock:
+        from phase_agent.runtime.loaded_code import assert_loaded_code_current
+
+        assert_loaded_code_current()
         from phase_agent.graphs.cancellation import check_cancelled
 
         check_cancelled()

@@ -14,7 +14,7 @@ def post_dft_lines(state):
     lines = [
         f"结果回收与分析：{label}",
         f"本轮 DFT：回收 {assessment['recovered_tasks']}/{assessment['expected_tasks']}，合格配对 {assessment['paired_structures']}。",
-        f"成功 {assessment['successful_tasks']}、失败 {assessment['failed_tasks']}；未回传且不再等待 {len(assessment['waived_task_ids'])}。",
+        f"成功 {assessment['successful_tasks']}、失败 {assessment['failed_tasks']}、已取消 {assessment.get('cancelled_tasks', 0)}；取消项不计DFT验证，不再回收。",
         f"原模型 {assessment['scope'].get('model_version')}：能量 MAE/RMSE {1000 * energy['mae']:.5g}/{1000 * energy['rmse']:.5g} meV/atom；受力 {1000 * forces['mae']:.5g}/{1000 * forces['rmse']:.5g} meV/Å。",
     ]
     export = next(
@@ -41,24 +41,11 @@ def post_dft_lines(state):
             lines.append(f"对角线图未生成：{plots['reason']}")
         if (plots.get("diagnostics") or {}).get("warning"):
             lines.append("受力检查提醒：" + plots["diagnostics"]["warning"])
-    for method, label in (("mlip", "MLIP"), ("dft", "DFT")):
-        snapshot = (state.get("phase_diagrams") or {}).get(method) or {}
-        if snapshot.get("csv_path"):
-            lines.append(f"{label} 相图：`{snapshot['csv_path']}`。")
-        elif method == "dft":
-            lines.append(
-                "DFT 相图：尚无已保存 CSV；需要检查端点、有效数据与相识别，不应把误差已配对视为相图已完成。"
-            )
-    combined = (state.get("phase_diagrams") or {}).get("combined") or {}
-    if combined:
-        lines.append(
-            f"DFT 校正综合相图：{combined.get('status')}；未校正结构 {combined.get('excluded_structures', '未知')}。"
-            + (
-                f" CSV：`{combined['csv_path']}`。"
-                if combined.get("csv_path")
-                else f" 原因：{combined.get('reason', '尚无输出')}。"
-            )
-        )
+    snapshot = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    if snapshot.get("csv_path"):
+        lines.append(f"MLIP 预测相图：`{snapshot['csv_path']}`；DFT 用于检验与微调。")
+    else:
+        lines.append("MLIP 预测相图：尚无已保存 CSV；DFT 用于检验与微调。")
     return "\n".join(lines)
 
 

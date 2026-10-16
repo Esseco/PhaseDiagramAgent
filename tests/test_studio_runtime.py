@@ -34,7 +34,7 @@ def test_lifespan_shares_handler_and_closes_control(tmp_path, monkeypatch):
         async with studio_runtime.lifespan(None):
             assert (
                 studio_runtime.send_project_message("继续", "t")
-                == "epoch0 · 配置修订中，等待确认\nok"
+                == "当前项目 · epoch0 · 配置修订中，等待确认\n本次：已检查当前项目状态。\nok\n预算：本次未提供新的计算预算。"
             )
             handler.assert_called_once_with(
                 [{"role": "user", "content": "继续"}], conversation_id="t"
@@ -82,7 +82,8 @@ def test_configured_app_and_graph_share_the_same_runtime(tmp_path, monkeypatch):
                 {"configurable": {"thread_id": "synthetic"}},
             )
             assert (
-                result["messages"][-1].content == "epoch0 · 配置修订中，等待确认\nsynthetic status"
+                result["messages"][-1].content
+                == "当前项目 · epoch0 · 配置修订中，等待确认\n本次：已检查当前项目状态。\nsynthetic status\n预算：本次未提供新的计算预算。"
             )
         assert studio_runtime._handler is None
 

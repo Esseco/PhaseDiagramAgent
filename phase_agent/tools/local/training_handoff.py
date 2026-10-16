@@ -71,6 +71,7 @@ def validation_request(current, key, job, config, result):
     new["model_path"] = new.get("remote_model_path") or new["model_path"]
     new["version"] = "remote-" + key + "-" + result["fingerprint"][:12]
     new["dataset_version"] = job["report"].get("training_round", Path(job["directory"]).name)
+    new.update(deepcopy(job.get("report", {}).get("training_snapshot") or {}))
     required = []
     data = Path(settings.get("data_path") or "__missing_validation_data__")
     if not data.is_file():

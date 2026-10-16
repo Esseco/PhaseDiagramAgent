@@ -82,6 +82,13 @@ def approval_reply(proposal, state):
     dft_details = dft_artifacts(proposal, state)
     if dft_details:
         artifact_lines.extend(file_location_lines("DFT 选点", dft_details["json"]))
+    shared = (proposal.get("raw_action") or {}).get("_shared_dft_snapshot")
+    if shared is not None:
+        artifact_lines.append(
+            "引用DFT："
+            + "、".join(shared["source_projects"])
+            + f"；本方案固定 {len(shared['record_ids'])} 条记录，新增数据下次审批纳入。"
+        )
     return "\n".join(
         [
             "本次：" + purpose,

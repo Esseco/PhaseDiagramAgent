@@ -2,7 +2,6 @@
 
 from phase_agent.tools.budget.estimate_stage_cost import estimate_dft_cost
 from phase_agent.tools.budget.check_budget import check_budget, budget_is_hard
-from copy import deepcopy
 from phase_agent.decisions.agent.dft_contracts import dft_contract_errors
 
 
@@ -16,7 +15,11 @@ def validate_dft_agent_decisions(
     remaining_budget: float,
 ) -> dict:
     errors, accepted, rejected = [], [], []
-    budget_state = deepcopy(state)
+    # Budget checks read existing usage; only new local reservations are added.
+    budget_state = {
+        "budget_usage": state.get("budget_usage") or {},
+        "budget_reservations": dict(state.get("budget_reservations") or {}),
+    }
     if str(proposal.get("source") or "").startswith("llm_agent") and _contains_forbidden_numeric(
         {
             "decisions": proposal.get("decisions"),
@@ -86,6 +89,15 @@ def validate_dft_agent_decisions(
                     "candidate_id": candidate_id,
                     "action": action,
                     "reason": "dft_relax_reserved_for_limited_geometry_checks",
+                }
+            )
+            continue
+        if action == "DFT_RELAX" and not _relax_geometry_justified(metric, config):
+            rejected.append(
+                {
+                    "candidate_id": candidate_id,
+                    "action": action,
+                    "reason": "dft_relax_requires_hull_and_geometry_evidence",
                 }
             )
             continue
@@ -164,6 +176,14 @@ def validate_dft_agent_decisions(
         )
         if action == "DFT_RELAX":
             relax_accepted += 1
+    audit_ids = set(state.get("dft_audit_candidate_ids") or [])
+    selected_ids = {
+        r["candidate_id"] for r in accepted if r["action"] in {"DFT_SINGLE_POINT", "DFT_RELAX"}
+    }
+    if selected_ids and audit_ids and not (audit_ids & selected_ids):
+        errors.append("independent_dft_audit_required")
+    for row in accepted:
+        row["independent_audit"] = row["candidate_id"] in audit_ids
     global_action = proposal.get("global_action", "CONTINUE_DATA_COLLECTION")
     if global_action not in {"RETRAIN_MLIP", "CONTINUE_DATA_COLLECTION"}:
         errors.append("invalid_global_action")
@@ -211,3 +231,23 @@ def _contains_forbidden_numeric(value, path=""):
     elif isinstance(value, list):
         return any(_contains_forbidden_numeric(item, path) for item in value)
     return False
+
+
+def _relax_geometry_justified(metric, config):
+    from math import isfinite
+
+    evidence = metric.get("geometry_optimization_evidence") or {}
+    gap = metric.get("predicted_Ehull")
+    residual = evidence.get("residual_force_ev_per_angstrom")
+    tolerance = evidence.get("force_tolerance_ev_per_angstrom")
+    values = (gap, residual, tolerance)
+    if any(
+        isinstance(v, bool) or not isinstance(v, (int, float)) or not isfinite(v) for v in values
+    ):
+        return False
+    return (
+        0 <= gap <= float(config.get("near_hull_threshold", 0.1))
+        and bool(evidence.get("source_task_id"))
+        and tolerance > 0
+        and residual > tolerance
+    )

@@ -37,6 +37,13 @@ def build_agent_proposal(
 
     summary = decision_summary(action, runtime_state or state)
     raw_action = deepcopy(action)
+    from phase_agent.persistence.shared_dft import capture_snapshot
+
+    snapshot = capture_snapshot(
+        runtime_state or state, (runtime_state or state).get("confirmed_config") or {}
+    )
+    if snapshot is not None:
+        raw_action["_shared_dft_snapshot"] = snapshot
     branch_policy = (raw_action.pop("decision_context", None) or {}).get("branch_count_policy")
     if branch_policy:
         raw_action["decision_context"] = {"branch_count_policy": deepcopy(branch_policy)}

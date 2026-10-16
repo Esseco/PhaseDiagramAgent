@@ -86,7 +86,7 @@ def prepare_cv_review(state, job, result):
             "K折评估训练方法，不是最终全数据模型的独立测试。",
             "未匹配旧模型同帧预测的结构不用于改善幅度计算；未评估近凸包排序。",
         ],
-        "next_proposal": "先审阅匹配结构的能量和力误差变化，再决定补DFT；需验证最终模型时，从未参与训练的同组成近凸包候选中选择结构，先核对已有DFT能否复用，再提出补算方案及预算。",
+        "next_proposal": "按已确认路线申请切换本轮新模型，刷新结构与MLIP相图；交付前使用未参与当前模型训练的新DFT独立检验。",
     }
     path = root / "cv_baseline_review.json"
     content = json.dumps(report, ensure_ascii=False, indent=2)
@@ -129,7 +129,7 @@ def register_cv_candidate(current, key, job, result, report, handoff):
         for name in ("energy_per_atom", "forces")
         for metric in ("mae", "rmse")
     )
-    if not improved:
+    if not complete:
         return False
     from copy import deepcopy
     from phase_agent.tools.local.training_handoff import digest_file
@@ -141,13 +141,15 @@ def register_cv_candidate(current, key, job, result, report, handoff):
         model_path=model.get("remote_model_path") or model["model_path"],
         dataset_version=job["report"].get("training_round", Path(job["directory"]).name),
         members=deepcopy(result["models"]),
+        **deepcopy(job.get("report", {}).get("training_snapshot") or {}),
     )
     validation = {
         "status": "completed",
         "passed": True,
         "evaluation_type": "grouped_cross_validation_review",
         "independent_test_completed": False,
-        "checks": {"fully_matched": complete, "energy_and_force_improved": improved},
+        "checks": {"fully_matched": complete},
+        "energy_and_force_improved": improved,
         "old_metrics": report["old"],
         "new_metrics": report["new"],
         "validation_data_version": "cv-" + result["fingerprint"],
@@ -176,6 +178,6 @@ def register_cv_candidate(current, key, job, result, report, handoff):
         candidate_model_version=version,
         evidence_type="grouped_cross_validation_review",
         review_sha256=digest_file(artifact),
-        reason=f"本轮微调已完成，K折同帧能量和力误差均改善。建议激活候选 {version}，随后刷新已有结构与凸包，再判断收敛、针对关键结构补DFT或下一轮搜索。K折不等同最终模型独立测试。\n如同意，回复：激活候选 {version} 原因：K折误差改善，采用新模型刷新凸包后评估收敛与DFT缺口。",
+        reason=f"本轮微调已完成，K折同帧评估已完成，改善情况见指标。按已确认路线切换候选 {version}，随后刷新已有结构与凸包，再判断收敛、针对关键结构补DFT或下一轮搜索。K折不等同最终模型独立测试。\n如同意，回复：激活候选 {version} 原因：本轮训练完成，采用新模型刷新凸包后评估收敛与DFT缺口。",
     )
     return True

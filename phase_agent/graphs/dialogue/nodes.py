@@ -24,16 +24,23 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
     facts = read_json(handler.state_path, missing)
     if facts is missing:
         from pathlib import Path
+
         directory = Path(handler.state_path).parent
-        existing_project = (directory / "langgraph_lifecycle.sqlite").is_file() or (directory / "ledgers" / "phase_data.json").is_file()
+        existing_project = (directory / "langgraph_lifecycle.sqlite").is_file() or (
+            directory / "ledgers" / "phase_data.json"
+        ).is_file()
         if handler.config_delegate is None and existing_project:
-            raise OpenWebUIRequestError("项目状态文件不存在，无法核对现有任务；本次未分析或生成任务。")
+            raise OpenWebUIRequestError(
+                "项目状态文件不存在，无法核对现有任务；本次未分析或生成任务。"
+            )
         facts = {}
     facts = facts or {}
     from phase_agent.runtime.read_only_queries import read_only_reply
     from phase_agent.runtime.turn_process import timed_call
 
-    answer = timed_call("read_only_query", read_only_reply, handler, message, facts, context.conversation_id)
+    answer = timed_call(
+        "read_only_query", read_only_reply, handler, message, facts, context.conversation_id
+    )
     if answer is not None:
         handler.last_turn_outcome = "answered"
         return {"reply": answer, "operation": "done"}
@@ -80,6 +87,41 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
     from phase_agent.runtime.review_requests import pending_reviews
 
     reviews = pending_reviews(state["facts"])
+    # Resolve references to saved work before invoking scientific planning.
+    from phase_agent.graphs.dialogue.saved_control import route_saved_control
+
+    routed = route_saved_control(state, runtime, reviews)
+    if routed is not None:
+        return routed
+    if (
+        handler.config_delegate is None
+        and not reviews
+        and command in {"同意", "approve", "继续", "continue", "继续原运行"}
+    ):
+        from phase_agent.tools.state.execution_receipts import recovery_report
+
+        if recovery_report(handler.state_path, state["facts"])["unsettled"]:
+            from phase_agent.graphs.dialogue.saved_control import recovery_reply
+            return {"reply": recovery_reply(handler)}
+        from phase_agent.tools.workflows.reuse_dft_selection import reusable_selection
+        if reusable_selection(state["facts"]) is not None:
+            from phase_agent.graphs.dialogue.saved_selection_resume import prepare_resume
+            prepare_resume(handler, runtime.context)
+            return {"operation": "scientific_workflow"}
+    if (
+        handler.config_delegate is None
+        and not reviews
+        and command in {"同意", "approve", "拒绝", "reject"}
+    ):
+        from phase_agent.tools.workflows.reuse_dft_selection import reusable_selection
+
+        if command in {"同意", "approve"} and reusable_selection(state["facts"]) is not None:
+            from phase_agent.graphs.dialogue.saved_selection_resume import prepare_resume
+
+            prepare_resume(handler, runtime.context)
+            return {"operation": "scientific_workflow"}
+        handler.last_turn_outcome = "answered"
+        return {"reply": "当前没有可批准或拒绝的待审方案；本次未执行任务，也未调用模型重新决策。"}
     # Existing explicit control messages do not request a revised scientific
     # proposal. Reuse the saved approval owner instead of asking an LLM again.
     if (
@@ -203,7 +245,20 @@ def decide(state, runtime: Runtime[TurnRuntime]):
         return {"status": "scientific_requested"}
 
     # Known continuation enters observation/planning directly, not semantic routing.
-    if state["message"].strip().lower().rstrip("。.!！") in {"继续", "continue", "继续原运行", "回收完毕", "回收完成", "回传完成", "结果已回传", "已回传"} and not pending:
+    if (
+        state["message"].strip().lower().rstrip("。.!！")
+        in {
+            "继续",
+            "continue",
+            "继续原运行",
+            "回收完毕",
+            "回收完成",
+            "回传完成",
+            "结果已回传",
+            "已回传",
+        }
+        and not pending
+    ):
         request_scientific()
         return {"operation": "scientific_workflow"}
     with dialogue_message():
@@ -251,11 +306,29 @@ def read_evidence(state, runtime: Runtime[TurnRuntime]):
     new = [topic for topic in topics if topic not in prior]
     if int(state.get("evidence_reads", 0)) == 3:
         # Complex conversation gets all remaining evidence before its final answer.
-        new = [topic for topic in ("mc", "dft", "tasks", "model", "convergence", "budget", "history", "configuration", "plans") if topic not in prior]
+        new = [
+            topic
+            for topic in (
+                "mc",
+                "dft",
+                "tasks",
+                "model",
+                "convergence",
+                "budget",
+                "history",
+                "configuration",
+                "plans",
+            )
+            if topic not in prior
+        ]
     result = read_topics(state["facts"], new)
     process_event("按需读取证据", {"topics": new, "read_only": True})
     return {
-        "evidence": {**(state.get("evidence") or {}), **result, "_loaded_topics": sorted(prior | set(new))},
+        "evidence": {
+            **(state.get("evidence") or {}),
+            **result,
+            "_loaded_topics": sorted(prior | set(new)),
+        },
         "evidence_topics": sorted(prior | set(new)),
         "evidence_reads": int(state.get("evidence_reads", 0)) + 1,
         "operation": "decide",

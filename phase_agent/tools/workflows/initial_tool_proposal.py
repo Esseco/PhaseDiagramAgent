@@ -29,6 +29,33 @@ def select_initial_proposal(
         for name in (config.get("agent") or {}).get("allowed_tools") or []
         if callable((registry.get(name) or {}).get("handler"))
     ]
+    if (
+        mode == "interactive"
+        and "select_dft_candidates" in allowed
+        and (
+            (context or {}).get("frozen_selection_only") is True
+            or str((context or {}).get("user_message") or "").strip().lower()
+            in {"继续", "下一步", "然后呢", "continue", "next"}
+        )
+    ):
+        from phase_agent.tools.workflows.reuse_dft_selection import reusable_selection
+
+        saved = reusable_selection(current)
+        if saved is not None:
+            return {
+                "_proposal_selected": True,
+                "current": current,
+                "decision_state": decision_state,
+                "proposal": saved,
+                "record_id": record_id_factory(current, invocation_id),
+            }
+    if (context or {}).get("frozen_selection_only"):
+        return {
+            "status": "saved_selection_changed",
+            "state": current,
+            "reason": "原 DFT 选点的复用条件已变化；本次停止，未调用模型重新决策或执行任务。",
+            "submitted": False,
+        }
     from phase_agent.tools.policy.branch_conditions import branch_facts
     from phase_agent.runtime.turn_process import process_event
 
@@ -125,8 +152,19 @@ def select_initial_proposal(
                 if t.get("stage") in {"dft_single_point", "dft_relax"}
                 and t.get("status") != "cancelled"
             }
+            prior_relax = {
+                t.get("structure_id")
+                for t in current.get("tasks") or []
+                if t.get("stage") == "dft_relax" and t.get("status") != "cancelled"
+            }
             current["qbc_candidates"] = [
-                r for r in current["qbc_candidates"] if r.get("candidate_id") not in previous_dft
+                r
+                for r in current["qbc_candidates"]
+                if r.get("candidate_id") not in previous_dft
+                or (
+                    r.get("geometry_optimization_evidence")
+                    and r.get("candidate_id") not in prior_relax
+                )
             ]
         decision_state["qbc_candidates"] = deepcopy(current["qbc_candidates"])
         decision_state.setdefault("decision_context", {})["qbc_candidates"] = deepcopy(
@@ -137,6 +175,14 @@ def select_initial_proposal(
         )
 
         recommendation = recommend_post_mc_dft(current["qbc_candidates"], effective, current)
+        current["dft_audit_candidate_ids"] = [
+            r["candidate_id"]
+            for r in recommendation["selected_candidates"]
+            if r.get("dft_selection_mode") == "independent_audit"
+        ]
+        decision_state["decision_context"]["independent_audit_candidate_ids"] = current[
+            "dft_audit_candidate_ids"
+        ]
         decision_state["decision_context"]["dft_sampling_recommendation"] = {
             "candidate_ids": [row["candidate_id"] for row in recommendation["selected_candidates"]],
             "summary": recommendation["summary"],
@@ -289,6 +335,13 @@ def select_initial_proposal(
             "state": current,
             "reason": "本轮微调已完成，重复训练方案已拦截。请先审阅切换搜索或补采样/DFT的方案。",
         }
+    from phase_agent.tools.policy.workflow_policy import initial_direction_errors
+
+    initial_errors = (
+        initial_direction_errors(action, current, assessment) if not model_failed(action) else []
+    )
+    if initial_errors:
+        return {"status": "not_configured", "state": current, "reason": "; ".join(initial_errors)}
     if assessment and not model_failed(action):
         if not valid_post_dft_review(action):
             return {
@@ -382,7 +435,7 @@ def select_initial_proposal(
             prepare_dft_proposal,
         )
 
-        action, current, error = prepare_dft_proposal(
+        preparation = prepare_dft_proposal(
             action,
             current,
             decision_state,
@@ -390,13 +443,15 @@ def select_initial_proposal(
             agent_client=agent_client,
             revise=revise,
         )
-        if error:
+        current = preparation.state
+        if preparation.status == "rejected":
             return {
                 "status": "rejected",
                 "state": current,
-                "reason": error,
-                "post_dft_review": action.get("post_dft_review"),
+                "reason": preparation.error,
+                "post_dft_review": preparation.action.get("post_dft_review"),
             }
+        action = preparation.action
     if action.get("tool") == "allocate_mc_bohb":
         from phase_agent.tools.workflows.prepare_mc_proposal import prepare_mc_proposal
 

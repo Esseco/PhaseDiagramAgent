@@ -1,5 +1,7 @@
 """Confirmed configuration and runtime dependency initialization."""
 
+from phase_agent.interface_compatibility import call_with_optimizations
+
 from copy import deepcopy
 from phase_agent.configuration.runtime.build_effective_run_config import (
     build_effective_run_config,
@@ -80,7 +82,9 @@ def _initialize_workflow(
     )
     from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
 
-    loaded_state = normalize_workflow_state(loaded_state)
+    loaded_state = call_with_optimizations(
+        normalize_workflow_state, loaded_state, _optimizations={"_owned": True}
+    )
     if (
         loaded_state.get("confirmed_config_version") == snapshot["config_version"]
         and loaded_state.get("confirmed_config") is not None
@@ -93,8 +97,12 @@ def _initialize_workflow(
             "submitted": False,
             "steps_executed": 0,
         }
-    migration = authorize_budget_extension(
-        loaded_state, snapshot, user_approved=approve_budget_extension
+    migration = call_with_optimizations(
+        authorize_budget_extension,
+        loaded_state,
+        snapshot,
+        user_approved=approve_budget_extension,
+        _optimizations={"_owned": True},
     )
     if migration["status"].startswith("rejected") or migration["status"] == "approval_required":
         from phase_agent.tools.workflows.recover_saved_results import (
@@ -121,6 +129,18 @@ def _initialize_workflow(
             "message": _config_migration_block_message(migration),
         }
     loaded_state = migration["state"]
+    if migration["status"] == "deferred_supercell_revision":
+        snapshot = {
+            "config": deepcopy(loaded_state["confirmed_config"]),
+            "config_version": loaded_state["confirmed_config_version"],
+        }
+        config_session = {**config_session, "confirmed_snapshot": snapshot}
+        effective_config = build_effective_run_config(config_session, run_config)
+        context["effective_config"] = deepcopy(effective_config)
+    if migration["status"] in {"deferred_supercell_revision", "supercell_revision_applied"}:
+        boundary = deepcopy(effective_config["system"]["boundary"])
+        manager.boundary = boundary
+        manager.data["boundary"] = deepcopy(boundary)
     supplied_policy = runtime_adapters.get("scientific_decision_policy")
     if supplied_policy:
         if not isinstance(supplied_policy, dict) or supplied_policy.get("schema_version") != 1:
@@ -159,7 +179,7 @@ def _initialize_workflow(
                 "config_version": snapshot["config_version"],
                 "submitted": False,
             }
-    return {
+    prepared = {
         "_workflow_prepared": True,
         "manager": manager,
         "phase_references": phase_references,
@@ -192,3 +212,7 @@ def _initialize_workflow(
         "collection_report": collection_report,
         "loaded_state": loaded_state,
     }
+
+    from phase_agent.tools.workflows.saved_dft_input_frame import prepare_saved_dft_input_frame
+
+    return prepare_saved_dft_input_frame(prepared)

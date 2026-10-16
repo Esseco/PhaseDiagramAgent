@@ -18,7 +18,7 @@ def propose_agent_tool_action(
 
             from phase_agent.tools.policy.workflow_policy import settings
 
-            from phase_agent.tools.policy.region_sampling import policy as region_policy
+            from phase_agent.tools.policy.adaptive_branch_count import policy_for
 
             decision_context = {
                 **(state.get("decision_context") or {}),
@@ -37,13 +37,14 @@ def propose_agent_tool_action(
                     **settings(config or {}),
                     "branch_batch_size": 1000,
                 },
-                "branch_count_policy": region_policy(),
+                "branch_count_policy": policy_for(state),
                 "workflow_instruction": (
                     "统一闭环：Branch生成登记→Relax+MLIP-MC封装→回收→选择是否及对哪些候选做DFT→回收→比较继续搜索、补DFT、微调或数值收敛。"
-                    "每次仅提出一个科学动作。branch只选区域，不先定数量；"
+                    "每次仅提出一个科学动作。每批明确规划100–1000个branch及区域配额，优先小超胞，再按收益探索大超胞；不得超过确认上限；"
                     "finetune_min_new_dft是有效新增数据下限，finetune_max_new_dft是可选累积上限。"
                     "达到微调门槛不自动训练；仍需依据误差、覆盖和收益决定并经过审批。"
                     "封装内MC由已确认规则执行，不另行给同批Branch分配MC。"
+                    "第一模型轮次正常路径是branch→封装→静态DFT→首次微调；数据不足应报告。后续MC回收后先比较新增branch与DFT，DFT整批回收后再比较探索、微调、交付。微调成功后按原路线切换，不再由Agent改选保留旧模型。相图只用当前MLIP，DFT只检验与训练。"
                     "旧搜索模式与短期计划仅作历史记录，不作为当前指令或授权。"
                 ),
             }
@@ -228,6 +229,10 @@ def propose_agent_tool_action(
                 if len(targets) != 1 or targets[0] not in retryable:
                     raise ValueError("restart_failed_task requires a retryable scientific task_id")
             if (action.get("tool") or action.get("action_type")) == "generate_branches":
+                if (action.get("parameters") or {}).get("sampling_mode") == "region_adaptive":
+                    raise ValueError(
+                        "current_policy_requires_explicit_branch_quota; old frozen region plans remain unchanged"
+                    )
                 unsupported = set(action.get("parameters") or {}) - {
                     "total_quota",
                     "quotas",

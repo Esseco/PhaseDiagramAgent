@@ -4,6 +4,7 @@ from copy import deepcopy
 
 
 RUNTIME_KEYS = {
+    "shared_dft",
     "structure_directory",
     "state_path",
     "ledger_path",
@@ -29,7 +30,9 @@ def build_effective_run_config(config_session: dict, runtime_config: dict | None
     effective = deepcopy(confirmed)
     for key, value in supplied.items():
         if key in RUNTIME_KEYS:
-            if key == "mlip" and isinstance(value, dict):
+            if key == "shared_dft" and isinstance(value, dict):
+                effective[key] = {**value, **(confirmed.get("shared_dft") or {})}
+            elif key == "mlip" and isinstance(value, dict):
                 # Runtime defaults contain empty model paths. Do not let those
                 # defaults erase the confirmed remote model path or parameters.
                 merged_mlip = deepcopy(effective.get("mlip") or {})

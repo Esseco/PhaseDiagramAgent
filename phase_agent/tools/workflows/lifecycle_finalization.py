@@ -10,7 +10,7 @@ def prepare_workflow_actions(frame, *, event_loop):
     config_session = frame["config_session"]
     effective_registry = frame["effective_registry"]
     agent_client = frame["agent_client"]
-    context = frame["context"]
+    context = {**frame["context"], "saved_input_only": bool(frame.get("saved_input_only"))}
     execution_mode = frame["execution_mode"]
     human_feedback = frame["human_feedback"]
     replay_record = frame["replay_record"]
@@ -20,6 +20,12 @@ def prepare_workflow_actions(frame, *, event_loop):
     effective_config = frame["effective_config"]
     approval_directory = frame["approval_directory"]
     initial_long_term_advice = frame["initial_long_term_advice"]
+    from phase_agent.tools.workflows.run_event_loop import run_action_turn
+
+    # Transfer only the private frame already detached by lifecycle loading.
+    # Never add private keywords to injected or legacy event-loop interfaces.
+    target = getattr(event_loop, "func", event_loop)
+    ownership = {"_owned": True} if frame.get("saved_input_only") and target is run_action_turn else {}
     return event_loop(
         feedback["state"],
         config_session,
@@ -35,6 +41,7 @@ def prepare_workflow_actions(frame, *, event_loop):
         state_path=state_path or effective_config.get("state_path"),
         approval_directory=approval_directory or effective_config.get("approval_directory"),
         initial_long_term_advice=initial_long_term_advice,
+        **ownership,
     )
 
 
@@ -119,5 +126,5 @@ def _finalize_workflow(frame):
     )
     if result["state"].get("model_refresh"):
         result["submitted"] = False  # This workflow prepares manual HPC inputs only.
-    _save_runner_state(result["state"], state_path or effective_config.get("state_path"))
+    # Only response metadata changed since the durable save above.
     return result

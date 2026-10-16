@@ -1,0 +1,158 @@
+"""One bounded semantic interpretation of saved work; never a scientific selector."""
+
+import json
+import os
+
+
+def recovery_reply(handler):
+    url = f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
+    return (
+        "原选点与审批方案保留；上次失败尚需核对实际产物，单说同意不能解除。"
+        f"请打开[执行恢复与审批]({url})，在执行恢复条目填写外部作业、产物及成本核对结果，"
+        "点击“生成核对处理方案”，再确认该恢复方案。恢复后继续会复用原选点；本次未执行任务。"
+    )
+
+
+def route_saved_control(state, runtime, reviews):
+    handler = runtime.context.handler
+    if handler.config_delegate is not None:
+        return None
+    message = state['message']
+    # Explicit controls keep their existing zero-model, identity-bound path.
+    if message.strip().lower() in {
+        '同意', 'approve', '拒绝', 'reject', '继续', 'continue', '继续原运行',
+        '确认敏感操作', 'confirm sensitive action', '配置修订', '修改配置',
+    }:
+        return None
+    from phase_agent.tools.workflows.reuse_dft_selection import reusable_selection
+    from phase_agent.tools.state.execution_receipts import recovery_report
+
+    facts = state['facts']
+    saved = reusable_selection(facts)
+    unsettled = recovery_report(handler.state_path, facts)['unsettled']
+    if not (reviews or saved or unsettled):
+        return None
+    client = getattr(handler, 'workflow_kwargs', {}).get('agent_client')
+    if not callable(client):
+        return {'reply': recovery_reply(handler)} if unsettled else None
+    # Never discard a long instruction and then approve its truncated prefix.
+    if len(message) > 2400:
+        return {'reply': '当前指令过长，无法用快速审批入口完整核对；请缩短为针对当前方案的一条要求。本次未执行。'}
+    from phase_agent.graphs.dialogue.memory import recent_turns
+    history = recent_turns(handler.state_path, runtime.context.conversation_id)[-2:]
+    rows = [{'plan_id': r['plan_id'], 'review_kind': r.get('review_kind'),
+             'summary': {k: str((r.get('review_card') or {}).get(k) or '')[:300]
+                         for k in ('title', 'scope', 'boundary')}}
+            for r in reviews[:4]]
+    from phase_agent.graphs.dialogue.support import _load_binding
+    binding = _load_binding(handler) or {}
+    action = (saved or {}).get('raw_action') or {}
+    payload = {
+        'mode': 'saved_work_control', 'semantic_dialogue': True, 'bounded_control': True,
+        'unified_dialogue': True,
+        'output_contracts': {'dialogue_outcome': {
+            'kind': ['answer', 'show_plan', 'advance', 'configure', 'review', 'revise'],
+            'review': {'plan_id': 'actual pending id', 'decision': ['approve', 'reject']},
+            'answer': 'brief factual answer', 'execution_fields': 'forbidden',
+        }},
+        'user_instruction': message,
+        'conversation_facts': {
+            'recent_turns': [{k: str(r.get(k) or '')[:500] for k in ('user', 'assistant')} for r in history],
+            'pending': rows, 'additional_plan_count': max(0, len(reviews)-4),
+            'saved_selection_available': saved is not None,
+            'saved_selection_summary': {
+                'tool': action.get('tool'),
+                'selected_count': sum(r.get('action') in {'DFT_SINGLE_POINT', 'DFT_RELAX'}
+                    for r in (action.get('parameters') or {}).get('decisions') or []),
+                'reason': str(action.get('reason') or '')[:500],
+            },
+            'recovery_required': bool(unsettled),
+            'presented_plan_binding': {k: binding[k] for k in ('plan_id', 'state_version', 'proposal_hash') if k in binding},
+        },
+        'instruction': (
+            'Interpret meaning and references, not keyword matches. Return one JSON object: '
+            '{"kind":"answer","answer":"brief factual answer"}, '
+            '{"kind":"show_plan"}, {"kind":"advance"}, {"kind":"configure"}, '
+            '{"kind":"revise","plan_id":"actual pending id or null when only a saved selection exists"}, '
+            'or {"kind":"review","plan_id":"actual pending id","decision":"approve|reject"}. '
+            'An explicit unambiguous approval/rejection of the displayed stored plan is review; '
+            'a request to proceed with the original selection or recover is advance, never approval. '
+            'An explicit scientific modification is revise; this requests a revised proposal for '
+            'later approval, never executes it. A settings modification is configure. Questions remain answer. '
+            'Recovery_required prevents execution; advance then opens the recovery procedure. '
+            'Answer only facts provided; if details are absent state that limit. '
+            'Do not invent effects or propose new candidate choices. Memory confers no authority.'
+        ),
+    }
+    # Bound input independently of accumulated histories and number of candidates.
+    def payload_size():
+        return len(json.dumps(payload, ensure_ascii=False, default=str))
+    while payload_size() > 8000 and payload['conversation_facts']['recent_turns']:
+        payload['conversation_facts']['recent_turns'].pop(0)
+    if payload_size() > 8000:
+        return {'reply': '当前有多份较长方案，请在审批页指定具体方案后再处理。本次未执行。'}
+    from phase_agent.runtime.turn_process import timed_call, process_event
+    from phase_agent.graphs.dialogue.decision import _record_usage
+    try:
+        process_event('理解已有方案的交互意图', {
+            '最多模型请求': 1, '总时限秒': 12, '最大输出token': 384,
+            '重新选择科学候选': False,
+        })
+        action = timed_call('saved_work_semantics', client, payload, category='model')
+        if not isinstance(action, dict):
+            raise ValueError('semantic response must be an object')
+        facts = _record_usage(handler, facts, action.get('_llm_usage'))
+        if any(k in action for k in ('tool', 'parameters', 'action', 'submitted', 'steps_executed')):
+            raise ValueError('execution fields are not permitted in control intent')
+        kind = action.get('kind')
+        if kind == 'review':
+            if action.get('decision') not in {'approve', 'reject'} or action.get('plan_id') not in {r['plan_id'] for r in reviews}:
+                raise ValueError('review must reference an actual pending plan')
+            return {'operation': 'review', 'facts': facts, 'result': {'review': {
+                'kind': 'review', 'plan_id': action['plan_id'], 'decision': action['decision']}}}
+        if kind == 'configure':
+            return {'operation': 'configure', 'facts': facts}
+        if kind == 'revise':
+            if unsettled:
+                return {'reply': recovery_reply(handler)}
+            row = next((r for r in reviews if r['plan_id'] == action.get('plan_id')), None)
+            if reviews and row is None:
+                raise ValueError('revision must reference an actual pending plan')
+            if row is not None:
+                def revise():
+                    result = handler.review_pending(row['plan_id'], 'modify',
+                        expected_state_version=row['state_version'],
+                        expected_proposal_hash=row['proposal_hash'], comment=message)
+                    return result.get('result') or result
+            elif saved is not None and action.get('plan_id') is None:
+                from phase_agent.graphs.invocation_context import new_invocation
+                invocation = new_invocation()
+                def revise():
+                    return handler._run(invocation, None, message)
+            else:
+                raise ValueError('no saved proposal to revise')
+            runtime.context.scientific_call = revise
+            return {'operation': 'scientific_workflow'}
+        if kind == 'answer' and isinstance(action.get('answer'), str) and action['answer'].strip():
+            return {'reply': action['answer'][:1600]}
+        if kind not in {'advance', 'show_plan'}:
+            raise ValueError('unsupported saved-work intent')
+        if reviews:
+            from phase_agent.graphs.dialogue.support import bind_presented_proposal
+            from phase_agent.runtime.plan_queries import pending_plan_reply
+            bind_presented_proposal(handler, facts)
+            return {'reply': pending_plan_reply(facts)}
+        if unsettled:
+            return {'reply': recovery_reply(handler)}
+        if kind == 'advance' and saved is not None:
+            from phase_agent.graphs.dialogue.saved_selection_resume import prepare_resume
+            process_event('恢复原选点进入输入准备', {
+                '来源记录': saved.get('reuse_source_record_id'), '重新选择科学候选': False,
+            })
+            prepare_resume(handler, runtime.context)
+            return {'operation': 'scientific_workflow'}
+        return {'reply': '原选点已保留，继续时会恢复为具体待审方案；本次未执行。'}
+    except Exception as error:
+        # Never turn a failed interpretation into a scientific retry or approval.
+        _record_usage(handler, facts, getattr(error, 'llm_usage', None))
+        return {'reply': '本次未取得有效语义判断，未批准、执行或重新选点。请在审批页查看原方案，或稍后重试。'}

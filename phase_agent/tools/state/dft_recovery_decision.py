@@ -8,6 +8,42 @@ from phase_agent.analysis.state.dft_round_status import dft_recovery_rounds, dft
 from phase_agent.tools.state.task_waiting import active_pending_tasks
 
 
+def cancel_dft_recovery_waits(state, task_ids, *, user_message):
+    """Cancel only explicitly selected DFT tracking; never submit remote commands."""
+    ids = set(task_ids)
+    if not ids or not str(user_message or "").strip():
+        raise ValueError("explicit_dft_cancellation_required")
+    rows = {t.get("task_id"): t for t in state.get("tasks") or []}
+    for task_id in ids:
+        task = rows.get(task_id) or {}
+        already = task.get("status") == "cancelled" and task.get("recovery_cancelled") is True
+        if task.get("stage") not in {"dft_single_point", "dft_relax"} or (
+            not already
+            and task.get("status")
+            not in {"pending", "running", "submitted", "unknown", "submission_unknown"}
+        ):
+            raise ValueError("dft_cancellation_scope_invalid:" + str(task_id))
+    current = deepcopy(state)
+    for task in current.get("tasks") or []:
+        if task.get("task_id") not in ids or task.get("recovery_cancelled") is True:
+            continue
+        current.setdefault("dft_recovery_cancellations", []).append(
+            {
+                "task_id": task["task_id"],
+                "previous_status": task["status"],
+                "scope": dft_round_scope(task),
+                "user_message": str(user_message),
+                "remote_cancel_sent": False,
+            }
+        )
+        task.update(
+            status="cancelled", recovery_cancelled=True, cancellation_reason=str(user_message)
+        )
+    if "pending_tasks" in current:
+        current["pending_tasks"] = active_pending_tasks(current.get("tasks") or [])
+    return current
+
+
 def classify_dft_recovery_reply(message, state):
     """Only exact replies to a saved question; never infer a choice from 'continue'."""
     question = state.get("pending_dft_recovery_question")
@@ -22,6 +58,9 @@ def classify_dft_recovery_reply(message, state):
         "不回收",
         "不回收了",
         "不再回收",
+        "不再等待",
+        "取消，不再回收",
+        "取消剩余dft",
         "剩下的不回收了",
         "不再回收剩余dft",
         "就用已有结果继续",
@@ -66,6 +105,12 @@ def update_dft_recovery_question(state, decision=None):
                     task["recovery_wait_waived"] = True
                     task["recovery_decision_id"] = question["question_id"]
                     changed.append(task["task_id"])
+            if changed:
+                current = cancel_dft_recovery_waits(
+                    current,
+                    changed,
+                    user_message=decision.get("user_message") or "用户明确不再回收",
+                )
         current.setdefault("dft_recovery_decisions", []).append(
             {
                 "question_id": question["question_id"],
@@ -74,6 +119,7 @@ def update_dft_recovery_question(state, decision=None):
                 "user_message": decision.get("user_message"),
                 "asked_task_ids": question["pending_task_ids"],
                 "waived_task_ids": sorted(changed),
+                "cancelled_task_ids": sorted(changed),
                 "recovered_tasks_at_question": question["recovered_tasks"],
             }
         )

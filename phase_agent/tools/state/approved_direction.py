@@ -50,10 +50,10 @@ def direction_action_errors(action, state):
     if bound != direction_hash(proposal):
         errors.append("action_not_bound_to_current_direction")
     plan = proposal.get("plan")
-    if (
-        isinstance(plan, dict)
-        and proposal.get("review_policy") == "post_training_single_approval_v3"
-    ):
+    if isinstance(plan, dict) and proposal.get("review_policy") in {
+        "post_training_single_approval_v3",
+        "trained_model_switch_v4",
+    }:
         for key in ("tool", "parameters", "target_ids", "budget"):
             if action.get(key) != plan.get(key):
                 errors.append("saved_direction_plan_changed:" + key)

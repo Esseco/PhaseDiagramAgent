@@ -7,17 +7,22 @@ import math
 
 
 def reconciled_mc_state(state):
-    tier_state = deepcopy(state.get("tiered_mc_state") or {})
+    tier_state = state.get("tiered_mc_state") or {}
+    # Overlay first, detach once: overwritten segment payloads need no copy.
+    return deepcopy({**tier_state, "segments": list(_reconciled_segments(state))})
+
+
+def _reconciled_segments(state):
+    """Internal read-only overlay; callers extract facts, never mutate rows."""
     tasks = {
         row.get("task_key"): row
         for row in state.get("tasks") or []
         if row.get("stage") == "deep_search"
     }
-    tier_state["segments"] = [
-        {**segment, **deepcopy(tasks.get(segment.get("task_key")) or {})}
-        for segment in tier_state.get("segments") or []
-    ]
-    return tier_state
+    return (
+        {**row, **(tasks.get(row.get("task_key")) or {})}
+        for row in (state.get("tiered_mc_state") or {}).get("segments") or []
+    )
 
 
 def second_round_completed(state, model_version):
@@ -46,9 +51,7 @@ def second_round_completed(state, model_version):
 def first_round_source(state, model_version):
     """Latest fully recovered wave seeds either addition; retain the saved field names."""
     segments = [
-        row
-        for row in reconciled_mc_state(state)["segments"]
-        if row.get("model_version") == model_version
+        row for row in _reconciled_segments(state) if row.get("model_version") == model_version
     ]
     indexed = _with_legacy_segment_indices(segments)
     latest = max((row["_effective_segment_index"] for row in indexed), default=0)
@@ -116,7 +119,7 @@ def second_round_candidates(candidates, state, diagram, model_version):
         return [], []
     completed = {
         row.get("branch_id"): row
-        for row in reconciled_mc_state(state)["segments"]
+        for row in _reconciled_segments(state)
         if row.get("model_version") == model_version
     }
     entries_by_path = {}

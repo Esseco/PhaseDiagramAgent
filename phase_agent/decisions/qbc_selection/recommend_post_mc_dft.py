@@ -19,6 +19,9 @@ def recommend_post_mc_dft(candidates, config, state=None):
         and row.get("generation_cycle") == len(state.get("generation_history") or [])
         and row.get("status") != "cancelled"
     ]
+    from phase_agent.tools.budget.check_budget import budget_is_hard
+
+    hard = budget_is_hard(config.get("budgets"))
     remaining_count = int(selection.get("single_point_max_per_round", 100)) - len(prior)
     remaining_cost = float(selection.get("single_point_cost_per_round", 5000)) - sum(
         float(row.get("planned_relative_cost") or 0) for row in prior
@@ -53,7 +56,10 @@ def recommend_post_mc_dft(candidates, config, state=None):
             - float((state.get("budget_usage") or {}).get("total_relative_cost") or 0)
             - sum(float(row.get("reserved_cost") or 0) for row in reservations),
         )
-    if remaining_count <= 0 or remaining_cost <= 0:
+    if not hard:
+        remaining_count = len(pool)
+        remaining_cost = None
+    if remaining_count <= 0 or (remaining_cost is not None and remaining_cost <= 0):
         return {"selected_candidates": [], "summary": {"selected": 0, "relative_cost": 0}}
     groups = [(row.get("phase"), row.get("x_Na_per_O2")) for row in pool]
     qbc_config = config.get("qbc") or {}

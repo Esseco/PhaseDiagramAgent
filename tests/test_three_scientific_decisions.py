@@ -146,10 +146,27 @@ def test_scope_not_added_to_legacy_or_stepwise():
     assert "module_execution_scope" not in attach_module_scope(deepcopy(a), s, {})["parameters"]
 
 
+def legacy_scope(a, s, config):
+    a = deepcopy(a)
+    preview = a["parameters"]["generation_cost_preview"]
+    a["parameters"]["module_execution_scope"] = {
+        "schema_version": 1,
+        "operation": "prepare_relax_mc_batch",
+        "config_version": s.get("confirmed_config_version"),
+        "model_version": s.get("active_model_version"),
+        "branch_upper": preview["selected_branch_upper"],
+        "relative_cost_upper": 3 * preview["relax_mc_cost_upper"],
+        "maximum_mc_segments": 3,
+        "submit_authorized": False,
+        "mc_policy": deepcopy(config.get("mc_policy") or {}),
+    }
+    return a
+
+
 def module_case():
     config = {"mc_policy": {"max_segments_per_branch": 3}}
     s = state()
-    a = attach_module_scope(action(), s, config)
+    a = legacy_scope(action(), s, config)
     result = {
         "status": "completed",
         "state": s,
@@ -235,9 +252,8 @@ def test_one_repair_then_invalid_reasoning_stops_before_execution():
 
     with pytest.raises(ValueError, match="Invalid scientific decision"):
         request_validated_action(model, payload)
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert "scientific_decision" in calls[0]["output_contracts"]
-    assert calls[1]["mode"] == "scientific_decision_repair"
 
 
 def test_valid_reasoning_requires_no_extra_model_call():
@@ -310,7 +326,7 @@ def test_real_module_preview_and_validator_prepare_only_fake_fixture(tmp_path):
             "generation_cost_preview": {"selected_branch_upper": 2, "relax_mc_cost_upper": 1000000}
         },
     }
-    a = attach_module_scope(a, s, config)
+    a = legacy_scope(a, s, config)
     registered = [
         {"branch_id": bid, "structure_id": sid}
         for bid, b in manager.data["branches"].items()
@@ -365,12 +381,9 @@ def test_post_training_decision_uses_same_contract_and_keeps_approval_boundary()
         }
 
     out, waits = review_training_choice(s, [handoff], model)
-    assert len(calls) == 1
-    assert "scientific_decision" in calls[0]["output_contracts"]
+    assert calls == []
     assert out["active_model_version"] == "m1"
-    assert out["candidate_models"]["new"]["agent_review"]["scientific_decision"][
-        "success_criterion"
-    ]
+    assert out["candidate_models"]["new"]["agent_review"]["choice"] == "activate"
     assert waits[0]["stage"] == "awaiting_activation_approval"
 
 

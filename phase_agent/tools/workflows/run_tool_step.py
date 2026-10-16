@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from phase_agent.interface_compatibility import call_with_optimizations
+
 from copy import deepcopy
 from typing import Any
 
@@ -123,17 +125,21 @@ def _initialize_tool_step(
     Interactive mode returns ``awaiting_approval`` on the first call. Call it
     again with the same ``invocation_id`` and ``human_feedback`` to continue.
     """
-    current = deepcopy(
+    current = (
         state
-        or {
-            "status": "ready",
-            "tasks": [],
-            "decisions": [],
-            "action_records": [],
-            "effective_decisions": {},
-            "invocations": {},
-            "pending_execution_policies": {},
-        }
+        if (context or {}).get("_event_state_owned") and state is not None
+        else deepcopy(
+            state
+            or {
+                "status": "ready",
+                "tasks": [],
+                "decisions": [],
+                "action_records": [],
+                "effective_decisions": {},
+                "invocations": {},
+                "pending_execution_policies": {},
+            }
+        )
     )
     current.setdefault("action_records", [])
     current.setdefault("pending_execution_policies", {})
@@ -186,7 +192,14 @@ def _initialize_tool_step(
                 "state": current,
                 "idempotent_replay": False,
             }
-    current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
+    # Frozen actions revalidate current facts and rebuild the snapshot after execution.
+    if not (context or {}).get("saved_input_only"):
+        current = call_with_optimizations(
+            update_state_snapshot,
+            current,
+            config_version=current.get("confirmed_config_version"),
+            _optimizations={"_owned": True},
+        )
     return {
         "_graph_prepared": True,
         "current": current,
@@ -514,8 +527,11 @@ def _prepare_tool_proposal(frame):
         advice_changed = updated.get("decision_memory") != current.get("decision_memory")
         current = updated
         if advice_changed:
-            current = update_state_snapshot(
-                current, config_version=current.get("confirmed_config_version")
+            current = call_with_optimizations(
+                update_state_snapshot,
+                current,
+                config_version=current.get("confirmed_config_version"),
+                _optimizations={"_owned": True},
             )
             decision_state = agent_state_summary(current)
     if (
@@ -533,8 +549,11 @@ def _prepare_tool_proposal(frame):
         advice_changed = advice_changed or memory_changed
         current = updated
         if memory_changed:
-            current = update_state_snapshot(
-                current, config_version=current.get("confirmed_config_version")
+            current = call_with_optimizations(
+                update_state_snapshot,
+                current,
+                config_version=current.get("confirmed_config_version"),
+                _optimizations={"_owned": True},
             )
             decision_state = agent_state_summary(current)
     if mode == "interactive" and stored and not rejecting:
@@ -746,9 +765,13 @@ def _approval_graph_node(frame):
             "revision": int((stored or {}).get("revision", 0)),
             "feedback_history": deepcopy((stored or {}).get("feedback_history") or []),
         }
-        current = update_state_snapshot(
-            current, config_version=current.get("confirmed_config_version")
-        )
+        if not (frame.get("context") or {}).get("_event_state_owned"):
+            current = call_with_optimizations(
+                update_state_snapshot,
+                current,
+                config_version=current.get("confirmed_config_version"),
+                _optimizations={"_owned": True},
+            )
         return {**response, "state": current, "idempotent_replay": False}
 
     current["pending_execution_policies"].pop(pending_key, None)
@@ -769,9 +792,13 @@ def _approval_graph_node(frame):
         )
         current.setdefault("decisions", []).append(deepcopy(response))
         _store_completed(current, invocation_id, response)
-        current = update_state_snapshot(
-            current, config_version=current.get("confirmed_config_version")
-        )
+        if not (frame.get("context") or {}).get("_event_state_owned"):
+            current = call_with_optimizations(
+                update_state_snapshot,
+                current,
+                config_version=current.get("confirmed_config_version"),
+                _optimizations={"_owned": True},
+            )
         return {**response, "state": current, "idempotent_replay": False}
 
     return {**frame, "current": current, "policy": policy, "_graph_prepared": True}
@@ -841,6 +868,13 @@ def _dispatch_graph_node(frame):
     mode = frame["mode"]
     policy = frame["policy"]
     record_id = frame["record_id"]
+    from phase_agent.persistence.shared_dft import accept_snapshot
+
+    accept_snapshot(
+        current,
+        (context or {}).get("effective_config") or config,
+        action.get("_shared_dft_snapshot"),
+    )
     formal = action.get("tool") not in {"check_convergence", "pause_search"}
     owns_action_reservation = (
         formal and registry.get(action.get("tool"), {}).get("reservation_mode") != "children"
@@ -855,6 +889,7 @@ def _dispatch_graph_node(frame):
         context={
             **(context or {}),
             "confirmed_config": config,
+            "event_state": current,
             "invocation_id": record_id,
             "approval_record_id": record_id,
             "config_version": validation["config_version"],
@@ -874,8 +909,24 @@ def _dispatch_graph_node(frame):
             "status": execution["status"],
             "execution": execution,
         }
-    current, payload_status = _apply_execution_result(
-        current, action, execution, record_id=record_id, formal=owns_action_reservation
+    current, payload_status = call_with_optimizations(
+        _apply_execution_result,
+        current,
+        action,
+        execution,
+        record_id=record_id,
+        formal=owns_action_reservation,
+        _optimizations={
+            "_owned": bool(
+                (frame.get("context") or {}).get("_event_state_owned")
+                and getattr(
+                    (registry.get(action.get("tool")) or {}).get("handler"),
+                    "_returns_owned_state",
+                    False,
+                )
+                is True
+            )
+        },
     )
     status = payload_status or execution["status"]
 
@@ -903,7 +954,11 @@ def _finish_graph_node(frame):
         "action": deepcopy(action),
         "validation": validation,
         "execution": execution,
-        "execution_result": deepcopy(execution),
+        "execution_result": (
+            compact_action_history(execution)
+            if (frame.get("context") or {}).get("_event_state_owned")
+            else deepcopy(execution)
+        ),
         "record_id": record_id,
     }
     _upsert_record(
@@ -926,7 +981,13 @@ def _finish_graph_node(frame):
 
     complete_action_direction(current, action, record_id, status)
     _store_completed(current, invocation_id, response)
-    current = update_state_snapshot(current, config_version=current.get("confirmed_config_version"))
+    if not (frame.get("context") or {}).get("_event_state_owned"):
+        current = call_with_optimizations(
+            update_state_snapshot,
+            current,
+            config_version=current.get("confirmed_config_version"),
+            _optimizations={"_owned": True},
+        )
     return {**response, "state": current, "idempotent_replay": False}
 
 

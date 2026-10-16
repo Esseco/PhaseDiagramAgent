@@ -26,7 +26,9 @@ def build_react_lifecycle_graph(*, action_graph=None, checkpointer=None, **stage
     observations.add_edge(steps[-1], END)
 
     def after_initialize(state):
-        return END if state.get("response") is not None else "observe"
+        if state.get("response") is not None:
+            return END
+        return "react" if state.get("saved_input_only") else "observe"
 
     def is_waiting(state):
         response = state.get("completed_response") or state.get("response") or {}
@@ -78,7 +80,7 @@ def build_react_lifecycle_graph(*, action_graph=None, checkpointer=None, **stage
     graph.add_node("finalize", nodes["prepare_inputs_and_finalize"])
     graph.add_node("wait_for_project_input", wait_for_project_input)
     graph.add_edge(START, "initialize")
-    graph.add_conditional_edges("initialize", after_initialize, [END, "observe"])
+    graph.add_conditional_edges("initialize", after_initialize, [END, "observe", "react"])
     graph.add_edge("observe", "wait")
     graph.add_conditional_edges("wait", after_wait, [END, "analyze", "wait_for_project_input"])
     graph.add_edge("analyze", "react")

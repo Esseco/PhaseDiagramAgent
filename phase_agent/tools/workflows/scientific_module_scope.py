@@ -5,34 +5,7 @@ import math
 
 
 def attach_module_scope(action, state, config):
-    if (state.get("scientific_decision_policy") or {}).get("schema_version") != 1:
-        return action
-    if action.get("tool") != "generate_branches":
-        return action
-    preference = (action.get("scientific_decision") or {}).get("module_execution")
-    if (
-        preference or (state.get("scientific_decision_policy") or {}).get("mlip_execution")
-    ) == "stepwise":
-        return action
-    params = action.get("parameters") or {}
-    preview = params.get("generation_cost_preview") or {}
-    amount = preview.get("relax_mc_cost_upper")
-    if type(amount) not in (int, float) or not math.isfinite(amount) or amount < 0:
-        return action
-    # Old preflight includes one segment. Three times it is a conservative
-    # envelope; exact diagnosis still has to fit, or preparation is blocked.
-    params["module_execution_scope"] = {
-        "schema_version": 1,
-        "operation": "prepare_relax_mc_batch",
-        "config_version": state.get("confirmed_config_version"),
-        "model_version": state.get("active_model_version"),
-        "branch_upper": preview["selected_branch_upper"],
-        "relative_cost_upper": 3 * amount,
-        "maximum_mc_segments": 3,
-        "submit_authorized": False,
-        "mc_policy": deepcopy(config.get("mc_policy") or {}),
-    }
-    action["parameters"] = params
+    # New plans stop after generation. Previously frozen scopes remain executable.
     return action
 
 

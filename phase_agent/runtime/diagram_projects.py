@@ -23,7 +23,12 @@ def read(path):
 
 
 def options(root, name):
-    return {"directory": str(root / "shared_dft"), "diagram_id": name}
+    return {
+        "directory": str(root / "shared_dft"),
+        "diagram_id": name,
+        "enabled": False,
+        "source_projects": [],
+    }
 
 
 def migrate(root, *, backup_directory):
@@ -71,22 +76,16 @@ def migrate(root, *, backup_directory):
             if not old.exists():
                 continue
             target = default / name
-            assert old.resolve().is_relative_to(
-                root
-            ) and target.resolve().is_relative_to(default)
+            assert old.resolve().is_relative_to(root) and target.resolve().is_relative_to(default)
             old.rename(target)
             moved.append((old, target, False))
         from phase_agent.configuration.session.relocate_workspace_paths import (
             relocate_workspace_paths,
         )
 
-        relocations = [
-            {"from": str(old), "to": str(target)} for old, target, _ in moved
-        ]
+        relocations = [{"from": str(old), "to": str(target)} for old, target, _ in moved]
         operational = {
-            key: value
-            for key, value in state.items()
-            if key not in {"confirmed_config"}
+            key: value for key, value in state.items() if key not in {"confirmed_config"}
         }
         state.update(relocate_workspace_paths(operational, relocations, root))
         runtime["local_path_relocations"] = [
@@ -121,23 +120,17 @@ def migrate(root, *, backup_directory):
             "work_directory": "work",
             "branch_energy_pool_ledger_path": "branch_energy_pool_ledger",
         }.items():
-            runtime[field] = str(
-                Path(storage["workspace_root"]) / storage["paths"][key]
-            )
+            runtime[field] = str(Path(storage["workspace_root"]) / storage["paths"][key])
         runtime["config_session_path"] = str(default / "parameters/config_session.json")
         if runtime.get("manual_upload"):
             runtime["manual_upload"]["batches_directory"] = str(
                 Path(storage["workspace_root"]) / storage["paths"]["upload_batches"]
             )
         write(default / "agent_runtime.json", runtime)
-        write(
-            root / "agent_runtime.json", runtime
-        )  # existing launcher is a default-diagram entry
+        write(root / "agent_runtime.json", runtime)  # existing launcher is a default-diagram entry
         from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
 
-        manager = PhaseDataManager.load(
-            default / "workflow_state/ledgers/phase_data.json"
-        )
+        manager = PhaseDataManager.load(default / "workflow_state/ledgers/phase_data.json")
         published = publish(state, manager, config)
         metadata = {
             "schema": 1,
@@ -180,9 +173,7 @@ def create(root, name, boundary):
     from phase_agent.runtime.project_service import project_lock
 
     root = Path(root).resolve()
-    with project_lock(
-        root / "agent_runtime.json", lock_name="../../diagrams.registry.lock"
-    ):
+    with project_lock(root / "agent_runtime.json", lock_name="../../diagrams.registry.lock"):
         return _create(root, name, boundary)
 
 
@@ -212,9 +203,7 @@ def _create(root, name, boundary):
     session = confirm_config_snapshot(create_config_draft(config), user_confirmed=True)
     if session["status"] != "confirmed":
         raise ValueError("新边界未通过配置校验：" + str(session.get("audit")))
-    runtime = read(
-        root / "diagrams" / descriptor["default_diagram"] / "agent_runtime.json"
-    )
+    runtime = read(root / "diagrams" / descriptor["default_diagram"] / "agent_runtime.json")
     runtime_paths = {
         "state_path": "workflow_state/state.json",
         "ledger_path": "workflow_state/ledgers/phase_data.json",

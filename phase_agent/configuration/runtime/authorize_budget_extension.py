@@ -15,7 +15,14 @@ _APPROVED_MC_POLICY_PATHS = {
 _LEGACY_MC_STEP_COST_FACTOR = 1.0
 
 
-def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False):
+def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False, _owned=False):
+    scope = _supercell_revision(state, confirmed_snapshot)
+    if scope is not None:
+        return scope
+    if state.get("confirmed_config_version") == confirmed_snapshot["config_version"]:
+        current = state if _owned else deepcopy(state)
+        current.setdefault("confirmed_config", deepcopy(confirmed_snapshot["config"]))
+        return {"status": "unchanged", "state": current}
     from phase_agent.configuration.runtime.authorize_generation_policy_revision import (
         authorize_second_mc_segment_revision,
         authorize_generation_policy_revision,
@@ -542,3 +549,34 @@ def _scientifically_empty(state):
     if float(usage.get("total_relative_cost") or 0.0) > 0:
         return False
     return not (usage.get("stages") or {})
+
+
+def _supercell_revision(state, snapshot):
+    old = state.get("confirmed_config") or {}
+    new = snapshot.get("config") or {}
+    allowed = {
+        "system.boundary.H",
+        "system.boundary.H_generation.size_max",
+        "system.H_generation.size_max",
+        "budgets.structure_limits.max_det_H",
+    }
+    changed = set(_changed_paths(old, new))
+    if not old or not changed or not changed <= allowed:
+        return None
+    current = deepcopy(state)
+    from phase_agent.tools.policy.workflow_policy import active_tasks
+
+    if active_tasks(current) or current.get("pending_execution_policies"):
+        current["pending_supercell_revision"] = deepcopy(snapshot)
+        return {"status": "deferred_supercell_revision", "state": current}
+    current["confirmed_config_version"] = snapshot["config_version"]
+    current["confirmed_config"] = deepcopy(new)
+    current.pop("pending_supercell_revision", None)
+    current.setdefault("config_migrations", []).append(
+        {
+            "type": "confirmed_supercell_revision",
+            "from": state.get("confirmed_config_version"),
+            "to": snapshot["config_version"],
+        }
+    )
+    return {"status": "supercell_revision_applied", "state": current}

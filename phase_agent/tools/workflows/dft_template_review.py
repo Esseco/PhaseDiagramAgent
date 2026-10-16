@@ -112,12 +112,19 @@ def create_review(action, state, config, manager, *, revision=0, settings=None):
         interpreter = sys.executable
     except ImportError:
         interpreter = str(Path(sys.executable).parent.parent / "atomate2" / "python.exe")
-    subprocess.run(
-        [interpreter, str(Path(__file__).resolve()), str(folder)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        subprocess.run(
+            [interpreter, str(Path(__file__).resolve()), str(folder)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or error.stdout or str(error)).strip()[-2500:]
+        raise ValueError("DFT 模板预览子进程失败；未生成正式任务。" + detail) from error
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("DFT 模板预览超过 120 秒；未生成正式任务，请核对输入环境。") from error
     from phase_agent.science.dft.prepare_pycode_relax import prepare_pycode_relax
     from phase_agent.tools.remote.integrity import payload_checksum
 

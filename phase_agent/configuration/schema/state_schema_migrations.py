@@ -27,14 +27,14 @@ def migrate_state_snapshot(snapshot: dict) -> dict:
     return current
 
 
-def migrate_persisted_state(state: dict) -> dict:
-    current = deepcopy(state or {})
+def migrate_persisted_state(state: dict, *, _owned=False) -> dict:
+    current = state if _owned and state is not None else deepcopy(state or {})
     if current.get("current_state_snapshot"):
         current["current_state_snapshot"] = migrate_state_snapshot(
             current["current_state_snapshot"]
         )
     current["state_snapshots"] = [
-        deepcopy(item)
+        item
         if item.get("history_format") == "summary-v1"
         else migrate_state_snapshot(item)
         for item in current.get("state_snapshots") or []

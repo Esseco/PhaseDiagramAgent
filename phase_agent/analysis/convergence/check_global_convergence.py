@@ -31,7 +31,8 @@ def check_global_convergence(
             "missing_rules": missing_rules,
             "config_version": state.get("confirmed_config_version"),
         }
-    required = int(config["stable_model_update_epochs"])
+    feedback = "stable_feedback_cycles" in config
+    required = int(config.get("stable_feedback_cycles", config["stable_model_update_epochs"]))
     minimum_checks = int(config["minimum_recent_dft_checks"])
     invalid_limits = any(
         config.get(name) is not None and (not _number(config[name]) or config[name] < 0)
@@ -51,7 +52,16 @@ def check_global_convergence(
             "criteria_satisfied": False,
             "reason": "confirmed_thresholds_invalid",
         }
-    active = [item for item in state.get("tasks", []) if awaiting_task_result(item)]
+    active = [
+        item
+        for item in state.get("tasks", [])
+        if awaiting_task_result(item)
+        or (
+            feedback
+            and item.get("status")
+            in {"pending", "running", "submitted", "unknown", "submission_unknown"}
+        )
+    ]
     if active:
         return {
             "status": "tasks_awaiting_results",
@@ -61,6 +71,16 @@ def check_global_convergence(
             "active_task_ids": [row.get("task_id") for row in active],
         }
     epochs = _unique_model_epochs(state.get("model_update_epochs") or [])
+    if feedback:
+        epochs = list(
+            {
+                r["cycle_id"]: r
+                for r in state.get("feedback_cycles", [])
+                if r.get("model_version") == state.get("active_model_version")
+                and r.get("method") == "mlip"
+                and r.get("complete") is True
+            }.values()
+        )
     tail = epochs[-required:]
     enough_epochs = len(tail) == required
     hull_values_known = enough_epochs and all(_number(row.get("hull_change")) for row in tail)
@@ -86,6 +106,7 @@ def check_global_convergence(
         model_version=version,
         minimum_checks=minimum_checks,
         phase_gap=config.get("phase_competition_gap_ev_per_atom"),
+        require_independent=feedback,
     )
     metrics = validation["metrics"]
     if (
@@ -104,7 +125,11 @@ def check_global_convergence(
         and all(row.get("ground_state_unchanged") is True for row in tail),
         "final_frame_dft_calibrated": errors_known
         and recent_mae is not None
-        and recent_mae <= float(config["final_energy_mae_tolerance"]),
+        and (
+            recent_mae < float(config["final_energy_mae_tolerance"])
+            if feedback
+            else recent_mae <= float(config["final_energy_mae_tolerance"])
+        ),
     }
     if config.get("phase_competition_gap_ev_per_atom") is not None:
         checks["competing_phases_agree"] = validation["phase_competition"]["passed"]
@@ -115,14 +140,33 @@ def check_global_convergence(
     ):
         if config.get(rule) is not None:
             value = metrics[metric][statistic]
-            checks[rule] = errors_known and value is not None and value <= float(config[rule])
+            checks[rule] = (
+                errors_known
+                and value is not None
+                and (value < float(config[rule]) if feedback else value <= float(config[rule]))
+            )
+    if feedback:
+        from phase_agent.analysis.convergence.independent_evidence import ground_state_validation
+
+        checked = ground_state_validation(state, version)
+        checks["ground_state_dft_validated"] = checked["fraction"] is not None and checked[
+            "fraction"
+        ] > float(config.get("minimum_ground_state_dft_fraction", 0.6))
     missing = []
     if not enough_epochs:
-        missing.append("consecutive_unique_model_update_epochs")
+        missing.append(
+            "complete_search_dft_feedback_cycles"
+            if feedback
+            else "consecutive_unique_model_update_epochs"
+        )
     if enough_epochs and not hull_values_known:
-        missing.append("model_epoch_hull_change")
+        missing.append("feedback_cycle_hull_change" if feedback else "model_epoch_hull_change")
     if enough_epochs and not ground_states_known:
-        missing.append("model_epoch_ground_state_stability")
+        missing.append(
+            "feedback_cycle_ground_state_stability"
+            if feedback
+            else "model_epoch_ground_state_stability"
+        )
     if not errors_known:
         missing.append("final_frame_dft_error")
     if validation["phase_competition"]["status"] == "missing_evidence":
@@ -152,6 +196,7 @@ def check_global_convergence(
             "recent_final_frame_mae_ev_per_atom": recent_mae,
             "single_point_validation": validation,
             "model_update_epochs_counted": [row.get("model_version") for row in tail],
+            "feedback_cycles_counted": [row.get("cycle_id") for row in tail] if feedback else [],
             "config_version": state.get("confirmed_config_version"),
         }
     from phase_agent.tools.budget.check_budget import budget_is_hard
@@ -181,6 +226,7 @@ def check_global_convergence(
         "recent_final_frame_mae_ev_per_atom": recent_mae,
         "single_point_validation": validation,
         "model_update_epochs_counted": [row.get("model_version") for row in tail],
+        "feedback_cycles_counted": [row.get("cycle_id") for row in tail] if feedback else [],
     }
 
 

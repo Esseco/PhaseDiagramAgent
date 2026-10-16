@@ -5,6 +5,7 @@ from typing import TypedDict, Literal
 
 class SearchWorkflowState(TypedDict, total=False):
     request_id: str
+    saved_input_only: bool
     current_node: str
     node_status: str
     business_frame: dict

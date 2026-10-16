@@ -56,15 +56,38 @@ class CheckpointBlobSerde:
                     self.known.add(identity)
             fields[name] = {"blob": identity}
             memo[("field", id(item))] = (item, fields[name])
-        result = {STATE_FIELDS: fields}
+        instance = memo.get("next_state_instance", 0)
+        memo["next_state_instance"] = instance + 1
+        # Optional metadata: older readers ignore it. Preserve only actual
+        # shared state identities, never alias independently equal states.
+        result = {
+            STATE_FIELDS: {
+                name: {**reference, "state_instance": instance}
+                for name, reference in fields.items()
+            }
+        }
         memo[("state", id(value))] = (value, result)
         return result
 
-    def _restore_state(self, value):
+    def _restore_state(self, value, memo=None):
         if not isinstance(value, dict) or set(value) != {STATE_FIELDS}:
             return value
+        memo = memo if memo is not None else {}
+        fields = value[STATE_FIELDS]
+        identities = {ref.get("state_instance") for ref in fields.values()}
+        if len(identities) > 1 and any(item is not None for item in identities):
+            raise ValueError("Checkpoint state alias mismatch")
+        instance = next(iter(identities)) if len(identities) == 1 else None
+        if instance is not None and (type(instance) is not int or instance < 0):
+            raise ValueError("Invalid checkpoint state alias")
+        key = ("restored_state", instance)
+        if instance is not None and key in memo:
+            prior_fields, prior_state = memo[key]
+            if prior_fields != fields:
+                raise ValueError("Checkpoint state alias mismatch")
+            return prior_state
         result = {}
-        for name, reference in value[STATE_FIELDS].items():
+        for name, reference in fields.items():
             if "inline" in reference:
                 result[name] = reference["inline"]
             else:
@@ -86,12 +109,18 @@ class CheckpointBlobSerde:
                     result[name] = self.delegate.loads_typed(row)
                 else:
                     raise ValueError("Checkpoint payload checksum mismatch")
+        if instance is not None:
+            memo[key] = (fields, result)
         return result
 
     def _frame(self, value, restore=False, memo=None):
         if not isinstance(value, dict):
             return value
-        state = self._restore_state if restore else lambda item: self._state(item, memo)
+        state = (
+            (lambda item: self._restore_state(item, memo))
+            if restore
+            else lambda item: self._state(item, memo)
+        )
         result = dict(value)
         if isinstance(result.get("loaded_state"), dict):
             result["loaded_state"] = state(result["loaded_state"])
@@ -103,6 +132,7 @@ class CheckpointBlobSerde:
     def _value(self, value, restore=False, memo=None):
         if not isinstance(value, dict):
             return value
+        memo = memo if memo is not None else {}
         result = dict(value)
         if isinstance(value.get("channel_values"), dict):
             channels = dict(value["channel_values"])
@@ -118,7 +148,11 @@ class CheckpointBlobSerde:
         ):
             result = self._frame(value, restore, memo)
         elif isinstance(value.get("state"), dict):
-            state = self._restore_state if restore else lambda item: self._state(item, memo)
+            state = (
+                (lambda item: self._restore_state(item, memo))
+                if restore
+                else lambda item: self._state(item, memo)
+            )
             result["state"] = state(value["state"])
         return result
 

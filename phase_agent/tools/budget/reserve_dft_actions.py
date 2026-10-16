@@ -3,8 +3,8 @@
 from copy import deepcopy
 
 
-def reserve_dft_actions(state: dict, decisions: list[dict]) -> dict:
-    updated = deepcopy(state)
+def reserve_dft_actions(state: dict, decisions: list[dict], *, _owned=False) -> dict:
+    updated = state if _owned else deepcopy(state)
     effective = updated.setdefault("effective_decisions", {})
     reservations = updated.setdefault("budget_reservations", {})
     for item in decisions:

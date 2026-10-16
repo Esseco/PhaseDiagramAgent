@@ -42,8 +42,8 @@ class RemoteBatchRunner:
         self.task_preparer = task_preparer
         self.last_collection_report = {}
 
-    def prepare(self, state):
-        current = deepcopy(state)
+    def prepare(self, state, *, _owned=False, _defer_index=False):
+        current = state if _owned else deepcopy(state)
         tasks = current.setdefault("tasks", [])
         _assign_upload_operations(current, tasks)
         selected = self._select(current, tasks)
@@ -194,7 +194,8 @@ class RemoteBatchRunner:
         current.setdefault("slurm_batches", []).append(batch)
         from phase_agent.tools.remote.submission_layout import write_submission_index
 
-        write_submission_index(self.root, current)
+        if not _defer_index:
+            write_submission_index(self.root, current)
         current["pending_tasks"] = active_pending_tasks(tasks)
         return {"status": "prepared", "state": current, "batch": deepcopy(batch)}
 

@@ -36,6 +36,10 @@ def create_local_http_server(
         def do_GET(self):
             if self.path == "/health":
                 self._json(200, {"status": "ok", "config_protocol": 2})
+            elif self.path == "/phase/runtime-code" and self._control_authorized():
+                from phase_agent.runtime.loaded_code import loaded_code_report
+
+                self._json(200, loaded_code_report())
             elif self.path == "/phase/setup":
                 if not self._is_loopback_client():
                     self._json(403, error_formatter("forbidden", "key setup is local-only"))

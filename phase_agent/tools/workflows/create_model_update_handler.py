@@ -86,10 +86,25 @@ def create_model_update_handler(
                 "state": activation["state"],
                 "validation": stored["validation"],
             }
+        from phase_agent.tools.policy.workflow_policy import active_tasks
+
+        if active_tasks(current):
+            return {
+                "status": "tasks_awaiting_results",
+                "state": current,
+                "reason": "model_training_waits_for_inflight_tasks",
+            }
+        contract = "stable_feedback_cycles" in (config.get("convergence") or {})
         iteration = int(current.get("iteration", 0))
         dataset_version = f"dft-data-{iteration:06d}"
         candidate_version = f"mlip-candidate-{iteration:06d}"
-        old_model = deepcopy(current.get("active_model") or config.get("mlip") or {})
+        from phase_agent.analysis.convergence.training_provenance import (
+            model_with_training_provenance,
+        )
+
+        old_model = model_with_training_provenance(
+            current, current.get("active_model") or config.get("mlip") or {}
+        )
         from phase_agent.science.training.cumulative_training_records import (
             cumulative_training_records,
         )
@@ -127,6 +142,9 @@ def create_model_update_handler(
         candidate_model = deepcopy(training["candidate_model"] or {})
         candidate_model.setdefault("version", candidate_version)
         candidate_model["dataset_version"] = dataset_version
+        from phase_agent.analysis.convergence.independent_evidence import training_snapshot
+
+        candidate_model.update(training_snapshot(training["dataset"], old_model))
         candidate_model["main_model_index"] = 0
         if not candidate_model.get("model_paths"):
             members = candidate_model.get("members") or candidate_model.get("committee") or []
@@ -148,6 +166,23 @@ def create_model_update_handler(
             criteria=deepcopy((config.get("mlip_finetune") or {}).get("validation") or {}),
             validation_data_version=f"validation-{dataset_version}",
         )
+        if contract:
+            from pathlib import Path
+
+            paths = candidate_model.get("model_paths") or [candidate_model.get("model_path")]
+            artifacts_valid = bool(paths) and all(
+                isinstance(path, str) and Path(path).is_file() and Path(path).stat().st_size > 0
+                for path in paths
+            )
+            validation = {
+                "status": "completed" if artifacts_valid else "invalid_training_artifacts",
+                "passed": artifacts_valid,
+                "evaluation_type": "training_artifact_integrity",
+                "independent_test_completed": False,
+                "validation_data_version": "artifacts-" + dataset_version,
+                "diagnostic_validation": validation,
+                "limitations": ["Training completion is not independent delivery validation."],
+            }
         result["validation"] = validation
         current.setdefault("candidate_models", {})[candidate_model["version"]] = {
             "model": deepcopy(candidate_model),
@@ -172,11 +207,11 @@ def create_model_update_handler(
                 else validation.get("status", "failed")
             )
             return result
-        if validation.get("benefit_status") == "no_distinguishable_benefit":
+        if not contract and validation.get("benefit_status") == "no_distinguishable_benefit":
             result["status"] = "candidate_retained_no_clear_benefit"
             return result
         activation_settings = (config.get("mlip_finetune") or {}).get("activation") or {}
-        if activation_settings.get("requires_separate_approval"):
+        if contract or activation_settings.get("requires_separate_approval"):
             result["status"] = "awaiting_activation_approval"
             return result
         activation = activate_validated_model(

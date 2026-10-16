@@ -16,6 +16,14 @@ def activate_validated_model(
             "state": state,
             "reason": "new_model_not_validated",
         }
+    from phase_agent.tools.policy.workflow_policy import active_tasks
+
+    if active_tasks(state):
+        return {
+            "status": "rejected",
+            "state": state,
+            "reason": "model_switch_waits_for_inflight_tasks",
+        }
     old = state.get("active_model_version")
     new = new_model.get("version")
     if not new:

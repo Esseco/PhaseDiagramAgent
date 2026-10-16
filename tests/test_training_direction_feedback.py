@@ -32,9 +32,9 @@ def test_correction_revises_cached_direction_and_is_not_approval():
     state, waits = review_training_choice(
         state, [handoff], agent, user_message="不是接口错误，就是模型的误差"
     )
-    assert len(calls) == 1
+    assert calls == []
     assert state["active_model_version"] == "old"
     assert state["candidate_models"]["new"]["superseded_agent_reviews"] == [old]
     assert waits[0]["direction_proposal"]["user_feedback"] == "不是接口错误，就是模型的误差"
     review_training_choice(state, waits, agent, user_message="继续")
-    assert len(calls) == 1
+    assert calls == []

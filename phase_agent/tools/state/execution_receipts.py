@@ -122,7 +122,7 @@ def recovery_report(state_path, state):
         if (
             phase == "returned"
             and execution.get("status") == outcome
-            and outcome in {"completed", "failed"}
+            and outcome == "completed"
             and business.get("status") not in {None, "execution_reconciliation_required"}
         ):
             continue
@@ -131,6 +131,9 @@ def recovery_report(state_path, state):
                 "identity": json.loads(identity),
                 "phase": phase,
                 "tool_outcome": outcome,
+                "reason": "handler_failed_effects_unknown"
+                if outcome == "failed"
+                else "execution_not_settled",
                 "required_action": "reconcile_business_artifacts",
             }
         )

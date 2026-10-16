@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 from fractions import Fraction
 
-from phase_agent.science.structures.create_generation_registry import create_generation_registry
 from phase_agent.science.structures.enumerate_legal_frameworks import enumerate_legal_frameworks
 from phase_agent.science.structures.boundary_utils import det_H, normalize_H, normalize_fraction
 
@@ -26,7 +25,12 @@ def propose_branches(
     framework_enumerator=None,
     max_det_H: int | None = None,
 ) -> list[dict[str, Any]]:
-    registry = registry or create_generation_registry()
+    if registry is None:
+        from phase_agent.science.structures.create_generation_registry import (
+            create_generation_registry,
+        )
+
+        registry = create_generation_registry()
     system = system_config or manager.data.get("system_config") or {}
     from phase_agent.configuration.schema.validate_configuration_space import (
         validate_configuration_space,

@@ -35,19 +35,27 @@ def dft_recovery_rounds(state):
             for t in tasks
             if t["task_id"] in received or t.get("status") in {"completed", "failed", "timeout"}
         ]
+        cancelled = [t for t in tasks if t.get("status") == "cancelled"]
         pending = [
             t
             for t in tasks
             if t.get("status") in {"pending", "running", "submitted", "unknown"}
             and t.get("recovery_wait_waived") is not True
         ]
-        waived = [t for t in tasks if t.get("recovery_wait_waived") is True and t not in returned]
+        waived = [
+            t
+            for t in tasks
+            if t.get("recovery_wait_waived") is True and t not in returned and t not in cancelled
+        ]
         output.append(
             {
                 "scope_key": key,
                 "scope": group["scope"],
                 "expected_tasks": len(tasks),
                 "recovered_tasks": len(returned),
+                "cancelled_tasks": len(cancelled),
+                "cancelled_task_ids": sorted(t["task_id"] for t in cancelled),
+                "resolved_tasks": len({t["task_id"] for t in returned + cancelled}),
                 "recovery_ratio": len(returned) / len(tasks),
                 "successful_tasks": sum(t.get("status") == "completed" for t in returned),
                 "failed_tasks": sum(t.get("status") in {"failed", "timeout"} for t in returned),

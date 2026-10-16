@@ -15,7 +15,14 @@ def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=Non
     uncertainty = [_qbc_summary(row) for row in qbc_rows[-50:]]
     uncertainty = [row for row in uncertainty if row]
     actions = state.get("action_records") or state.get("decisions") or []
-    rewards = state.get("rewards") or []
+    current_basis = (diagrams.get("mlip") or {}).get("energy_basis_id")
+    rewards = [
+        row
+        for row in state.get("rewards") or []
+        if row.get("energy_method") == "mlip"
+        and current_basis
+        and row.get("energy_basis_id") == current_basis
+    ]
     failed = [
         item
         for item in tasks
@@ -31,7 +38,9 @@ def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=Non
         "current_convex_hull": _hull_summary(diagrams),
         "search_coverage": deepcopy(state.get("coverage") or state.get("coverage_report") or {}),
         "available_budget": deepcopy(available),
-        "budget_usage": evidence_context({"budget_usage": state.get("budget_usage") or {}})["budget_usage"],
+        "budget_usage": evidence_context({"budget_usage": state.get("budget_usage") or {}})[
+            "budget_usage"
+        ],
         "uncertainty": uncertainty,
         "qbc_uncertainty": uncertainty,
         "mlip_status": {
@@ -71,7 +80,7 @@ def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=Non
 
 def _hull_summary(diagrams):
     output = {}
-    for method in ("mlip", "dft"):
+    for method in ("mlip",):
         item = diagrams.get(method) or {}
         entries = item.get("entries") or []
         output[method] = {

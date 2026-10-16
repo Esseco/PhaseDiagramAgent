@@ -23,7 +23,10 @@ def create_lifecycle_nodes(
 
     def initial(state, runtime: Runtime[WorkflowRuntime]):
         context = require_runtime(runtime)
-        return accept(context.callback("initialize", initialize)(), runtime, "initialized")
+        result = context.callback("initialize", initialize)()
+        update = accept(result, runtime, "initialized")
+        update["saved_input_only"] = bool(result.get("saved_input_only"))
+        return update
 
     def stage(name, callback, phase):
         def node(state, runtime: Runtime[WorkflowRuntime]):
@@ -137,7 +140,11 @@ def create_lifecycle_nodes(
             error = None
             try:
                 context = require_runtime(runtime)
-                if context.stages.get("durable") and name != "initialize_confirmed_run" and context.stages.pop("restore_business_frame", False):
+                if (
+                    context.stages.get("durable")
+                    and name != "initialize_confirmed_run"
+                    and context.stages.pop("restore_business_frame", False)
+                ):
                     from phase_agent.graphs.business_checkpoint import restore_frame
 
                     context.frame = restore_frame(context.frame, state.get("business_frame") or {})
@@ -148,7 +155,7 @@ def create_lifecycle_nodes(
                 if context.stages.get("durable"):
                     from phase_agent.graphs.business_checkpoint import checkpoint_frame
 
-                    projected = checkpoint_frame(context.frame)
+                    projected = checkpoint_frame(context.frame, state.get("business_frame") or {})
                     if projected != (state.get("business_frame") or {}):
                         # Preserve the existing channel version for observation
                         # nodes that did not change durable business facts.
@@ -156,7 +163,13 @@ def create_lifecycle_nodes(
                     if context.response is not None:
                         import json
 
-                        update["completed_response"] = json.loads(json.dumps(context.response))
+                        if (
+                            context.response is context.frame.get("result")
+                            and "result" in projected
+                        ):
+                            update["completed_response"] = projected["result"]
+                        else:
+                            update["completed_response"] = json.loads(json.dumps(context.response))
                 update["current_node"] = name
                 business_status = (context.response or {}).get("status", "")
                 from phase_agent.graphs.wait_contract import wait_boundary

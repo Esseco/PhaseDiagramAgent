@@ -1,7 +1,7 @@
 """Explicit serializable lifecycle fields; runtime dependencies are never saved."""
 
 import json
-from copy import deepcopy
+from pathlib import Path
 
 FIELDS = {
     "_workflow_prepared",
@@ -25,24 +25,52 @@ FIELDS = {
 }
 
 
-def checkpoint_frame(frame):
-    result = {}
-    for key in FIELDS:
-        if key in frame:
-            value = frame[key]
-            # Paths are protocol data; other runtime objects are errors, not silently dropped.
-            from pathlib import Path
+def checkpoint_frame(frame, previous=None):
+    """Detach JSON facts once, preserving shared state inside one snapshot."""
+    memo, visiting = {}, set()
+    previous = previous or {}
+    return {
+        key: _snapshot(value, previous.get(key), memo, visiting)
+        for key, value in frame.items()
+        if key in FIELDS
+    }
 
-            encoded = json.dumps(
-                value,
-                default=lambda item: (
-                    str(item)
-                    if isinstance(item, Path)
-                    else (_ for _ in ()).throw(TypeError(f"Nonserializable business field: {key}"))
-                ),
-            )
-            result[key] = json.loads(encoded)
-    return result
+
+def _snapshot(value, previous, memo, visiting):
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if not isinstance(value, (dict, list, tuple)):
+        raise TypeError("Nonserializable business field: " + type(value).__name__)
+    identity = id(value)
+    if identity in visiting:
+        raise ValueError("Circular reference detected")
+    if identity in memo:
+        return memo[identity]
+    if value == previous:
+        memo[identity] = previous
+        return previous
+    visiting.add(identity)
+    try:
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    if key is None or isinstance(key, (int, float, bool)):
+                        key = json.dumps(key)
+                    else:
+                        raise TypeError("Checkpoint dictionary keys must be JSON keys")
+                old = previous.get(key) if isinstance(previous, dict) else None
+                result[key] = _snapshot(item, old, memo, visiting)
+        else:
+            # State histories are JSON arrays. Let the native codec detach
+            # their trees rather than recursing through every scalar in Python.
+            result = json.loads(json.dumps(value, default=_json_default))
+        memo[identity] = result
+        return result
+    finally:
+        visiting.remove(identity)
 
 
 def restore_frame(runtime_frame, saved):
@@ -52,4 +80,12 @@ def restore_frame(runtime_frame, saved):
     previous = saved.get("loaded_state") or {}
     if current.get(FIELD) != previous.get(FIELD):
         raise ValueError("stale_lifecycle_checkpoint_control_revision")
-    return {**runtime_frame, **deepcopy(saved)}
+    # Shared checkpoint snapshots are read-only. Restore independent mutable
+    # stage facts, matching the historical JSON checkpoint ownership boundary.
+    return {**runtime_frame, **json.loads(json.dumps(saved))}
+
+
+def _json_default(value):
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError("Nonserializable business field: " + type(value).__name__)

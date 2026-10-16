@@ -113,6 +113,13 @@ def _check_convergence(*, action, context):
             "reason": "partial_model_refresh_not_global_convergence_evidence",
         }
     rules = (context.get("effective_config") or {}).get("convergence") or {}
+    rules = {
+        **rules,
+        "stable_feedback_cycles": rules.get("stable_feedback_cycles", 1),
+        "minimum_ground_state_dft_fraction": 0.6,
+        "final_energy_mae_tolerance": 0.005,
+        "final_force_rmse_tolerance": 0.05,
+    }
     result = check_global_convergence(state, rules=_normalize_rules(rules))
     if result.get("status") == "finished":
         from phase_agent.persistence.memory.maybe_draft_converged_skill import (

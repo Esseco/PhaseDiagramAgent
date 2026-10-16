@@ -210,9 +210,10 @@ def format_progress(state):
     )
     completed = sum(row.get("status") == "completed" for row in tasks)
     failed = sum(row.get("status") in {"failed", "timeout"} for row in tasks)
+    cancelled = sum(row.get("status") == "cancelled" for row in tasks)
     wait_text = "、".join(f"{name} {count}" for name, count in by_stage.items()) or "0"
     lines.append(
-        f"累计任务：完成 {completed}、失败/超时 {failed}；仍需回收 {wait_text}；未回传但不再等待 {len(waived)}。"
+        f"累计任务：完成 {completed}、失败/超时 {failed}、已取消 {cancelled}；仍需回收 {wait_text}；未回传但不再等待 {len(waived)}。"
     )
     remaining = state.get("budget_remaining")
     if isinstance(remaining, (float, int)) and not isinstance(remaining, bool):

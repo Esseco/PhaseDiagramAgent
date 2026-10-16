@@ -11,12 +11,23 @@ def read_only_reply(handler, message, facts, conversation_id=None):
 
     if handler.config_delegate is not None:
         return None
-    if _is_status_command(message):
-        return format_status_reply(facts)
-    if is_plan_query(message):
+    if _is_status_command(message) or is_plan_query(message):
         from phase_agent.graphs.dialogue.support import bind_presented_proposal
-        bind_presented_proposal(handler, facts)
-        return pending_plan_reply(facts)
+        from phase_agent.runtime.review_requests import pending_reviews
+
+        # This fast path runs before history/route_request assigns the session.
+        # Bind exactly the saved plan shown here to the requesting conversation.
+        if conversation_id is not None:
+            handler.conversation_id = conversation_id
+        if is_plan_query(message):
+            reply = pending_plan_reply(facts)
+            bind_presented_proposal(handler, facts)
+            return reply
+        reply = format_status_reply(facts)
+        if pending_reviews(facts):
+            reply += "\n" + pending_plan_reply(facts)
+            bind_presented_proposal(handler, facts)
+        return reply
     reply = finetune_location_reply(message, facts)
     if reply is not None:
         return reply

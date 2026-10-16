@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from phase_agent.interface_compatibility import call_with_optimizations
+
 from copy import deepcopy
 import hashlib
 
@@ -14,7 +16,7 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
     """Return the default handler without introducing a second policy gate."""
 
     def handler(*, action, context):
-        state = deepcopy(context.get("event_state") or {})
+        state = _input_working_state(context)
         if context.get("execution_mode") == "interactive" and not (
             action.get("parameters") or {}
         ).get("dft_input_preview"):
@@ -81,7 +83,9 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             row["candidate_id"]: row["purpose"]
             for row in (action.get("scientific_decision") or {}).get("selection_purposes") or []
         }
-        state = reserve_dft_actions(state, validation["accepted"])
+        state = call_with_optimizations(
+            reserve_dft_actions, state, validation["accepted"], _optimizations={"_owned": True}
+        )
         tasks = []
         confirmed_parameters = deepcopy(
             (context["effective_config"].get("dft") or {}).get("parameters") or {}
@@ -108,6 +112,7 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                     None,
                 ),
                 "stage": stage,
+                "independent_audit": decision.get("independent_audit", False),
                 "status": "pending",
                 "planned_relative_cost": decision["relative_cost"],
                 "parameters": confirmed_parameters,
@@ -136,6 +141,8 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 ),
                 {},
             )
+            if selected.get("source_search_task_id"):
+                task["source_search_task_id"] = selected["source_search_task_id"]
             if selected.get("structure_path"):
                 task["structure_path"] = selected["structure_path"]
             if reviewed_settings is not None:
@@ -159,9 +166,11 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 prepare_dft_upload_batches,
             )
 
-            prepared = prepare_dft_upload_batches(
+            prepared = call_with_optimizations(
+                prepare_dft_upload_batches,
                 action={"target_ids": [row["task_id"] for row in tasks]},
                 context={**context, "event_state": state},
+                _optimizations={"_owned": True},
             )
             from phase_agent.tools.workflows.dft_selection_artifacts import preparation_artifacts
 
@@ -187,6 +196,8 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             "retrain_requested": validation["global_action"] == "RETRAIN_MLIP",
         }
 
+    # Runtime capability: safe to adopt only inside an already-owned action loop.
+    handler._returns_owned_state = True
     return handler
 
 
@@ -226,3 +237,25 @@ def _remaining_dft_budget(state, config):
     used = float((state.get("budget_usage") or {}).get("total_relative_cost", 0) or 0)
     reserved = float(state.get("reserved_relative_cost", 0) or 0)
     return max(0.0, float(total) - used - reserved)
+
+
+def _input_working_state(context):
+    source = context.get("event_state") or {}
+    if not (context.get("_event_state_owned") and context.get("saved_input_only")):
+        return deepcopy(source)
+    # The guarded idle input path reads scientific history. Detach every ledger
+    # mutated by selection, reservation and staging so failures cannot change
+    # the outer action state. Other histories remain read-only until commit.
+    current = dict(source)
+    for key in (
+        "tasks",
+        "pending_tasks",
+        "effective_decisions",
+        "budget_reservations",
+        "qbc_selection_history",
+        "slurm_batches",
+        "upload_layout",
+    ):
+        if key in source:
+            current[key] = deepcopy(source[key])
+    return current

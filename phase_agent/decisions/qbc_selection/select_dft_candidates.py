@@ -31,7 +31,9 @@ def select_dft_candidates(
     pool = [copy.copy(item) for item in candidates]
     rng = random.Random(seed)
     rng.shuffle(pool)
-    audit_count = min(len(pool), round(batch_size * audit_fraction))
+    audit_count = min(
+        len(pool), batch_size, max(1, round(batch_size * audit_fraction)) if audit_fraction else 0
+    )
     audit, remaining = pool[:audit_count], pool[audit_count:]
     hull = _normalized([item.get("hull_impact", 0.0) for item in remaining])
     qbc_values = [_qbc_value(item) for item in remaining]
@@ -62,7 +64,7 @@ def select_dft_candidates(
         for phase in phases:
             options = [item for item in remaining if item.get("phase") == phase]
             if not options:
-                options = [item for item in audit if item.get("phase") == phase]
+                options = []
             if options:
                 coverage.append(options[0])
         coverage_ids = {id(item) for item in coverage}
@@ -74,7 +76,7 @@ def select_dft_candidates(
     if cover_phases:
         # Spread Na compositions after phase representatives, while retaining
         # hull/QBC scores rather than replacing the scientific ranking.
-        ordered = list(coverage) + list(audit)
+        ordered = list(audit) + list(coverage)
         ranked = list(remaining)
         while ranked:
 

@@ -1,5 +1,7 @@
 """Resumable multi-step Agent → policy → validation → tool event loop."""
 
+from phase_agent.interface_compatibility import call_with_optimizations
+
 from phase_agent.decisions.agent.dialogue_contract import DIALOGUE_STATUSES
 from copy import deepcopy
 import json
@@ -123,22 +125,27 @@ def prepare_event_loop(
     state_path=None,
     approval_directory=None,
     initial_long_term_advice=None,
+    _owned=False,
 ):
     """Run bounded Agent actions and persist after every state transition."""
     if type(max_steps) is not int or max_steps <= 0:
         raise ValueError("max_steps 必须是正整数")
-    current = _load_state(state)
+    current = _load_state(state, _owned=_owned)
     if "decision_memory" not in current:
         current = update_long_term_advice(
             current, initial_long_term_advice, source="initial_user_input"
         )
     current.setdefault("event_index", 0)
     current.setdefault("event_history", [])
-    reconciliation = reconcile_task_results(current, recovered_results)
+    reconciliation = call_with_optimizations(
+        reconcile_task_results, current, recovered_results, _optimizations={"_owned": True}
+    )
     current = reconciliation["state"]
     from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
 
-    current = normalize_workflow_state(current)
+    current = call_with_optimizations(
+        normalize_workflow_state, current, _optimizations={"_owned": True}
+    )
     _save_state(current, state_path)
     events = []
     final_status = "max_steps_reached"
@@ -156,8 +163,7 @@ def prepare_event_loop(
         step_context = {
             **(context or {}),
             "state_path": str(state_path) if state_path else None,
-            "event_state": deepcopy(current),
-            "search_state": deepcopy(current),
+            "_event_state_owned": True,
         }
         step_feedback = human_feedback if offset == 0 else None
         if execution_mode == "interactive" and step_feedback is None and approval_directory:
@@ -193,8 +199,11 @@ def prepare_event_loop(
         current["event_index"] = int(current.get("event_index", 0)) + (
             0 if response.get("idempotent_replay") else 1
         )
-        current = update_state_snapshot(
-            current, config_version=current.get("confirmed_config_version")
+        current = call_with_optimizations(
+            update_state_snapshot,
+            current,
+            config_version=current.get("confirmed_config_version"),
+            _optimizations={"_owned": True},
         )
         events.append(event)
         final_status = response["status"]
@@ -262,10 +271,12 @@ def _step_invocation_id(starting_index, base, offset, max_steps):
     return f"{prefix}-{starting_index + offset + 1:06d}"
 
 
-def _load_state(state):
+def _load_state(state, *, _owned=False):
     if isinstance(state, (str, Path)):
         return json.loads(Path(state).read_text(encoding="utf-8"))
-    return deepcopy(state or {})
+    # The lifecycle's idle saved-input frame is already invocation-owned.
+    # Public calls retain their independent copy by default.
+    return state if _owned and isinstance(state, dict) else deepcopy(state or {})
 
 
 def _save_state(state, path):

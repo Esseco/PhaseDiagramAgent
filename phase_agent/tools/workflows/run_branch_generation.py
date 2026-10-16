@@ -8,9 +8,6 @@ from typing import Any
 from phase_agent.science.structures.propose_branches import propose_branches
 from phase_agent.science.structures.deduplicate_candidates import deduplicate_candidates
 from phase_agent.tools.budget.estimate_candidate_cost import estimate_candidate_cost
-from phase_agent.science.structures.initialize_branch_structures import (
-    initialize_branch_structures,
-)
 from phase_agent.persistence.ledger.register_candidate_batch import (
     register_candidate_batch,
 )
@@ -43,6 +40,9 @@ def run_branch_generation(
     sampling_report: dict | None = None,
 ) -> dict[str, Any]:
     """调度完整流程；不运行 MLIP 或 DFT。"""
+    from phase_agent.science.structures.initialize_branch_structures import (
+        initialize_branch_structures,
+    )
 
     def produce(allocated_quotas, allocated_seed, options):
         return propose_branches(

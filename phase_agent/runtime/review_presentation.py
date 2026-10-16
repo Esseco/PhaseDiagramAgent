@@ -64,7 +64,7 @@ def review_card(plan_id, record):
         relax = sum(row["action"] == "DFT_RELAX" for row in selected)
         scope = f"选中 {len(targets)} 个结构；DFT单点 {single} 个，结构优化 {relax} 个"
     if tool == "generate_branches" and params.get("total_quota") is not None:
-        scope = f"计划采样 {params['total_quota']} 个候选结构"
+        scope = f"计划生成 {params['total_quota']} 个 branch，实际数量生成后核验"
     if preview:
         scope = f"首批刷新 {len(preview.get('candidates') or [])} 个结构；暂缓 {preview.get('deferred', '未记录')} 个"
     boundary = "完成本次动作后停止；后续新动作需另行审阅。"

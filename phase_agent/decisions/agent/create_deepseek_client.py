@@ -1,4 +1,4 @@
-"""创建具备空响应重试和安全诊断的 DeepSeek JSON 客户端。"""
+"""创建单次调用、失败直接回报的 DeepSeek JSON 客户端。"""
 
 from __future__ import annotations
 
@@ -115,9 +115,11 @@ def create_deepseek_client(
     def uncached_call(payload: dict) -> dict:
         from time import monotonic
 
-        deadline = monotonic() + max(0.001, float(total_timeout))
+        bounded_control = payload.get("bounded_control") is True
+        effective_timeout = min(float(total_timeout), 12.0) if bounded_control else float(total_timeout)
+        deadline = monotonic() + max(0.001, effective_timeout)
         planning = (payload.get("evidence_reader") or {}).get("phase") == "select_topics"
-        important = needs_deep_reasoning(payload)
+        important = not bounded_control and needs_deep_reasoning(payload)
         payload = prepare_llm_request(payload)
         from phase_agent.decisions.agent.transport_tables import evidence_row_count
 
@@ -193,17 +195,16 @@ def create_deepseek_client(
             max_tokens_this_try = max(max_tokens_this_try, json_ceiling)
         if planning:
             max_tokens_this_try = max(1024, int(routine_max_tokens))
-        # One length retry gets real headroom, rather than reusing a capped
-        # request. Ordinary replies keep their original initial token budget.
-        retry_token_ceiling = max(token_ceiling, min(16384, token_ceiling * 2))
+        if bounded_control:
+            max_tokens_this_try = 384
+            thinking_this_try = "disabled"
         input_tokens = output_tokens = 0
         last_error = None
 
-        # DeepSeek JSON mode may occasionally return empty content. Retry one
-        # malformed/empty model response, while accounting for both API calls.
+        # A failed response is surfaced immediately; user decides when to retry.
         from phase_agent.graphs.cancellation import check_cancelled
 
-        for attempt in range(2):
+        for attempt in range(1):
             check_cancelled()
             body = {
                 "model": model,
@@ -259,7 +260,7 @@ def create_deepseek_client(
 
                 failure = DeepSeekResponseError(
                     "total_timeout",
-                    f"模型调用已达到 {float(total_timeout):g} 秒总时限（含重试），已停止等待，本轮未取得有效方案。\n"
+                    f"模型调用已达到 {effective_timeout:g} 秒总时限，已停止等待，本轮未取得有效方案。\n"
                     + local_analysis(payload),
                 )
                 failure.llm_usage = {
@@ -272,11 +273,9 @@ def create_deepseek_client(
                 raise failure from None
             except TimeoutError:
                 check_cancelled()
-                if attempt == 0:
-                    continue
                 raise DeepSeekResponseError(
                     "timeout",
-                    "模型服务读取超时，有限重试仍未得到回答；本次未生成方案或执行任务。",
+                    "模型服务读取超时，本次未得到回答，未自动重试；本次未生成方案或执行任务。",
                 ) from None
             except urllib.error.HTTPError as error:
                 if error.code in {502, 503, 504}:
@@ -304,8 +303,6 @@ def create_deepseek_client(
             except urllib.error.URLError as error:
                 if isinstance(error.reason, TimeoutError):
                     check_cancelled()
-                    if attempt == 0:
-                        continue
                     message = "连接 DeepSeek API 超时，请检查网络后重试。"
                 else:
                     message = "无法连接 DeepSeek API，请检查本机网络和 API 地址。"
@@ -347,13 +344,7 @@ def create_deepseek_client(
                     f"正文长度=0，思考字段长度={len(reasoning_content or '')}，"
                     f"输出 token={int(usage.get('completion_tokens') or 0)}）。",
                 )
-                if finish_reason == "length":
-                    # Keep configured scientific reasoning; enlarge output space only.
-                    token_ceiling = max(token_ceiling, json_ceiling)
-                    max_tokens_this_try = min(
-                        max(max_tokens_this_try * 2, 1200), retry_token_ceiling
-                    )
-                elif finish_reason in {
+                if finish_reason in {
                     "content_filter",
                     "insufficient_system_resource",
                     "aborted",
@@ -371,12 +362,7 @@ def create_deepseek_client(
                     "DeepSeek 返回的内容无法解析为 JSON 对象 "
                     f"（结束原因={finish_reason or '未知'}，字符数={len(content)}）。",
                 )
-                if finish_reason == "length":
-                    # Do not trade away scientific reasoning after truncation.
-                    max_tokens_this_try = min(
-                        max(max_tokens_this_try * 2, json_ceiling), retry_token_ceiling
-                    )
-                elif finish_reason in {
+                if finish_reason in {
                     "content_filter",
                     "insufficient_system_resource",
                     "aborted",
@@ -421,7 +407,7 @@ def create_deepseek_client(
         from phase_agent.runtime.turn_process import timed_call
 
         return timed_call(
-            "API 总时限 " + str(total_timeout) + " 秒（含重试）",
+            "API 总时限 " + str(min(float(total_timeout), 12.0) if payload.get("bounded_control") is True else total_timeout) + " 秒",
             cached_request,
             payload,
             uncached_call,

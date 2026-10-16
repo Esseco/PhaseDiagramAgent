@@ -128,22 +128,61 @@ class CompactSqliteSaver(SqliteSaver):
         self.lock = RLock()
         self.serde = CheckpointBlobSerde(CompressedSerde(self.serde), conn, self.lock)
         self.timings = {}
+        self.measurements = {}
 
     def _measured(self, name, callback, *args, **kwargs):
-        from time import perf_counter
+        from time import perf_counter, thread_time
 
         started = perf_counter()
+        cpu_started = thread_time()
         try:
             return callback(*args, **kwargs)
         finally:
+            elapsed = perf_counter() - started
+            cpu = thread_time() - cpu_started
             with self.lock:
-                self.timings[name] = self.timings.get(name, 0) + perf_counter() - started
+                self.timings[name] = self.timings.get(name, 0) + elapsed
+                row = self.measurements.setdefault(
+                    name, {"calls": 0, "wall_seconds": 0.0, "cpu_seconds": 0.0}
+                )
+                row["calls"] += 1
+                row["wall_seconds"] += elapsed
+                row["cpu_seconds"] += cpu
 
     def put(self, *args, **kwargs):
         return self._measured("checkpoint_write", super().put, *args, **kwargs)
 
     def put_writes(self, *args, **kwargs):
-        return self._measured("checkpoint_pending_write", super().put_writes, *args, **kwargs)
+        return self._measured("checkpoint_pending_write", self._put_writes, *args, **kwargs)
+
+    def _put_writes(self, config, writes, task_id, task_path=""):
+        from langgraph.checkpoint.base import WRITES_IDX_MAP
+
+        # Match SqliteSaver's indexes/upsert policy, but serialize before taking
+        # its cursor lock. Large business frames must not monopolize the DB lock
+        # while unrelated checkpoint writes/reads wait behind Python encoding.
+        replace = all(channel in WRITES_IDX_MAP for channel, _ in writes)
+        query = (
+            ("INSERT OR REPLACE INTO writes " if replace else "INSERT OR IGNORE INTO writes ")
+            + "(thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        identity = config["configurable"]
+        with self.lock:
+            self.setup()
+        rows = [
+            (
+                str(identity["thread_id"]),
+                str(identity["checkpoint_ns"]),
+                str(identity["checkpoint_id"]),
+                task_id,
+                WRITES_IDX_MAP.get(channel, idx),
+                channel,
+                *self.serde.dumps_typed(value),
+            )
+            for idx, (channel, value) in enumerate(writes)
+        ]
+        with self.cursor() as cursor:
+            cursor.executemany(query, rows)
 
     def get_tuple(self, *args, **kwargs):
         return self._measured("checkpoint_read", super().get_tuple, *args, **kwargs)
@@ -161,7 +200,8 @@ class CompactSqliteSaver(SqliteSaver):
                 collect_payloads(conn, saver.serde.delegate)
                 # Do not copy a multi-GB database on the user-facing request path.
                 # Existing free pages are reused; offline storage maintenance is separate.
-                from phase_agent.runtime.turn_process import record_timing
+                from phase_agent.runtime.turn_process import record_timing, process_event
 
+                process_event("检查点读写统计", saver.measurements)
                 for name, seconds in saver.timings.items():
                     record_timing(name, seconds, category="checkpoint")

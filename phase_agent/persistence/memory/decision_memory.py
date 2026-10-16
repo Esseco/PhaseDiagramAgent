@@ -37,9 +37,9 @@ def update_long_term_advice(state, advice, *, source):
     return updated
 
 
-def update_short_term_memory(state, snapshot):
+def update_short_term_memory(state, snapshot, *, _owned=False):
     """Replace volatile memory from facts; never promote it into long-term knowledge."""
-    updated = deepcopy(state)
+    updated = state if _owned else deepcopy(state)
     memory = updated.setdefault(
         "decision_memory", {"version": 0, "long_term_advice": [], "history": []}
     )

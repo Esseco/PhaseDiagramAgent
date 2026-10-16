@@ -1,5 +1,7 @@
 """Single state transition boundary for Agent-visible snapshots."""
 
+from phase_agent.interface_compatibility import call_with_optimizations
+
 from copy import deepcopy
 import hashlib
 import json
@@ -11,8 +13,10 @@ from phase_agent.persistence.memory.collect_memory_candidates import collect_mem
 from phase_agent.configuration.schema.state_schema_migrations import migrate_persisted_state
 
 
-def update_state_snapshot(state: dict, *, config_version=None) -> dict:
-    current = collect_memory_candidates(migrate_persisted_state(state))
+def update_state_snapshot(state: dict, *, config_version=None, _owned=False) -> dict:
+    current = collect_memory_candidates(
+        call_with_optimizations(migrate_persisted_state, state, _optimizations={"_owned": _owned})
+    )
     fingerprint = _state_fingerprint(current)
     existing = current.get("current_state_snapshot") or {}
     if existing.get("source_fingerprint") == fingerprint:
@@ -27,14 +31,18 @@ def update_state_snapshot(state: dict, *, config_version=None) -> dict:
     current["current_state_snapshot"] = snapshot
     current.setdefault("state_snapshots", []).append(_history_snapshot(snapshot))
     current["state_snapshots"] = current["state_snapshots"][-50:]
-    return update_short_term_memory(current, snapshot)
+    return call_with_optimizations(
+        update_short_term_memory, current, snapshot, _optimizations={"_owned": True}
+    )
 
 
-def agent_state_summary(state: dict) -> dict:
+def agent_state_summary(state: dict, *, _approval_only=False) -> dict:
     from phase_agent.analysis.state.project_authority import current_project
 
     summary = deepcopy(state.get("current_state_snapshot") or {})
     summary["current_project"] = current_project(state)
+    if _approval_only:
+        return summary
     from phase_agent.analysis.state.training_context import (
         validation_planning_context,
         post_refresh_search_context,

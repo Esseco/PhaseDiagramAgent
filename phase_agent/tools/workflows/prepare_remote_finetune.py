@@ -14,11 +14,22 @@ from phase_agent.tools.remote.write_training_submission import training_environm
 
 def prepare_remote_finetune(state, config, *, replacement_directory=None):
     current = deepcopy(state)
+    from phase_agent.tools.policy.workflow_policy import active_tasks
+
+    if active_tasks(current):
+        return {
+            "status": "tasks_awaiting_results",
+            "state": current,
+            "reason": "model_training_waits_for_inflight_tasks",
+        }
     settings = deepcopy(config.get("mlip_finetune") or {})
     if not settings.get("committee"):
         settings["committee"] = [{"seed": 2026 + i, "bootstrap_seed": 3026 + i} for i in range(4)]
     root = config.get("upload_batches_directory")
     base = current.get("active_model") or config.get("mlip") or {}
+    from phase_agent.analysis.convergence.training_provenance import model_with_training_provenance
+
+    base = model_with_training_provenance(current, base)
     model_path = base.get("model_path")
     if not root or not model_path or not settings.get("committee"):
         return {
@@ -170,6 +181,9 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         member.pop("bootstrap_seed", None)
     inputs = directory / "inputs"
     report = prepare_mace_finetune(records, inputs, config=settings)
+    from phase_agent.analysis.convergence.independent_evidence import training_snapshot
+
+    report["training_snapshot"] = training_snapshot(records, base)
     report["dataset_scope"] = {
         "cumulative_records": len(records),
         "current_round_records": sum(r["is_current_round"] for r in records),

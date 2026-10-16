@@ -48,9 +48,9 @@ def settings(config):
     }
 
 
-def normalize_workflow_state(state):
+def normalize_workflow_state(state, *, _owned=False):
     """Archive scheduling metadata, preserving real jobs and frozen scientific approvals."""
-    current = deepcopy(state)
+    current = state if _owned else deepcopy(state)
     legacy = {}
     for key in (
         "search_mode",
@@ -79,7 +79,12 @@ def active_tasks(state):
     rows.update(
         {row.get("task_id", str(index)): row for index, row in enumerate(state.get("tasks") or [])}
     )
-    return [row for row in rows.values() if awaiting_task_result(row)]
+    return [
+        row
+        for row in rows.values()
+        if awaiting_task_result(row)
+        or row.get("status") in {"pending", "running", "submitted", "unknown", "submission_unknown"}
+    ]
 
 
 def new_dft_ids(state, config):
@@ -165,9 +170,13 @@ def action_errors(action, state, config):
         "dft_single_point",
         "dft_relax",
     }
-    if (tool == "select_dft_candidates" or direct_dft) and policy[
-        "finetune_max_new_dft"
-    ] is not None:
+    from phase_agent.tools.budget.check_budget import budget_is_hard
+
+    if (
+        budget_is_hard(config.get("budgets"))
+        and (tool == "select_dft_candidates" or direct_dft)
+        and policy["finetune_max_new_dft"] is not None
+    ):
         if direct_dft:
             selected = set(action.get("target_ids") or [])
         else:
@@ -225,3 +234,20 @@ def needs_human(action, config):
     ):
         return True
     return tool == "update_mlip" and params.get("action") == "ACTIVATE_CANDIDATE_MODEL"
+
+
+def initial_direction_errors(action, state, assessment):
+    """Validate the confirmed cold-start route; never choose an action for the LLM."""
+    if not assessment or assessment.get("status") != "evaluated":
+        return []
+    if (
+        state.get("model_activation_history")
+        or state.get("last_trained_dataset_version")
+        or (state.get("active_model") or {}).get("dataset_version")
+    ):
+        return []
+    if assessment.get("eligible_structures", 0) < assessment.get("minimum_new_dft_records", 10):
+        return []
+    if (action.get("tool") or action.get("action_type")) != "update_mlip":
+        return ["first_round_requires_initial_finetune_proposal"]
+    return []

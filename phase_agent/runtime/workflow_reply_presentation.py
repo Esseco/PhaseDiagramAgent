@@ -32,13 +32,16 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             return approval_reply(proposal, result.get("state") or {})
     reply = _format_workflow_reply(result, state_path, verbose=verbose)
     from phase_agent.runtime.review_file_presentation import file_location_lines
+
     if result.get("status") == "awaiting_approval":
         from phase_agent.tools.workflows.generation_artifacts import proposal_artifacts
 
         plan_artifacts = proposal_artifacts(proposal, result.get("state") or {})
         if plan_artifacts:
             reply += "\n" + "\n".join(file_location_lines("Branch", plan_artifacts["json"]))
-        from phase_agent.tools.workflows.dft_selection_artifacts import proposal_artifacts as dft_artifacts
+        from phase_agent.tools.workflows.dft_selection_artifacts import (
+            proposal_artifacts as dft_artifacts,
+        )
 
         dft_details = dft_artifacts(proposal, result.get("state") or {})
         if dft_details:
@@ -46,7 +49,9 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
     history = (result.get("state") or {}).get("generation_history") or []
     selections = (result.get("state") or {}).get("qbc_selection_history") or []
     if selections and selections[-1].get("artifacts"):
-        reply += "\n" + "\n".join(file_location_lines("DFT 选点及输入任务", selections[-1]["artifacts"]["json"]))
+        reply += "\n" + "\n".join(
+            file_location_lines("DFT 选点及输入任务", selections[-1]["artifacts"]["json"])
+        )
     if history and (history[-1].get("artifacts") or {}):
         artifacts = history[-1]["artifacts"]
         reply += "\n" + "\n".join(file_location_lines("Branch 及结构路径", artifacts["json"]))
@@ -69,9 +74,7 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
 def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
     from phase_agent.tools.workflows.mc_coverage_choice import needs_choice, prompt
 
-    if result.get("status") == "awaiting_approval" and needs_choice(
-        result.get("agent_proposal")
-    ):
+    if result.get("status") == "awaiting_approval" and needs_choice(result.get("agent_proposal")):
         return (
             result.get("reason")
             if result.get("mc_coverage_question")
@@ -85,9 +88,9 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         ) or result
         if not payload.get("missing_evidence"):
             for event in reversed(result.get("events") or []):
-                data = (
-                    event.get("execution_result") or event.get("execution") or {}
-                ).get("result") or event
+                data = (event.get("execution_result") or event.get("execution") or {}).get(
+                    "result"
+                ) or event
                 if data.get("missing_evidence"):
                     payload = data
                     break
@@ -130,17 +133,11 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                 {**result, "verified_recovery": None}, state_path, verbose=verbose
             )
         )
-    if result.get("status") == "awaiting_approval" and not result.get(
-        "_review_card_rendered"
-    ):
+    if result.get("status") == "awaiting_approval" and not result.get("_review_card_rendered"):
         pending = (result.get("state") or {}).get("pending_execution_policies") or {}
         proposal = result.get("agent_proposal") or {}
         match = next(
-            (
-                (key, row)
-                for key, row in pending.items()
-                if row.get("agent_proposal") == proposal
-            ),
+            ((key, row) for key, row in pending.items() if row.get("agent_proposal") == proposal),
             None,
         )
         if match:
@@ -151,7 +148,9 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
 
             key, row = match
             card = review_card(key, row)
-            heading = f"方案：{card['title']} · 修订 {card['revision']} · {card['proposal_hash'][:12]}"
+            heading = (
+                f"方案：{card['title']} · 修订 {card['revision']} · {card['proposal_hash'][:12]}"
+            )
             original = format_workflow_reply(
                 {**result, "_review_card_rendered": True}, state_path, verbose=verbose
             )
@@ -181,9 +180,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                 )
                 for artifact in check["artifact_checks"][:4]:
                     lines.append(f"- {artifact['path']}：{artifact['status']}")
-            lines.append(
-                "上述为只读核对；原动作不会自动重跑。没有记录或文件缺失不等于没有副作用。"
-            )
+            lines.append("上述为只读核对；原动作不会自动重跑。没有记录或文件缺失不等于没有副作用。")
             return "\n".join(lines)
         rows = report.get("unsettled") or []
         names = {
@@ -192,8 +189,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         }
         tools = list(
             dict.fromkeys(
-                names.get((row.get("identity") or {}).get("tool"), "旧动作")
-                for row in rows
+                names.get((row.get("identity") or {}).get("tool"), "旧动作") for row in rows
             )
         )
         actions = "、".join(tools) or "旧动作"
@@ -210,9 +206,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         from phase_agent.runtime.training_reply import concise_training_reply
 
         handoffs = result.get("training_handoffs") or []
-        concise = [
-            concise_training_reply(row, result.get("state") or {}) for row in handoffs
-        ]
+        concise = [concise_training_reply(row, result.get("state") or {}) for row in handoffs]
         if handoffs and all(concise):
             return "\n".join(concise)
         return result["reason"]
@@ -222,16 +216,10 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         verbose = detailed_response()
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
-        (
-            row.get("agent_proposal")
-            for row in reversed(events)
-            if row.get("agent_proposal")
-        ),
+        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")),
         {},
     )
-    preview = ((proposal.get("raw_action") or {}).get("parameters") or {}).get(
-        "refresh_preview"
-    )
+    preview = ((proposal.get("raw_action") or {}).get("parameters") or {}).get("refresh_preview")
     refresh = (result.get("state") or {}).get("model_refresh") or {}
     if preview and result.get("status") == "awaiting_approval":
         rows = preview["candidates"]
@@ -260,9 +248,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             )
 
             facts = refresh_result_facts(result.get("state") or {})
-            failed = sum(
-                facts["status_counts"].get(s, 0) for s in ("failed", "timeout")
-            )
+            failed = sum(facts["status_counts"].get(s, 0) for s in ("failed", "timeout"))
             if failed:
                 reason = result.get("reason")
                 if not reason:
@@ -271,8 +257,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                         None,
                     )
                 causes = "；".join(
-                    f"{row['count']} 个：{row['reason']}"
-                    for row in facts["failure_groups"][:3]
+                    f"{row['count']} 个：{row['reason']}" for row in facts["failure_groups"][:3]
                 )
                 return reason or (
                     f"当前刷新 {failed}/{facts['task_count']} 个失败。\n原因：{causes}\n先修复依赖，再审核重试方案；重复“同意”不能恢复缺失文件。"
@@ -290,9 +275,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                 reason = result.get("reason") or next(
                     (e.get("reason") for e in reversed(events) if e.get("reason")), None
                 )
-                return "\n".join(
-                    [brief_chat_state(state), *([str(reason)] if reason else [])]
-                )
+                return "\n".join([brief_chat_state(state), *([str(reason)] if reason else [])])
             return "\n".join([brief_chat_state(state), *waiting_file_lines(state)])
         reason = result.get("reason") or next(
             (e.get("reason") for e in reversed(events) if e.get("reason")), None
@@ -303,9 +286,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
     if result.get("followup_error") or result.get("followup_note"):
         text += "\n下一步方案暂未准备成功；已生成结果保留，未执行后续任务。"
         if verbose:
-            text += "\n" + str(
-                result.get("followup_error") or result.get("followup_note")
-            )
+            text += "\n" + str(result.get("followup_error") or result.get("followup_note"))
     if (
         not verbose
         and not result.get("post_dft_review")
@@ -329,14 +310,10 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         return text + f"\n完整记录：`{state_path}`"
     from phase_agent.analysis.feedback.dft_magnetic_tables import magnetic_chat_summary
 
-    question = (
-        (result.get("dft_recovery_question") or {}) if isinstance(result, dict) else {}
-    )
+    question = (result.get("dft_recovery_question") or {}) if isinstance(result, dict) else {}
     task_ids = set(question.get("recovered_task_ids") or []) if question else None
     summary = (
-        magnetic_chat_summary(
-            (result.get("state") or {}), task_ids=task_ids, verbose=verbose
-        )
+        magnetic_chat_summary((result.get("state") or {}), task_ids=task_ids, verbose=verbose)
         if isinstance(result, dict)
         else ""
     )
@@ -345,16 +322,10 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         post_dft_review_lines,
     )
 
-    assessment = (
-        post_dft_lines(result.get("state") or {}) if isinstance(result, dict) else ""
-    )
+    assessment = post_dft_lines(result.get("state") or {}) if isinstance(result, dict) else ""
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
-        (
-            row.get("agent_proposal")
-            for row in reversed(events)
-            if row.get("agent_proposal")
-        ),
+        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")),
         {},
     )
     from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
@@ -367,9 +338,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
     review = post_dft_review_lines(
         review_action,
         verbose=verbose,
-        finetune_enabled=round_assessment.get("finetune_enabled")
-        if round_assessment
-        else None,
+        finetune_enabled=round_assessment.get("finetune_enabled") if round_assessment else None,
     )
     if review and result.get("status") == "awaiting_approval":
         text = "下一步建议（待批准）：\n" + text
@@ -394,14 +363,10 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             or next(
                 (
                     event.get("reason")
-                    or ((event.get("execution") or {}).get("result") or {}).get(
-                        "reason"
-                    )
+                    or ((event.get("execution") or {}).get("result") or {}).get("reason")
                     for event in reversed(events)
                     if event.get("reason")
-                    or ((event.get("execution") or {}).get("result") or {}).get(
-                        "reason"
-                    )
+                    or ((event.get("execution") or {}).get("result") or {}).get("reason")
                 ),
                 None,
             )
@@ -411,20 +376,13 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             if reason
             else "\n流程未提供具体原因，请查看完整记录中的审批与执行结果。"
         )
-    if (
-        isinstance(result, dict)
-        and result.get("status") == "awaiting_dft_recovery_decision"
-    ):
+    if isinstance(result, dict) and result.get("status") == "awaiting_dft_recovery_decision":
         return _dft_recovery_question_reply(result)
     if verbose or not isinstance(result, dict):
         return _format_workflow_reply_verbose(result, state_path, verbose=True)
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
-        (
-            row.get("agent_proposal")
-            for row in reversed(events)
-            if row.get("agent_proposal")
-        ),
+        (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")),
         {},
     )
     status = result.get("status")
@@ -446,9 +404,9 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
         }
         tool = proposal.get("recommended_action")
         if tool == "select_dft_candidates":
-            review = proposal.get("dft_template_review") or (
-                proposal.get("raw_action") or {}
-            ).get("dft_template_review")
+            review = proposal.get("dft_template_review") or (proposal.get("raw_action") or {}).get(
+                "dft_template_review"
+            )
             if review and review.get("status") == "pending":
                 return (
                     "当前：DFT 公共参数示例待确认。\n"
@@ -461,9 +419,7 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             params = proposal.get("action_parameters") or {}
             preview = params.get("dft_input_preview") or {}
             if not preview.get("task_count"):
-                return (
-                    "DFT 旧方案缺少结构数量与成本预览，暂不可批准。请说“继续”刷新方案。"
-                )
+                return "DFT 旧方案缺少结构数量与成本预览，暂不可批准。请说“继续”刷新方案。"
             if not preview.get("selected_structures"):
                 return "当前是旧 DFT 方案，缺少 Na/相/Ehull 清单及新版采点信息。请说“继续”刷新，未执行任务。"
             text = text.replace(
@@ -493,11 +449,7 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
                 text += "\n提醒：" + warning
             text += "\n批准后生成输入文件，不提交超算。"
         text = text.replace(f"建议：`{tool}`", f"建议：{labels.get(tool, tool)}")
-        lines = [
-            line
-            for line in text.splitlines()
-            if not line.startswith("完整参数与依据：")
-        ]
+        lines = [line for line in text.splitlines() if not line.startswith("完整参数与依据：")]
         lines = [
             line.replace(
                 "回复“同意”执行；回复“拒绝”取消；也可以直接提出修改意见。",
@@ -508,9 +460,7 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
         return "\n".join(lines + evidence_lines)
     if status == "awaiting_manual_submission":
         wait = result.get("manual_wait") or {}
-        recovered = int(
-            wait.get("recovered_count") or result.get("recovered_count") or 0
-        )
+        recovered = int(wait.get("recovered_count") or result.get("recovered_count") or 0)
         names = {
             "deep_search": "MC",
             "relax_and_feature": "Relax",
@@ -519,8 +469,7 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
         }
         stages = wait.get("waiting_by_stage") or {}
         summary = "、".join(
-            f"{names.get(stage, stage)} {count} 个"
-            for stage, count in sorted(stages.items())
+            f"{names.get(stage, stage)} {count} 个" for stage, count in sorted(stages.items())
         )
         lines = [f"已回收 {recovered} 个结果。"] if recovered else []
         for row in wait.get("dft_recovery_rounds") or []:
@@ -530,32 +479,22 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
                     f"已回收 {row['recovered_tasks']}/{row['expected_tasks']}（{row['recovery_ratio']:.1%}），"
                     f"成功 {row['successful_tasks']}、失败 {row['failed_tasks']}。"
                 )
-        lines.append(
-            f"等待结果：{summary or str(wait.get('waiting_task_count', 0)) + ' 个任务'}。"
-        )
+        lines.append(f"等待结果：{summary or str(wait.get('waiting_task_count', 0)) + ' 个任务'}。")
         collection = wait.get("result_collection") or {}
         issues = int(collection.get("invalid_count", 0)) + int(
             collection.get("missing_structure_count", 0)
         )
         markers = int(collection.get("missing_marker_count", 0))
         if issues or markers:
-            lines.append(
-                f"需检查：校验/结构问题 {issues} 个，缺完成标记 {markers} 个。"
-            )
+            lines.append(f"需检查：校验/结构问题 {issues} 个，缺完成标记 {markers} 个。")
         interception = (result.get("state") or {}).get("mc_budget_interception") or {}
         if interception.get("rejected_count"):
             verbose_text = _format_workflow_reply_verbose(result, state_path)
             lines.extend(
-                line
-                for line in verbose_text.splitlines()
-                if line.startswith("预算拦截：")
+                line for line in verbose_text.splitlines() if line.startswith("预算拦截：")
             )
         if wait.get("handoffs"):
-            lines.extend(
-                _handoff_lines(
-                    wait["handoffs"], collection=wait.get("result_collection")
-                )
-            )
+            lines.extend(_handoff_lines(wait["handoffs"], collection=wait.get("result_collection")))
             return "\n".join(lines)
         from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
 
@@ -564,17 +503,14 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             lines.extend(file_lines)
             errors = collection.get("transfer_errors") or []
             if errors:
-                lines.append(
-                    "结果包导入失败：" + "；".join(row["reason"] for row in errors[:3])
-                )
+                lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
             return "\n".join(lines)
         if wait.get("upload_root"):
             lines.append(f"目录：`{wait['upload_root']}`")
         else:
             roots = list(
                 dict.fromkeys(
-                    str(Path(path).parent)
-                    for path in wait.get("batch_directories") or []
+                    str(Path(path).parent) for path in wait.get("batch_directories") or []
                 )
             )
             if roots:
@@ -582,17 +518,14 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
         lines.append("尚未本机提交。Relax/MC 提交批次 GPU.sh；DFT 提交单任务 GPU.sh。")
         if wait.get("upload_archives"):
             lines.append(
-                "上传输入包："
-                + "、".join(f"`{path}`" for path in wait["upload_archives"])
+                "上传输入包：" + "、".join(f"`{path}`" for path in wait["upload_archives"])
             )
         lines.append(
             "完成后只需下载 results/transfer/all.results.zip 到对应 results 目录，再说“继续”自动校验回收；旧批次仍可回传精简 results 文件夹。未回传任务保持等待。"
         )
         errors = collection.get("transfer_errors") or []
         if errors:
-            lines.append(
-                "结果包导入失败：" + "；".join(row["reason"] for row in errors[:3])
-            )
+            lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
         return "\n".join(lines)
     text = _format_workflow_reply_verbose(result, state_path)
     return "\n".join(
@@ -615,14 +548,8 @@ def _dft_recovery_question_reply(result):
     state = result.get("state") or {}
     scope = question.get("scope") or {}
     version = scope.get("model_version") or "未知模型"
-    model_round = ((state.get("upload_layout") or {}).get("model_rounds") or {}).get(
-        version
-    )
-    label = (
-        f"第 {model_round} 轮（{version}）"
-        if model_round is not None
-        else f"模型 {version}"
-    )
+    model_round = ((state.get("upload_layout") or {}).get("model_rounds") or {}).get(version)
+    label = f"第 {model_round} 轮（{version}）" if model_round is not None else f"模型 {version}"
     lines = [
         f"{label}：DFT 已回收 {question.get('recovered_tasks', 0)}/{question.get('expected_tasks', 0)}"
         f"（{question.get('recovery_ratio', 0):.1%}）。",
@@ -634,8 +561,8 @@ def _dft_recovery_question_reply(result):
     lines.extend(
         [
             "还要继续回收剩余结果吗？",
-            "回复“继续回收”则等待；回复“不再回收”或“否”，则基于已有结果提出下一步方案。",
-            "不等待不会取消超算作业，也不会把缺失结果标为完成。",
+            "回复“继续回收”则等待；回复“不再回收”或“否”，则取消剩余DFT本地跟踪并基于已有结果提出下一步方案。",
+            "取消后不再回收这些任务，不会把缺失结果标为完成，也不会向超算发送终止作业命令。",
         ]
     )
     return "\n".join(lines)
@@ -646,11 +573,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         return str(result)
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
-        (
-            event.get("agent_proposal")
-            for event in reversed(events)
-            if event.get("agent_proposal")
-        ),
+        (event.get("agent_proposal") for event in reversed(events) if event.get("agent_proposal")),
         None,
     )
     if result.get("status") == "awaiting_approval" and proposal:
@@ -682,9 +605,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             ),
             {},
         )
-        detail = approval_files.get("directory") or _proposal_directory(
-            state_path, proposal
-        )
+        detail = approval_files.get("directory") or _proposal_directory(state_path, proposal)
         from phase_agent.runtime.proposal_presentation import TOOL_LABELS
 
         lines = [
@@ -727,13 +648,9 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             "select_dft_candidates",
             "run_calculation_stage",
         }:
-            lines.append(
-                "耗时粗估：暂无足够实测或任务规模信息，暂无法估算；相对成本不代表小时。"
-            )
+            lines.append("耗时粗估：暂无足够实测或任务规模信息，暂无法估算；相对成本不代表小时。")
         if recovered_count:
-            lines.insert(
-                0, f"已校验并回收 {recovered_count} 个任务结果，结果与成本已入账。"
-            )
+            lines.insert(0, f"已校验并回收 {recovered_count} 个任务结果，结果与成本已入账。")
         if proposed_tool == "generate_branches" and not verbose:
             from phase_agent.runtime.proposal_presentation import (
                 concise_generation_lines,
@@ -762,9 +679,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 "tm_ordering": "TM排布",
             }
             strategy = (
-                "、".join(
-                    f"{names.get(name, name)} {count}" for name, count in quotas.items()
-                )
+                "、".join(f"{names.get(name, name)} {count}" for name, count in quotas.items())
                 if isinstance(quotas, dict) and quotas
                 else f"覆盖补充（预计 {params.get('total_quota', '按配置')} 个；具体分配由现有 branch 覆盖决定）"
             )
@@ -778,11 +693,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                     if row.get("na_min") is not None
                     else ""
                 )
-                cap = (
-                    f"，det(H)≤{row['max_det_H']}"
-                    if row.get("max_det_H") is not None
-                    else ""
-                )
+                cap = f"，det(H)≤{row['max_det_H']}" if row.get("max_det_H") is not None else ""
                 lines.append(
                     f"- {target}{x}{cap}：{names.get(row['strategy'], row['strategy'])}候选 {row['quota']}；{row['reason']}"
                 )
@@ -831,8 +742,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                     "Relax 回收后先构建当前模型凸包并计算 Ehull，再按规则派发首轮 MC；每段回收后更新凸包，再决定追加。缺少有效凸包则暂停。"
                 )
             lines.extend(
-                "诊断提示：" + warning
-                for warning in batch_preview["diagnosis"].get("warnings", [])
+                "诊断提示：" + warning for warning in batch_preview["diagnosis"].get("warnings", [])
             )
         if proposal.get("recommended_action") == "allocate_mc_bohb":
             params = (
@@ -859,12 +769,8 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         summary = proposal.get("decision_summary") or {}
         if summary.get("observation"):
             lines.insert(0, "观察：" + summary["observation"])
-        if summary.get("rationale") and (
-            summary.get("observation") or summary.get("alternatives")
-        ):
-            lines.insert(
-                1 if summary.get("observation") else 0, "判断：" + summary["rationale"]
-            )
+        if summary.get("rationale") and (summary.get("observation") or summary.get("alternatives")):
+            lines.insert(1 if summary.get("observation") else 0, "判断：" + summary["rationale"])
         if verbose:
             for alternative in summary.get("alternatives") or []:
                 lines.append(
@@ -897,8 +803,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         change_text = ""
         if changes:
             details = "、".join(
-                f"{row.get('field')} {row.get('from')}→{row.get('to')}"
-                for row in changes
+                f"{row.get('field')} {row.get('from')}→{row.get('to')}" for row in changes
             )
             change_text = f"预算调整：{details}。"
         policy_changes = migration.get("policy_changes") or []
@@ -938,9 +843,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             ),
             None,
         )
-        return (
-            f"{reason or '本轮要求超过已确认配置；请先修订配置。'}\n未执行生成或计算。"
-        )
+        return f"{reason or '本轮要求超过已确认配置；请先修订配置。'}\n未执行生成或计算。"
     if status == "awaiting_remote_training":
         payload = (result.get("execution") or {}).get("result") or next(
             (
@@ -968,20 +871,14 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         )
     )
     validation = result.get("validation") or next(
-        (
-            event.get("validation")
-            for event in reversed(events)
-            if event.get("validation")
-        ),
+        (event.get("validation") for event in reversed(events) if event.get("validation")),
         {},
     )
     errors = validation.get("errors") or []
     detail_path = str(Path(state_path))
     if status == "awaiting_manual_submission":
         wait = result.get("manual_wait") or {}
-        recovered_count = int(
-            wait.get("recovered_count") or result.get("recovered_count") or 0
-        )
+        recovered_count = int(wait.get("recovered_count") or result.get("recovered_count") or 0)
         waiting_count = int(wait.get("waiting_task_count") or 0)
         by_stage = wait.get("waiting_by_stage") or {}
         stage_label = (
@@ -995,9 +892,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         )
         lines = []
         if recovered_count:
-            lines.append(
-                f"已校验并回收 {recovered_count} 个任务结果；预算和台账已更新。"
-            )
+            lines.append(f"已校验并回收 {recovered_count} 个任务结果；预算和台账已更新。")
         collection = wait.get("result_collection") or {}
         if collection:
             lines.append(
@@ -1011,9 +906,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         if recovered_count:
             lines.append(f"当前有 {waiting_count} 个 {stage_label} 任务待提交或回传。")
         else:
-            lines.append(
-                f"{stage_label} 输入已准备：{waiting_count} 个任务待提交或回传。"
-            )
+            lines.append(f"{stage_label} 输入已准备：{waiting_count} 个任务待提交或回传。")
         interception = (result.get("state") or {}).get("mc_budget_interception") or {}
         if stage_label == "MC" and interception.get("rejected_count"):
             breakdown = "、".join(
@@ -1031,11 +924,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             "本机没有提交作业。请将同一阶段的批次目录放在同一轮次目录下：Relax/MC 每个批次根目录的 `GPU.sh` 提交一次；DFT 则在单任务目录提交 `GPU.sh`。"
         )
         if wait.get("handoffs"):
-            lines.extend(
-                _handoff_lines(
-                    wait["handoffs"], collection=wait.get("result_collection")
-                )
-            )
+            lines.extend(_handoff_lines(wait["handoffs"], collection=wait.get("result_collection")))
             return "\n".join(lines)
         if wait.get("upload_root"):
             lines.append(f"本地任务总目录：`{wait['upload_root']}`")
@@ -1045,24 +934,18 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             )
         if wait.get("upload_archives"):
             lines.append(
-                "必要输入包："
-                + "、".join(f"`{path}`" for path in wait["upload_archives"])
+                "必要输入包：" + "、".join(f"`{path}`" for path in wait["upload_archives"])
             )
-        directories = (
-            wait.get("batch_directories") or wait.get("task_directories") or []
-        )
+        directories = wait.get("batch_directories") or wait.get("task_directories") or []
         if directories:
             lines.append("待提交的批次目录：")
             lines.extend(f"- `{path}`" for path in directories[:5])
             if len(directories) > 5:
-                lines.append(
-                    f"- 其余 {len(directories) - 5} 个批次见任务清单和 state 文件。"
-                )
+                lines.append(f"- 其余 {len(directories) - 5} 个批次见任务清单和 state 文件。")
         results_directories = wait.get("results_directories") or []
         if results_directories:
             lines.append(
-                "本阶段统一结果目录："
-                + "、".join(f"`{path}`" for path in results_directories)
+                "本阶段统一结果目录：" + "、".join(f"`{path}`" for path in results_directories)
             )
         lines.append(
             "本阶段任务完成后，只需下载 `results/transfer/all.results.zip`，放到登记的本地 `results/` 目录，"
@@ -1073,11 +956,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         return "\n".join(lines)
     if status == "failed":
         execution = result.get("execution") or next(
-            (
-                event.get("execution")
-                for event in reversed(events)
-                if event.get("execution")
-            ),
+            (event.get("execution") for event in reversed(events) if event.get("execution")),
             {},
         )
         reason = (
@@ -1095,11 +974,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             result.get("message")
             or result.get("reason")
             or next(
-                (
-                    event.get("reason")
-                    for event in reversed(events)
-                    if event.get("reason")
-                ),
+                (event.get("reason") for event in reversed(events) if event.get("reason")),
                 None,
             )
         )
@@ -1107,11 +982,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             reason = _friendly_workflow_rejection(workflow_reason)
         if not errors and not workflow_reason:
             execution = result.get("execution") or next(
-                (
-                    event.get("execution")
-                    for event in reversed(events)
-                    if event.get("execution")
-                ),
+                (event.get("execution") for event in reversed(events) if event.get("execution")),
                 {},
             )
             payload = (execution or {}).get("result") or {}
@@ -1121,11 +992,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         return f"本轮未执行：{reason}\n详细记录：`{detail_path}`"
     if status == "not_configured":
         execution = result.get("execution") or next(
-            (
-                event.get("execution")
-                for event in reversed(events)
-                if event.get("execution")
-            ),
+            (event.get("execution") for event in reversed(events) if event.get("execution")),
             {},
         )
         payload = (execution or {}).get("result") or {}
@@ -1134,11 +1001,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             or payload.get("reason")
             or result.get("reason")
             or next(
-                (
-                    event.get("reason")
-                    for event in reversed(events)
-                    if event.get("reason")
-                ),
+                (event.get("reason") for event in reversed(events) if event.get("reason")),
                 None,
             )
             or "执行接口未配置"
@@ -1159,26 +1022,19 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             "mc_requires_current_phase_diagram_ehull_per_atom": "MC 派发缺少当前相图的 Ehull/atom 证据",
         }
         reason = reason_labels.get(str(reason), str(reason))
-        if "llm_failed:" in str(reason) and any(word in str(reason).lower() for word in ("timeout", "timed out", "超时")):
+        if "llm_failed:" in str(reason) and any(
+            word in str(reason).lower() for word in ("timeout", "timed out", "超时")
+        ):
             return "本轮未执行：模型服务请求超时；已有结果仍保留，本次未生成新方案或执行任务。\n下一步：网络或服务恢复后，再重新请求下一步方案。"
         return f"本轮未执行：`{action or 'workflow'}` 未能准备（{reason}）。\n详细记录：`{detail_path}`"
-    if (
-        status in {"prepared", "already_prepared"}
-        and action == "prepare_local_batch_files"
-    ):
+    if status in {"prepared", "already_prepared"} and action == "prepare_local_batch_files":
         execution = result.get("execution") or next(
-            (
-                event.get("execution")
-                for event in reversed(events)
-                if event.get("execution")
-            ),
+            (event.get("execution") for event in reversed(events) if event.get("execution")),
             {},
         )
         payload = (execution or {}).get("result") or {}
         if payload.get("batches"):
-            locations = "、".join(
-                row.get("directory", "") for row in payload["batches"][:3]
-            )
+            locations = "、".join(row.get("directory", "") for row in payload["batches"][:3])
             return (
                 f"已准备 {payload.get('task_count', 0)} 个 Relax 任务、"
                 f"{payload.get('batch_count', 0)} 个上传批次；未提交超算。\n"
@@ -1189,11 +1045,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
     if status in {"completed", "planned_only", "tasks_in_progress"}:
         if status == "completed" and action == "generate_branches":
             execution = result.get("execution") or next(
-                (
-                    event.get("execution")
-                    for event in reversed(events)
-                    if event.get("execution")
-                ),
+                (event.get("execution") for event in reversed(events) if event.get("execution")),
                 {},
             )
             summary = ((execution or {}).get("result") or {}).get("summary") or {}
@@ -1201,9 +1053,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 phases = (
                     "、".join(
                         f"{name} {count}"
-                        for name, count in sorted(
-                            (summary.get("phase_counts") or {}).items()
-                        )
+                        for name, count in sorted((summary.get("phase_counts") or {}).items())
                     )
                     or "无"
                 )
@@ -1226,8 +1076,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 if shortfall:
                     notice += f"策略配额有 {shortfall} 个未生成，原因见分配记录；未自动转移配额。\n"
                 return (
-                    notice
-                    + f"已生成 {summary.get('registered_branches', 0)} 个 branch、"
+                    notice + f"已生成 {summary.get('registered_branches', 0)} 个 branch、"
                     f"{summary.get('registered_structures', 0)} 个初始结构。"
                     f"去重前入选相分布：{phases}；{cells}。\n"
                     f"生成 {summary.get('proposed_branches', 0)} 个候选，"
@@ -1295,18 +1144,13 @@ def _handoff_lines(handoffs, *, collection=None):
     if not detailed_response():
         folders = list(
             dict.fromkeys(
-                str(row.get("folder") or Path(row["upload_archive"]).parent)
-                for row in handoffs
+                str(row.get("folder") or Path(row["upload_archive"]).parent) for row in handoffs
             )
         )
-        lines = [
-            "本轮提交文件夹：" + "、".join(str(Path(folder)) for folder in folders)
-        ]
+        lines = ["本轮提交文件夹：" + "、".join(str(Path(folder)) for folder in folders)]
         returns = list(
             dict.fromkeys(
-                row.get("return_directory")
-                for row in handoffs
-                if row.get("return_directory")
+                row.get("return_directory") for row in handoffs if row.get("return_directory")
             )
         )
         if returns:
@@ -1316,16 +1160,12 @@ def _handoff_lines(handoffs, *, collection=None):
         )
         errors = (collection or {}).get("transfer_errors") or []
         if errors:
-            lines.append(
-                "结果包导入失败：" + "；".join(row["reason"] for row in errors[:3])
-            )
+            lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
         return lines
     lines = []
     for row in handoffs:
         lines.append(f"交互文件夹：`{row['folder']}`（{row['job_count']} 个作业）。")
-        lines.append(
-            f"压缩包：`{row['upload_archive']}`；总提交脚本：`{row['submit_script']}`。"
-        )
+        lines.append(f"压缩包：`{row['upload_archive']}`；总提交脚本：`{row['submit_script']}`。")
         lines.append(
             "把三个文件上传到超算同一个目录，在该目录执行 `sbatch submit_all.sh`；Python 在计算节点校验、解压并逐批提交，重复执行会跳过已有提交记录。总脚本只用 sbatch 提交，不直接 bash 执行。"
         )
@@ -1334,7 +1174,5 @@ def _handoff_lines(handoffs, *, collection=None):
         )
     errors = (collection or {}).get("transfer_errors") or []
     if errors:
-        lines.append(
-            "结果包导入失败：" + "；".join(row["reason"] for row in errors[:3])
-        )
+        lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
     return lines

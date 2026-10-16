@@ -1,5 +1,7 @@
 """One online decision, then immutable proposal validation and human approval."""
 
+from phase_agent.interface_compatibility import call_with_optimizations
+
 from copy import deepcopy
 from phase_agent.tools.policy.validate_tool_action import validate_tool_action
 from phase_agent.tools.state.state_manager import agent_state_summary
@@ -32,7 +34,13 @@ def prepare_react_proposal(frame):
         )
         if response:
             return response
-    summary = agent_state_summary(current)
+    summary = (
+        call_with_optimizations(
+            agent_state_summary, current, _optimizations={"_approval_only": True}
+        )
+        if context.get("saved_input_only")
+        else agent_state_summary(current)
+    )
     summary["user_message"] = str(context.get("user_message") or "")
     if stored:
         summary.setdefault("decision_context", {})["pending_proposal"] = deepcopy(
@@ -95,6 +103,36 @@ def prepare_react_proposal(frame):
                 "reason": "方案未通过执行约束：" + "; ".join(validation["errors"]),
                 "submitted": False,
             }
+    if decision != "reject" and proposal.get("recommended_action") == "select_dft_candidates":
+        from phase_agent.tools.workflows.dft_template_review import gate_template
+        from phase_agent.runtime.turn_process import timed_call
+
+        try:
+            proposal, template_wait = timed_call(
+                "核对或生成DFT模板预览",
+                gate_template,
+                proposal,
+                current,
+                stored,
+                feedback,
+                context.get("effective_config") or frame["config"],
+                context.get("manager"),
+                frame["agent_client"],
+                category="dft_inputs",
+            )
+        except (ValueError, OSError, ImportError) as error:
+            return {
+                "status": "not_configured",
+                "state": current,
+                "reason": "DFT 模板准备失败：" + str(error),
+                "submitted": False,
+            }
+        if template_wait:
+            feedback = None
+            if stored:
+                stored = deepcopy(stored)
+                stored["agent_proposal"] = deepcopy(proposal)
+                current["pending_execution_policies"][key] = stored
     return {
         **frame,
         "_graph_prepared": True,

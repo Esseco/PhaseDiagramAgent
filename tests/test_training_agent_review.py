@@ -28,14 +28,10 @@ def test_agent_choice_is_cached_and_does_not_activate():
     assert "回复‘同意’" in waits[0]["reason"]
     assert updated["candidate_models"]["new"]["agent_review"]["choice"] == "activate"
     review_training_choice(updated, waits, agent)
-    assert len(calls) == 1
-    assert calls[0]["decision_kind"] == "model_update"
-    from phase_agent.decisions.agent.prepare_llm_request import needs_deep_reasoning
-
-    assert needs_deep_reasoning(calls[0])
+    assert calls == []
 
 
-def test_repairs_format_without_replacing_agent_choice():
+def test_new_training_route_never_requests_a_second_model_choice():
     handoff = {
         "stage": "awaiting_activation_approval",
         "candidate_model_version": "new",
@@ -60,7 +56,11 @@ def test_repairs_format_without_replacing_agent_choice():
             },
         ]
     )
-    updated, waits = review_training_choice(state, [handoff], lambda payload: next(responses))
-    assert updated["candidate_models"]["new"]["agent_review"]["choice"] == "supplement_dft"
-    assert waits[0]["stage"] == "execution_plan_ready"
+    updated, waits = review_training_choice(
+        state,
+        [handoff],
+        lambda payload: (_ for _ in ()).throw(AssertionError("unexpected model call")),
+    )
+    assert updated["candidate_models"]["new"]["agent_review"]["choice"] == "activate"
+    assert waits[0]["stage"] == "awaiting_activation_approval"
     assert updated["active_model_version"] == "old"

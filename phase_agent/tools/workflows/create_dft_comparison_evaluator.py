@@ -9,7 +9,9 @@ from phase_agent.tools.workflows.comparison_model_registry import (
 
 
 def create_dft_comparison_evaluator(config, *, state=None):
-    references = deepcopy(state or {})
+    references = {
+        key: deepcopy((state or {}).get(key) or {}) for key in ("model_registry", "active_model")
+    }
     remember_comparison_models(references, config)
 
     def evaluate(*, result, structure_id, manager):

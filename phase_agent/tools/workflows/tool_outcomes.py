@@ -61,7 +61,7 @@ def _policy_rejection(record_id, mode, proposal, policy):
     }
 
 
-def _apply_execution_result(current, action, execution, *, record_id, formal):
+def _apply_execution_result(current, action, execution, *, record_id, formal, _owned=False):
     if execution.get("status") != "completed" or not isinstance(execution.get("result"), dict):
         if formal and execution.get("status") == "failed":
             # An exception does not prove that the handler produced no files.
@@ -78,16 +78,17 @@ def _apply_execution_result(current, action, execution, *, record_id, formal):
             if reservation is not None:
                 reservation["reconciliation_required"] = True
         return current, None
-    payload = deepcopy(execution["result"])
+    # Payload is observed only. Copy the final merged state once, rather than
+    # copying both histories and then copying the winning history again.
+    payload = execution["result"]
     if isinstance(payload.get("state"), dict):
-        merged = deepcopy(current)
-        merged.update(deepcopy(payload["state"]))
-        # A handler receives the state from before this approval was consumed.
-        # Its returned scientific state must not restore that pending approval.
-        merged["pending_execution_policies"] = deepcopy(
-            current.get("pending_execution_policies") or {}
-        )
-        current = merged
+        merged = {
+            **current,
+            **payload["state"],
+            # The handler cannot resurrect an already consumed approval.
+            "pending_execution_policies": current.get("pending_execution_policies") or {},
+        }
+        current = merged if _owned else deepcopy(merged)
     payload_status = payload.get("status")
     if action.get("tool") in {
         "generate_branches",

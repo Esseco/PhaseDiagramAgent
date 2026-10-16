@@ -37,6 +37,9 @@ def build_qbc_candidate_metrics(candidates: list[dict], *, qbc_evaluator=None) -
                 "interpretation", "committee_disagreement_not_true_error"
             ),
             "estimated_cost": deepcopy(candidate.get("estimated_cost")),
+            "geometry_optimization_evidence": deepcopy(
+                candidate.get("geometry_optimization_evidence")
+            ),
         }
         rows.append(row)
     return {

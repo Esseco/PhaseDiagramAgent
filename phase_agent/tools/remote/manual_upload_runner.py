@@ -50,7 +50,7 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
     def _script(self, batch_id, count, stage):
         return "# Generated transiently; manual tasks use their own GPU.sh.\n"
 
-    def prepare(self, state):
+    def prepare(self, state, *, _owned=False, _defer_index=False, _defer_archive=False):
         selected = self._select(state, state.get("tasks") or [])
         if selected and selected[0].get("stage") not in {
             "dft_single_point",
@@ -59,7 +59,11 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
             if self.task_preparer is None:
                 raise ValueError("MLIP task_preparer 未配置，不能生成可运行任务")
             _executor_reference(self.worker_command)
-        result = super().prepare(state)
+        from phase_agent.tools.remote.prepare_options import supported_prepare_options
+
+        prepare = super().prepare
+        options = supported_prepare_options(prepare, _owned=_owned, _defer_index=_defer_index)
+        result = prepare(state, **options)
         batch = result.get("batch")
         if result.get("status") != "prepared" or not batch:
             return result
@@ -160,9 +164,10 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
         ) / "results"
         from phase_agent.tools.remote.transfer_bundle import input_bundle
 
-        upload_archive = input_bundle(directory)
-        batch["upload_archive"] = upload_archive
-        result["state"]["slurm_batches"][-1]["upload_archive"] = upload_archive
+        if not _defer_archive:
+            upload_archive = input_bundle(directory)
+            batch["upload_archive"] = upload_archive
+            result["state"]["slurm_batches"][-1]["upload_archive"] = upload_archive
         batch.update(
             {
                 "upload_directory": str(directory),

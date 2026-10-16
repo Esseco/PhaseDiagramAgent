@@ -25,10 +25,12 @@ class FakeResponse:
 def completion(content, *, finish_reason="stop", prompt_tokens=10, completion_tokens=4):
     return {
         "model": "deepseek-v4-pro",
-        "choices": [{
-            "finish_reason": finish_reason,
-            "message": {"content": content},
-        }],
+        "choices": [
+            {
+                "finish_reason": finish_reason,
+                "message": {"content": content},
+            }
+        ],
         "usage": {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -38,55 +40,52 @@ def completion(content, *, finish_reason="stop", prompt_tokens=10, completion_to
 
 class DeepSeekClientTest(unittest.TestCase):
     def test_large_dft_retry_does_not_reduce_output_budget(self):
-        client = create_deepseek_client(api_key="test", thinking="disabled")
-        payload = {"allowed_tools": ["select_dft_candidates"],
-                   "state": {"qbc_candidates": [{}] * 100}}
-        with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
-                   side_effect=[FakeResponse(completion('{"reply":', finish_reason="length")),
-                                FakeResponse(completion('{"reply":"ok"}'))]) as request:
-            self.assertEqual(client(payload)["reply"], "ok")
-        budgets = [json.loads(call.args[0].data)["max_tokens"] for call in request.call_args_list]
-        self.assertGreater(budgets[0], 1600)
-        self.assertGreaterEqual(budgets[1], budgets[0])
+        client = create_deepseek_client(api_key="fake-secret", thinking="disabled")
+        with patch(
+            "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+            return_value=FakeResponse(completion("{}", finish_reason="length")),
+        ) as request:
+            with self.assertRaises(DeepSeekResponseError) as caught:
+                client({})
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(caught.exception.llm_usage["calls"], 1)
+        self.assertNotIn("fake-secret", str(caught.exception))
 
     def test_length_finish_is_retried_even_if_json_parses(self):
-        client = create_deepseek_client(api_key="test", thinking="disabled")
-        with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
-                   side_effect=[FakeResponse(completion('{}', finish_reason="length")),
-                                FakeResponse(completion('{"reply":"complete"}'))]) as request:
-            result = client({})
-        self.assertEqual(request.call_count, 2)
-        self.assertEqual(result["reply"], "complete")
+        client = create_deepseek_client(api_key="fake-secret", thinking="disabled")
+        with patch(
+            "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+            return_value=FakeResponse(completion("{}", finish_reason="length")),
+        ) as request:
+            with self.assertRaises(DeepSeekResponseError) as caught:
+                client({})
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(caught.exception.llm_usage["calls"], 1)
+        self.assertNotIn("fake-secret", str(caught.exception))
 
     def test_empty_json_output_is_retried_and_usage_counts_both_calls(self):
-        client = create_deepseek_client(api_key="test-secret-do-not-print", thinking="disabled")
+        client = create_deepseek_client(api_key="fake-secret", thinking="disabled")
         with patch(
             "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
-            side_effect=[FakeResponse(completion("")), FakeResponse(completion('{"reply":"ok"}'))],
-        ) as urlopen:
-            result = client({"instruction": "test"})
-
-        self.assertEqual(urlopen.call_count, 2)
-        self.assertEqual(result["reply"], "ok")
-        self.assertEqual(result["_llm_usage"]["calls"], 2)
-        self.assertEqual(result["_llm_usage"]["input_tokens"], 20)
-        self.assertEqual(result["_llm_usage"]["output_tokens"], 8)
-        sent_body = json.loads(urlopen.call_args_list[0].args[0].data)
-        self.assertEqual(sent_body["thinking"], {"type": "disabled"})
+            return_value=FakeResponse(completion("", finish_reason="stop")),
+        ) as request:
+            with self.assertRaises(DeepSeekResponseError) as caught:
+                client({})
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(caught.exception.llm_usage["calls"], 1)
+        self.assertNotIn("fake-secret", str(caught.exception))
 
     def test_invalid_json_after_retry_has_safe_actionable_error(self):
-        client = create_deepseek_client(api_key="test-secret-do-not-print")
+        client = create_deepseek_client(api_key="fake-secret", thinking="disabled")
         with patch(
             "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
-            side_effect=[FakeResponse(completion("not-json")), FakeResponse(completion("still-not-json"))],
-        ) as urlopen:
-            with self.assertRaises(DeepSeekResponseError) as raised:
-                client({"instruction": "test"})
-
-        self.assertEqual(urlopen.call_count, 2)
-        self.assertEqual(raised.exception.code, "invalid_json")
-        self.assertIn("字符数=14", raised.exception.safe_message)
-        self.assertNotIn("test-secret", str(raised.exception))
+            return_value=FakeResponse(completion("{bad", finish_reason="stop")),
+        ) as request:
+            with self.assertRaises(DeepSeekResponseError) as caught:
+                client({})
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(caught.exception.llm_usage["calls"], 1)
+        self.assertNotIn("fake-secret", str(caught.exception))
 
     def test_json_markdown_fence_is_accepted(self):
         client = create_deepseek_client(api_key="test-secret-do-not-print")

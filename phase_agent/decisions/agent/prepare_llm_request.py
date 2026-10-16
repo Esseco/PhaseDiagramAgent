@@ -38,6 +38,9 @@ def _size(value):
 
 
 def prepare_llm_request(payload):
+    if payload.get("bounded_control") is True:
+        # This contract has no scientific tools, candidate tables or action history.
+        return deepcopy(payload)
     from phase_agent.analysis.state.decision_evidence import transport_copy
     from phase_agent.runtime.turn_process import timed_call
 

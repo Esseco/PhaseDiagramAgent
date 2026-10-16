@@ -8,6 +8,13 @@ from phase_agent.analysis.feedback.dft_comparison_tables import (
 
 
 def post_dft_assessment(state, config=None):
+    if any(
+        task.get("stage") in {"dft_single_point", "dft_relax"}
+        and task.get("status")
+        in {"pending", "running", "submitted", "unknown", "submission_unknown"}
+        for task in state.get("tasks") or []
+    ):
+        return None
     config = config or {}
     model = config.get("mlip") or {}
     version = state.get("active_model_version") or model.get("version") or model.get("name")
@@ -17,6 +24,8 @@ def post_dft_assessment(state, config=None):
         for row in dft_recovery_rounds(state)
         if row["recovered_tasks"]
         and not row["pending_task_ids"]
+        and not row["waived_task_ids"]
+        and row["resolved_tasks"] == row["expected_tasks"]
         and row["scope_key"] not in consumed
         and (not version or row["scope"].get("model_version") == version)
     ]
@@ -70,11 +79,18 @@ def post_dft_assessment(state, config=None):
             for job in (state.get("remote_finetune_jobs") or {}).values()
         ],
         "eligible_structures": len(eligible),
+        "failure_review": {
+            "failure_fraction": row["failed_tasks"] / row["recovered_tasks"]
+            if row["recovered_tasks"]
+            else None,
+            "majority_failed": row["failed_tasks"] > row["recovered_tasks"] * 0.5,
+            "instruction": "个别DFT失败直接放弃；超过50%结合共同错误汇报用户，不自动重试或修改参数。未回传不算失败。",
+        },
         "paired_structures": paired,
         "metrics": metrics,
         "minimum_new_dft_records": minimum,
-        "combined_phase_diagram": {
-            key: ((state.get("phase_diagrams") or {}).get("combined") or {}).get(key)
+        "mlip_phase_diagram": {
+            key: ((state.get("phase_diagrams") or {}).get("mlip") or {}).get(key)
             for key in (
                 "status",
                 "version",

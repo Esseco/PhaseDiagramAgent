@@ -40,6 +40,7 @@ def post_mc_candidates(state, model_version):
                 "candidate_id": task.get("structure_id"),
                 "structure_id": task.get("structure_id"),
                 "branch_id": task.get("branch_id"),
+                "source_search_task_id": task.get("task_id"),
                 "structure_path": path,
                 "composition": entry.get("composition"),
                 "atom_count": entry.get("atom_count")
@@ -51,6 +52,7 @@ def post_mc_candidates(state, model_version):
                 "ehull_unit": "eV/atom",
                 "phase_diagram_version": diagram.get("version"),
                 "qbc": output.get("qbc") or {"status": "not_configured"},
+                "geometry_optimization_evidence": _geometry_evidence(state, task),
             }
         )
     # Candidate IDs must be unique for the existing selection contract.
@@ -58,3 +60,57 @@ def post_mc_candidates(state, model_version):
     return [
         row for row in candidates if row["candidate_id"] and ids.count(row["candidate_id"]) == 1
     ]
+
+
+def _geometry_evidence(state, candidate):
+    from math import isfinite, sqrt
+    from phase_agent.analysis.convergence.independent_evidence import geometry_key
+
+    path = (candidate.get("outputs") or {}).get("structure_path") or (
+        candidate.get("outputs") or {}
+    ).get("final_structure_path")
+    key = geometry_key({"structure": path}) if path else None
+    tolerance = None
+    for task in reversed(state.get("tasks") or []):
+        if (
+            task.get("branch_id") == candidate.get("branch_id")
+            and task.get("stage") in {"relax_and_feature", "mlip_relax", "relax_screen"}
+            and task.get("status") == "completed"
+        ):
+            tolerance = (task.get("outputs") or {}).get("fmax_target_ev_per_angstrom") or (
+                task.get("parameters") or {}
+            ).get("fmax")
+            if tolerance is not None:
+                break
+    if (
+        not key
+        or not isinstance(tolerance, (int, float))
+        or not isfinite(tolerance)
+        or tolerance <= 0
+    ):
+        return None
+    for row in reversed(state.get("dft_dataset_records") or []):
+        if (
+            row.get("status") != "completed"
+            or row.get("checks_passed") is not True
+            or row.get("converged") is not True
+            or geometry_key(row) != key
+        ):
+            continue
+        forces = row.get("forces")
+        if not forces:
+            continue
+        try:
+            residual = max(
+                sqrt(sum(float(x) ** 2 for x in vector)) for vector in forces if len(vector) == 3
+            )
+        except (ValueError, TypeError, OverflowError):
+            continue
+        if isfinite(residual):
+            return {
+                "source_task_id": row.get("task_id"),
+                "residual_force_ev_per_angstrom": residual,
+                "force_tolerance_ev_per_angstrom": tolerance,
+                "structure_geometry_key": key,
+            }
+    return None

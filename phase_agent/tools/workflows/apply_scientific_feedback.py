@@ -61,6 +61,9 @@ def apply_scientific_feedback(
         prior = next(
             (row for row in current.get("tasks", []) if row.get("task_id") == task_id), None
         )
+        if prior and prior.get("recovery_cancelled") is True:
+            rejected.append({"task_id": task_id, "reason": "dft_recovery_cancelled_by_user"})
+            continue
         if task_id in processed:
             if incoming.get("stage") not in DFT_STAGES or prior is None:
                 continue
@@ -194,8 +197,9 @@ def apply_scientific_feedback(
             },
             active_model_version=active_model_version or current.get("active_model_version"),
             output_state=current,
+            include_dft=False,
         )
-        diagrams = output["diagrams"]
+        diagrams = {**previous, **output["diagrams"]}  # Historical diagnostic links stay immutable.
         current["phase_diagrams_by_model"].update(output["mlip_by_version"])
         current["phase_diagrams"] = diagrams
         current["phase_diagram_input_checksum"] = records_checksum
@@ -220,7 +224,7 @@ def apply_scientific_feedback(
 
 
 def _record_rewards(state, previous, diagrams, feedback_rows):
-    for method in ("mlip", "dft"):
+    for method in ("mlip",):
         relevant = [
             row
             for row in feedback_rows
@@ -336,7 +340,11 @@ def _record_final_frame_error(state, result, manager, structure_id, evaluator=No
 
 
 def _record_convergence_round(state, previous, current):
-    method = "dft" if (current.get("dft") or {}).get("entries") else "mlip"
+    method = "mlip"
+    version = state.get("active_model_version")
+    baseline = previous.get("mlip") or {}
+    if baseline.get("model_version") == version and baseline.get("entries"):
+        state.setdefault("mlip_feedback_baselines", {}).setdefault(version, deepcopy(baseline))
     before, after = previous.get(method) or {}, current.get(method) or {}
     if before.get("energy_basis_id") != after.get("energy_basis_id"):
         return

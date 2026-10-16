@@ -65,6 +65,12 @@ def run_workflow_turn(
         # This approval only authorizes a safe, versioned config migration;
         # it never approves a scientific action or remote submission.
         kwargs["approve_budget_extension"] = True
+    if kwargs.get("frozen_selection_only"):
+
+        def reject_new_decision(_payload):
+            raise ValueError("原选点复用请求禁止重新调用决策模型")
+
+        kwargs["agent_client"] = reject_new_decision
     base_agent_client = kwargs.get("agent_client")
     from phase_agent.decisions.agent.resolve_explicit_generation_request import (
         resolve_explicit_generation_request,
@@ -134,7 +140,9 @@ def run_workflow_turn(
                     "editable_file": actual.get("editable_file"),
                 }
                 from phase_agent.decisions.agent.summary_request import request_summary_first
-                response = request_summary_first(base_agent_client,
+
+                response = request_summary_first(
+                    base_agent_client,
                     {
                         **payload,
                         "state": {**observed, "current_project": card}
@@ -150,7 +158,7 @@ def run_workflow_turn(
                             "current_project": card,
                             "project_settings": card["configuration"]["effective_settings"],
                         },
-                    }
+                    },
                 )
                 outcome = "已返回"
                 return response

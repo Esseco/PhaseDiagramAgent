@@ -357,11 +357,9 @@ def _assess_workflow_round(frame):
     from phase_agent.analysis.feedback.export_dft_products import export_dft_products
 
     export_dft_products(feedback["state"], effective_config.get("phase_diagram_directory"))
-    from phase_agent.analysis.phase.combined_phase_diagram import refresh_combined_phase_diagram
+    from phase_agent.analysis.convergence.feedback_cycles import record_feedback_cycle
 
-    refresh_combined_phase_diagram(
-        feedback["state"], effective_config.get("phase_diagram_directory")
-    )
+    record_feedback_cycle(feedback["state"])
     _save_runner_state(feedback["state"], state_path or effective_config.get("state_path"))
     return {
         **frame,

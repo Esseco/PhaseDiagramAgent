@@ -11,6 +11,7 @@ def require_structure_refresh(state, old_version, new_version):
         rounds[old_version] = max(rounds.values(), default=0) + 1
     if new_version not in rounds:
         rounds[new_version] = max(rounds.values(), default=0) + 1
+    state.setdefault("mlip_feedback_baselines", {}).pop(new_version, None)
     diagrams = state.get("phase_diagrams") or {}
     prior = (
         diagrams.get("mlip")

@@ -5,7 +5,6 @@ import hashlib
 import json
 
 
-from phase_agent.science.structures.initialize_branch_structures import initialize_branch_structures
 from phase_agent.persistence.ledger.register_candidate_batch import register_candidate_batch
 from phase_agent.tools.budget.reserve_budget import reserve_budget
 from phase_agent.analysis.phase.branch_relax_hull import (
@@ -20,6 +19,10 @@ from phase_agent.persistence.ledger.branch_energy_pool_ledger import (
 
 
 def prepare_branch_relaxation(candidates, state, context):
+    from phase_agent.science.structures.initialize_branch_structures import (
+        initialize_branch_structures,
+    )
+
     from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
 
     config = context["effective_config"]

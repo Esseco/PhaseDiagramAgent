@@ -19,7 +19,7 @@ def build_convergence_evidence(state, manager, *, budget_remaining=None):
     total_structures = len(structures)
     total_branches = len(branches)
     hull_changes = list(state.get("hull_changes") or [])
-    dft_diagram = (state.get("phase_diagrams") or {}).get("dft") or {}
+    dft_diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
     hull_version = dft_diagram.get("version") if dft_diagram.get("status") == "completed" else None
     previous_hull_version = state.get("convergence_hull_version")
     if hull_version is not None and previous_hull_version is not None:

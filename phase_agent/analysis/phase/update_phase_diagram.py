@@ -24,6 +24,7 @@ def update_phase_diagram(
     parent_versions: dict[str, str] | None = None,
     active_model_version: str | None = None,
     output_state: dict | None = None,
+    include_dft: bool = True,
 ) -> dict[str, Any]:
     """分别构建 mlip/dft 相图，保留原能量并保存可追踪版本。"""
     if energy_basis not in {"total", "per_atom", "per_formula_unit"}:
@@ -36,7 +37,7 @@ def update_phase_diagram(
             if item.get("energy_method") == "mlip"
         }
     )
-    groups = [("mlip", version) for version in versions] + [("dft", None)]
+    groups = [("mlip", version) for version in versions] + ([("dft", None)] if include_dft else [])
     for method, model_version in groups:
         selected = [
             item

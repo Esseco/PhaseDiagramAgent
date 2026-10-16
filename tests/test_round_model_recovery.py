@@ -262,7 +262,7 @@ def test_partial_recovery_question_is_saved_and_continue_is_not_a_choice():
     assert "1/3" in reply and "33.3%" in reply and "不再回收" in reply and "第 1 轮" in reply
 
 
-def test_decline_waives_only_asked_tasks_without_faking_completion_or_settlement():
+def test_decline_cancels_only_asked_tasks_without_faking_completion_or_settlement():
     original = update_dft_recovery_question(partial_state())
     decision = classify_dft_recovery_reply("否", original)
     state = update_dft_recovery_question(original, decision)
@@ -270,13 +270,14 @@ def test_decline_waives_only_asked_tasks_without_faking_completion_or_settlement
     assert state["pending_tasks"] == []
     assert state["budget_reservations"] == original["budget_reservations"]
     assert (
-        state["tasks"][1]["status"] == "pending"
+        state["tasks"][1]["status"] == "cancelled"
         and state["tasks"][1]["recovery_wait_waived"] is True
     )
     assert summarize_manual_upload_wait(state) is None
     assert reconcile_task_results(state)["state"]["pending_tasks"] == []
     assert dft_recovery_rounds(state)[0]["recovery_ratio"] == pytest.approx(1 / 3)
-    assert len(dft_recovery_rounds(state)[0]["waived_task_ids"]) == 2
+    assert len(dft_recovery_rounds(state)[0]["cancelled_task_ids"]) == 2
+    assert not dft_recovery_rounds(state)[0]["waived_task_ids"]
 
 
 def test_new_round_does_not_inherit_a_previous_waiver():
@@ -288,14 +289,15 @@ def test_new_round_does_not_inherit_a_previous_waiver():
     assert [t["task_id"] for t in state["pending_tasks"]] == ["E2"]
 
 
-def test_late_result_is_still_reconciled_after_waiving_wait():
+def test_late_result_is_ignored_after_explicit_recovery_cancellation():
     state = update_dft_recovery_question(partial_state())
     state = update_dft_recovery_question(state, classify_dft_recovery_reply("否", state))
     late = dft_result("D2")
     result = reconcile_task_results(state, [late])
-    assert result["state"]["tasks"][1]["status"] == "completed"
-    assert "D2" in result["state"]["processed_task_ids"]
-    assert dft_recovery_rounds(result["state"])[0]["recovered_tasks"] == 2
+    assert result["state"]["tasks"][1]["status"] == "cancelled"
+    assert "D2" not in result["state"].get("processed_task_ids", [])
+    assert dft_recovery_rounds(result["state"])[0]["recovered_tasks"] == 1
+    assert result["reconciled"][0]["reason"] == "dft_recovery_cancelled_by_user"
 
 
 def test_wait_choice_is_not_reasked_until_recovery_changes():

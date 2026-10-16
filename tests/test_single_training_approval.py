@@ -44,6 +44,13 @@ def setup_direction():
             },
         }
 
+    state["candidate_models"]["new"]["agent_review"] = {
+        "choice": "supplement_dft",
+        "review_policy": REVIEW_POLICY,
+        "reason": "saved legacy choice",
+        "alternatives": "saved comparison",
+        "followup_action": deepcopy(plan),
+    }
     state, waits = review_training_choice(state, [handoff], agent)
     assert waits[0]["stage"] == "execution_plan_ready"
     assert "回复‘同意’" not in waits[0]["reason"]

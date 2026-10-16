@@ -12,12 +12,19 @@ from phase_agent.analysis.feedback.dft_comparison_tables import (
 )
 
 
-def single_point_validation(state, *, model_version, minimum_checks, phase_gap=None):
+def single_point_validation(
+    state, *, model_version, minimum_checks, phase_gap=None, require_independent=False
+):
     records = [
         row
         for row in state.get("dft_dataset_records", [])
         if row.get("model_version") == model_version and row.get("stage") == "dft_single_point"
     ]
+    all_records = records
+    if require_independent:
+        from phase_agent.analysis.convergence.independent_evidence import independent_records
+
+        records = independent_records(state, model_version)["records"]
     comparisons = state.get("dft_mlip_comparisons") or []
     energies, forces = build_comparison_tables(records, comparisons, round_name="convergence")
     paired = [row for row in energies if row["comparison_status"] == "completed"]
@@ -37,7 +44,18 @@ def single_point_validation(state, *, model_version, minimum_checks, phase_gap=N
     metrics["task_ids"] = recent_ids
     metrics["enough_checks"] = minimum_checks > 0 and len(selected) >= minimum_checks
     competition = (
-        competing_phase_validation(state, paired, model_version=model_version, gap=phase_gap)
+        competing_phase_validation(
+            state,
+            [
+                r
+                for r in build_comparison_tables(
+                    all_records, comparisons, round_name="competition"
+                )[0]
+                if r["comparison_status"] == "completed"
+            ],
+            model_version=model_version,
+            gap=phase_gap,
+        )
         if phase_gap is not None
         else {"status": "disabled", "passed": True}
     )

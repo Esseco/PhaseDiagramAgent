@@ -12,8 +12,12 @@ import time
 
 MANIFEST = "transfer_manifest.json"
 from phase_agent.tools.remote.transfer_limits import (
-    MAX_ARCHIVE_FILES, MAX_MANIFEST_BYTES, MAX_ARCHIVE_BYTES, validate_capacity,
+    MAX_ARCHIVE_FILES,
+    MAX_MANIFEST_BYTES,
+    MAX_ARCHIVE_BYTES,
+    validate_capacity,
 )
+
 RESULT_NAMES = {
     "mc_occupations.bin",
     "result.json",
@@ -45,29 +49,50 @@ def checksum(path):
 
 
 def create_bundle(root, files, destination, *, kind, prefix=""):
+    """Hash the exact bytes written to ZIP, reading every payload only once."""
     root = Path(root).resolve()
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    rows = []
-    sources = []
+    sources, names = [], []
+    expected_size = 0
     for source in sorted({Path(p).resolve() for p in files}):
         relative = source.relative_to(root).as_posix()
         name = f"{prefix}/{relative}" if prefix else relative
         _safe_name(name)
         if source == destination.resolve():
             raise ValueError("Archive cannot include itself")
-        rows.append({"path": name, "size": source.stat().st_size, "sha256": checksum(source)})
         sources.append(source)
-    if len({row["path"].casefold() for row in rows}) != len(rows) or any(row["path"].casefold() == MANIFEST.casefold() for row in rows):
+        names.append(name)
+        expected_size += source.stat().st_size
+    if len({name.casefold() for name in names}) != len(names) or any(
+        name.casefold() == MANIFEST.casefold() for name in names
+    ):
         raise ValueError("Duplicate or reserved transfer paths")
-    manifest_bytes = json.dumps({"schema": 1, "kind": kind, "files": rows}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    validate_capacity(len(rows) + 1, len(manifest_bytes), sum(row["size"] for row in rows) + len(manifest_bytes))
+    validate_capacity(len(names) + 1, 0, expected_size)
     temporary = destination.with_name(destination.name + ".part")
+    rows, written = [], 0
     try:
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
+            for source, name in zip(sources, names):
+                info = zipfile.ZipInfo.from_file(source, name)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                digest, size = hashlib.sha256(), 0
+                with source.open("rb") as incoming, archive.open(info, "w") as outgoing:
+                    for chunk in iter(lambda: incoming.read(1024 * 1024), b""):
+                        size += len(chunk)
+                        written += len(chunk)
+                        validate_capacity(len(names) + 1, 0, written)
+                        outgoing.write(chunk)
+                        digest.update(chunk)
+                rows.append({"path": name, "size": size, "sha256": digest.hexdigest()})
+            manifest_bytes = json.dumps(
+                {"schema": 1, "kind": kind, "files": rows},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            validate_capacity(len(rows) + 1, len(manifest_bytes), written + len(manifest_bytes))
+            # Readers locate the unchanged v1 manifest by name, not ZIP order.
             archive.writestr(MANIFEST, manifest_bytes)
-            for source, row in zip(sources, rows):
-                archive.write(source, row["path"])
         os.replace(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)
@@ -206,7 +231,12 @@ def _validated_inventory(archive, max_bytes, storage_kind):
     infos = archive.infolist()
     if len({i.filename.casefold() for i in infos}) != len(infos):
         raise ValueError("Duplicate paths or too many files")
-    validate_capacity(len(infos), archive.getinfo(MANIFEST).file_size, sum(i.file_size for i in infos), max_bytes=max_bytes)
+    validate_capacity(
+        len(infos),
+        archive.getinfo(MANIFEST).file_size,
+        sum(i.file_size for i in infos),
+        max_bytes=max_bytes,
+    )
     for info in infos:
         _safe_name(info.filename)
         if info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000:
@@ -227,7 +257,12 @@ def _validated_inventory(archive, max_bytes, storage_kind):
 
 
 def import_bundle(
-    archive_path, directory, *, max_bytes=MAX_ARCHIVE_BYTES, storage_kind=None, extra_result_suffixes=()
+    archive_path,
+    directory,
+    *,
+    max_bytes=MAX_ARCHIVE_BYTES,
+    storage_kind=None,
+    extra_result_suffixes=(),
 ):
     """Validate the whole archive before publishing; refuse differing existing files."""
     root = Path(directory).resolve()
@@ -404,7 +439,13 @@ def validate_bundle(archive_path, *, max_bytes=MAX_ARCHIVE_BYTES, extra_result_s
         rows = _validated_inventory(archive, max_bytes, None)
         for row in rows:
             relative = _safe_name(row["path"])
-            if relative.name not in RESULT_NAMES and relative.suffix.lower() not in {".vasp", ".poscar", ".json", ".gz", *extra_result_suffixes}:
+            if relative.name not in RESULT_NAMES and relative.suffix.lower() not in {
+                ".vasp",
+                ".poscar",
+                ".json",
+                ".gz",
+                *extra_result_suffixes,
+            }:
                 raise ValueError(f"Unexpected result file: {relative}")
             digest = hashlib.sha256()
             size = 0

@@ -26,9 +26,11 @@ def test_partial_round_requires_wait_or_exact_waiver():
     state["tasks"].append(pending)
     assert post_dft_assessment(state) is None
     pending["recovery_wait_waived"] = True
-    assessment = post_dft_assessment(state)
-    assert assessment["waived_task_ids"] == ["missing"]
+    assert post_dft_assessment(state) is None
     assert pending["status"] == "pending"
+    pending["status"] = "failed"
+    assessment = post_dft_assessment(state)
+    assert assessment["recovered_tasks"] == assessment["expected_tasks"]
     state["post_dft_decided_rounds"] = [assessment["scope_key"]]
     assert post_dft_assessment(state) is None
 

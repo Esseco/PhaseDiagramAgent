@@ -1,26 +1,24 @@
 """inspection operation adapter; invoked as a named dialogue graph node."""
 
 from phase_agent.tools.step_runner.file_protocol import write_json
-from phase_agent.graphs.dialogue.commands import format_status_reply, _is_status_command
+from phase_agent.graphs.dialogue.commands import _is_status_command
 
 
 def handle(self, user_message, state, messages, conversation_id):
     # Read-only inspection must precede history recovery and all mutations.
     if self.config_delegate is None:
-        from phase_agent.runtime.plan_queries import is_plan_query, pending_plan_reply
-        from phase_agent.graphs.dialogue.support import bind_presented_proposal
+        from phase_agent.runtime.plan_queries import is_plan_query
 
-        if is_plan_query(user_message):
-            bind_presented_proposal(self, state)
-            return pending_plan_reply(state)
+        if is_plan_query(user_message) or _is_status_command(user_message):
+            from phase_agent.runtime.read_only_queries import read_only_reply
+
+            return read_only_reply(self, user_message, state, conversation_id)
     if self.config_delegate is None:
         from phase_agent.runtime.artifact_queries import finetune_location_reply
 
         location = finetune_location_reply(user_message, state)
         if location is not None:
             return location
-    if self.config_delegate is None and _is_status_command(user_message):
-        return format_status_reply(state)
     if self.config_delegate is None:
         from phase_agent.runtime.review_requests import additional_reviews
 

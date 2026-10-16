@@ -4,17 +4,21 @@ from copy import deepcopy
 
 
 def compact_action_history(record):
-    compact = deepcopy(record)
-    if not isinstance(compact, dict):
-        return compact
+    if not isinstance(record, dict):
+        return deepcopy(record)
+    # Strip redundant state BEFORE copying; handler results can contain the
+    # complete task ledger. Audit contents and caller ownership stay unchanged.
+    compact = {key: value for key, value in record.items() if key != "state"}
     if isinstance(compact.get("result"), dict):
-        compact["result"].pop("state", None)
+        compact["result"] = {k: v for k, v in compact["result"].items() if k != "state"}
     for key in ("execution", "execution_result"):
         execution = compact.get(key)
         if isinstance(execution, dict) and isinstance(execution.get("result"), dict):
-            execution["result"].pop("state", None)
-    compact.pop("state", None)
-    return compact
+            compact[key] = {
+                **execution,
+                "result": {k: v for k, v in execution["result"].items() if k != "state"},
+            }
+    return deepcopy(compact)
 
 
 def compact_state_history(state):
