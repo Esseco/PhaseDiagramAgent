@@ -53,6 +53,22 @@ def prepare_pycode_relax(task, *, manager, generator=None, comparison_model=None
             json.dumps(model, indent=2), encoding="utf-8"
         )
     workflow = directory / "workflow.py"
+    code = workflow.read_text(encoding="utf-8")
+    entries = (
+        "from Process_Vasp.workflows.atomate_runner import main",
+        "from Process_Vasp.atomate_runner import main",
+        "from atomate_runner import main",
+    )
+    if any(entry in code for entry in entries):
+        # Freeze the locally validated runner; the remote Py-Code may be older.
+        from Process_Vasp.workflows import atomate_runner
+
+        (directory / "_handoff_atomate_runner.py").write_bytes(
+            Path(atomate_runner.__file__).read_bytes()
+        )
+        for entry in entries:
+            code = code.replace(entry, "from _handoff_atomate_runner import main")
+        workflow.write_text(code, encoding="utf-8", newline="\n")
     workflow.rename(directory / "atomate_relax.py")
     workflow.write_text(
         '''"""Run one Py-Code relaxation and export the task result."""
@@ -64,16 +80,18 @@ import json
 
 root = Path(__file__).resolve().parent
 exit_code = 0
+workflow_error = None
 timer = start_timer()
 try:
     runpy.run_path(str(root / "atomate_relax.py"), run_name="__main__")
-except BaseException:
+except BaseException as error:
     exit_code = 1
+    workflow_error = {"type": type(error).__name__, "message": str(error)}
     raise
 finally:
     task = json.loads((root / "task.json").read_text(encoding="utf-8"))
     runtime = runtime_observation(timer, task, {})
-    result = finalize_vasp(root, exit_code=exit_code, runtime=runtime)
+    result = finalize_vasp(root, exit_code=exit_code, runtime=runtime, workflow_error=workflow_error)
     if result["status"] != "completed" and exit_code == 0:
         raise RuntimeError("DFT relaxation failed or did not converge")
 ''',

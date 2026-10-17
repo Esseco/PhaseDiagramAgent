@@ -1,6 +1,7 @@
 """Compute-node collection only: no scheduler calls and no scientific execution."""
 
 import hashlib
+import gzip
 import importlib.util
 import json
 import os
@@ -144,6 +145,58 @@ def artifacts(source, directory, task, data):
     return files
 
 
+def failure_diagnostics(source, task):
+    """Bounded text evidence only; never read wavefunction/charge payloads."""
+    worker = safe(source, task["input_directory"])
+    files = {}
+
+    def capture(directory, name, label):
+        path = directory / name
+        if not path.is_file():
+            path = directory / (name + ".gz")
+        if not path.is_file():
+            return None
+        if not path.resolve().is_relative_to(source.resolve()):
+            raise ValueError("diagnostic_path_outside_original_package")
+        with gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb") as stream:
+            data = stream.read(65537)
+        files[label] = {
+            "text": data[:65536].decode("utf-8", errors="replace"),
+            "truncated": len(data) > 65536,
+        }
+        return files[label]["text"] if len(data) <= 65536 else None
+
+    for name in ("workflow_status.json", "workflow_state.json", "failure_report.txt", "err", "out"):
+        capture(worker, name, name)
+    state = files.get("workflow_state.json") or {}
+    config_path = worker / "workflow.json"
+    observed = {}
+    try:
+        if state and not state["truncated"] and config_path.stat().st_size <= 65536:
+            if not config_path.resolve().is_relative_to(source.resolve()):
+                raise ValueError("diagnostic_config_outside_original_package")
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            checkpoint = json.loads(state["text"])
+            entry = (checkpoint.get("stages") or {}).get(config.get("calculation")) or {}
+            if entry.get("directory"):
+                calculation = safe(source, task["input_directory"] + "/" + entry["directory"])
+                for name in ("INCAR", "std_err.txt", "vasp.out"):
+                    capture(calculation, name, "calculation/" + name)
+                for name in ("WAVECAR", "CHGCAR", "vasprun.xml", "OUTCAR", "CONTCAR"):
+                    candidate = calculation / name
+                    if not candidate.is_file():
+                        candidate = calculation / (name + ".gz")
+                    if candidate.is_file():
+                        if not candidate.resolve().is_relative_to(source.resolve()):
+                            raise ValueError("diagnostic_artifact_outside_original_package")
+                        observed[name] = {"exists": True, "size_bytes": candidate.stat().st_size}
+                    else:
+                        observed[name] = {"exists": False}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return {"files": files, "artifacts": observed, "diagnostic_error": str(error)}
+    return {"files": files, "artifacts": observed}
+
+
 def collect(root):
     work, plan, transfer = unpack(root)
     # The original folder must sit beside this delivery. No guessed filesystem scan.
@@ -193,6 +246,10 @@ def collect(root):
                 if len({checksum(d / "result.json") for d, _ in candidates}) != 1:
                     raise ValueError("conflicting_original_terminal_results")
                 directory, data = candidates[0]
+                if data.get("status") != "completed":
+                    report.setdefault("task_diagnostics", {})[tid] = failure_diagnostics(
+                        source, task
+                    )
                 selected = artifacts(source, directory, task, data)
                 destination = safe(staging, task["result_directory"])
                 destination.mkdir(parents=True)

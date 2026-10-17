@@ -40,9 +40,7 @@ def resolve_calculation_directory(root):
         return next(iter(outputs)) if outputs else directory
     outputs = _vasp_directories(root)
     if len(outputs) > 1:
-        raise ValueError(
-            "Multiple attempts without checkpoint; refusing ambiguous result"
-        )
+        raise ValueError("Multiple attempts without checkpoint; refusing ambiguous result")
     return next(iter(outputs)) if outputs else root
 
 
@@ -50,12 +48,13 @@ def _vasp_directories(root):
     return {
         path.parent
         for path in root.rglob("vasprun.xml*")
-        if path.name
-        in {"vasprun.xml", "vasprun.xml.gz", "vasprun.xml.bz2", "vasprun.xml.xz"}
+        if path.name in {"vasprun.xml", "vasprun.xml.gz", "vasprun.xml.bz2", "vasprun.xml.xz"}
     }
 
 
-def finalize_vasp(directory, *, exit_code=0, calculation_directory=None, runtime=None):
+def finalize_vasp(
+    directory, *, exit_code=0, calculation_directory=None, runtime=None, workflow_error=None
+):
     root = Path(directory).resolve()
     task = json.loads((root / "task.json").read_text(encoding="utf-8"))
     try:
@@ -74,9 +73,21 @@ def finalize_vasp(directory, *, exit_code=0, calculation_directory=None, runtime
             "outputs": {},
         }
         calculation = root
-    result.update(
-        {"structure_id": task.get("structure_id"), "stage": task.get("stage")}
-    )
+    if workflow_error is not None:
+        detail = {
+            "type": str(workflow_error.get("type") or "Exception")[:120],
+            "message": str(workflow_error.get("message") or "")[:4000],
+        }
+        result.update(
+            status="failed",
+            converged=False,
+            workflow_error=detail,
+            workflow_exit_code=int(exit_code),
+            error=f"DFT workflow failed: {detail['type']}: {detail['message']}",
+        )
+        if result.get("outputs") is not None:
+            result["outputs"]["converged"] = False
+    result.update({"structure_id": task.get("structure_id"), "stage": task.get("stage")})
     outputs = result.get("outputs") or {}
     structure_path = outputs.get("structure_path")
     if structure_path:
@@ -119,15 +130,11 @@ def finalize_vasp(directory, *, exit_code=0, calculation_directory=None, runtime
     if comparison_config.is_file() and result.get("status") == "completed":
         from phase_agent.tools.remote.predict_dft_final_frame import write_prediction
 
-        write_prediction(
-            root, result, json.loads(comparison_config.read_text(encoding="utf-8"))
-        )
+        write_prediction(root, result, json.loads(comparison_config.read_text(encoding="utf-8")))
     result_path = root / "result.json"
     _write(result_path, result)
     marker = {key: result.get(key) for key in (*keys, "task_checksum", "status")}
-    marker.update(
-        {"result_file": result_path.name, "result_checksum": file_checksum(result_path)}
-    )
+    marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})
     _write(root / "task.finished.json", marker)
     stage = root.parent.parent
     if stage.name == "inputs":
@@ -139,8 +146,7 @@ def finalize_vasp(directory, *, exit_code=0, calculation_directory=None, runtime
 def _write(path, payload):
     temporary = Path(f"{path}.tmp")
     temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
         encoding="utf-8",
     )
     temporary.replace(path)
