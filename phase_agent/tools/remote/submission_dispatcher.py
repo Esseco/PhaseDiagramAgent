@@ -84,7 +84,7 @@ def preflight_models(root, jobs):
     return len(required)
 
 
-def run(root):
+def _run(root):
     import sys
 
     if sys.version_info < (3, 10):
@@ -175,8 +175,18 @@ def run(root):
                 "remedy": "Correct the HPC model reference or restore the recorded weights on HPC; local model download is not required. Already submitted jobs must not be submitted again.",
             }
             save(receipt_path, receipt)
-            save(root / "return-results" / "dispatch-error.json", receipt["model_preflight"])
+            if root.name.endswith("_input"):
+                output = root.with_name(root.name[:-6] + "_output")
+                output.mkdir(exist_ok=True)
+                temporary = output / "diagnostics.zip.part"
+                with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                    archive.writestr("dispatch-error.json", json.dumps(receipt["model_preflight"]))
+                temporary.replace(output / "diagnostics.zip")
+            else:
+                save(root / "return-results/dispatch-error.json", receipt["model_preflight"])
             raise
+        if root.name.endswith("_input"):
+            (root.with_name(root.name[:-6] + "_output") / "diagnostics.zip").unlink(missing_ok=True)
         receipt.pop("model_preflight", None)
         submitted = 0
         for job in jobs:
@@ -208,8 +218,36 @@ def run(root):
             print("Submitted:", job, job_id)
         print("New jobs:", submitted)
         print(
-            "Download the return-results folder after all jobs finish; keep its ZIP files compressed."
+            "Download the sibling <batch>_output folder after all jobs finish; keep its ZIP files compressed (legacy packages retain return-results)."
         )
+
+
+def run(root):
+    try:
+        return _run(root)
+    except Exception as error:
+        root = Path(root).resolve()
+        if os.environ.get("SLURM_JOB_ID") and root.name.endswith("_input"):
+            output = root.with_name(root.name[:-6] + "_output")
+            output.mkdir(exist_ok=True)
+            destination = output / "diagnostics.zip"
+            # Preserve the model preflight's more specific remedy when present.
+            if not destination.exists():
+                temporary = output / "diagnostics.zip.part"
+                with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                    archive.writestr(
+                        "dispatch-error.json",
+                        json.dumps(
+                            {
+                                "status": "failed",
+                                "error": f"{type(error).__name__}: {error}",
+                                "location": "remote",
+                                "remedy": "Inspect dispatch receipt and Slurm before retry; do not duplicate jobs.",
+                            }
+                        ),
+                    )
+                temporary.replace(destination)
+        raise
 
 
 if __name__ == "__main__":

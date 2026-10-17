@@ -138,4 +138,8 @@ def test_terminal_analysis_publishes_named_output(tmp_path):
     publish_output(work, {"status": "completed"})
     output = tmp_path / "epoch0_RelaxMC_Batch01_output"
     assert (output / "results.zip").read_bytes() == b"verified archive"
-    assert json.loads((output / "run_status.json").read_text())["status"] == "completed"
+    import zipfile
+
+    with zipfile.ZipFile(output / "diagnostics.zip") as archive:
+        assert json.loads(archive.read("run_status.json"))["status"] == "completed"
+    assert {p.name for p in output.iterdir()} == {"results.zip", "diagnostics.zip"}

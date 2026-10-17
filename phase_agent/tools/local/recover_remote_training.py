@@ -41,11 +41,25 @@ def inspect_training_results(job):
     if not root.is_dir() or not any((root / name).exists() for name in FILES):
         return None
     try:
-        missing = [name for name in FILES if not (root / name).is_file()]
+        paths = {name: root / name for name in FILES}
+        selected = job.get("model_manifest_file") or (job.get("training_handoff") or {}).get(
+            "manifest_result"
+        )
+        if selected:
+            candidate = Path(selected).resolve()
+            if (
+                candidate.parent != root.resolve()
+                or not candidate.name.startswith("models-")
+                or candidate.suffix != ".json"
+            ):
+                raise ValueError("Invalid registered model manifest path")
+            if candidate.is_file():
+                paths["models.json"] = candidate
+        missing = [name for name, path in paths.items() if not path.is_file()]
         if missing:
             raise ValueError("缺少 " + "、".join(missing))
         marker = json.loads((root / FILES[0]).read_text(encoding="utf-8-sig"))
-        models = json.loads((root / FILES[1]).read_text(encoding="utf-8-sig"))
+        models = json.loads(paths[FILES[1]].read_text(encoding="utf-8-sig"))
         version = job["original_model_version"]
         if marker.get("status") != "completed" or marker.get("original_model_version") != version:
             raise ValueError("完成标记状态或原模型版本不匹配")
@@ -113,7 +127,7 @@ def inspect_training_results(job):
         fingerprint = hashlib.sha256()
         for name in FILES:
             fingerprint.update(name.encode())
-            with (root / name).open("rb") as handle:
+            with paths[name].open("rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                     fingerprint.update(chunk)
         return {
@@ -142,7 +156,7 @@ def training_result_message(result):
     if result["issues"]:
         return (
             text
-            + "\n模型清单需补齐超算绝对路径及SHA256；说“继续”生成GPU_manifest.sh，在超算原inputs目录通过 sbatch GPU_manifest.sh 提交计算节点；回传models.json即可，无需重训或下载模型。"
+            + "\n模型清单需补齐超算绝对路径及SHA256；说“继续”生成模型清单核对批次，上传对应_input文件夹并执行 sbatch submit_all.sh；回传对应_output文件夹即可，无需重训或下载模型。"
         )
     return (
         text
@@ -156,10 +170,19 @@ def recover_remote_training(state):
     for job in (current.get("remote_finetune_jobs") or {}).values():
         if job.get("status") in INACTIVE or job.get("activated"):
             continue
-        from phase_agent.tools.remote.transfer_bundle import import_registered_bundles
+        from phase_agent.tools.remote.transfer_bundle import (
+            import_registered_bundles,
+            registered_return_locations,
+        )
 
         errors = import_registered_bundles(
-            [Path(job["directory"]), Path(job["directory"]) / "results"]
+            [Path(job["directory"]), Path(job["directory"]) / "results"],
+            locations={
+                source: target
+                for source, target in registered_return_locations(current).items()
+                if Path(target["directory"]) == Path(job["directory"])
+                or Path(job["directory"]).is_relative_to(Path(target["directory"]))
+            },
         )
         if errors:
             reports.append(

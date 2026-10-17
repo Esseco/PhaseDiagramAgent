@@ -73,10 +73,7 @@ def review_card(plan_id, record):
     if tool == "generate_branches" and params.get("module_execution_scope"):
         boundary = "生成并登记 branch，按已展示范围准备 Relax+MC 输入后停止；不提交超算。"
     if preview:
-        boundary = (
-            "首批及已展示上限内最多一轮补充输入生成；"
-            f"补充成本上限 {preview.get('maximum_supplemental_cost', '未记录')}；超限另行审批。"
-        )
+        boundary = "仅准备本次已展示目标的输入；回收后若需补充弛豫，须按具体目标另行审批。"
     from phase_agent.runtime.chat_approval_rules import is_sensitive_proposal
 
     region_mode = tool == "generate_branches" and params.get("sampling_mode") == "region_adaptive"

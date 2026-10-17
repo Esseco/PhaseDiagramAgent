@@ -6,7 +6,7 @@ import zipfile
 import pytest
 
 from phase_agent.tools.relax_mc_batch import upload_driver as driver
-from phase_agent.tools.relax_mc_batch.handoff import compact_handoff, result_archive
+from phase_agent.tools.relax_mc_batch.handoff import BOOTSTRAP, compact_handoff, result_archive
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 
 
@@ -35,7 +35,7 @@ def test_named_three_files_manifest_resume_and_output(tmp_path, monkeypatch):
         "submit_all.sh",
         "run_upload.py",
     }
-    assert (folder / "run_upload.py").read_text() == Path(driver.__file__).read_text()
+    assert (folder / "run_upload.py").read_text() == BOOTSTRAP
     script = (folder / "submit_all.sh").read_text()
     assert "python3 run_upload.py" in script and "python3 - <<" not in script
     assert script.index("SLURM_JOB_ID") < script.index("python3")
@@ -62,10 +62,14 @@ def test_named_three_files_manifest_resume_and_output(tmp_path, monkeypatch):
     output = root.with_name(root.name + "_output")
     assert {p.name for p in output.iterdir()} == {
         "results.zip",
-        "run_status.json",
-        "run.log",
+        "diagnostics.zip",
     }
-    assert json.loads((output / "run_status.json").read_text())["returncode"] == 0
+    assert (
+        json.loads(zipfile.ZipFile(output / "diagnostics.zip").read("run_status.json"))[
+            "returncode"
+        ]
+        == 0
+    )
     record = {
         "directory": str(root),
         "expected_results_archive": str(root / "returned/results.zip"),
@@ -111,7 +115,7 @@ def test_corrupt_archive_publishes_diagnostic_output(tmp_path, monkeypatch, name
     assert driver.main(folder) == 1
     assert not (folder / "work").exists()
     output = tmp_path / "batch_output"
-    status = json.loads((output / "run_status.json").read_text())
+    status = json.loads(zipfile.ZipFile(output / "diagnostics.zip").read("run_status.json"))
     assert status["error"] and not status["results_available"]
     from phase_agent.tools.relax_mc_batch.results import recover_available
 
@@ -154,7 +158,12 @@ def test_failure_return_preserved_in_output(tmp_path, monkeypatch):
     assert driver.main(folder) == 1
     output = tmp_path / "batch_output"
     assert (output / "results.zip").read_bytes() == b"failed scientific results"
-    assert json.loads((output / "run_status.json").read_text())["returncode"] == 1
+    assert (
+        json.loads(zipfile.ZipFile(output / "diagnostics.zip").read("run_status.json"))[
+            "returncode"
+        ]
+        == 1
+    )
 
 
 def test_actual_coordinator_and_local_recovery_from_named_output(tmp_path, monkeypatch):
@@ -168,6 +177,10 @@ def test_actual_coordinator_and_local_recovery_from_named_output(tmp_path, monke
     spec = importlib.util.spec_from_file_location("relax_mc_test_helpers", tests)
     helpers = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helpers)
+    monkeypatch.setattr(
+        "phase_agent.tools.remote.handoff_naming.batch_label",
+        lambda *a, **k: "epoch0_RelaxMC_Batch01",
+    )
     manager, state, config, context, action, result = helpers.package(tmp_path, count=3)
     executor, calls = helpers.fake_executor(monkeypatch)
     monkeypatch.setenv("SLURM_JOB_ID", "fake-test-job")

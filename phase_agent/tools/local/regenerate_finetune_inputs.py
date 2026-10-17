@@ -62,6 +62,9 @@ def _files(directory):
             "GPU.sh",
             "run_training.sh",
             "collect_training_results.py",
+            "transfer_bundle.py",
+            "_gpu_accounting.py",
+            "_gpu_transfer_bundle.py",
             "training_plan.json",
             "UPLOAD_AND_SUBMIT.md",
         }

@@ -9,12 +9,23 @@ import zipfile
 
 def batch_label(directory, state, version, operation, sequence):
     from phase_agent.analysis.state.model_epoch import model_epoch
+
     directory = Path(directory)
-    project = next((p.name for p in [directory, *directory.parents] if (p / "system.json").is_file() or re.match(r"^(O3|P2|P3)-", p.name)), "Project")
-    diagram = next((p.name for p in [directory, *directory.parents] if p.parent.name == "diagrams"), "diagram_default")
+    project = next(
+        (
+            p.name
+            for p in [directory, *directory.parents]
+            if (p / "system.json").is_file() or re.match(r"^(O3|P2|P3)-", p.name)
+        ),
+        "Project",
+    )
+    diagram = next(
+        (p.name for p in [directory, *directory.parents] if p.parent.name == "diagrams"),
+        "diagram_default",
+    )
     epoch = model_epoch(state, version) or "epoch-unregistered"
-    clean = lambda value: re.sub(r'[^A-Za-z0-9_.-]+', '_', str(value)).strip('._') or 'unknown'
-    return '_'.join(clean(v) for v in (epoch, operation, f"Batch{sequence:02d}"))
+    clean = lambda value: re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("._") or "unknown"
+    return "_".join(clean(v) for v in (epoch, operation, f"Batch{sequence:02d}"))
 
 
 def handoff_label(directory, scripts):
@@ -83,11 +94,18 @@ def handoff_label(directory, scripts):
         for kind in ("SP", "Relax", "MC", "DFTSP", "DFTRelax")
         if counts.get(kind)
     )
-    diagram = next((p.name for p in directory.parents if p.parent.name == "diagrams"), "diagram_default")
-    model_dir = next((p.name for p in [directory, *directory.parents] if re.match(r"epoch\d+_", p.name)), "epoch-unregistered_model-unregistered")
+    diagram = next(
+        (p.name for p in directory.parents if p.parent.name == "diagrams"), "diagram_default"
+    )
+    model_dir = next(
+        (p.name for p in [directory, *directory.parents] if re.match(r"epoch\d+_", p.name)),
+        "epoch-unregistered_model-unregistered",
+    )
     epoch_label = f"epoch{epoch.group(1)}" if epoch else "epoch-unregistered"
     if len(counts) > 1 and not refresh and not training:
-        operation = ''.join(kind for kind in ('SP', 'Relax', 'MC', 'DFTSP', 'DFTRelax') if counts.get(kind))
+        operation = "".join(
+            kind for kind in ("SP", "Relax", "MC", "DFTSP", "DFTRelax") if counts.get(kind)
+        )
     return f"{epoch_label}_{operation}"
 
 
@@ -95,17 +113,23 @@ def package_folder(parent, label, fingerprint):
     """Reuse identical inputs; give different packages a visible batch sequence."""
     parent = Path(parent)
     for sequence in range(1, 10000):
-        folder = parent / f"{label}_Batch{sequence:02d}"
-        if not folder.exists():
+        label_root = parent / f"{label}_Batch{sequence:02d}"
+        folder = label_root.with_name(label_root.name + "_input")
+        occupied = False
+        for existing in (label_root, folder):
+            if not existing.exists():
+                continue
+            occupied = True
+            archive = existing / "inputs.zip"
+            if archive.is_file():
+                with zipfile.ZipFile(archive) as bundle:
+                    rows = json.loads(bundle.read("transfer_manifest.json"))["files"]
+                identity = hashlib.sha256()
+                for row in rows:
+                    identity.update(row["path"].encode())
+                    identity.update(bytes.fromhex(row["sha256"]))
+                if identity.hexdigest()[:16] == fingerprint:
+                    return existing  # Existing handed-off inputs are immutable.
+        if not occupied and not label_root.with_name(label_root.name + "_output").exists():
             return folder
-        archive = folder / "inputs.zip"
-        if archive.is_file():
-            with zipfile.ZipFile(archive) as bundle:
-                rows = json.loads(bundle.read("transfer_manifest.json"))["files"]
-            identity = hashlib.sha256()
-            for row in rows:
-                identity.update(row["path"].encode())
-                identity.update(bytes.fromhex(row["sha256"]))
-            if identity.hexdigest()[:16] == fingerprint:
-                return folder
     raise ValueError("Too many handoff batches for the same label")

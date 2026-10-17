@@ -37,6 +37,8 @@ RESULT_NAMES = {
     "kfold_metrics.csv",
     "energy_comparison.csv",
     "force_comparison.csv",
+    "cv_baseline_review.json",
+    "remote_context.json",
 }
 
 
@@ -48,9 +50,10 @@ def checksum(path):
     return digest.hexdigest()
 
 
-def create_bundle(root, files, destination, *, kind, prefix=""):
+def create_bundle(root, files, destination, *, kind, prefix="", payloads=None, binding=None):
     """Hash the exact bytes written to ZIP, reading every payload only once."""
     root = Path(root).resolve()
+    payloads = payloads or {}
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     sources, names = [], []
@@ -63,11 +66,13 @@ def create_bundle(root, files, destination, *, kind, prefix=""):
             raise ValueError("Archive cannot include itself")
         sources.append(source)
         names.append(name)
-        expected_size += source.stat().st_size
+        expected_size += len(payloads[name]) if name in payloads else source.stat().st_size
     if len({name.casefold() for name in names}) != len(names) or any(
         name.casefold() == MANIFEST.casefold() for name in names
     ):
         raise ValueError("Duplicate or reserved transfer paths")
+    if set(payloads) - set(names):
+        raise ValueError("Replacement payload must name an included archive file")
     validate_capacity(len(names) + 1, 0, expected_size)
     temporary = destination.with_name(destination.name + ".part")
     rows, written = [], 0
@@ -77,7 +82,10 @@ def create_bundle(root, files, destination, *, kind, prefix=""):
                 info = zipfile.ZipInfo.from_file(source, name)
                 info.compress_type = zipfile.ZIP_DEFLATED
                 digest, size = hashlib.sha256(), 0
-                with source.open("rb") as incoming, archive.open(info, "w") as outgoing:
+                from io import BytesIO
+
+                incoming_stream = BytesIO(payloads[name]) if name in payloads else source.open("rb")
+                with incoming_stream as incoming, archive.open(info, "w") as outgoing:
                     for chunk in iter(lambda: incoming.read(1024 * 1024), b""):
                         size += len(chunk)
                         written += len(chunk)
@@ -86,7 +94,12 @@ def create_bundle(root, files, destination, *, kind, prefix=""):
                         digest.update(chunk)
                 rows.append({"path": name, "size": size, "sha256": digest.hexdigest()})
             manifest_bytes = json.dumps(
-                {"schema": 1, "kind": kind, "files": rows},
+                {
+                    "schema": 1,
+                    "kind": kind,
+                    "files": rows,
+                    **({"batch_binding": binding} if binding is not None else {}),
+                },
                 ensure_ascii=False,
                 separators=(",", ":"),
             ).encode("utf-8")
@@ -152,6 +165,8 @@ def _result_files(directory):
         if p.is_file()
         and (
             p.name in RESULT_NAMES
+            or (p.name.startswith("validation-") and p.suffix == ".json")
+            or (p.name.startswith("models-") and p.suffix == ".json")
             or p.name in extra_names
             or p.suffix.lower() in {".vasp", ".poscar"}
         )
@@ -310,18 +325,51 @@ def import_bundle(
     return len(rows)
 
 
-def import_registered_bundles(directories):
+def import_registered_bundles(directories, *, locations=None):
     errors = []
-    for root in sorted({Path(p) for p in directories if p}):
+    sources = {Path(p): Path(p) for p in directories if p}
+    sources.update({Path(source): target for source, target in (locations or {}).items()})
+    for root, target in sorted(sources.items()):
         if not root.is_dir():
             continue
+        if isinstance(target, dict):
+            failure = dispatch_failure(root)
+            if failure:
+                errors.append({"archive": str(root / "diagnostics.zip"), "reason": failure})
         for archive in _registered_archives(root):
             receipt = _archive_receipt(root, archive)
             digest = checksum(archive)
             if receipt.is_file() and receipt.read_text(encoding="utf-8") == digest:
                 continue
             try:
-                import_bundle(archive, root)
+                destination = target
+                if isinstance(target, dict):
+                    destination = target["directory"]
+                    with zipfile.ZipFile(archive) as zipped:
+                        binding = json.loads(zipped.read(MANIFEST)).get("batch_binding")
+                    expected = {
+                        "batch": target["batch"],
+                        "input_sha256": checksum(target["input_archive"]),
+                    }
+                    if binding != expected:
+                        raise ValueError("returned_package_binding_mismatch")
+                    if target.get("allowed_prefixes"):
+                        with zipfile.ZipFile(archive) as zipped:
+                            rows = json.loads(zipped.read(MANIFEST))["files"]
+                        for row in rows:
+                            path = _safe_name(row["path"])
+                            scoped = any(
+                                path.as_posix().startswith(prefix)
+                                for prefix in target["allowed_prefixes"]
+                            )
+                            runtime = (
+                                path.parent.as_posix() in target.get("runtime_roots", [])
+                                and path.name.startswith("gpu-job-")
+                                and path.name.endswith(".runtime.json")
+                            )
+                            if not scoped and not runtime:
+                                raise ValueError("recovery_result_outside_original_scope")
+                import_bundle(archive, destination)
                 receipt.parent.mkdir(exist_ok=True)
                 receipt.write_text(digest, encoding="utf-8")
             except (
@@ -333,6 +381,65 @@ def import_registered_bundles(directories):
             ) as error:
                 errors.append({"archive": str(archive), "reason": str(error)})
     return errors
+
+
+def registered_return_locations(state):
+    """Only persisted local handoffs may select an archive's import root."""
+    locations = {}
+    rows = list(state.get("slurm_batches") or [])
+    for job in (state.get("remote_finetune_jobs") or {}).values():
+        if job.get("activated") or job.get("status") in {"abandoned", "cancelled", "superseded"}:
+            continue
+        rows.append(job)
+        rows.extend({"handoff": h} for h in (job.get("transfer_handoffs") or {}).values())
+        if (job.get("training_handoff") or {}).get("handoff"):
+            rows.append(job["training_handoff"])
+    for row in rows:
+        handoff = row.get("handoff") or {}
+        if handoff.get("layout_version") != 4:
+            continue
+        folder = Path(handoff["folder"])
+        output = Path(handoff["return_directory"])
+        if not folder.name.endswith("_input") or output != folder.with_name(
+            folder.name[:-6] + "_output"
+        ):
+            raise ValueError("batch_output_directory_mismatch")
+        target = {
+            "directory": handoff["import_directory"],
+            "batch": folder.name[:-6],
+            "input_archive": handoff["upload_archive"],
+        }
+        if str(output) in locations and locations[str(output)] != target:
+            raise ValueError("batch_output_import_root_conflict")
+        locations[str(output)] = target
+    from phase_agent.tools.remote.legacy_recovery import recovery_handoffs
+
+    for handoff in recovery_handoffs(state):
+        folder = Path(handoff["folder"])
+        locations[handoff["return_directory"]] = {
+            "directory": handoff["import_directory"],
+            "batch": folder.name[:-6],
+            "input_archive": handoff["upload_archive"],
+            "allowed_prefixes": handoff["allowed_prefixes"],
+            "runtime_roots": handoff["runtime_roots"],
+        }
+    return locations
+
+
+def dispatch_failure(root):
+    archive = Path(root) / "diagnostics.zip"
+    if not archive.is_file():
+        return None
+    try:
+        with zipfile.ZipFile(archive) as zipped:
+            if zipped.getinfo("dispatch-error.json").file_size > 65536:
+                raise ValueError("oversized_dispatch_diagnostic")
+            report = json.loads(zipped.read("dispatch-error.json"))
+            if report.get("error"):
+                return "remote_dispatch_failed:" + str(report["error"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as error:
+        return str(error)
+    return None
 
 
 def registered_result_directories(state):
@@ -380,6 +487,7 @@ def has_registered_return(state):
         if archive.is_file() and batch.get("import_checksum") != checksum(archive):
             return True
     directories = registered_result_directories(state)
+    directories.update(registered_return_locations(state))
     directories.update(
         str(Path(job["directory"]))
         for job in (state.get("remote_finetune_jobs") or {}).values()
@@ -394,6 +502,8 @@ def has_registered_return(state):
         and not job.get("activated")
         and job.get("status") not in {"abandoned", "cancelled", "superseded"}
     )
+    if any(dispatch_failure(source) for source in registered_return_locations(state)):
+        return True
     return any(
         not _archive_receipt(root, archive).is_file()
         or _archive_receipt(root, archive).read_text(encoding="utf-8") != checksum(archive)
@@ -412,6 +522,9 @@ def publish_return(handoff_directory, results_relative):
         return None
     # The operation lock covers collection and publishing, including concurrent jobs.
     with _archive_lock(results):
+        if handoff.name.endswith("_input") and (handoff / "inputs/run_training.sh").is_file():
+            context = {"input_directory": str((handoff / "inputs").resolve())}
+            (results / "remote_context.json").write_text(json.dumps(context), encoding="utf-8")
         files = _result_files(results)
         for directory in results.iterdir():
             if (
@@ -424,7 +537,17 @@ def publish_return(handoff_directory, results_relative):
         if not files:
             return None
         name = "__".join(relative.parts) + ".results.zip"
-        return create_bundle(handoff, files, handoff / "return-results" / name, kind="results")
+        destination = (
+            handoff.with_name(handoff.name[:-6] + "_output")
+            if handoff.name.endswith("_input")
+            else handoff / "return-results"
+        )
+        binding = (
+            {"batch": handoff.name[:-6], "input_sha256": checksum(handoff / "inputs.zip")}
+            if handoff.name.endswith("_input")
+            else None
+        )
+        return create_bundle(handoff, files, destination / name, kind="results", binding=binding)
 
 
 if __name__ == "__main__":

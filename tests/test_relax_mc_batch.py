@@ -292,7 +292,7 @@ def test_return_import_rebases_results_preserves_ledger_and_is_idempotent(tmp_pa
     execute, calls = fake_executor(monkeypatch)
     outcome = run_batch(result["directory"], submit=True, batch_executor=execute)
     returned = Path(result["expected_results_archive"])
-    returned.parent.mkdir()
+    returned.parent.mkdir(exist_ok=True)
     shutil.copy2(outcome["archive"], returned)
     imported = import_results(
         action={"parameters": {"bundle_id": result["bundle_id"]}},
@@ -355,6 +355,7 @@ def test_failure_does_not_overwrite_submission_receipt_checkpoint(tmp_path, monk
         raise RuntimeError("submission_receipt_uncertain")
 
     from phase_agent.tools.relax_mc_batch import dependencies
+
     monkeypatch.setattr(dependencies, "prepare_wave", uncertain)
     outcome = run_batch(result["directory"], submit=True)
     assert outcome["status"] == "failed"

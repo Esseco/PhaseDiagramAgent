@@ -90,7 +90,7 @@ def write_submission_index(root, state):
         "",
         "上传：使用下方本次交互文件夹，整体上传后执行一次 sbatch submit_all.sh；不要重复提交历史任务。",
         "",
-        "回收：把远端 return-results 文件夹整体传回下方本地回传目录，保留压缩包即可，再说“继续”。旧提交仍支持原 results/transfer 路径。",
+        "回收：把远端对应批次的 _output 文件夹整体传回下方本地回传目录（旧包仍为 return-results），保留压缩包即可，再说“继续”。旧提交仍支持原 results/transfer 路径。",
         "",
         "Agent 读取已有归档时自动恢复所需文件；工作目录和旧路径兼容入口隐藏，平时只需使用 archives 和本索引。工作目录链接可直接打开。",
         "",
@@ -128,6 +128,9 @@ def write_submission_index(root, state):
             if r.get("handoff")
         }
     )
+    for job in (state.get("remote_finetune_jobs") or {}).values():
+        for transfer in (job.get("transfer_handoffs") or {}).values():
+            handoffs[transfer["folder"]] = transfer
     if handoffs:
         guide = [
             "## 本次交互文件夹",
@@ -145,7 +148,7 @@ def write_submission_index(root, state):
         guide.extend(
             [
                 "",
-                "结束后把远端 return-results 文件夹中的压缩包传到上表对应目录，回复‘继续’，无需手动解压。下方完整输入包为归档，勿重复提交历史作业。",
+                "结束后把远端对应批次 _output 文件夹中的压缩包传到上表对应目录（旧包仍为 return-results），回复‘继续’，无需手动解压。下方完整输入包为归档，勿重复提交历史作业。",
                 "",
             ]
         )

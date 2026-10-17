@@ -7,9 +7,7 @@ from pathlib import Path
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
 
-DRIVER = (
-    Path(__file__).with_name("submission_dispatcher.py").read_text(encoding="utf-8")
-)
+DRIVER = Path(__file__).with_name("submission_dispatcher.py").read_text(encoding="utf-8")
 
 
 def dispatcher_gpu_directive(first_script):
@@ -24,15 +22,9 @@ def dispatcher_gpu_directive(first_script):
                 if parts[0] == "gpu" and (
                     len(parts) == 1 or not parts[-1].isdigit() or int(parts[-1]) > 0
                 ):
-                    kind = (
-                        ":".join(parts[1:-1])
-                        if parts[-1].isdigit()
-                        else ":".join(parts[1:])
-                    )
+                    kind = ":".join(parts[1:-1]) if parts[-1].isdigit() else ":".join(parts[1:])
                     return "#SBATCH --gres=gpu:" + (kind + ":" if kind else "") + "1"
-        match = re.search(
-            r"(?:--gpus(?:-per-node|-per-task)?|-G)(?:=|\s+)([^\s]+)", line
-        )
+        match = re.search(r"(?:--gpus(?:-per-node|-per-task)?|-G)(?:=|\s+)([^\s]+)", line)
         if match:
             parts = match.group(1).split(":")
             if parts[-1].isdigit() and int(parts[-1]) > 0:
@@ -51,11 +43,7 @@ def write_dispatch_entry(folder, first_script):
     dispatcher = folder / "dispatch_tasks.py"
     dispatcher.write_text(DRIVER, encoding="utf-8", newline="\n")
     partition = next(
-        (
-            line
-            for line in first_script.splitlines()
-            if line.startswith("#SBATCH --partition")
-        ),
+        (line for line in first_script.splitlines() if line.startswith("#SBATCH --partition")),
         "",
     )
     gpu = dispatcher_gpu_directive(first_script)
@@ -91,15 +79,13 @@ def handoff_root(directory):
     )
 
 
-def prepare_handoff(directory, scripts):
+def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=None):
     """Build a portable dispatch package without changing scientific inputs."""
     import tempfile
     import shutil
 
     directory = Path(directory).resolve()
-    scripts = sorted(
-        {Path(p).resolve().relative_to(directory).as_posix() for p in scripts}
-    )
+    scripts = sorted({Path(p).resolve().relative_to(directory).as_posix() for p in scripts})
     if not scripts:
         return None
     files = set()
@@ -116,6 +102,21 @@ def prepare_handoff(directory, scripts):
             payload = inputs / parts[0] if len(parts) > 1 else inputs
         files.update(input_files(payload))
         result_roots[script] = (operation / "results").relative_to(directory).as_posix()
+    if payload_files is not None:
+        files = {Path(p).resolve() for p in payload_files}
+        if not {directory / p for p in scripts}.issubset(files):
+            raise ValueError("Selected handoff payload must contain its scripts")
+        for name in scripts:
+            script = directory / name
+            if "# GPU_USAGE_CLOCK" in script.read_text(encoding="utf-8"):
+                files.update(
+                    script.parent / helper
+                    for helper in ("_gpu_accounting.py", "_gpu_transfer_bundle.py")
+                )
+        for source in files:
+            source.relative_to(directory)
+            if not source.is_file():
+                raise FileNotFoundError(source)
     with tempfile.TemporaryDirectory(prefix="phase-handoff-") as temp:
         portable = Path(temp)
         for source in files:
@@ -142,9 +143,19 @@ def prepare_handoff(directory, scripts):
                 len(lines),
             )
             upward = "/".join([".."] * len(Path(script).parent.parts)) or "."
+            accounting = ""
+            if "# GPU_USAGE_CLOCK" in content:
+                index = next(
+                    i + 1
+                    for i, line in enumerate(lines)
+                    if line.strip() == "trap _gpu_usage_finish EXIT"
+                )
+                accounting = 'python3 "$_gpu_usage_directory/_gpu_accounting.py" "$_gpu_usage_started" "$phase_status" || echo "GPU usage record unavailable" >&2; '
             hook = (
                 'PHASE_HANDOFF_ROOT="$(cd -- "' + upward + '" && pwd)"\n'
-                'trap \'phase_status=$?; python3 "$PHASE_HANDOFF_ROOT/_round_transfer.py" "$PHASE_HANDOFF_ROOT" '
+                "trap 'phase_status=$?; trap - EXIT; "
+                + accounting
+                + 'python3 "$PHASE_HANDOFF_ROOT/_round_transfer.py" "$PHASE_HANDOFF_ROOT" '
                 + '"'
                 + result_roots[script]
                 + '"'
@@ -158,15 +169,17 @@ def prepare_handoff(directory, scripts):
             identity.update(source.relative_to(portable).as_posix().encode())
             identity.update(hashlib.sha256(source.read_bytes()).digest())
         key = identity.hexdigest()[:16]
-        base = next(
-            (p for p in directory.parents if p.name == "submissions"), directory.parent
-        )
+        base = next((p for p in directory.parents if p.name == "submissions"), directory.parent)
         from phase_agent.tools.remote.handoff_naming import (
             handoff_label,
             package_folder,
         )
 
         label = handoff_label(directory, scripts)
+        if operation_label is not None:
+            if not re.fullmatch(r"[A-Za-z0-9]+", operation_label):
+                raise ValueError("Invalid handoff operation label")
+            label = label.split("_", 1)[0] + "_" + operation_label
         folder = package_folder(base / "archives" / "01-upload", label, key)
         archive = folder / "inputs.zip"
         if not archive.exists():
@@ -174,7 +187,10 @@ def prepare_handoff(directory, scripts):
     script, dispatcher = write_dispatch_entry(
         folder, (directory / scripts[0]).read_text(encoding="utf-8")
     )
-    destination = directory / "return-results"
+    paired = folder.name.endswith("_input")
+    destination = (
+        folder.with_name(folder.name[:-6] + "_output") if paired else directory / "return-results"
+    )
     destination.mkdir(parents=True, exist_ok=True)
     return {
         "folder": str(folder),
@@ -186,7 +202,7 @@ def prepare_handoff(directory, scripts):
         "return_directory": str(destination.resolve()),
         "import_directory": str(directory),
         "job_count": len(scripts),
-        "layout_version": 3,
+        "layout_version": 4 if paired else 3,
         "package_fingerprint": key,
     }
 
@@ -196,11 +212,7 @@ def prepare_batch_handoff(state, batch):
     tasks = {r["task_id"]: r for r in state.get("tasks", [])}
     selected = []
     for row in state.get("slurm_batches", []):
-        if (
-            not row.get("script_path")
-            or row.get("job_id")
-            or row.get("status") != "prepared"
-        ):
+        if not row.get("script_path") or row.get("job_id") or row.get("status") != "prepared":
             continue
         if handoff_root(Path(row["upload_directory"]).parent.parent) != directory:
             continue
@@ -272,9 +284,7 @@ def finalize_prepared_handoffs(state):
         }
     from phase_agent.tools.state.task_waiting import awaiting_task_result
 
-    waiting_ids = {
-        t.get("task_id") for t in state.get("tasks", []) if awaiting_task_result(t)
-    }
+    waiting_ids = {t.get("task_id") for t in state.get("tasks", []) if awaiting_task_result(t)}
     batches = [
         b
         for b in state.get("slurm_batches", [])

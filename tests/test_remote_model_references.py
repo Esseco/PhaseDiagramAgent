@@ -63,7 +63,13 @@ def test_remote_preflight_failure_returns_cause_without_submitting(tmp_path, mon
     monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("No submission allowed"))
     with pytest.raises(FileNotFoundError, match="remote_model_not_found"):
         run(folder)
-    error = json.loads((folder / "return-results/dispatch-error.json").read_text())
+    import zipfile
+
+    error = json.loads(
+        zipfile.ZipFile(Path(handoff["return_directory"]) / "diagnostics.zip").read(
+            "dispatch-error.json"
+        )
+    )
     assert (
         error["location"] == "remote" and "local model download is not required" in error["remedy"]
     )

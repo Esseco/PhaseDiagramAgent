@@ -268,11 +268,11 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
 
     write_training_submission(inputs, environment)
     (directory / "results").mkdir(exist_ok=True)
-    from phase_agent.tools.remote.transfer_bundle import input_bundle
+    from phase_agent.tools.remote.submission_handoff import prepare_handoff
 
-    upload_archive = input_bundle(inputs)
+    handoff = prepare_handoff(directory, [inputs / "GPU.sh"])
     current.setdefault("remote_finetune_jobs", {})[digest] = {
-        "upload_archive": upload_archive,
+        "upload_archive": handoff["upload_archive"],
         "directory": str(directory),
         "status": "inputs_prepared",
         "original_model_version": version,
@@ -280,9 +280,6 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         "submitted": False,
         "activated": False,
     }
-    from phase_agent.tools.remote.submission_handoff import prepare_handoff
-
-    handoff = prepare_handoff(directory, [inputs / "GPU.sh"])
     current["remote_finetune_jobs"][digest]["handoff"] = handoff
     from phase_agent.tools.remote.submission_layout import write_submission_index
 
@@ -292,5 +289,5 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         "handoffs": [deepcopy(handoff)],
         "submitted": False,
         "state": current,
-        "reason": f"上传文件夹：{handoff['folder']}；上传后执行 sbatch submit_all.sh。完成后把远端 return-results 文件夹传回 {handoff.get('return_directory') or handoff['results_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
+        "reason": f"上传文件夹：{handoff['folder']}；上传后执行 sbatch submit_all.sh。完成后把对应批次 _output 文件夹传回 {handoff['return_directory']}，再说“继续”。无需手动解压；已提交的不要重复提交。",
     }

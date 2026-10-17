@@ -203,42 +203,29 @@ def publish(root, state, manifest, status, reason=None):
             ],
         },
     )
-    write(root / "candidate_pool.json", rebase(candidate_pool(state), root, portable=True))
-    logs = []
-    for path in (root / "jobs").rglob("*"):
-        if not path.is_file() or not (
-            path.name in {"out", "err"} or path.suffix in {".out", ".err", ".log"}
-        ):
-            continue
-        with path.open("rb") as stream:
-            stream.seek(max(0, path.stat().st_size - 65536))
-            tail = stream.read().decode("utf-8", errors="replace")
-        logs.append(
-            {
-                "path": path.relative_to(root).as_posix(),
-                "tail": tail,
-                "truncated": path.stat().st_size > 65536,
-            }
-        )
-    write(root / "remote_logs.json", logs)
+    # Keep full remote checkpoints in place for resumption; publish only the
+    # importer contract and scientifically referenced artifacts.
+    from phase_agent.tools.relax_mc_batch.return_payload import compact_state, result_files
+    import json
+
+    candidates = candidate_pool(state)
     files = [
-        root / "workflow_state.json",
-        root / "result_summary.json",
-        root / "candidate_pool.json",
-        root / "remote_logs.json",
+        root / name
+        for name in ("workflow_state.json", "result_summary.json", "candidate_pool.json")
     ]
     if (root / "failure.json").is_file():
         files.append(root / "failure.json")
-    files.extend(
-        p
-        for name in ("analysis", "jobs", "inputs", "references")
-        for p in (root / name).rglob("*")
-        if p.is_file()
-        and p.suffix.lower() in {".json", ".gz", ".vasp", ".bin", ".csv"}
-        and "runtime" not in p.parts
-        and p.name not in {"task.json", "manifest.json", "batch.snapshot.json"}
+    files.extend(result_files(root, state, candidates))
+    write(root / "candidate_pool.json", rebase(candidates, root, portable=True))
+    payload = json.dumps(
+        rebase(compact_state(state), root, portable=True),
+        ensure_ascii=False,
+        allow_nan=False,
+        default=str,
+    ).encode("utf-8")
+    return create_bundle(
+        root, files, root / "results.zip", kind="results", payloads={"workflow_state.json": payload}
     )
-    return create_bundle(root, files, root / "results.zip", kind="results")
 
 
 def run_batch(

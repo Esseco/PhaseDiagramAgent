@@ -6,7 +6,9 @@ import shutil
 
 from phase_agent.tools.remote.transfer_limits import bootstrap_limits
 
-BOOTSTRAP = bootstrap_limits() + Path(__file__).with_name("upload_driver.py").read_text(encoding="utf-8")
+BOOTSTRAP = bootstrap_limits() + Path(__file__).with_name("upload_driver.py").read_text(
+    encoding="utf-8"
+)
 
 
 def input_directory(directory):
@@ -40,6 +42,7 @@ def compact_handoff(directory):
     original = (root / "submit_all.sh").read_text(encoding="utf-8")
     folder = input_directory(root)
     folder.mkdir(exist_ok=True)
+    output_directory(root).mkdir(exist_ok=True)
     target = folder / "inputs.zip"
     if target.exists():
         from phase_agent.tools.remote.integrity import file_checksum

@@ -25,10 +25,23 @@ def approval_reply(proposal, state):
     )
     purpose = re.sub(r"config-\d+-[a-f0-9]+", "已确认配置", purpose)
     params = (
-        proposal.get("action_parameters")
-        or (proposal.get("raw_action") or {}).get("parameters")
+        (proposal.get("raw_action") or {}).get("parameters")
+        or proposal.get("action_parameters")
         or {}
     )
+    tool = (proposal.get("raw_action") or {}).get("tool") or proposal.get("recommended_action")
+    dft_preview = params.get("dft_input_preview") or {}
+    if (
+        tool == "select_dft_candidates"
+        and dft_preview
+        and (not isinstance(params.get("decisions"), list) or not params["decisions"])
+    ):
+        count = dft_preview.get("task_count")
+        scope = f"原预览记录 {count} 个 DFT 输入" if count is not None else "原 DFT 预览"
+        return (
+            scope + "，但缺少可执行的选点决策明细，当前不可批准。\n"
+            "请核对已保存的原选点并补齐方案；未生成任务或提交计算。"
+        )
     preview = params.get("relax_mc_preview") or {}
     workload = preview.get("workload") or {}
     result = "待确认：" + card["title"] + "。"

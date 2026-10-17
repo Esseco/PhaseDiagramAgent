@@ -148,7 +148,12 @@ def recovered_state(tmp_path):
 
 def test_bounded_supplement_and_no_third_wave(tmp_path):
     state, session, context, registry = recovered_state(tmp_path)
-    result = run_model_refresh_gate(state, session, registry=registry, context=context)
+    proposal = run_model_refresh_gate(state, session, registry=registry, context=context)
+    assert proposal["status"] == "awaiting_approval", proposal
+    assert len(proposal["state"]["tasks"]) == 1
+    result = run_model_refresh_gate(
+        proposal["state"], session, registry=registry, context=context, human_feedback="同意"
+    )
     assert result["status"] == "prepared", result
     assert result["state"]["model_refresh"]["wave"] == 1
     tasks = result["state"]["tasks"]

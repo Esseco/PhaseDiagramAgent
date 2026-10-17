@@ -51,16 +51,16 @@ def prepare_manifest_job(job, config, handoff):
     target = inputs / source.name
     if not target.exists() or target.read_bytes() != source.read_bytes():
         target.write_bytes(source.read_bytes())
-    script = write_job(
-        inputs, "GPU_manifest.sh", "python collect_training_results.py --manifest-only", config
-    )
+    script = write_job(inputs, "GPU_manifest.sh", "python manifest_job.py", config)
     handoff.update(
         stage="awaiting_manifest",
         script=script,
         reason=f"上传更新的collect_training_results.py和GPU_manifest.sh，在超算原inputs目录执行 sbatch GPU_manifest.sh；回传同轮results/models.json后说“继续”。所有运算均通过计算节点，未重新训练。",
     )
 
-    return handoff
+    from phase_agent.tools.local.paired_training import manifest_followup
+
+    return manifest_followup(job, config, script, handoff)
 
 
 def validation_request(current, key, job, config, result):
@@ -208,13 +208,34 @@ def prepare_validation_job(job, config, request, handoff):
         reason=f"独立验证作业已生成：{script}；上传validation.xyz、validation_request.json、validate_remote_training.py和GPU_validation.sh到原inputs，执行 sbatch GPU_validation.sh。回传results/{returned.name}后继续；无需重新训练。",
     )
 
-    return handoff
+    from phase_agent.tools.local.paired_training import prepare_followup
+
+    return prepare_followup(
+        job,
+        script,
+        [
+            "GPU_validation.sh",
+            "validation.xyz",
+            "validation_request.json",
+            "validate_remote_training.py",
+            "_shared_data/train.xyz",
+        ],
+        "Validation",
+        handoff,
+    )
 
 
 def record_handoff(current, key, handoff):
     job = current["remote_finetune_jobs"][key]
     prior = job.get("training_handoff") or {}
     job["training_handoff"] = deepcopy(handoff)
+    if handoff.get("manifest_result"):
+        job["model_manifest_file"] = handoff["manifest_result"]
+    if handoff.get("handoff"):
+        transfer = handoff["handoff"]
+        job.setdefault("transfer_handoffs", {})[transfer["package_fingerprint"]] = deepcopy(
+            transfer
+        )
     if prior != handoff:
         current.setdefault("training_handoff_history", []).append(
             {"job_key": key, **deepcopy(handoff)}

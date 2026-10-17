@@ -8,6 +8,37 @@ from phase_agent.tools.relax_mc_batch.handoff import input_directory, output_dir
 
 
 def waiting_file_lines(state):
+    from phase_agent.tools.remote.legacy_recovery import recovery_handoffs
+
+    pending = {t.get("task_id") for t in state.get("tasks", []) if awaiting_task_result(t)}
+    if pending:
+        covered, recovery_lines = set(), []
+        for handoff in recovery_handoffs(state):
+            members = pending.intersection(handoff["task_ids"]) - covered
+            if not members:
+                continue
+            covered.update(members)
+            recovery_lines.extend(
+                [
+                    "仅回收旧任务：上传整个文件夹 `"
+                    + handoff["folder"]
+                    + "`，放在超算原批次文件夹旁。",
+                    "执行 `sbatch submit_all.sh`，只运行 CPU 回收打包，不提交 DFT/MLIP 子任务；缺结果也不会补交或重算。",
+                    "回传配对 `_output` 文件夹至 `"
+                    + handoff["return_directory"]
+                    + "`，再说“已回传”；原选点、任务与审批不变。",
+                ]
+            )
+        if covered:
+            other = {
+                **state,
+                "tasks": [t for t in state.get("tasks", []) if t.get("task_id") not in covered],
+            }
+            return recovery_lines + _ordinary_waiting_file_lines(other)
+    return _ordinary_waiting_file_lines(state)
+
+
+def _ordinary_waiting_file_lines(state):
     owned = [
         row
         for row in state.get("tasks", [])
@@ -24,7 +55,11 @@ def waiting_file_lines(state):
                 lines.append("回传核对失败：" + str(batch["return_error"]))
                 lines.append("结果包已回传但尚未登记；请保留原包，无需重新上传输入或提交计算。")
                 if destination:
-                    lines.append("待核对结果目录：`" + str(destination) + "`。修复接收问题后，再说“已回传”重试回收。")
+                    lines.append(
+                        "待核对结果目录：`"
+                        + str(destination)
+                        + "`。修复接收问题后，再说“已回传”重试回收。"
+                    )
                 continue
             if (
                 folder is None
@@ -54,7 +89,7 @@ def waiting_file_lines(state):
             **state,
             "tasks": [row for row in state.get("tasks", []) if not row.get("relax_mc_bundle_id")],
         }
-        return lines + waiting_file_lines(other)
+        return lines + _ordinary_waiting_file_lines(other)
     if not detailed_response():
         return _brief_waiting_file_lines(state)
     return _detailed_waiting_file_lines(state)

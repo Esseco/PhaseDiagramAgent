@@ -1,8 +1,35 @@
 from copy import deepcopy
 
-from tests.test_model_refresh_workflow import setup
+from tests.test_model_refresh_workflow import setup as refresh_setup
 from phase_agent.tools.workflows.model_refresh_gate import run_model_refresh_gate
 from phase_agent.tools.local.prepare_model_refresh import prepare_model_refresh
+
+
+def setup(tmp_path):
+    # These tests deliberately exercise blocking; the production default is advisory.
+    state, session, context, registry = refresh_setup(tmp_path)
+    context["effective_config"]["budgets"]["enforcement"] = "hard"
+    session["confirmed_snapshot"]["config"]["budgets"]["enforcement"] = "hard"
+    return state, session, context, registry
+
+
+def test_advisory_budget_keeps_approved_inputs_and_does_not_duplicate(tmp_path):
+    state, session, context, registry = refresh_setup(tmp_path)
+    state["budget_reservations"] = {
+        "other": {
+            "stage": "relax_and_feature",
+            "status": "reserved",
+            "reserved_cost": context["effective_config"]["budgets"]["total_relative_cost"],
+        }
+    }
+    first = run_model_refresh_gate(state, session, registry=registry, context=context)
+    prepared = run_model_refresh_gate(
+        first["state"], session, registry=registry, context=context, human_feedback="同意"
+    )
+    assert prepared["status"] == "prepared", prepared
+    assert len(prepared["state"]["tasks"]) == 1
+    again = run_model_refresh_gate(prepared["state"], session, registry=registry, context=context)
+    assert len(again["state"]["tasks"]) == 1
 
 
 def test_budget_block_preserves_approval_and_resumes_once(tmp_path):

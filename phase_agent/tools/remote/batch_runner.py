@@ -223,9 +223,12 @@ class RemoteBatchRunner:
         from phase_agent.tools.remote.transfer_bundle import (
             import_registered_bundles,
             registered_result_directories,
+            registered_return_locations,
         )
 
-        report["transfer_errors"] = import_registered_bundles(registered_result_directories(state))
+        report["transfer_errors"] = import_registered_bundles(
+            registered_result_directories(state), locations=registered_return_locations(state)
+        )
         for task in state.get("tasks") or []:
             # WebUI control records are not remote scientific jobs. Legacy
             # tasks with file/batch pointers remain eligible even without stage.

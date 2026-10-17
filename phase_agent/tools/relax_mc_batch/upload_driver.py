@@ -12,7 +12,11 @@ import zipfile
 
 # Generated standalone drivers receive these constants from the shared policy.
 if "MAX_ARCHIVE_FILES" not in globals():
-    from phase_agent.tools.remote.transfer_limits import MAX_ARCHIVE_FILES, MAX_MANIFEST_BYTES, MAX_ARCHIVE_BYTES
+    from phase_agent.tools.remote.transfer_limits import (
+        MAX_ARCHIVE_FILES,
+        MAX_MANIFEST_BYTES,
+        MAX_ARCHIVE_BYTES,
+    )
 
 
 def prepare_work(root):
@@ -30,7 +34,11 @@ def prepare_work(root):
         manifest = json.loads(manifest_bytes)
         rows = manifest["files"]
         names = [row["path"] for row in rows]
-        if manifest.get("schema") != 1 or manifest.get("kind") != "inputs" or len(rows) + 1 > MAX_ARCHIVE_FILES:
+        if (
+            manifest.get("schema") != 1
+            or manifest.get("kind") != "inputs"
+            or len(rows) + 1 > MAX_ARCHIVE_FILES
+        ):
             raise ValueError("Invalid input manifest")
         if (
             len(set(names)) != len(names)
@@ -85,7 +93,7 @@ def main(root=None):
     output = root.with_name(label + "_output")
     output.mkdir(exist_ok=True)
     code, error = 1, None
-    with (output / "run.log").open("a", encoding="utf-8") as log:
+    with (root / "run.log").open("a", encoding="utf-8") as log:
         try:
             work = prepare_work(root)
             env = dict(os.environ, SLURM_SUBMIT_DIR=str(work))
@@ -116,17 +124,15 @@ def main(root=None):
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             traceback.print_exc(file=log)
-    (output / "run_status.json").write_text(
-        json.dumps(
-            {
-                "batch": label,
-                "returncode": code,
-                "error": error,
-                "results_available": (output / "results.zip").is_file(),
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
+    publish_diagnostics(
+        root,
+        output,
+        {
+            "batch": label,
+            "returncode": code,
+            "error": error,
+            "results_available": (output / "results.zip").is_file(),
+        },
     )
     print(f"Return this complete output folder: {output}")
     return code
@@ -150,7 +156,20 @@ def publish_output(work, result):
         "error": result.get("reason") if result.get("status") == "failed" else None,
         **result,
     }
-    (output / "run_status.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    publish_diagnostics(work.parent, output, record)
+
+
+def publish_diagnostics(root, output, record):
+    """Return bounded diagnostics; full runtime logs stay on the cluster."""
+    temporary = output / "diagnostics.zip.part"
+    with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("run_status.json", json.dumps(record, indent=2))
+        log = root / "run.log"
+        if log.is_file():
+            with log.open("rb") as handle:
+                handle.seek(max(0, log.stat().st_size - 65536))
+                archive.writestr("run.log", handle.read())
+    temporary.replace(output / "diagnostics.zip")
 
 
 if __name__ == "__main__":

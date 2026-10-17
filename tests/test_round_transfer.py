@@ -18,6 +18,7 @@ from phase_agent.tools.remote.transfer_bundle import (
     import_registered_bundles,
     publish_return,
     registered_result_directories,
+    registered_return_locations,
 )
 
 
@@ -69,8 +70,9 @@ def test_one_folder_dispatch_and_automatic_round_return(tmp_path):
         "dispatch_tasks.py",
         "submit_all.sh",
     }
-    remote = tmp_path / "remote"
+    remote = tmp_path / "remote" / Path(handoff["folder"]).name
     extract(handoff, remote)
+    shutil.copy2(handoff["upload_archive"], remote / "inputs.zip")
     for script in json.loads((remote / "submission_plan.json").read_text())["scripts"]:
         text = (remote / script).read_text()
         assert "trap " in text and "_round_transfer.py" in text
@@ -79,9 +81,18 @@ def test_one_folder_dispatch_and_automatic_round_return(tmp_path):
     completed(remote / "Relax/results", "three")
     publish_return(remote, "SP/results")
     publish_return(remote, "Relax/results")
-    shutil.copytree(remote / "return-results", Path(handoff["return_directory"]))
+    shutil.copytree(
+        remote.with_name(remote.name[:-6] + "_output"),
+        Path(handoff["return_directory"]),
+        dirs_exist_ok=True,
+    )
     assert has_registered_return(state)
-    assert import_registered_bundles(registered_result_directories(state)) == []
+    assert (
+        import_registered_bundles(
+            registered_result_directories(state), locations=registered_return_locations(state)
+        )
+        == []
+    )
     assert (root / "SP/results/one/result.json").is_file()
     assert (root / "Relax/results/three/result.json").is_file()
     assert not has_registered_return(state)
