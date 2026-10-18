@@ -36,26 +36,33 @@ def safe(root, name):
     return target
 
 
-def unpack(root):
+def unpack(root, *, extra_payloads=()):
     work = root / "work"
     with zipfile.ZipFile(root / "inputs.zip") as archive:
         if archive.getinfo("transfer_manifest.json").file_size > 2 * 1024**2:
             raise ValueError("oversized_collection_manifest")
         manifest = json.loads(archive.read("transfer_manifest.json"))
         rows = manifest["files"]
+        expected = {"recovery_plan.json", "_transfer.py", *extra_payloads}
         if (
             manifest.get("kind") != "inputs"
-            or {r["path"] for r in rows} != {"recovery_plan.json", "_transfer.py"}
-            or len(archive.infolist()) != 3
+            or {r["path"] for r in rows} != expected
+            or len(archive.infolist()) != len(expected) + 1
         ):
             raise ValueError("unexpected_collection_payload")
         payloads = {}
         for row in rows:
             info = archive.getinfo(row["path"])
-            if info.file_size > 2 * 1024**2 or (info.external_attr >> 16) & 0o170000 == 0o120000:
+            if (
+                info.file_size > 2 * 1024**2
+                or (info.external_attr >> 16) & 0o170000 == 0o120000
+            ):
                 raise ValueError("unsafe_collection_payload")
             content = archive.read(row["path"])
-            if len(content) != row["size"] or hashlib.sha256(content).hexdigest() != row["sha256"]:
+            if (
+                len(content) != row["size"]
+                or hashlib.sha256(content).hexdigest() != row["sha256"]
+            ):
                 raise ValueError("collection_input_checksum_mismatch")
             target = safe(work, row["path"])
             if target.exists() and target.read_bytes() != content:
@@ -64,11 +71,18 @@ def unpack(root):
     work.mkdir(exist_ok=True)
     for target, content in payloads.items():
         if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
     plan = json.loads((work / "recovery_plan.json").read_text(encoding="utf-8"))
-    if plan.get("schema") != 1 or plan.get("mode") != "collect_only" or not plan.get("tasks"):
+    if (
+        plan.get("schema") != 1
+        or plan.get("mode") != "collect_only"
+        or not plan.get("tasks")
+    ):
         raise ValueError("not_a_collection_only_plan")
-    spec = importlib.util.spec_from_file_location("collection_transfer", work / "_transfer.py")
+    spec = importlib.util.spec_from_file_location(
+        "collection_transfer", work / "_transfer.py"
+    )
     transfer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(transfer)
     return work, plan, transfer
@@ -87,9 +101,9 @@ def terminal(directory, expected):
             and (data.get(key) != value or receipt.get(key) != value)
         ):
             raise ValueError("original_task_identity_mismatch:" + key)
-    if receipt.get("result_checksum") != checksum(result) or receipt.get("status") != data.get(
+    if receipt.get("result_checksum") != checksum(result) or receipt.get(
         "status"
-    ):
+    ) != data.get("status"):
         raise ValueError("original_result_checksum_or_status_mismatch")
     if data.get("status") not in {"completed", "failed", "timeout", "cancelled"}:
         return None
@@ -113,14 +127,19 @@ def artifacts(source, directory, task, data):
             candidate = directory / name
             if not candidate.is_file():
                 candidate = worker / name
-            if not candidate.is_file() or checksum(candidate) != outputs.get(digest_key):
+            if not candidate.is_file() or checksum(candidate) != outputs.get(
+                digest_key
+            ):
                 raise ValueError("required_scientific_artifact_invalid:" + name)
             files[name] = candidate
     if outputs.get("structure") is None:
         value = outputs.get("structure_path") or outputs.get("final_structure_path")
         if value:
             name = Path(value).name
-            if Path(name).suffix.lower() not in {".vasp", ".poscar"} and name != "CONTCAR":
+            if (
+                Path(name).suffix.lower() not in {".vasp", ".poscar"}
+                and name != "CONTCAR"
+            ):
                 raise ValueError("unexpected_structure_artifact")
             candidate = directory / name
             if not candidate.is_file():
@@ -158,7 +177,9 @@ def failure_diagnostics(source, task):
             return None
         if not path.resolve().is_relative_to(source.resolve()):
             raise ValueError("diagnostic_path_outside_original_package")
-        with gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb") as stream:
+        with (
+            gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb") as stream
+        ):
             data = stream.read(65537)
         files[label] = {
             "text": data[:65536].decode("utf-8", errors="replace"),
@@ -166,7 +187,13 @@ def failure_diagnostics(source, task):
         }
         return files[label]["text"] if len(data) <= 65536 else None
 
-    for name in ("workflow_status.json", "workflow_state.json", "failure_report.txt", "err", "out"):
+    for name in (
+        "workflow_status.json",
+        "workflow_state.json",
+        "failure_report.txt",
+        "err",
+        "out",
+    ):
         capture(worker, name, name)
     state = files.get("workflow_state.json") or {}
     config_path = worker / "workflow.json"
@@ -177,9 +204,13 @@ def failure_diagnostics(source, task):
                 raise ValueError("diagnostic_config_outside_original_package")
             config = json.loads(config_path.read_text(encoding="utf-8"))
             checkpoint = json.loads(state["text"])
-            entry = (checkpoint.get("stages") or {}).get(config.get("calculation")) or {}
+            entry = (checkpoint.get("stages") or {}).get(
+                config.get("calculation")
+            ) or {}
             if entry.get("directory"):
-                calculation = safe(source, task["input_directory"] + "/" + entry["directory"])
+                calculation = safe(
+                    source, task["input_directory"] + "/" + entry["directory"]
+                )
                 for name in ("INCAR", "std_err.txt", "vasp.out"):
                     capture(calculation, name, "calculation/" + name)
                 for name in ("WAVECAR", "CHGCAR", "vasprun.xml", "OUTCAR", "CONTCAR"):
@@ -188,8 +219,13 @@ def failure_diagnostics(source, task):
                         candidate = calculation / (name + ".gz")
                     if candidate.is_file():
                         if not candidate.resolve().is_relative_to(source.resolve()):
-                            raise ValueError("diagnostic_artifact_outside_original_package")
-                        observed[name] = {"exists": True, "size_bytes": candidate.stat().st_size}
+                            raise ValueError(
+                                "diagnostic_artifact_outside_original_package"
+                            )
+                        observed[name] = {
+                            "exists": True,
+                            "size_bytes": candidate.stat().st_size,
+                        }
                     else:
                         observed[name] = {"exists": False}
     except (OSError, ValueError, KeyError, TypeError) as error:
@@ -197,19 +233,24 @@ def failure_diagnostics(source, task):
     return {"files": files, "artifacts": observed}
 
 
-def collect(root):
-    work, plan, transfer = unpack(root)
+def collect(root, *, extra_payloads=(), transform_factory=None):
+    work, plan, transfer = unpack(root, extra_payloads=extra_payloads)
     # The original folder must sit beside this delivery. No guessed filesystem scan.
     supplied = os.environ.get("PHASE_RECOVERY_SOURCE")
     if supplied and not Path(supplied).is_absolute():
         raise ValueError("PHASE_RECOVERY_SOURCE_must_be_absolute")
-    source = Path(supplied).resolve() if supplied else safe(root.parent, plan["source_folder"])
+    source = (
+        Path(supplied).resolve()
+        if supplied
+        else safe(root.parent, plan["source_folder"])
+    )
     if source == root or not (source / "inputs.zip").is_file():
         raise FileNotFoundError(
             "original_package_missing: place this input beside " + plan["source_folder"]
         )
     if checksum(source / "inputs.zip") != plan["source_archive_sha256"]:
         raise ValueError("original_input_archive_changed")
+    transform = transform_factory(work, plan) if transform_factory else None
     report = {
         "mode": "collect_only",
         "source_folder": plan["source_folder"],
@@ -224,7 +265,8 @@ def collect(root):
         if submitted.get("archive_sha256") != plan["source_archive_sha256"]:
             raise ValueError("original_dispatch_receipt_archive_mismatch")
         report["original_submission_states"] = {
-            name: row.get("status") for name, row in (submitted.get("jobs") or {}).items()
+            name: row.get("status")
+            for name, row in (submitted.get("jobs") or {}).items()
         }
     else:
         report["original_submission_states"] = "unknown; never submit missing tasks"
@@ -247,8 +289,8 @@ def collect(root):
                     raise ValueError("conflicting_original_terminal_results")
                 directory, data = candidates[0]
                 if data.get("status") != "completed":
-                    report.setdefault("task_diagnostics", {})[tid] = failure_diagnostics(
-                        source, task
+                    report.setdefault("task_diagnostics", {})[tid] = (
+                        failure_diagnostics(source, task)
                     )
                 selected = artifacts(source, directory, task, data)
                 destination = safe(staging, task["result_directory"])
@@ -263,6 +305,24 @@ def collect(root):
                     {**task, "input_directory": task["result_directory"]},
                     data,
                 )
+                if transform is not None:
+                    report.setdefault("task_reassessments", {})[tid] = transform(
+                        destination, source, task, data
+                    )
+                    reassessed = report["task_reassessments"][tid]
+                    if reassessed.get("status") == "prediction_failed":
+                        report["errors"].append(
+                            {"task_id": tid, "error": reassessed.get("error")}
+                        )
+                    revised = terminal(destination, task["expected"])
+                    if revised is None:
+                        raise ValueError("reassessed_terminal_result_missing")
+                    artifacts(
+                        staging,
+                        destination,
+                        {**task, "input_directory": task["result_directory"]},
+                        revised,
+                    )
                 report["recovered_task_ids"].append(tid)
             except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
                 # Do not transport an incomplete task after a mid-copy failure.
@@ -270,7 +330,9 @@ def collect(root):
                 if destination.exists():
                     shutil.rmtree(destination)
                 report["errors"].append({"task_id": tid, "error": str(error)})
-        operations = {str(Path(t["result_directory"]).parent.as_posix()) for t in plan["tasks"]}
+        operations = {
+            str(Path(t["result_directory"]).parent.as_posix()) for t in plan["tasks"]
+        }
         if report["recovered_task_ids"]:
             for operation in operations:
                 for receipt in safe(source, operation).glob("gpu-job-*.runtime.json"):
@@ -285,12 +347,17 @@ def collect(root):
                 files,
                 output / "recovered.results.zip",
                 kind="results",
-                binding={"batch": root.name[:-6], "input_sha256": checksum(root / "inputs.zip")},
+                binding={
+                    "batch": root.name[:-6],
+                    "input_sha256": checksum(root / "inputs.zip"),
+                },
             )
         else:
             (output / "recovered.results.zip").unlink(missing_ok=True)
     report["status"] = (
-        "complete" if not report["missing_task_ids"] and not report["errors"] else "incomplete"
+        "complete"
+        if not report["missing_task_ids"] and not report["errors"]
+        else "incomplete"
     )
     return report
 
@@ -304,11 +371,14 @@ def diagnostics(root, report):
         if report["status"] == "complete"
         else "collection_incomplete:"
         + json.dumps(
-            {k: report.get(k) for k in ("missing_task_ids", "errors", "error")}, ensure_ascii=False
+            {k: report.get(k) for k in ("missing_task_ids", "errors", "error")},
+            ensure_ascii=False,
         )
     )
     with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
-        zipped.writestr("recovery_status.json", json.dumps(report, ensure_ascii=False, indent=2))
+        zipped.writestr(
+            "recovery_status.json", json.dumps(report, ensure_ascii=False, indent=2)
+        )
         zipped.writestr(
             "dispatch-error.json",
             json.dumps(
@@ -319,16 +389,20 @@ def diagnostics(root, report):
     temporary.replace(output / "diagnostics.zip")
 
 
-def main(root=None):
+def main(root=None, *, extra_payloads=(), transform_factory=None):
     if not os.environ.get("SLURM_JOB_ID"):
-        raise RuntimeError("Use sbatch submit_all.sh; collection runs on a CPU compute node")
+        raise RuntimeError(
+            "Use sbatch submit_all.sh; collection runs on a CPU compute node"
+        )
     if sys.version_info < (3, 10):
         raise RuntimeError("Python 3.10 or newer is required on the CPU compute node")
     root = Path(root or Path(__file__).resolve().parent).resolve()
     if not root.name.endswith("_input"):
         raise ValueError("collection_folder_must_end_in_input")
     try:
-        report = collect(root)
+        report = collect(
+            root, extra_payloads=extra_payloads, transform_factory=transform_factory
+        )
     except Exception as error:
         report = {
             "mode": "collect_only",
@@ -337,7 +411,12 @@ def main(root=None):
             "science_submissions": 0,
         }
     diagnostics(root, report)
-    print(json.dumps(report, ensure_ascii=False))
+    print(
+        json.dumps(
+            {key: value for key, value in report.items() if key != "task_diagnostics"},
+            ensure_ascii=False,
+        )
+    )
     return 0 if report["status"] == "complete" else 2
 
 

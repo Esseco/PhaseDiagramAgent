@@ -8,7 +8,10 @@ import shlex
 import shutil
 from phase_agent.tools.mc_batch_policy import mc_batch_limit
 from phase_agent.tools.remote.integrity import payload_checksum, verify_result
-from phase_agent.tools.state.task_waiting import active_pending_tasks, awaiting_task_result
+from phase_agent.tools.state.task_waiting import (
+    active_pending_tasks,
+    awaiting_task_result,
+)
 
 DFT_STAGES = {"dft_single_point", "dft_relax"}
 PROTOCOL_VERSION = 1
@@ -37,7 +40,9 @@ class RemoteBatchRunner:
         self.worker_command = list(worker_command)
         self.dispatcher = dispatcher
         self.batch_sizes = {**DEFAULT_BATCH_SIZES, **(stage_batch_sizes or {})}
-        self.batch_sizes["deep_search"] = mc_batch_limit(self.batch_sizes["deep_search"])
+        self.batch_sizes["deep_search"] = mc_batch_limit(
+            self.batch_sizes["deep_search"]
+        )
         self.stage_profiles = deepcopy(stage_profiles or {})
         self.task_preparer = task_preparer
         self.last_collection_report = {}
@@ -54,7 +59,9 @@ class RemoteBatchRunner:
             build_upload_batch_directory,
         )
 
-        model_version = selected[0].get("model_version") or current.get("active_model_version")
+        model_version = selected[0].get("model_version") or current.get(
+            "active_model_version"
+        )
         directory, layout = build_upload_batch_directory(
             self.root,
             current,
@@ -66,7 +73,9 @@ class RemoteBatchRunner:
             search_group_index=selected[0].get("search_group_index"),
             parent_relax_round=selected[0].get("parent_relax_round"),
             model_refresh_round=selected[0].get("model_refresh_round"),
-            refresh_operation=(selected[0].get("parameters") or {}).get("model_refresh_operation"),
+            refresh_operation=(selected[0].get("parameters") or {}).get(
+                "model_refresh_operation"
+            ),
         )
         directory.parent.mkdir(parents=True, exist_ok=True)
         directory.mkdir(exist_ok=False)
@@ -81,7 +90,9 @@ class RemoteBatchRunner:
             relative_dir = Path(f"{index:05d}-{task['task_id']}")
             task_dir = directory / relative_dir
             task_dir.mkdir()
-            from phase_agent.tools.remote.result_directory_name import result_directory_name
+            from phase_agent.tools.remote.result_directory_name import (
+                result_directory_name,
+            )
 
             result_folder = result_directory_name(task_dir, task.get("stage"))
             relative_result = (
@@ -91,7 +102,10 @@ class RemoteBatchRunner:
                 / "result.json"
             )
             task.update(
-                {"calculation_directory": str(relative_dir), "result_path": str(relative_result)}
+                {
+                    "calculation_directory": str(relative_dir),
+                    "result_path": str(relative_result),
+                }
             )
             if task.get("stage") not in DFT_STAGES and self.task_preparer:
                 task = self.task_preparer(task)
@@ -99,7 +113,9 @@ class RemoteBatchRunner:
             if task.get("stage") in {"relax_and_feature", "deep_search"} and worker_job:
                 original = Path(worker_job.get("structure_path") or "")
                 if not original.is_file():
-                    raise FileNotFoundError(f"Relax input structure missing: {original}")
+                    raise FileNotFoundError(
+                        f"Relax input structure missing: {original}"
+                    )
                 staged = task_dir / "initial.vasp"
                 shutil.copy2(original, staged)
                 worker_job["structure_path"] = staged.name
@@ -108,7 +124,9 @@ class RemoteBatchRunner:
                 if full_na:
                     source_full_na = Path(full_na)
                     if not source_full_na.is_file():
-                        raise FileNotFoundError(f"full Na structure missing: {source_full_na}")
+                        raise FileNotFoundError(
+                            f"full Na structure missing: {source_full_na}"
+                        )
                     staged_full_na = task_dir / "full_na_structure.vasp"
                     shutil.copy2(source_full_na, staged_full_na)
                     worker_job["parameters"]["full_na_structure"] = staged_full_na.name
@@ -116,7 +134,9 @@ class RemoteBatchRunner:
                 if checkpoint:
                     source_checkpoint = Path(checkpoint)
                     if not source_checkpoint.is_file():
-                        raise FileNotFoundError(f"MC checkpoint missing: {source_checkpoint}")
+                        raise FileNotFoundError(
+                            f"MC checkpoint missing: {source_checkpoint}"
+                        )
                     staged_checkpoint = task_dir / source_checkpoint.name
                     shutil.copy2(source_checkpoint, staged_checkpoint)
                     worker_job["checkpoint"] = staged_checkpoint.name
@@ -124,7 +144,9 @@ class RemoteBatchRunner:
                 if self.dispatcher is None:
                     raise ValueError("remote DFT task requires atomate dispatcher")
                 generated = self.dispatcher({**task, "work_directory": str(task_dir)})
-                output = generated.get("outputs") or generated.get("result") or generated
+                output = (
+                    generated.get("outputs") or generated.get("result") or generated
+                )
                 if output.get("generator") != "atomate":
                     raise RuntimeError("DFT inputs must come from atomate")
                 task["atomate"] = output
@@ -160,13 +182,17 @@ class RemoteBatchRunner:
                 }
             )
         results_directory = (
-            directory.parent.parent if directory.parent.name == "inputs" else directory.parent
+            directory.parent.parent
+            if directory.parent.name == "inputs"
+            else directory.parent
         ) / "results"
         results_directory.mkdir(exist_ok=True)
         _write(directory / "manifest.json", manifest)
         checksum = payload_checksum(manifest)
         stage = selected[0].get("stage")
-        from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
+        from phase_agent.tools.remote.write_unix_shell_script import (
+            write_unix_shell_script,
+        )
 
         write_unix_shell_script(
             directory / "submit.sbatch", self._script(batch_id, len(manifest), stage)
@@ -227,8 +253,12 @@ class RemoteBatchRunner:
         )
 
         report["transfer_errors"] = import_registered_bundles(
-            registered_result_directories(state), locations=registered_return_locations(state)
+            registered_result_directories(state),
+            locations=registered_return_locations(state),
         )
+        from phase_agent.tools.remote.legacy_recovery import reassessment_result_paths
+
+        reassessed_results = reassessment_result_paths(state)
         for task in state.get("tasks") or []:
             # WebUI control records are not remote scientific jobs. Legacy
             # tasks with file/batch pointers remain eligible even without stage.
@@ -245,12 +275,18 @@ class RemoteBatchRunner:
                 continue
             task_id = task.get("task_id")
             previously_processed = task_id in processed
-            if not task_id or (previously_processed and task.get("stage") not in DFT_STAGES):
+            if not task_id or (
+                previously_processed and task.get("stage") not in DFT_STAGES
+            ):
                 continue
             if not previously_processed:
                 report["considered_count"] += 1
-            task_dir, snapshot, location_error = _locate_task_directory(task, directories)
-            result = _task_result_path(task, task_dir)
+            task_dir, snapshot, location_error = _locate_task_directory(
+                task, directories
+            )
+            result = reassessed_results.get(task_id) or _task_result_path(
+                task, task_dir
+            )
             marker = result.with_name("task.finished.json") if result else None
             # Already received jobs are not newly missing returns. A re-extracted
             # DFT JSON may supplement magnetism, but still needs full verification.
@@ -281,7 +317,12 @@ class RemoteBatchRunner:
                 _add_collection_detail(report, task_id, checked["reason"])
                 continue
             payload = checked["result"]
-            if payload.get("status") not in {"completed", "failed", "timeout", "cancelled"}:
+            if payload.get("status") not in {
+                "completed",
+                "failed",
+                "timeout",
+                "cancelled",
+            }:
                 continue
             if task.get("stage") in DFT_STAGES:
                 outputs = payload.get("outputs") or {}
@@ -296,7 +337,9 @@ class RemoteBatchRunner:
                     ):
                         report["invalid_count"] += 1
                         _add_collection_detail(
-                            report, task_id, "training_file_missing_or_checksum_mismatch"
+                            report,
+                            task_id,
+                            "training_file_missing_or_checksum_mismatch",
                         )
                         continue
             if (
@@ -314,10 +357,14 @@ class RemoteBatchRunner:
                         report, task_id, "final_structure_missing_or_checksum_mismatch"
                     )
                     continue
-            elif task.get("stage") in DFT_STAGES and payload.get("status") == "completed":
+            elif (
+                task.get("stage") in DFT_STAGES and payload.get("status") == "completed"
+            ):
                 outputs = payload.get("outputs") or {}
                 raw_structure = (
-                    outputs.get("structure_path") if outputs.get("structure") is None else None
+                    outputs.get("structure_path")
+                    if outputs.get("structure") is None
+                    else None
                 )
                 if raw_structure:
                     local_structure = (
@@ -325,7 +372,9 @@ class RemoteBatchRunner:
                     )
                     if not local_structure.is_file():
                         report["missing_structure_count"] += 1
-                        _add_collection_detail(report, task_id, "final_structure_missing")
+                        _add_collection_detail(
+                            report, task_id, "final_structure_missing"
+                        )
                         continue
                     expected_checksum = outputs.get("structure_checksum")
                     if expected_checksum:
@@ -343,7 +392,9 @@ class RemoteBatchRunner:
                     }
             compact = _compact_result_for_state(payload, result)
             if previously_processed:
-                from phase_agent.tools.state.dft_result_refresh import validated_magnetic_refresh
+                from phase_agent.tools.state.dft_result_refresh import (
+                    validated_magnetic_refresh,
+                )
 
                 refresh = validated_magnetic_refresh(task, compact)
                 if refresh["status"] == "unchanged":
@@ -352,7 +403,9 @@ class RemoteBatchRunner:
                     report["invalid_count"] += 1
                     _add_collection_detail(report, task_id, refresh["reason"])
                     continue
-                report["metadata_refresh_count"] = report.get("metadata_refresh_count", 0) + 1
+                report["metadata_refresh_count"] = (
+                    report.get("metadata_refresh_count", 0) + 1
+                )
             recovered.append(compact)
         report["recovered_count"] = len(recovered)
         if report["invalid_count"] or report["missing_structure_count"]:
@@ -388,7 +441,10 @@ class RemoteBatchRunner:
                 and task.get("stage") != "offline_check_dedup"
                 and valid_after_dedup
             ):
-                if task.get("structure_id") and task.get("structure_id") not in valid_after_dedup:
+                if (
+                    task.get("structure_id")
+                    and task.get("structure_id") not in valid_after_dedup
+                ):
                     continue
             if (reservations.get(task.get("task_key")) or {}).get("status") not in {
                 "reserved",
@@ -412,7 +468,12 @@ class RemoteBatchRunner:
 
     def _script(self, batch_id, count, stage):
         profile = next(
-            (p for p in self.stage_profiles.values() if stage in set(p.get("stages") or [])), {}
+            (
+                p
+                for p in self.stage_profiles.values()
+                if stage in set(p.get("stages") or [])
+            ),
+            {},
         )
         options = {
             "job-name": batch_id,
@@ -424,7 +485,9 @@ class RemoteBatchRunner:
             options.pop("array", None)
             for key in ("output", "error"):
                 if key in options:
-                    options[key] = str(options[key]).replace("_%a", "").replace("%A", "%j")
+                    options[key] = (
+                        str(options[key]).replace("_%a", "").replace("%A", "%j")
+                    )
         directives = "\n".join(f"#SBATCH --{k}={v}" for k, v in options.items())
         preamble = "\n".join(profile.get("shell_preamble") or [])
         root = 'batch_directory=$(cd "$(dirname "$0")" && pwd)\n'
@@ -455,7 +518,9 @@ class RemoteBatchRunner:
 
 def _compatibility(task):
     # MC seed, step limit and patience are per-task inputs inside one serial GPU job.
-    parameters = None if task.get("stage") == "deep_search" else task.get("parameters") or {}
+    parameters = (
+        None if task.get("stage") == "deep_search" else task.get("parameters") or {}
+    )
     return json.dumps(
         {
             "stage": task.get("stage"),
@@ -515,7 +580,9 @@ def _assign_upload_operations(state, tasks):
             if not group and len(state.get("generation_history") or []) <= 1:
                 group = 1
             if not group:
-                raise ValueError(f"任务 {task.get('task_id')} 无法唯一确定 branch 生成来源")
+                raise ValueError(
+                    f"任务 {task.get('task_id')} 无法唯一确定 branch 生成来源"
+                )
             task["search_group_index"] = int(group)
         if (
             task.get("stage") == "deep_search"
@@ -529,7 +596,11 @@ def _assign_upload_operations(state, tasks):
                 and row.get("branch_id") == task.get("branch_id")
                 and row.get("slurm_batch_id") in relax_batches
             ]
-            exact = [row for row in matches if row.get("structure_id") == task.get("structure_id")]
+            exact = [
+                row
+                for row in matches
+                if row.get("structure_id") == task.get("structure_id")
+            ]
             parents = {
                 int(relax_batches[row["slurm_batch_id"]].get("operation_index") or 1)
                 for row in exact or matches
@@ -554,12 +625,16 @@ def _assign_upload_operations(state, tasks):
                     task.get("stage"),
                     task.get("model_version"),
                     task.get("config_version"),
-                    task.get("generation_cycle", len(state.get("generation_history") or [])),
+                    task.get(
+                        "generation_cycle", len(state.get("generation_history") or [])
+                    ),
                     task.get("segment_index", 0),
                 ],
                 sort_keys=True,
             )
-        task["upload_operation_id"] = hashlib.sha256(str(identity).encode()).hexdigest()[:12]
+        task["upload_operation_id"] = hashlib.sha256(
+            str(identity).encode()
+        ).hexdigest()[:12]
 
 
 def _task_directories_by_id(state):
@@ -571,7 +646,9 @@ def _task_directories_by_id(state):
         if batch.get("task_directory"):
             paths.append(batch["task_directory"])
         manifest = Path(batch["manifest_path"]) if batch.get("manifest_path") else None
-        upload_root = Path(batch["upload_directory"]) if batch.get("upload_directory") else None
+        upload_root = (
+            Path(batch["upload_directory"]) if batch.get("upload_directory") else None
+        )
         if manifest is not None and manifest.is_file():
             try:
                 root = manifest.parent
@@ -595,7 +672,9 @@ def _task_directories_by_id(state):
             except (OSError, ValueError):
                 continue
             task_id = payload.get("task_id")
-            if not task_id or (batch_id and payload.get("batch_id") not in {None, batch_id}):
+            if not task_id or (
+                batch_id and payload.get("batch_id") not in {None, batch_id}
+            ):
                 continue
             indexed.setdefault((batch_id, task_id), []).append((directory, payload))
     return indexed
@@ -631,10 +710,16 @@ def _locate_task_directory(task, indexed):
         (directory, snapshot)
         for directory, snapshot in matches
         if snapshot.get("task_id") == task_id
-        and (not task.get("task_key") or snapshot.get("task_key") == task.get("task_key"))
+        and (
+            not task.get("task_key") or snapshot.get("task_key") == task.get("task_key")
+        )
     ]
     if len(matching) != 1:
-        return None, None, "task_folder_ambiguous" if matching else "task_folder_identity_mismatch"
+        return (
+            None,
+            None,
+            "task_folder_ambiguous" if matching else "task_folder_identity_mismatch",
+        )
     return matching[0][0], matching[0][1], None
 
 
@@ -674,7 +759,11 @@ def _expected_result_identity(task, snapshot):
     expected = deepcopy(snapshot or {})
     if expected and expected.get("task_id") != task.get("task_id"):
         return {}, "task_snapshot_id_mismatch"
-    if expected and task.get("task_key") and expected.get("task_key") != task.get("task_key"):
+    if (
+        expected
+        and task.get("task_key")
+        and expected.get("task_key") != task.get("task_key")
+    ):
         return {}, "task_snapshot_key_mismatch"
     for key in (
         "task_id",
@@ -708,14 +797,17 @@ def _compact_result_for_state(result, result_path):
         forces = outputs.pop("forces_ev_per_angstrom", None)
         if forces is not None:
             outputs["forces_stored_in_result_file"] = True
-            outputs["forces_atom_count"] = len(forces) if isinstance(forces, list) else None
+            outputs["forces_atom_count"] = (
+                len(forces) if isinstance(forces, list) else None
+            )
     return compact
 
 
 def _write(path, payload):
     temporary = Path(f"{path}.tmp")
     temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        + "\n",
         encoding="utf-8",
     )
     temporary.replace(path)
