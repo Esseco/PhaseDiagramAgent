@@ -195,6 +195,8 @@ def build_decision_context(state, *, recent_limit=5):
         refresh_result_facts,
     )
 
+    from phase_agent.decisions.agent.branch_pool_review import pool_context
+
     context = {
         "mc_entry_conditions": mc_allocation_facts(state),
         "refresh_result_facts": refresh_result_facts(state),
@@ -204,6 +206,7 @@ def build_decision_context(state, *, recent_limit=5):
         "training_validation_planning": validation_planning_context(state),
         "post_refresh_search": post_refresh_search_context(state),
         "new_model_generation": new_model_generation_facts(state),
+        "branch_pool_facts": pool_context(state),
         "training_excluded_data_ids": sorted(
             {
                 str(value)

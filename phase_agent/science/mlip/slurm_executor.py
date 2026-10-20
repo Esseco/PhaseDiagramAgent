@@ -227,13 +227,15 @@ def execute_mlip_task(task):
     outputs = deepcopy(result)
     outputs.setdefault("mlip_name", "MACE")
     outputs.setdefault("mlip_version", job.get("model_version"))
-    return {
+    response = {
         "status": result.get("status", "completed"),
         "stage": task["stage"],
         "structure_id": task["structure_id"],
         "converged": (
-            result.get("relax_stopped_normally") is True
-            if task["stage"] in {"relax_and_feature", "deep_search"}
+            result.get("optimizer_converged") is True
+            if job["operation"] == "relax"
+            else result.get("relax_stopped_normally") is True
+            if job["operation"] == "mc"
             else result.get("converged")
         ),
         "relax_stopped_normally": result.get("relax_stopped_normally"),
@@ -253,6 +255,15 @@ def execute_mlip_task(task):
         "actual_cost": result.get("actual_cost"),
         "model_version": job.get("model_version"),
     }
+    from phase_agent.analysis.convergence.mlip_relaxation import (
+        relaxation_failure,
+        reject_relaxation,
+    )
+
+    reason = relaxation_failure({**task, **response}, require_optimizer=job["operation"] == "relax")
+    if reason:
+        reject_relaxation(response, reason)
+    return response
 
 
 def _resolve_structure_id(manager, task):

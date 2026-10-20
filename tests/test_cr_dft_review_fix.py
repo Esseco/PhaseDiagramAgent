@@ -30,7 +30,7 @@ def test_storage_root_and_empty_response_use_original_pending(tmp_path):
     before = deepcopy(state)
     text = approval_reply({}, state)
     assert "已指定 0" not in text and "待审阅动作" not in text
-    assert "DFT单点 1" in text and "文件名：" in text
+    assert "DFT单点 1" in text and "DFT 选点文件：" in text and ".txt`" in text
     assert "完成本批输入准备后停止" in text
     assert state == before
     paths = list((tmp_path / "workflow_state/dft_plans").glob("*.json"))

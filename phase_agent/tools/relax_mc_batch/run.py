@@ -24,6 +24,14 @@ from phase_agent.tools.remote.transfer_bundle import create_bundle, _archive_loc
 from phase_agent.tools.remote.integrity import file_checksum
 
 
+class SchedulerQueryError(RuntimeError):
+    """A query failure is not evidence that a GPU job failed or finished."""
+
+    def __init__(self, diagnostics):
+        self.diagnostics = diagnostics
+        super().__init__("scheduler_state_unknown; squeue/sacct could not confirm every job")
+
+
 class SlurmIO:
     """Thin I/O adapter; existing runner owns tasks/batches, no second scheduler."""
 
@@ -47,13 +55,60 @@ class SlurmIO:
     def active(self, ids):
         if not ids:
             return set()
-        result = subprocess.run(
-            ["squeue", "--noheader", "--jobs", ",".join(ids), "--format=%A"],
-            check=True,
-            capture_output=True,
-            text=True,
+        diagnostics = []
+
+        def query(command):
+            try:
+                result = subprocess.run(
+                    command, check=False, capture_output=True, text=True, timeout=20
+                )
+                diagnostics.append(
+                    {
+                        "command": command,
+                        "returncode": result.returncode,
+                        "stdout": result.stdout[:4096],
+                        "stderr": result.stderr[:4096],
+                    }
+                )
+                return result
+            except (OSError, subprocess.TimeoutExpired) as error:
+                diagnostics.append(
+                    {
+                        "command": command,
+                        "returncode": None,
+                        "error": str(error),
+                        "stdout": str(getattr(error, "stdout", "") or "")[:4096],
+                        "stderr": str(getattr(error, "stderr", "") or "")[:4096],
+                    }
+                )
+                return None
+
+        queued = query(["squeue", "--noheader", "--jobs", ",".join(ids), "--format=%A"])
+        if queued is not None and queued.returncode == 0:
+            return set(queued.stdout.split())
+        accounting = query(
+            [
+                "sacct",
+                "--noheader",
+                "--allocations",
+                "--parsable2",
+                "--jobs",
+                ",".join(ids),
+                "--format=JobID%64,State%32",
+            ]
         )
-        return set(result.stdout.split())
+        states = {}
+        if accounting is not None and accounting.returncode == 0:
+            for line in accounting.stdout.splitlines():
+                fields = line.split("|")
+                if len(fields) >= 2 and fields[0].strip() in ids and fields[1].strip():
+                    states.setdefault(fields[0].strip(), set()).add(
+                        fields[1].split()[0].rstrip("+")
+                    )
+        if set(states) != set(ids):
+            raise SchedulerQueryError(diagnostics)
+        terminal = {"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY"}
+        return {job for job, values in states.items() if not values.issubset(terminal)}
 
 
 def checkpoint(root, state, manager):
@@ -215,6 +270,8 @@ def publish(root, state, manifest, status, reason=None):
     ]
     if (root / "failure.json").is_file():
         files.append(root / "failure.json")
+    if (root / "scheduler_diagnostics.json").is_file():
+        files.append(root / "scheduler_diagnostics.json")
     files.extend(result_files(root, state, candidates))
     write(root / "candidate_pool.json", rebase(candidates, root, portable=True))
     payload = json.dumps(

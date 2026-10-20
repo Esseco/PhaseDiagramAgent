@@ -6,6 +6,7 @@ from pathlib import Path
 from phase_agent.tools.relax_mc_batch.files import write, read
 from phase_agent.tools.workflows.branch_review_view import readable_view, raw_record
 from phase_agent.tools.policy.adaptive_branch_count import configured_selection_guards
+from phase_agent.tools.workflows.compact_review import review_artifacts
 
 
 def artifact_path(state, task_key, params, directory=None):
@@ -37,13 +38,17 @@ def proposal_artifacts(proposal, state):
     path = artifact_path(state, action.get("task_key"), params)
     if path is None:
         return {}
+    from phase_agent.tools.workflows.readonly_views import is_read_only
+
+    if is_read_only():
+        return review_artifacts(path, kind="branch", state=state)
     if path.exists():
         saved = read(path)
         original = raw_record(saved)
         if original.get("status") == "completed":
             if original is saved:
                 write(path, readable_view(original), sort_keys=False)
-            return {"json": str(path)}
+            return review_artifacts(path, kind="branch", record=original, state=state)
     config = state.get("confirmed_config") or {}
     config = config.get("config") or config
     boundary = (
@@ -115,7 +120,7 @@ def proposal_artifacts(proposal, state):
         "actual": None,
     }
     write(path, readable_view(payload), sort_keys=False)
-    return {"json": str(path)}
+    return review_artifacts(path, kind="branch", record=payload, state=state)
 
 
 def determinant(matrix):
@@ -184,4 +189,4 @@ def result_artifacts(directory, history, manager, registered, state, action):
         },
     )
     write(path, readable_view(payload), sort_keys=False)
-    return {"json": str(path)}
+    return review_artifacts(path, kind="branch", record=payload, state=state)

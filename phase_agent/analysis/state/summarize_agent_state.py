@@ -17,7 +17,10 @@ def summarize_agent_state(state: dict) -> dict:
             "dft_single_point",
             "dft_relax",
         }:
-            identified = (item.get("outputs") or {}).get("phase_identification") or {}
+            outputs = item.get("outputs")
+            identified = (
+                (outputs.get("phase_identification") or {}) if isinstance(outputs, dict) else {}
+            )
             key = "identified" if identified.get("status") == "identified" else "unknown"
             phase_counts[key] += 1
     stale = []

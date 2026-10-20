@@ -45,3 +45,19 @@ class GenerationAllocation(BaseModel):
             ):
                 raise ValueError("Na/O2范围必须有限且0≤下限≤上限，两端同时提供")
         return self
+
+
+class GenerationRegion(BaseModel):
+    """One explicit phase per adaptive region; phase selection stays with the agent."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+    region_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    priority: Annotated[int, Field(strict=True, ge=1, le=12)]
+    strategy: GenerationStrategy
+    phase: Literal["O1", "O3", "P3", "OP2"]
+    min_det_H: PositiveInteger
+    max_det_H: PositiveInteger
+    na_min: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    na_max: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    evidence_refs: list[str]

@@ -42,6 +42,18 @@ RESULT_NAMES = {
 }
 
 
+def local_path(path):
+    """Use Windows extended paths for deep HPC artifacts without changing ZIP names."""
+    if os.name != "nt":
+        return Path(path)
+    text = os.path.abspath(path)
+    if text.startswith("\\\\?\\"):
+        return Path(text)
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text[2:])
+    return Path("\\\\?\\" + text)
+
+
 def checksum(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -271,6 +283,72 @@ def _validated_inventory(archive, max_bytes, storage_kind):
     return rows
 
 
+def _path_length(path):
+    text = str(path)
+    if text.startswith("\\\\?\\UNC\\"):
+        text = "\\\\" + text[8:]
+    elif text.startswith("\\\\?\\"):
+        text = text[4:]
+    return len(text.encode("utf-16-le")) // 2
+
+
+def check_return_paths(archive_path, directory, *, max_bytes=MAX_ARCHIVE_BYTES, storage_kind=None):
+    """Check every eventual/staging path before creating any return files."""
+    root = local_path(directory).resolve()
+    with zipfile.ZipFile(archive_path) as archive:
+        rows = _validated_inventory(archive, max_bytes, storage_kind)
+    longest, longest_member, legacy = 0, None, 0
+    for row in rows:
+        relative = _safe_name(row["path"])
+        staged = root / ".transfer-xxxxxxxx" / Path(*relative.parts)
+        length = _path_length(staged)
+        if length > longest:
+            longest, longest_member = length, row["path"]
+        legacy += length >= 260
+        if os.name == "nt":
+            for part in relative.parts:
+                stem = part.split(".")[0].upper()
+                if (
+                    any(c in part for c in '<>"|?*')
+                    or any(ord(c) < 32 for c in part)
+                    or stem in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+                    or stem
+                    in {
+                        f"{prefix}{n}"
+                        for prefix in ("COM", "LPT")
+                        for n in (*range(1, 10), "¹", "²", "³")
+                    }
+                    or _path_length(part) > 255
+                    or length >= 32760
+                ):
+                    raise ValueError(
+                        f"回收路径预检失败；阶段=解包前；包内文件存在=是；成员={row['path']}；"
+                        f"临时路径长度={length}；原因=Windows 不支持的名称或路径长度；"
+                        "请检查回传包命名，不要重投计算"
+                    )
+    return {
+        "status": "passed",
+        "file_count": len(rows),
+        "longest_staged_path_length": longest,
+        "longest_member": longest_member,
+        "legacy_limit_paths": legacy,
+        "windows_extended_paths": os.name == "nt",
+    }
+
+
+@contextmanager
+def _return_path_error(phase, member, path):
+    try:
+        yield
+    except OSError as error:
+        raise ValueError(
+            f"回收文件操作失败；阶段={phase}；包内文件存在=是；成员={member}；"
+            f"本地路径={path}；路径长度={_path_length(path)}；"
+            f"系统错误码={getattr(error, 'winerror', None) or error.errno}；原因={error.strerror or error}；"
+            "请检查路径、磁盘空间和访问权限，保留回传包，不要重投计算"
+        ) from error
+
+
 def import_bundle(
     archive_path,
     directory,
@@ -280,11 +358,18 @@ def import_bundle(
     extra_result_suffixes=(),
 ):
     """Validate the whole archive before publishing; refuse differing existing files."""
-    root = Path(directory).resolve()
-    root.mkdir(parents=True, exist_ok=True)
+    check_return_paths(archive_path, directory, max_bytes=max_bytes, storage_kind=storage_kind)
+    root = local_path(directory).resolve()
+    with _return_path_error("创建回收目录", "归档已通过清单校验", root):
+        root.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive_path) as archive:
         rows = _validated_inventory(archive, max_bytes, storage_kind)
-        with tempfile.TemporaryDirectory(prefix=".transfer-", dir=root) as temp:
+        with (
+            _return_path_error(
+                "创建或清理解包暂存目录", "归档已通过清单校验", root / ".transfer-xxxxxxxx"
+            ),
+            tempfile.TemporaryDirectory(prefix=".transfer-", dir=root) as temp,
+        ):
             staged = Path(temp)
             targets = []
             for row in rows:
@@ -305,23 +390,30 @@ def import_bundle(
                 target = root.joinpath(*relative.parts)
                 target.resolve().relative_to(root)
                 candidate = staged.joinpath(*relative.parts)
-                candidate.parent.mkdir(parents=True, exist_ok=True)
-                with (
-                    archive.open(row["path"]) as source,
-                    candidate.open("wb") as output,
-                ):
-                    shutil.copyfileobj(source, output, 1024 * 1024)
-                if candidate.stat().st_size != row["size"] or checksum(candidate) != row["sha256"]:
-                    raise ValueError(f"Result checksum mismatch: {relative}")
-                if target.exists() and (not target.is_file() or checksum(target) != row["sha256"]):
-                    raise ValueError(f"Existing result differs: {target}")
+                with _return_path_error("解包与校验", row["path"], candidate):
+                    candidate.parent.mkdir(parents=True, exist_ok=True)
+                    with (
+                        archive.open(row["path"]) as source,
+                        candidate.open("wb") as output,
+                    ):
+                        shutil.copyfileobj(source, output, 1024 * 1024)
+                    if (
+                        candidate.stat().st_size != row["size"]
+                        or checksum(candidate) != row["sha256"]
+                    ):
+                        raise ValueError(f"Result checksum mismatch: {relative}")
+                    if target.exists() and (
+                        not target.is_file() or checksum(target) != row["sha256"]
+                    ):
+                        raise ValueError(f"Existing result differs: {target}")
                 targets.append((candidate, target))
             for candidate, target in sorted(
                 targets, key=lambda pair: pair[1].name.endswith("finished.json")
             ):
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if not target.exists():
-                    os.replace(candidate, target)
+                with _return_path_error("发布已校验文件", str(target.relative_to(root)), target):
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if not target.exists():
+                        os.replace(candidate, target)
     return len(rows)
 
 

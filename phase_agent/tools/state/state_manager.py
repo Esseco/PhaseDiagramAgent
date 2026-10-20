@@ -50,11 +50,19 @@ def agent_state_summary(state: dict, *, _approval_only=False) -> dict:
 
     from phase_agent.tools.policy.model_generation import new_model_generation_facts
 
+    from phase_agent.decisions.agent.branch_pool_review import pool_context
+
     # Refresh scoped directives even when the cached snapshot predates this code.
     summary.setdefault("decision_context", {}).update(
         training_validation_planning=validation_planning_context(state),
         post_refresh_search=post_refresh_search_context(state),
         new_model_generation=new_model_generation_facts(state),
+        branch_pool_facts=pool_context(state),
+    )
+    from phase_agent.analysis.state.decision_evidence_catalog import decision_evidence_catalog
+
+    summary["decision_context"]["evidence_catalog"] = decision_evidence_catalog(
+        summary["decision_context"]
     )
     return summary
 

@@ -191,11 +191,13 @@ def test_reply_reports_metrics_and_directory_before_next_proposal():
             "directory": "outputs/m1/Search-group-0001/DFT-round-0001",
         }
     }
-    reply = format_workflow_reply({"status": "completed", "state": state}, "state.json")
+    reply = format_workflow_reply(
+        {"status": "completed", "state": state, "recovered_count": 1}, "state.json"
+    )
     assert "回收 1/1" in reply and "合格配对 1" in reply
     assert "MAE/RMSE" in reply and "DFT-round-0001" not in reply
     full_reply = format_workflow_reply(
-        {"status": "completed", "state": state}, "state.json", verbose=True
+        {"status": "completed", "state": state, "recovered_count": 1}, "state.json", verbose=True
     )
     assert "DFT-round-0001" in full_reply
     assert reply.index("MAE/RMSE") < reply.index("已完成")

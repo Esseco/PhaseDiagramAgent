@@ -28,6 +28,11 @@ def read_only_reply(handler, message, facts, conversation_id=None):
             reply += "\n" + pending_plan_reply(facts)
             bind_presented_proposal(handler, facts)
         return reply
+    from phase_agent.graphs.dialogue.saved_control import unavailable_review_reply
+
+    reply = unavailable_review_reply(handler, message, facts)
+    if reply is not None:
+        return reply
     reply = finetune_location_reply(message, facts)
     if reply is not None:
         return reply

@@ -102,26 +102,21 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
 
         if recovery_report(handler.state_path, state["facts"])["unsettled"]:
             from phase_agent.graphs.dialogue.saved_control import recovery_reply
+
             return {"reply": recovery_reply(handler)}
         from phase_agent.tools.workflows.reuse_dft_selection import reusable_selection
+
         if reusable_selection(state["facts"]) is not None:
             from phase_agent.graphs.dialogue.saved_selection_resume import prepare_resume
-            prepare_resume(handler, runtime.context)
-            return {"operation": "scientific_workflow"}
-    if (
-        handler.config_delegate is None
-        and not reviews
-        and command in {"同意", "approve", "拒绝", "reject"}
-    ):
-        from phase_agent.tools.workflows.reuse_dft_selection import reusable_selection
-
-        if command in {"同意", "approve"} and reusable_selection(state["facts"]) is not None:
-            from phase_agent.graphs.dialogue.saved_selection_resume import prepare_resume
 
             prepare_resume(handler, runtime.context)
             return {"operation": "scientific_workflow"}
+    from phase_agent.graphs.dialogue.saved_control import unavailable_review_reply
+
+    unavailable = unavailable_review_reply(handler, state["message"], state["facts"])
+    if unavailable is not None:
         handler.last_turn_outcome = "answered"
-        return {"reply": "当前没有可批准或拒绝的待审方案；本次未执行任务，也未调用模型重新决策。"}
+        return {"reply": unavailable}
     # Existing explicit control messages do not request a revised scientific
     # proposal. Reuse the saved approval owner instead of asking an LLM again.
     if (
@@ -155,6 +150,14 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
                 return {
                     "reply": "上次审批决定已交付，业务记录尚需核对；本次未重新批准、分析或执行。"
                 }
+            from phase_agent.graphs.dialogue.saved_control import (
+                generation_blocked_review,
+                prepare_saved_revision,
+            )
+
+            blocked = generation_blocked_review(state["facts"], reviews)
+            if blocked is not None:
+                return prepare_saved_revision(handler, runtime.context, blocked, state["message"])
         bind_presented_proposal(handler, state["facts"])
         return {"reply": pending_plan_reply(state["facts"])}
     if command in {"确认敏感操作", "confirm sensitive action"}:
@@ -321,7 +324,9 @@ def read_evidence(state, runtime: Runtime[TurnRuntime]):
             )
             if topic not in prior
         ]
-    result = read_topics(state["facts"], new)
+    result = read_topics(
+        state["facts"], new, manager=runtime.context.handler.workflow_kwargs.get("manager")
+    )
     process_event("按需读取证据", {"topics": new, "read_only": True})
     return {
         "evidence": {

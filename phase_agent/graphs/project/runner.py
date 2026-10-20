@@ -34,6 +34,7 @@ def run_search_workflow_graph(
         config = {
             "configurable": {"thread_id": thread},
             "recursion_limit": 32,
+            "max_concurrency": 1,
         }
         with FileLock(str(path) + ".lock", timeout=10):
             with SqliteSaver.from_conn_string(str(path)) as saver:

@@ -60,6 +60,9 @@ def project_progress(state, state_path, *, session=None):
         if pending
         else "project_input_or_results"
     )
+    from phase_agent.runtime.result_recovery_status import result_recovery_facts
+
+    progress["result_recoveries"] = result_recovery_facts(state)
     tasks = state.get("tasks") or []
     if isinstance(tasks, dict):
         tasks = list(tasks.values())
@@ -104,6 +107,18 @@ def project_progress(state, state_path, *, session=None):
             "human_review",
             "等待人工审阅",
             "查看具体方案后批准、修改或拒绝；继续不代表批准",
+        )
+    elif any(row["kind"] == "blocked" for row in progress["result_recoveries"]):
+        status, label, action = (
+            "recovery_blocked",
+            "结果回收受阻",
+            "保留原包，查看具体校验错误；不要重投计算",
+        )
+    elif any(row["kind"] == "awaiting_verification" for row in progress["result_recoveries"]):
+        status, label, action = (
+            "result_verification",
+            "已有结果待核验",
+            "核对原作业和结果，继续回收；不要整批重投",
         )
     elif any(row.get("status") == "running" for row in tasks):
         status, label, action = (

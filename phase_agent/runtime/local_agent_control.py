@@ -31,11 +31,43 @@ from phase_agent.runtime.control_ui_contracts import (
 from phase_agent.runtime.control_request_contracts import validate_control_request
 
 
+from phase_agent.tools.workflows.readonly_views import read_only_view
+
+
 class LocalAgentControl:
     def __init__(self, chat_handler):
         self.chat_handler = chat_handler
         self.state_path = chat_handler.state_path
+        from phase_agent.runtime.ui_operations import UIOperations
 
+        import threading
+
+        self.operations = UIOperations(
+            self.state_path, getattr(chat_handler, "lock", threading.RLock())
+        )
+
+    def resolve_operation(self, body):
+        validate_control_request("/phase/operations/resolve", body)
+        from phase_agent.runtime.operation_resolution import resolve_operation
+
+        return resolve_operation(self, body)
+
+    def diagnostics(self):
+        from phase_agent.runtime.project_diagnostics import inspect_project
+
+        return inspect_project(self.state_path)
+
+    def recovery_transaction(self):
+        from phase_agent.persistence.result_recovery_commit import recovery_transaction_status
+
+        return recovery_transaction_status(self.state_path)
+
+    def resume_recovery_transaction(self, revision):
+        from phase_agent.persistence.result_recovery_commit import resume_result_recovery
+
+        return resume_result_recovery(self.state_path, revision=revision)
+
+    @read_only_view
     def status(self):
         state = read_json(self.state_path, {}) or {}
         from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
@@ -55,8 +87,11 @@ class LocalAgentControl:
         summary["pending_approvals"] = progress["pending_review_count"]
         summary["waiting_state"] = progress["waiting_state"]
         summary["recovery_report"] = progress["recovery_report"]
+        summary["ui_operations"] = self.operations.recent()
+        summary["result_recoveries"] = progress.get("result_recoveries", [])
         return validate_control_response(StatusResponse, summary)
 
+    @read_only_view
     def pending(self):
         state = read_json(self.state_path, {}) or {}
         state_version = build_status_summary(
@@ -86,6 +121,7 @@ class LocalAgentControl:
             },
         )
 
+    @read_only_view
     def tasks(self):
         state = read_json(self.state_path, {}) or {}
         return validate_control_response(
@@ -109,10 +145,12 @@ class LocalAgentControl:
             },
         )
 
+    @read_only_view
     def charts(self):
         state = read_json(self.state_path, {}) or {}
         return build_webui_charts(state)
 
+    @read_only_view
     def config(self):
         handler = getattr(self.chat_handler, "config_delegate", None) or self.chat_handler
         from phase_agent.runtime.project_context import current_config_session
@@ -138,6 +176,7 @@ class LocalAgentControl:
             },
         )
 
+    @read_only_view
     def memory(self):
         state = read_json(self.state_path, {}) or {}
         return validate_control_response(
@@ -171,6 +210,7 @@ class LocalAgentControl:
             raise ValueError("knowledge library root is not configured")
         return Path(value).resolve()
 
+    @read_only_view
     def domain_skill_matches(self):
         config = (self.config().get("confirmed_snapshot") or {}).get("config") or {}
         signature = build_system_signature(config.get("system") or config.get("system_config"))

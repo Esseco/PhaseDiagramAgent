@@ -189,15 +189,17 @@ class CompactSqliteSaver(SqliteSaver):
 
     @classmethod
     @contextmanager
-    def from_conn_string(cls, conn_string):
+    def from_conn_string(cls, conn_string, *, maintain_history=True):
+        """Open all supported encodings; optionally retain the caller's full history."""
         with closing(sqlite3.connect(conn_string, check_same_thread=False)) as conn:
             saver = cls(conn)
             try:
                 yield saver
             finally:
                 # Called while the caller still owns the project's existing DB lock.
-                prune_history(conn, limit_namespaces=True)
-                collect_payloads(conn, saver.serde.delegate)
+                if maintain_history:
+                    prune_history(conn, limit_namespaces=True)
+                    collect_payloads(conn, saver.serde.delegate)
                 # Do not copy a multi-GB database on the user-facing request path.
                 # Existing free pages are reused; offline storage maintenance is separate.
                 from phase_agent.runtime.turn_process import record_timing, process_event

@@ -88,7 +88,15 @@ def _execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict
     try:
         # Handlers may add transient metadata; the approved action and receipt
         # identity must continue to describe the original proposal.
-        result = handler(action=deepcopy(action), context=context)
+        from phase_agent.tools.state.execution_progress import execution_scope, preparation_progress
+
+        with execution_scope(state_path, identity):
+            if (
+                tool == "prepare_local_batch_files"
+                and (action.get("parameters") or {}).get("mode") == "relax_mc_inputs"
+            ):
+                preparation_progress("started", {"protocol": 1, "mode": "relax_mc_inputs"})
+            result = handler(action=deepcopy(action), context=context)
         if tool == "check_convergence":
             from phase_agent.analysis.convergence.normalize_convergence_result import (
                 normalize_convergence_result,
@@ -97,11 +105,20 @@ def _execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict
             result = normalize_convergence_result(result)
         execution = {"status": "completed", "tool": tool, "result": result, "error": None}
     except Exception as error:
+        from phase_agent.runtime.boundary_diagnostics import record_failure
+
+        diagnostic = record_failure(
+            state_path,
+            error,
+            boundary="scientific_action",
+            object_id=(identity or {}).get("invocation_id") or action.get("task_key"),
+        )
         execution = {
             "status": "failed",
             "tool": tool,
             "result": None,
             "error": f"{type(error).__name__}: {error}",
+            "diagnostic": diagnostic,
         }
     from phase_agent.tools.dispatch.operation_outcome import operation_outcome
 

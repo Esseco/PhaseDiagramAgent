@@ -82,7 +82,18 @@ def restore_frame(runtime_frame, saved):
         raise ValueError("stale_lifecycle_checkpoint_control_revision")
     # Shared checkpoint snapshots are read-only. Restore independent mutable
     # stage facts, matching the historical JSON checkpoint ownership boundary.
-    return {**runtime_frame, **json.loads(json.dumps(saved))}
+    restored = {**runtime_frame, **json.loads(json.dumps(saved))}
+    from phase_agent.tools.workflows.compact_action_history import compact_state_history
+
+    # Older lifecycle checkpoints may still carry the redundant audit snapshots.
+    # Apply the same migration after detaching, without editing saved checkpoints.
+    if isinstance(restored.get("loaded_state"), dict):
+        compact_state_history(restored["loaded_state"], _owned=True)
+    for key in FIELDS - {"loaded_state"}:
+        value = restored.get(key)
+        if isinstance(value, dict) and isinstance(value.get("state"), dict):
+            compact_state_history(value["state"], _owned=True)
+    return restored
 
 
 def _json_default(value):

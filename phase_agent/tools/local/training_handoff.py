@@ -243,7 +243,16 @@ def record_handoff(current, key, handoff):
     return current
 
 
-def advance_training_handoffs(state, config, *, state_path=None, graph=None):
+def advance_training_handoffs(state, config, *, state_path=None, graph=None, _owned=False):
     from phase_agent.graphs.training_handoff_graph import run_training_handoffs
 
-    return run_training_handoffs(state, config, state_path=state_path, graph=graph)
+    from phase_agent.interface_compatibility import call_with_optimizations
+
+    return call_with_optimizations(
+        run_training_handoffs,
+        state,
+        config,
+        state_path=state_path,
+        graph=graph,
+        _optimizations={"_owned": _owned},
+    )

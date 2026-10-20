@@ -103,8 +103,11 @@ def test_ordinary_wait_and_completed_tasks(tmp_path):
 
 
 def test_dialogue_and_configuration_share_actionable_rule():
+    from phase_agent.runtime.response_preferences import ACTIONABLE_REPLY_RULE
+
     rule = dialogue_output_contract()["reply_guidance"]
-    assert "默认只显示一个本轮提交文件夹" in rule
+    assert rule == ACTIONABLE_REPLY_RULE
+    assert "操作需要时给一个上传目录、必要命令及回传目录" in rule
     assert rule in CONFIG_AGENT_SYSTEM_PROMPT
 
 

@@ -55,13 +55,17 @@ def test_refresh_scope_blocks_model_config_targets_cost_and_extra_wave():
         "new_model_version": "new",
         "maximum_supplemental_count": 1,
         "maximum_supplemental_cost": 2,
-        "candidates": [{"structure_id": "s1", "operation": "predict"}],
+        "candidates": [
+            {"structure_id": "s1", "operation": "predict", "structure_sha256": "a" * 64}
+        ],
     }
     refresh = {
         "plan": plan,
         "new_model_version": "new",
         "wave": 1,
-        "supplemental_candidates": [{"structure_id": "s1", "relative_cost": 1}],
+        "supplemental_candidates": [
+            {"structure_id": "s1", "relative_cost": 1, "structure_sha256": "a" * 64}
+        ],
         "approved_scope": approved_refresh_scope(plan, "c1"),
     }
     assert refresh_scope_errors(refresh, "c1") == []
@@ -72,6 +76,7 @@ def test_refresh_scope_blocks_model_config_targets_cost_and_extra_wave():
         {"supplemental_candidates": [{"structure_id": "other", "relative_cost": 1}]},
         {"supplemental_candidates": [{"structure_id": "s1", "relative_cost": 3}]},
         {"supplemental_candidates": [{"structure_id": "s1", "relative_cost": float("nan")}]},
+        {"supplemental_candidates": [{"structure_id": "s1", "relative_cost": 1}]},
         {"approved_scope": None},
     ]:
         assert refresh_scope_errors({**refresh, **patch}, "c1")

@@ -47,6 +47,7 @@ def record_dft_products(state, result, evaluator=None, manager=None, *, refresh=
     record = {
         **lineage,
         "task_id": result.get("task_id"),
+        "task_key": result.get("task_key") or task.get("task_key"),
         "structure_id": result.get("structure_id"),
         "stage": result.get("stage"),
         "branch_id": branch_id,
@@ -102,8 +103,17 @@ def record_dft_products(state, result, evaluator=None, manager=None, *, refresh=
         ),
         {},
     )
-    provenance={key:deepcopy(result[key]) for key in ('shared_dft_record_id','shared_dft_source','shared_dft_source_task_id','dft_data_role') if key in result}
-    provenance.setdefault('dft_data_role','local')
+    provenance = {
+        key: deepcopy(result[key])
+        for key in (
+            "shared_dft_record_id",
+            "shared_dft_source",
+            "shared_dft_source_task_id",
+            "dft_data_role",
+        )
+        if key in result
+    }
+    provenance.setdefault("dft_data_role", "local")
     record.update(provenance)
     _upsert_task_record(state, "dft_dataset_records", record)
     from phase_agent.science.dft.vasp_training_labels import training_records

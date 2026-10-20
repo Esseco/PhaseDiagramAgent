@@ -17,6 +17,9 @@ def refresh_result_facts(state):
         "task_count": len(ids),
         "registered_count": len(rows),
         "status_counts": dict(Counter(t.get("status", "unknown") for t in rows)),
+        "discarded_unconverged_count": sum(
+            t.get("result_disposition") == "discarded_unconverged" for t in rows
+        ),
         "failure_groups": [{"count": count, "reason": reason} for reason, count in errors.items()],
         "instruction": "失败是已回收的失败结果，不是仍在运行。先解释原因和修复依赖；本地生成输入只需远端模型路径，不需要本地权重；若错误来自远端加载，核对超算路径或在超算恢复文件。继续/同意不会恢复远端模型文件，也不能把失败标记为完成或自动重试。修复后重试仍需具体方案审批。",
     }

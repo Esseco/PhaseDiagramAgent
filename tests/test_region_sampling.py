@@ -251,11 +251,11 @@ def test_online_agent_gets_only_region_contract(monkeypatch):
         allowed_tools=["generate_branches"],
         config={"run": {"total_quota": 600, "batch_size": 96}},
     )
-    assert result["decision_source"] != "llm_agent"
+    assert result["decision_source"] == "llm_agent"
     assert "generation_allocation_contract" not in seen[0]["decision_context"]
     assert "early_branch_planning" not in seen[0]["decision_context"]
-    assert seen[0]["branch_count_policy"]["minimum"] == 100
-    assert seen[0]["branch_count_policy"]["maximum"] == 1000
+    assert seen[0]["branch_count_policy"]["count_is_result"] is True
+    assert "minimum" not in seen[0]["branch_count_policy"]
     assert "total_quota" not in result["parameters"]
 
 

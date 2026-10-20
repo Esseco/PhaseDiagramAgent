@@ -49,9 +49,12 @@ def brief_chat_state(state, *, configuring=False):
                     t.get("phase_identification_status") == "unknown"
                     for t in state.get("tasks") or []
                     if t.get("task_id") in ids
+                    and t.get("result_disposition") != "discarded_unconverged"
                 )
                 if unknown:
-                    return f"当前：刷新结果已全部回收，{unknown} 个结果待相识别；正在核对相图。"
+                    return f"当前：刷新结果已全部回收，{unknown} 个结果相识别受阻；需核对识别证据后才能完成刷新。"
+                if facts["discarded_unconverged_count"]:
+                    return f"当前：刷新结果已回收，{facts['discarded_unconverged_count']} 个弛豫未收敛结果已排除；等待核对有效相图，不自动重试。"
                 return "当前：刷新结果已全部回收，正在核对新相图及补充条件。"
             return "当前：用微调模型重新计算已有结构，输入已生成，等待结果。"
         authorization = refresh.get("input_authorization") or {}
@@ -70,15 +73,17 @@ def brief_chat_state(state, *, configuring=False):
 
     generation = new_model_generation_facts(state)
     active = active_pending_tasks(state.get("tasks") or [])
+    if generation["required"] and not generation["ready"] and not active:
+        return "当前：新模型刷新已完成，须先生成新branch并展示结果；等待生成方案审批。"
     if (
-        generation["required"]
+        generation.get("post_refresh")
         and not generation["first_search_completed"]
         and not active
         and not state.get("pending_execution_policies")
     ):
         if generation["ready"]:
             return "当前：本轮新branch已登记，等待准备Relax+MC搜索输入。"
-        return "当前：新模型刷新已完成，等待生成本轮新branch。"
+        return "当前：新模型刷新已完成，须先生成新branch并展示结果。"
     completed_refresh = state.get("model_refresh") or {}
     if (
         completed_refresh.get("status") == "completed"
@@ -113,6 +118,17 @@ def brief_chat_state(state, *, configuring=False):
             tool = proposal.get("recommended_action") or (proposal.get("raw_action") or {}).get(
                 "tool"
             )
+            params = (
+                (proposal.get("raw_action") or {}).get("parameters")
+                or proposal.get("action_parameters")
+                or {}
+            )
+            if (
+                tool == "generate_branches"
+                and params.get("sampling_mode") == "region_adaptive"
+                and not params.get("regions")
+            ):
+                return "当前：已有branch复用方案待确认。"
             return f"当前：{names.get(tool, '操作方案')}待确认。"
         return f"当前：{len(pending)} 个方案待确认。"
     training = waiting_training_job(state)
@@ -127,6 +143,10 @@ def brief_chat_state(state, *, configuring=False):
     tasks = state.get("tasks") or []
     active = active_pending_tasks(tasks)
     if active:
+        from phase_agent.runtime.local_return_status import pending_dft_return_facts
+
+        if pending_dft_return_facts(state):
+            return "当前：DFT 回传包已到，待本地校验与分析。"
         names = {
             "deep_search": "MC",
             "relax_and_feature": "Relax",
@@ -187,7 +207,10 @@ def format_epoch_reply(reply, state, *, configuring=False, project_card=None):
     stage = header.split(" · ", 1)[-1].rstrip("。")
     lines = []
     for line in str(reply).splitlines():
-        if line.startswith("当前状态：") and line.split("：", 1)[1].rstrip("。") == stage:
+        if (
+            line.startswith(("当前状态：", "当前："))
+            and line.split("：", 1)[1].rstrip("。") == stage
+        ):
             continue
         lines.append(line)
     if project_card is not None:
@@ -219,5 +242,12 @@ def format_epoch_reply(reply, state, *, configuring=False, project_card=None):
             "confirmed_not_applied",
             "pending_confirmation",
         }:
-            lines.insert(0, "结果：设置修改尚未生效，需核对并应用。")
+            changed = (card.get("editable_file") or {}).get("changed_paths") or []
+            detail = "；差异字段：" + "、".join(changed) if changed else ""
+            lines.insert(
+                0,
+                "设置提醒：设置草稿尚未应用"
+                + detail
+                + "；当前方案和已有任务回收仍使用原确认配置。",
+            )
     return header + "\n" + concise_body("\n".join(lines), state)

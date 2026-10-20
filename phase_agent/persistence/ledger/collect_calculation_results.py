@@ -15,6 +15,18 @@ def collect_calculation_results(
     refresh_existing: bool = False,
 ) -> dict[str, Any]:
     """完成项写 stage_history；其他状态只写 calculation_attempts。"""
+    from phase_agent.analysis.convergence.mlip_relaxation import (
+        relaxation_failure,
+        reject_relaxation,
+    )
+
+    from phase_agent.persistence.ledger.result_validation import validate_scientific_result
+
+    validate_scientific_result(result)
+    result = copy.deepcopy(result)
+    reason = relaxation_failure(result)
+    if reason:
+        reject_relaxation(result, reason)
     structure = manager.data["structures"].get(structure_id)
     if structure is None:
         raise KeyError(f"未知结构：{structure_id}")
@@ -52,6 +64,8 @@ def collect_calculation_results(
         "model_version": result.get("model_version", result.get("calculation_version")),
         "parameters": copy.deepcopy(result.get("parameters") or {}),
         "checks_passed": result.get("checks_passed", True),
+        "result_disposition": result.get("result_disposition"),
+        "relaxation_quality": copy.deepcopy(result.get("relaxation_quality")),
         "spin_state_check": copy.deepcopy((result.get("outputs") or {}).get("spin_state_check")),
         "magnetic_check": copy.deepcopy((result.get("outputs") or {}).get("magnetic_check")),
         "magnetic_moments": copy.deepcopy((result.get("outputs") or {}).get("magnetic_moments")),
@@ -139,6 +153,10 @@ def collect_calculation_results(
 
 
 def _phase_record(manager, structure_id, result_id, stage, result):
+    from phase_agent.analysis.convergence.mlip_relaxation import relaxation_failure
+
+    if relaxation_failure({**result, "stage": stage}):
+        return None
     if result.get("checks_passed", True) is not True:
         return None
     outputs = result.get("outputs") or {}
@@ -206,4 +224,8 @@ def _phase_record(manager, structure_id, result_id, stage, result):
         "source_task_id": result.get("task_id"),
         "stage": stage,
         "status": "completed" if identified else "pending_phase_identification",
+        "converged": result.get("converged"),
+        "optimizer_converged": outputs.get("optimizer_converged"),
+        "force_max_ev_per_angstrom": outputs.get("force_max_ev_per_angstrom"),
+        "fmax_target_ev_per_angstrom": outputs.get("fmax_target_ev_per_angstrom"),
     }

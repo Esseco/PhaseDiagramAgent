@@ -18,7 +18,33 @@ def reserve_budget(
     timeout_at=None,
 ) -> dict:
     updated = deepcopy(state)
-    reservations = updated.setdefault("budget_reservations", {})
+    updated.setdefault("budget_reservations", {})
+    return _reserve_budget_inplace(
+        updated,
+        task_key=task_key,
+        stage=stage,
+        amount=amount,
+        limits=limits,
+        config_version=config_version,
+        model_version=model_version,
+        reserved_at=reserved_at,
+        timeout_at=timeout_at,
+    )
+
+
+def _reserve_budget_inplace(
+    updated,
+    *,
+    task_key,
+    stage,
+    amount,
+    limits,
+    config_version=None,
+    model_version=None,
+    reserved_at=None,
+    timeout_at=None,
+):
+    reservations = updated.get("budget_reservations", {})
     if task_key in reservations:
         return {"status": "existing", "state": updated, "reservation": reservations[task_key]}
     check = check_budget(updated, {"stage": stage, "tasks": 1, "relative_cost": amount}, limits)
@@ -38,5 +64,15 @@ def reserve_budget(
         "actual_cost": None,
         "released_cost": None,
     }
-    reservations[task_key] = record
+    updated.setdefault("budget_reservations", reservations)[task_key] = record
     return {"status": "reserved", "state": updated, "reservation": record}
+
+
+def reserve_owned_budget(state: dict, **kwargs) -> dict:
+    """Use the same policy on a caller's private batch without copying its ledger.
+
+    check_budget is read-only. Only a successful new reservation inserts a row;
+    existing or rejected keys leave the private state unchanged.
+    The caller owns transaction rollback and must not pass a shared input state.
+    """
+    return _reserve_budget_inplace(state, **kwargs)

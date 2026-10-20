@@ -164,8 +164,8 @@ def training_result_message(result):
     )
 
 
-def recover_remote_training(state):
-    current = deepcopy(state)
+def recover_remote_training(state, *, _owned=False):
+    current = state if _owned else deepcopy(state)
     reports = []
     for job in (current.get("remote_finetune_jobs") or {}).values():
         if job.get("status") in INACTIVE or job.get("activated"):

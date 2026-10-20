@@ -3,6 +3,9 @@
 from copy import deepcopy
 import shutil
 from pathlib import Path
+from time import perf_counter
+
+from phase_agent.runtime.turn_process import timed_call, record_timing, process_event
 
 from phase_agent.tools.relax_mc_batch.plan import diagnose, relax_tasks, context_config
 from phase_agent.tools.relax_mc_batch.files import (
@@ -13,16 +16,24 @@ from phase_agent.tools.relax_mc_batch.files import (
 )
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.integrity import file_checksum
-from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
 from phase_agent.science.structures.boundary_utils import load_structure
 
 
 def prepare_batch(*, action, context):
+    from phase_agent.tools.state.execution_progress import preparation_progress
+
+    preparation_progress("started", {"protocol": 1, "mode": "relax_mc_inputs"})
     config, manager = (
         context_config(context["effective_config"], context),
         context["manager"],
     )
-    state = deepcopy(context.get("event_state") or {})
+    state = timed_call(
+        "RelaxMC：建立本批独立状态",
+        deepcopy,
+        context.get("event_state") or {},
+        category="processing",
+    )
     approved = (action.get("parameters") or {}).get("relax_mc_preview")
     if not approved:
         return {
@@ -46,6 +57,7 @@ def prepare_batch(*, action, context):
             output_directory,
         )
 
+        preparation_progress("effects_started", {"directory": existing["directory"]})
         upload = compact_handoff(existing["directory"])
         existing.update(
             upload_folder=str(upload),
@@ -53,13 +65,29 @@ def prepare_batch(*, action, context):
             script_path=str(upload / "submit_all.sh"),
             expected_results_archive=str(output_directory(existing["directory"]) / "results.zip"),
         )
+        preparation_progress(
+            "complete",
+            {
+                key: existing[key]
+                for key in (
+                    "bundle_id",
+                    "plan_checksum",
+                    "directory",
+                    "upload_folder",
+                    "upload_archive",
+                    "script_path",
+                )
+            },
+        )
         return {
             "status": "already_prepared",
             "state": state,
             **existing,
             "submitted": False,
         }
-    plan = diagnose(
+    plan = timed_call(
+        "RelaxMC：校验已批准方案",
+        diagnose,
         action.get("target_ids") or [],
         state,
         manager,
@@ -67,6 +95,7 @@ def prepare_batch(*, action, context):
         context["config_version"],
         max_concurrent_jobs=(action.get("parameters") or {}).get("max_concurrent_jobs"),
         phase_references=context.get("phase_references"),
+        category="processing",
     )
     if plan["checksum"] != approved["checksum"]:
         return {
@@ -83,12 +112,32 @@ def prepare_batch(*, action, context):
     )
     label = batch_label(base, state, plan["model_version"], "RelaxMC", sequence)
     root = base / label
+    preparation_progress(
+        "plan_verified",
+        {
+            "directory": str(root),
+            "input_directory": str(root.with_name(root.name + "_input")),
+            "output_directory": str(root.with_name(root.name + "_output")),
+            "bundle_id": plan["bundle_id"],
+            "plan_checksum": plan["checksum"],
+            "task_count": len(plan["structures"]),
+        },
+    )
     if root.exists():
         raise FileExistsError("Unregistered bundle already exists; inspect before retry")
     tasks = relax_tasks(plan, config)
     coordinator_profile(plan["stage_profiles"])
+    process_event(
+        "RelaxMC输入准备",
+        {
+            "task_count": len(tasks),
+            "branch_count": len(plan["branch_ids"]),
+            "reuse_approved_plan": True,
+        },
+    )
+    reservation_started = perf_counter()
     for task in tasks:
-        reservation = reserve_budget(
+        reservation = reserve_owned_budget(
             state,
             task_key=task["task_key"],
             stage=task["stage"],
@@ -104,6 +153,13 @@ def prepare_batch(*, action, context):
                 "reason": str(reservation["reasons"]),
             }
         state = reservation["state"]
+    record_timing(
+        "RelaxMC：登记本批预算", perf_counter() - reservation_started, category="processing"
+    )
+    from phase_agent.graphs.cancellation import check_cancelled
+
+    check_cancelled()
+    preparation_progress("effects_started", {"directory": str(root)})
     root.mkdir(parents=True)
     mapping = {}
     for index, entry in enumerate(plan["inputs"]):
@@ -198,10 +254,13 @@ def prepare_batch(*, action, context):
             )  # Historical energy evidence remains; absent geometry is not fabricated.
     runtime = root / "runtime"
     source = Path(__file__).resolve().parents[2]
-    shutil.copytree(
+    timed_call(
+        "RelaxMC：复制运行代码",
+        shutil.copytree,
         source,
         runtime / "phase_agent",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        category="processing",
     )
     from phase_agent.tools.remote.manual_upload_runner import _bundle_mc_backend
 
@@ -254,7 +313,15 @@ def prepare_batch(*, action, context):
         "Resume with the same uploaded directory; do not delete its workflow_state.json or rerun a batch already active.\n"
     )
     (root / "README.md").write_text(guide, encoding="utf-8")
-    archive = create_bundle(root, input_files(root), root / "inputs.zip", kind="inputs")
+    archive = timed_call(
+        "RelaxMC：压缩并校验输入",
+        create_bundle,
+        root,
+        input_files(root),
+        root / "inputs.zip",
+        kind="inputs",
+        category="processing",
+    )
     import zipfile
 
     with zipfile.ZipFile(archive) as zipped:
@@ -264,7 +331,9 @@ def prepare_batch(*, action, context):
         output_directory,
     )
 
-    upload = compact_handoff(root)
+    upload = timed_call(
+        "RelaxMC：生成input和output交付目录", compact_handoff, root, category="processing"
+    )
     record = {
         "bundle_id": plan["bundle_id"],
         "plan_checksum": plan["checksum"],
@@ -286,4 +355,18 @@ def prepare_batch(*, action, context):
     state.setdefault("tasks", []).extend(tasks)
     state.setdefault("pending_tasks", []).extend(deepcopy(tasks))
     state.setdefault("relax_mc_batches", {})[plan["bundle_id"]] = record
+    preparation_progress(
+        "complete",
+        {
+            key: record[key]
+            for key in (
+                "bundle_id",
+                "plan_checksum",
+                "directory",
+                "upload_folder",
+                "upload_archive",
+                "script_path",
+            )
+        },
+    )
     return {"status": "prepared", "state": state, **record, "submitted": False}

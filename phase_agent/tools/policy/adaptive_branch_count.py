@@ -4,6 +4,13 @@ VERSION = "adaptive-branch-100-1000-v1"
 
 
 def policy_for(state):
+    from phase_agent.tools.policy.region_sampling import (
+        VERSION as REGION_VERSION,
+        policy,
+    )
+
+    if (state.get("branch_count_policy") or {}).get("version") == REGION_VERSION:
+        return policy()
     context = state.get("decision_context") or {}
     branches = (
         state.get("available_branches")

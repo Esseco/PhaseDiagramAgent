@@ -6,7 +6,7 @@ from phase_agent.tools.state.training_pending_validation import training_pending
 def new_model_generation_facts(state):
     refresh = state.get("model_refresh") or {}
     version = state.get("active_model_version")
-    required = bool(
+    post_refresh = bool(
         version
         and refresh.get("status") == "completed"
         and refresh.get("new_model_version") == version
@@ -15,10 +15,14 @@ def new_model_generation_facts(state):
         and not training_pending_validation(state)
     )
     checksum = (refresh.get("plan") or {}).get("checksum")
+    from phase_agent.tools.state.retired_generations import retired_task_keys
+
+    retired = retired_task_keys(state)
     rows = [
         row
         for row in state.get("generation_history") or []
-        if row.get("model_version") == version
+        if row.get("task_key") not in retired
+        and row.get("model_version") == version
         and row.get("new_branch_ids")
         and row.get("registered_ids")
         and (not checksum or row.get("refresh_plan_checksum") == checksum)
@@ -32,38 +36,33 @@ def new_model_generation_facts(state):
         for task in state.get("tasks") or []
     )
     return {
-        "required": required,
-        "ready": bool(ids) if required else True,
+        "required": post_refresh,
+        "post_refresh": post_refresh,
+        "prefer_new_branches": True,
+        "ready": bool(ids) if post_refresh else True,
         "model_version": version,
         "refresh_plan_checksum": checksum,
         "new_branch_count": len(ids),
         "generated_branch_ids": ids,
         "first_search_completed": searched,
         "instruction": (
-            "模型轮次顺序：新MLIP激活→刷新已有结构/相图→生成并登记本轮新branch→Relax+MC搜索→按结果选择DFT。"
-            "旧branch池可作为生成依据，不能代替本轮新增branch。尚未生成时先提出generate_branches具体方案；"
-            "策略、数量与范围由Agent结合当前模型证据和预算选择，不自动执行，不机械用满配额。"
-            "首次搜索只选generated_branch_ids；生成0个新branch不能宣称完成此阶段。"
-            "明确绑定当前模型的独立验证请求另行保留，不能把历史验证计划当作默认顺序。"
-        )
-        if required
-        else "当前不处于新模型刷新后的首次搜索阶段；此轮次前置约束不适用，沿用现有流程。",
+            "新模型完成已有结构与相图刷新后，必须先生成当前模型的新branch。"
+            "先展示生成方案并审批；生成后展示实际数量、分布与结构清单，再单独审批Relax/MC输入方案。"
+            "生成方案不得捆绑后续输入准备；暂缓或空批次不满足本步骤，不设固定最低数量。"
+            "完成本步骤后，再由Agent按需选择旧branch续搜、新增branch或DFT。"
+            "新旧branch均可成为搜索候选；旧模型搜索历史不等于当前模型搜索已完成，"
+            "基态/近简并与续搜规则保持有效，同模型已登记任务不得通过重新封装重置。"
+            "撤回批次不作为有效新增或候选。刷新与审批、模型绑定、有效数据仍是硬约束。"
+        ),
     }
 
 
 def new_model_search_errors(state, branch_ids=None, *, dft=False):
+    from phase_agent.tools.state.retired_generations import retired_branch_ids
+
+    if branch_ids and set(branch_ids).intersection(retired_branch_ids(state)):
+        return ["retired_generation_branch_not_available"]
     facts = new_model_generation_facts(state)
-    if not facts["required"]:
-        return []
-    plan = state.get("training_validation_planning") or {}
-    scope = (plan.get("scope") or {}).get("model_version") or plan.get("model_version")
-    if dft and plan.get("status") == "active" and scope == facts["model_version"]:
-        return []  # Explicit current-model validation, not the default search route.
-    if not facts["ready"]:
+    if facts["required"] and not facts["ready"]:
         return ["new_model_branch_generation_required"]
-    if dft and not facts["first_search_completed"]:
-        return ["new_model_branch_search_required_before_dft"]
-    if branch_ids and not facts["first_search_completed"]:
-        if not set(branch_ids).issubset(facts["generated_branch_ids"]):
-            return ["first_new_model_search_requires_generated_branches"]
     return []

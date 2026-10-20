@@ -21,15 +21,23 @@ def editable_comparison_baseline(config, source, project_root):
     expected = deepcopy(config)
     source = Path(source)
     if source.is_file() and read_document(source).get("_format") == FORMAT_ID:
+        # Optional validation thresholds did not exist in older confirmed runs.
+        # Missing and explicit null both mean no user-confirmed threshold;
+        # adding today's profile value would fabricate a pending edit.
+        rules = expected.setdefault("convergence", {})
+        for key in (
+            "final_energy_rmse_tolerance",
+            "final_force_mae_tolerance",
+            "final_force_rmse_tolerance",
+        ):
+            rules.setdefault(key, None)
         expected = _add_inherited_fields(expected, profile_defaults())
     root = Path(project_root).resolve()
     settings_path = root / "agent_runtime.json"
     if settings_path.is_file():
         settings = read_document(settings_path)
         if settings.get("local_path_relocations"):
-            expected = relocate_workspace_paths(
-                expected, settings["local_path_relocations"], root
-            )
+            expected = relocate_workspace_paths(expected, settings["local_path_relocations"], root)
         if settings.get("runtime_storage_override") is not None:
             expected["storage"] = deepcopy(settings["runtime_storage_override"])
             # A selected diagram has its own runtime root. The editable project

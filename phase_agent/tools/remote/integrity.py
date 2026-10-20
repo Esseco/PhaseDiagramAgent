@@ -29,6 +29,14 @@ def verify_result(result_path, marker_path, expected: dict) -> dict:
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         return {"valid": False, "reason": f"invalid_json:{error}"}
+    if not isinstance(result, dict) or not isinstance(marker, dict):
+        return {"valid": False, "reason": "result_and_marker_objects_required"}
+    if (
+        marker.get("status") is not None
+        and result.get("status") is not None
+        and marker["status"] != result["status"]
+    ):
+        return {"valid": False, "reason": "marker_result_status_mismatch"}
     for key in (
         "task_id",
         "task_key",

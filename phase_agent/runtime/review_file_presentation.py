@@ -1,12 +1,15 @@
-"""Local review files are locations to copy, not browser hyperlinks."""
+"""Keep complete human review addresses visible in brief interaction replies."""
 
 from pathlib import Path
 
 
 def file_location_lines(label, path):
-    path = Path(path)
+    return [f"{label}：`{Path(path).absolute()}`"]
+
+
+def inventory_location_lines(text):
     return [
-        f"{label}详情已保存，用 VS Code 或记事本打开：",
-        f"文件夹：`{path.parent}`",
-        f"文件名：`{path.name}`",
+        line
+        for line in text.splitlines()
+        if line.startswith(("Branch 分布与构成文件：", "DFT 选点文件："))
     ]

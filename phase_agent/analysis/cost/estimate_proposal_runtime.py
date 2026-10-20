@@ -11,6 +11,8 @@ def estimate_proposal_runtime(action, state):
     params = action.get("parameters") or {}
     tool = action.get("tool")
     if params.get("mode") == "model_refresh_inputs":
+        if "supplemental_relax_parameters" in params:
+            return {"status": "unavailable", "serial_seconds": None}
         return (params.get("refresh_preview") or {}).get("runtime_budget") or {
             "status": "unavailable"
         }

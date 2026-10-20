@@ -152,6 +152,8 @@ def proposal_material(payload):
             "post_refresh_search",
             "new_model_generation",
             "new_branch_count",
+            "post_refresh",
+            "prefer_new_branches",
             "generated_branch_ids",
             "first_search_completed",
             "refresh_plan_checksum",
@@ -349,7 +351,15 @@ def proposal_material(payload):
         "allowed_tools": deepcopy(payload.get("allowed_tools") or []),
         "mode": payload.get("mode"),
         "decision_context": {
-            key: summary(context[key])
+            key: deepcopy(context[key])
+            if key
+            in {
+                "branch_pool_facts",
+                "branch_pool_review_contract",
+                "branch_pool_review_required",
+                "generation_region_contract",
+            }
+            else summary(context[key])
             for key in (
                 "current_phase_diagram",
                 "relevant_approved_knowledge",
@@ -370,6 +380,10 @@ def proposal_material(payload):
                 "training_validation_planning",
                 "post_refresh_search",
                 "new_model_generation",
+                "branch_pool_facts",
+                "branch_pool_review_contract",
+                "branch_pool_review_required",
+                "generation_region_contract",
                 "decision_authority",
                 "training_already_completed",
                 "approved_direction",
@@ -389,6 +403,8 @@ def proposal_material(payload):
     }
     # Schemas are program-owned contracts, not scientific/raw filesystem data.
     material["output_contracts"] = deepcopy(payload.get("output_contracts") or {})
+    if payload.get("invalid_branch_proposal"):
+        material["invalid_branch_proposal"] = deepcopy(payload["invalid_branch_proposal"])
     if payload.get("validation_errors"):
         material["validation_errors"] = list(payload["validation_errors"])
         material["repair_instruction"] = (

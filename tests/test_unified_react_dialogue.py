@@ -168,8 +168,15 @@ def test_return_to_configuration_preserves_pending_proposal(tmp_path, malformed)
     handler([{"role": "user", "content": "建议下一步"}], conversation_id="a")
     original = deepcopy(read_json(handler.state_path, {})["pending_execution_policies"])
     reply = handler([{"role": "user", "content": "返回初始设置"}], conversation_id="a")
-    assert "已进入初始设置" in reply
-    assert configured == ["返回初始设置"]
+    if malformed:
+        # Current proposal contracts reject untyped prose without a format retry.
+        # The app must retain the saved proposal rather than infer configuration
+        # authority from a legacy `reply` field or ask the model for a new plan.
+        assert "未取得有效语义判断" in reply
+        assert configured == []
+    else:
+        assert "已进入初始设置" in reply
+        assert configured == ["返回初始设置"]
     assert read_json(handler.state_path, {})["pending_execution_policies"] == original
     assert not executed
-    assert len(calls) == (3 if malformed else 2)
+    assert len(calls) == 2

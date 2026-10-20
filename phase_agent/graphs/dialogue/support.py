@@ -126,12 +126,17 @@ def review_presented_proposal(handler, state, message, *, requested_review=None)
         row.get("agent_proposal") or {}
     )
     if decision == "approve" and sensitive:
-        import os
+        if row.get("review_kind") == "model_activation":
+            # The current conversation has already displayed this exact switch.
+            # Reuse its approval owner with the original version/hash guards.
+            decision = "confirm_sensitive"
+        else:
+            import os
 
-        return (
-            "请在本机审批页核对并批准具体影响："
-            + f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
-        )
+            return (
+                "请在本机审批页核对并批准具体影响："
+                + f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
+            )
     try:
         outcome = handler.review_pending(
             plan_id,

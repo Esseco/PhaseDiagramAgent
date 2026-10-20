@@ -7,26 +7,35 @@ from pathlib import Path
 
 from phase_agent.tools.relax_mc_batch.files import read, write
 from phase_agent.tools.policy.region_sampling import CONTROLS
+from phase_agent.tools.workflows.compact_review import review_artifacts
 
 
 def path_for(state, action):
     identity = str(action.get("task_key")) + ":" + str(state.get("active_model_version"))
     digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
-    root = (state.get("workspace_layout") or {}).get("workspace_root")
+    config = state.get("confirmed_config") or {}
+    root = (state.get("workspace_layout") or {}).get("workspace_root") or (
+        config.get("storage") or (config.get("config") or {}).get("storage") or {}
+    ).get("workspace_root")
     if not root:
         raise ValueError("region_review_requires_workspace_root")
     return Path(root) / "workflow_state/branch_plans" / f"branch_region_plan_{digest}.json"
 
 
 def write_proposal(proposal, state):
+    from phase_agent.tools.workflows.readonly_views import is_read_only
+
+    if is_read_only():
+        return review_artifacts(path_for(state, proposal["raw_action"]), kind="branch", state=state)
     action = proposal["raw_action"]
     params = action["parameters"]
     compact_params = deepcopy(params)
     for item in (compact_params.get("region_preview") or {}).get("regions") or []:
         item.pop("cells", None)
     path = path_for(state, action)
-    if path.exists() and (read(path).get("程序记录（可折叠）") or {}).get("status") == "completed":
-        return {"json": str(path)}
+    saved = read(path) if path.exists() else {}
+    if (saved.get("程序记录（可折叠）") or {}).get("status") == "completed":
+        return review_artifacts(path, kind="branch", record=saved, state=state)
     preview = params.get("region_preview") or {}
     legal = {row["region_id"]: row for row in preview.get("regions") or []}
     rows = []
@@ -48,16 +57,29 @@ def write_proposal(proposal, state):
             }
         )
     controls = params.get("sampling_controls") or CONTROLS
+    from phase_agent.decisions.agent.branch_pool_review import readable_review
+
+    deferred = not params["regions"]
     payload = {
-        "状态": "待审批，尚未执行新生成",
-        "决策方式": "Agent选区域与优先级；程序受控生成、去重和停止；最后统计实际数量。",
+        "状态": "待审阅，建议暂不新增branch" if deferred else "待审批，尚未执行新生成",
+        "已有branch是否需要补充": readable_review(action.get("branch_pool_review")),
+        "决策方式": "Agent按需判断旧branch续搜与新增；每轮优先考虑新增但不强制。程序受控生成、去重与停止，最后统计实际数量。",
+        "已撤回的旧配额批次": [
+            {
+                k: row.get(k)
+                for k in ("branch_count", "structure_count", "origin", "status", "reason")
+            }
+            for row in (state.get("branch_region_review") or {}).get("retired_batches") or []
+        ],
         "方案来源": action.get("proposal_backend") or action.get("decision_source"),
         "本轮背景与复用说明": action.get("branch_region_review_notes"),
         "项目已有branch数": preview.get("existing_branch_count"),
         "本次选择理由": action.get("reason"),
         "本次选择的区域": rows,
-        "本次新增branch数": None,
-        "数量说明": "不预设总数或各区域配额；实际新增数与相、超胞、Na分布在生成登记后统计。",
+        "本次新增branch数": 0 if deferred else None,
+        "数量说明": "本次建议不新增，新增数为0；保留已登记branch，后续搜索另行提案。"
+        if deferred
+        else "不预设总数或各区域配额；实际新增数与相、超胞、Na分布在生成登记后统计。",
         "停止规则": {
             "区域停止": f"连续{controls['stagnant_batches']}小批没有新覆盖或新的初始TM近邻相关性描述符。",
             "每小批最多尝试": controls["batch_attempts"],
@@ -69,7 +91,9 @@ def write_proposal(proposal, state):
             "说明": "保护阈值不是生成目标或最终截断数，达到即暂停等待审阅；随机停滞不证明穷尽，描述符不代表能量或物理收敛。",
         },
         "每个branch计划初始结构数": params.get("initial_states_per_branch", 3),
-        "执行范围": "批准后仅生成并登记branch及初始结构，保存实际统计后停止。",
+        "执行范围": "本方案暂不新增；后续搜索输入需另行提案和审批。"
+        if deferred
+        else "批准后仅生成并登记branch及初始结构，保存实际统计后停止。",
         "暂缓理由": params.get("defer_reason"),
         "程序记录（可折叠）": {
             "schema_version": 2,
@@ -78,10 +102,11 @@ def write_proposal(proposal, state):
             "config_version": state.get("confirmed_config_version"),
             "model_version": state.get("active_model_version"),
             "parameters": compact_params,
+            "branch_pool_review": action.get("branch_pool_review"),
         },
     }
     write(path, payload, sort_keys=False)
-    return {"json": str(path)}
+    return review_artifacts(path, kind="branch", record=payload, state=state)
 
 
 def write_result(history, manager, registered, state, action):
@@ -157,4 +182,4 @@ def write_result(history, manager, registered, state, action):
     }
     payload["程序记录（可折叠）"] = raw
     write(path, payload, sort_keys=False)
-    return {"json": str(path)}
+    return review_artifacts(path, kind="branch", record=payload, state=state)

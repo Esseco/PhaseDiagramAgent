@@ -91,8 +91,25 @@ def record_timing(name, seconds, *, category="node", status="completed", mode=No
 
     record = _current.get()
 
-    if record is not None and len(record.setdefault("timings", [])) < 80:
-        record["timings"].append(
+    if record is not None:
+        rows = record.setdefault("timings", [])
+        important = category in {"processing", "training_inputs", "model"} or status == "failed"
+        if not important and len(rows) >= 64:
+            return
+        if len(rows) >= 80:
+            replace = next(
+                (
+                    i
+                    for i, row in enumerate(rows)
+                    if row.get("category") not in {"processing", "training_inputs", "model"}
+                    and row.get("status") != "failed"
+                ),
+                None,
+            )
+            if replace is None:
+                return
+            rows.pop(replace)
+        rows.append(
             {
                 "name": name,
                 "category": category,

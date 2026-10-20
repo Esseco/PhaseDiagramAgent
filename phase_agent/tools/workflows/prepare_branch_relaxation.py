@@ -6,7 +6,7 @@ import json
 
 
 from phase_agent.persistence.ledger.register_candidate_batch import register_candidate_batch
-from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
 from phase_agent.analysis.phase.branch_relax_hull import (
     ENERGY_BASIS,
     build_relax_hull,
@@ -39,7 +39,13 @@ def prepare_branch_relaxation(candidates, state, context):
         version = Path(mlip["model_path"]).stem
     if not version:
         raise ValueError("confirmed MLIP version required for Relax screening")
-    current = deepcopy(state)
+    from phase_agent.analysis.convergence.mlip_relaxation import (
+        reconcile_relaxation_quality,
+        relaxation_failure,
+        DISCARDED,
+    )
+
+    current = reconcile_relaxation_quality(state)
     pending = []
     unavailable = []
     system_id = (config.get("system_config") or {}).get("system_id")
@@ -100,8 +106,12 @@ def prepare_branch_relaxation(candidates, state, context):
             if matches:
                 task = matches[-1]
                 out = task.get("outputs") or {}
-                normal_stop = out.get("relax_stopped_normally", task.get("converged") is True)
-                if task.get("status") == "completed" and normal_stop:
+                if (
+                    task.get("status") == "completed"
+                    and task.get("converged") is True
+                    and task.get("checks_passed", True) is True
+                    and not relaxation_failure(task)
+                ):
                     composition = out.get("composition")
                     if composition and out.get("structure_path"):
                         records.append(
@@ -115,6 +125,7 @@ def prepare_branch_relaxation(candidates, state, context):
                                 "relax_stopped_normally": True,
                                 "converged": True,
                                 "model_version": version,
+                                "source_task_id": task.get("task_id"),
                             }
                         )
                     else:
@@ -131,7 +142,7 @@ def prepare_branch_relaxation(candidates, state, context):
             cost = estimate_stage_cost(
                 "relax_and_feature", atom_count=atoms, budgets=config["budgets"]
             )["value"]
-            reservation = reserve_budget(
+            reservation = reserve_owned_budget(
                 current,
                 task_key=key,
                 stage="relax_and_feature",
@@ -182,6 +193,19 @@ def prepare_branch_relaxation(candidates, state, context):
     pool = (
         (current.get("branch_hull_batches") or {}).get(frozen_version) if frozen_version else None
     )
+    bad_paths = {
+        (t.get("outputs") or {}).get("structure_path")
+        for t in current.get("tasks") or []
+        if t.get("result_disposition") == DISCARDED
+    } - {None}
+    if pool and any(r.get("structure_path") in bad_paths for r in pool.get("records") or []):
+        return {
+            "state": current,
+            "status": "screening_incomplete",
+            "candidates": [],
+            "unavailable": unavailable,
+            "reason": "approved_hull_contains_unconverged_results",
+        }
     if frozen_version and (not pool or pool.get("model_version") != version):
         return {
             "state": current,

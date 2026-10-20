@@ -5,14 +5,23 @@ from pathlib import Path
 import json
 import zipfile
 
-from phase_agent.tools.remote.transfer_bundle import import_bundle, checksum, validate_bundle
+from phase_agent.tools.remote.transfer_bundle import (
+    import_bundle,
+    checksum,
+    validate_bundle,
+    local_path,
+    check_return_paths,
+)
 from phase_agent.tools.relax_mc_batch.files import read, rebase, PATH_KEYS
 from phase_agent.tools.relax_mc_batch.handoff import result_archive, output_directory
 from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
 from phase_agent.tools.workflows.apply_scientific_feedback import (
     apply_scientific_feedback,
 )
-from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.reserve_budget import (
+    reserve_owned_budget,
+    reserve_owned_budget as _reserve_returned_budget,
+)
 
 
 def inspect_archive(path):
@@ -37,23 +46,8 @@ def _scientific_values(value):
     return value
 
 
-def _reserve_returned_budget(state, **kwargs):
-    # This policy reads usage/reservations only. Avoid copying structures,
-    # histories and scientific outputs once for every returned MC task.
-    result = reserve_budget(
-        {
-            "budget_usage": state.get("budget_usage", {}),
-            "budget_reservations": state.get("budget_reservations", {}),
-        },
-        **kwargs,
-    )
-    if result["status"] != "rejected":
-        state["budget_reservations"] = result["state"]["budget_reservations"]
-    return result
-
-
-def import_results(*, action, context):
-    state = deepcopy(context.get("event_state") or {})
+def import_results(*, action, context, _owned=False):
+    state = context.get("event_state") or {}
     bundle_id = (action.get("parameters") or {}).get("bundle_id")
     record = (state.get("relax_mc_batches") or {}).get(bundle_id)
     if not record:
@@ -73,9 +67,19 @@ def import_results(*, action, context):
     archive = result_archive(record)
     digest = checksum(archive)
     if record.get("import_checksum") == digest:
-        return {"status": "already_imported", "state": state, "submitted": False}
-    # Keep nested scientific artifact paths below Windows' legacy path limit.
-    destination = Path(config["upload_batches_directory"]) / "verified" / digest[:16]
+        return {
+            "status": "already_imported",
+            "state": state if _owned else deepcopy(state),
+            "submitted": False,
+        }
+    # A changed return is transactional even for an owned caller: failed
+    # validation must not leave partial task/budget updates in its input.
+    state = deepcopy(state)
+    record = state["relax_mc_batches"][bundle_id]
+    # Preserve extended paths through receipt checks and final-geometry reads,
+    # not only ZIP staging: HPC member names can exceed Windows' legacy limit.
+    destination = local_path(Path(config["upload_batches_directory"]) / "verified" / digest[:16])
+    path_report = check_return_paths(archive, destination)
     import_bundle(archive, destination, extra_result_suffixes=(".csv", ".bin"))
     summary = read(destination / "result_summary.json")
     for key, expected in (
@@ -150,7 +154,7 @@ def import_results(*, action, context):
             ):
                 raise ValueError("unexpected_remote_task")
             state.setdefault("tasks", []).append({**deepcopy(task), "status": "pending"})
-            reserved = reserve_budget(
+            reserved = reserve_owned_budget(
                 state,
                 task_key=task["task_key"],
                 stage=task["stage"],
@@ -202,8 +206,16 @@ def import_results(*, action, context):
         import_checksum=digest,
         result_summary=summary,
         return_directory=str(destination),
+        return_path_check=path_report,
     )
     state["relax_mc_batches"][bundle_id].pop("return_error", None)
+    if summary.get("recovery"):
+        state.setdefault("result_recoveries", {})[bundle_id] = {
+            **deepcopy(summary["recovery"]),
+            "status": summary["status"],
+            "archive_checksum": digest,
+            "archive": str(archive),
+        }
     return {
         "status": "completed",
         "state": state,
@@ -213,8 +225,8 @@ def import_results(*, action, context):
     }
 
 
-def recover_available(state, context):
-    current = deepcopy(state)
+def recover_available(state, context, *, _owned=False):
+    current = state if _owned else deepcopy(state)
     for bid, record in list((current.get("relax_mc_batches") or {}).items()):
         if record.get("status") in {"cancelled", "superseded"}:
             continue
@@ -244,11 +256,28 @@ def recover_available(state, context):
                     record["return_error"] = "回传状态文件无效：" + str(error)
             continue
         try:
-            result = import_results(
+            from phase_agent.interface_compatibility import call_with_optimizations
+
+            result = call_with_optimizations(
+                import_results,
+                _optimizations={"_owned": True},
                 action={"parameters": {"bundle_id": bid}},
                 context={**context, "event_state": current},
             )
             current = result["state"]
         except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
-            current["relax_mc_batches"][bid]["return_error"] = str(error)
+            detail = str(error)
+            if isinstance(error, OSError):
+                from phase_agent.tools.remote.transfer_bundle import _path_length
+
+                failed_path = error.filename or "未提供"
+                detail = (
+                    f"阶段=本地回收文件读写；本地路径={failed_path}；"
+                    f"路径长度={_path_length(failed_path)}；"
+                    f"系统错误码={getattr(error, 'winerror', None) or error.errno}；原因={error}"
+                )
+            current["relax_mc_batches"][bid]["return_error"] = (
+                f"回收未完成；回传包={result_archive(record)}；"
+                f"请保留回传包，不要整批重投计算；详情：{detail}"
+            )
     return current

@@ -67,7 +67,7 @@ def inspect_execution(state, issue, *, state_path=None):
         if isinstance(value, dict):
             for key, item in value.items():
                 if isinstance(item, str) and (
-                    key.endswith("_path") or key in {"directory", "checkpoint"}
+                    key.endswith(("_path", "_directory")) or key in {"directory", "checkpoint"}
                 ):
                     path = Path(item)
                     # Relative paths cannot safely be interpreted from the application's cwd.
@@ -160,6 +160,29 @@ def inspect_execution(state, issue, *, state_path=None):
                 branch_outputs.append(evidence)
     if any(row.get("status") == "verified" for row in branch_outputs):
         next_action = "复用已核验的branch与结构；旧动作未完成的后续范围另行处理，禁止重复生成。"
+    progress = {}
+    markers = {
+        row["event"].split(":", 1)[1]: row["payload"].get("evidence") or {}
+        for row in journal
+        if row["event"].startswith("input_preparation:")
+        and row["payload"].get("identity") == identity
+    }
+    if (markers.get("started") or {}).get("protocol") == 1:
+        boundary = (
+            "complete"
+            if "complete" in markers
+            else "effects_possible"
+            if "effects_started" in markers
+            else "before_file_writes"
+        )
+        progress = {"boundary": boundary, "markers": markers}
+        next_action = (
+            "持久化进度停在首次文件写入前；核对登记与输出目录后，可生成无副作用恢复处理方案，再确认原输入方案。"
+            if boundary == "before_file_writes"
+            else "本地交付已生成但业务入账未完成；核对完整交付并复用，禁止重复准备。"
+            if boundary == "complete"
+            else "已进入文件写入；核对下列批次目录中的部分产物，再修复交付或登记，禁止盲目重跑。"
+        )
     return {
         "identity": identity,
         "execution_events": journal,
@@ -170,6 +193,7 @@ def inspect_execution(state, issue, *, state_path=None):
         "pending_task_ids": pending,
         "task_count": len(related),
         "registered_branch_outputs": branch_outputs,
+        "preparation_progress": progress,
         "unregistered_returned_task_ids": unregistered,
         "artifact_checks": list(files.values()),
         "budget_reservations": reservations,

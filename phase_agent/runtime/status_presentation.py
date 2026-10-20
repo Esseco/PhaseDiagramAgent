@@ -174,6 +174,23 @@ def format_progress(state):
         action = proposal.get("raw_action") or {}
         tool = action.get("tool") or proposal.get("recommended_action")
         name = ACTION_NAMES.get(tool, tool or "待审批操作")
+        params = action.get("parameters") or proposal.get("action_parameters") or {}
+        from phase_agent.tools.policy.branch_conditions import branch_entry_errors
+
+        blocked = branch_entry_errors(action, state)
+        if (
+            "new_model_branch_generation_required" in blocked
+            or "post_refresh_branch_generation_separate_review_required" in blocked
+        ):
+            from phase_agent.runtime.plan_queries import pending_plan_reply
+
+            return "\n".join([*lines, pending_plan_reply(state)])
+        if (
+            tool == "generate_branches"
+            and params.get("sampling_mode") == "region_adaptive"
+            and not params.get("regions")
+        ):
+            name = "暂缓新增branch，先复用已有池"
         lines += [
             f"待审批方案 1 个：{name}。",
             "下一步：查看该方案后回复“同意”“拒绝”或提出修改；本次查询不会批准。",
@@ -191,14 +208,20 @@ def format_progress(state):
     elif state.get("pending_dft_recovery_question"):
         lines.append("下一步：回复“继续回收”或“不再回收”，确认是否等待剩余 DFT。")
     elif training:
-        if training.get("upload_archive"):
-            lines.append(f"必要输入包：`{training['upload_archive']}`。")
-        lines.append(
-            "下一步：上传输入包并在训练轮目录解压，在inputs内提交 GPU.sh；只下载results/transfer/all.results.zip并回传到本轮results，再说“继续”（旧批次可回传精简results文件夹）。模型仍需验证和单独激活审批。"
-            if training.get("status") == "inputs_prepared"
-            else "下一步：回传训练结果后说“继续”，检查通过后再单独批准模型激活。"
-        )
-        lines.append(f"训练目录：{training.get('directory') or '未记录'}。")
+        from phase_agent.runtime.training_reply import training_delivery_lines
+
+        delivery = training_delivery_lines(training)
+        if delivery:
+            lines.extend(delivery)
+        else:
+            if training.get("upload_archive"):
+                lines.append(f"必要输入包：`{training['upload_archive']}`。")
+            lines.append(
+                "下一步：上传输入包并在训练轮目录解压，在inputs内提交 GPU.sh；只下载results/transfer/all.results.zip并回传到本轮results，再说“继续”（旧批次可回传精简results文件夹）。模型仍需验证和单独激活审批。"
+                if training.get("status") == "inputs_prepared"
+                else "下一步：回传训练结果后说“继续”，检查通过后再单独批准模型激活。"
+            )
+            lines.append(f"训练目录：{training.get('directory') or '未记录'}。")
     elif waiting:
         from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
 

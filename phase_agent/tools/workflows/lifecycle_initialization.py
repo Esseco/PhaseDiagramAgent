@@ -77,9 +77,14 @@ def _initialize_workflow(
     }
     automatic_results = []
     collection_report = None
-    loaded_state = compact_state_history(
-        _read_state_for_runner(state, state_path or effective_config.get("state_path"))
+    loaded_state = call_with_optimizations(
+        compact_state_history,
+        _read_state_for_runner(state, state_path or effective_config.get("state_path")),
+        _optimizations={"_owned": True},
     )
+    from phase_agent.persistence.result_recovery_commit import refresh_manager_after_recovery
+
+    refresh_manager_after_recovery(manager, loaded_state, effective_config.get("ledger_path"))
     from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
 
     loaded_state = call_with_optimizations(

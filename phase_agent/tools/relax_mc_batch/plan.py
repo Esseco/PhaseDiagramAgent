@@ -41,16 +41,74 @@ def context_config(config, context):
     return result
 
 
+def _relax_signature(config):
+    settings = (config.get("mlip") or {}).get("relax_parameters") or {}
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def _relax_key(version, signature, structure_id):
+    return f"relax-screen:{version}:{signature}:{structure_id}"
+
+
+def _selected_structure_ids(branch, records, valid_ids, count):
+    return [
+        sid for sid in branch.get("structure_ids") or [] if sid in records and sid in valid_ids
+    ][:count]
+
+
+def registration_facts(state, manager, config):
+    """Exact registered keys for current recommended inputs, without IO or new tasks."""
+    from collections import Counter
+
+    model = config.get("mlip") or {}
+    version = model.get("version") or model.get("name")
+    signature = _relax_signature(config)
+    count = min(3, int((config.get("bohb") or {}).get("relax_structures_per_branch", 3)))
+    records = manager.data.get("structures") or {}
+    valid = set((state.get("dedup_gate") or {}).get("valid_structure_ids") or records)
+    by_key = {}
+    for task in state.get("tasks") or []:
+        if task.get("task_key"):
+            by_key.setdefault(task["task_key"], []).append(task)
+    conflicts = []
+    for bid, branch in sorted((manager.data.get("branches") or {}).items()):
+        selected = _selected_structure_ids(branch, records, valid, count)
+        matches = [
+            task for sid in selected for task in by_key.get(_relax_key(version, signature, sid), [])
+        ]
+        if matches:
+            conflicts.append(
+                {
+                    "branch_id": bid,
+                    "task_ids": sorted({t["task_id"] for t in matches if t.get("task_id")}),
+                    "status_counts": dict(Counter(str(t.get("status")) for t in matches)),
+                }
+            )
+    return {
+        "model_version": version,
+        "relax_parameter_signature": signature,
+        "blocked_branches": conflicts,
+        "instruction": "这是原任务键的重复封装限制，不是路线推荐。含cancelled在内的登记任务仍保留身份；取消封装不释放原任务键，不能通过换批次或重新封装重置。blocked_branches不得用于本参数/模型下的新Relax+MC封装。可由Agent比较未冲突候选、新增branch或原任务维护；旧任务维护须走已有入口，不代表可重算。未冲突只表示未占用Relax键，其他模型、MC、文件、相图、收益及审批校验仍必须满足。",
+    }
+
+
+def registration_conflicts(action, facts):
+    if (action.get("parameters") or {}).get("mode") != "relax_mc_inputs":
+        return []
+    targets = set(action.get("target_ids") or [])
+    return [row for row in facts.get("blocked_branches") or [] if row["branch_id"] in targets]
+
+
 def relax_tasks(plan, config):
     settings = deepcopy((config.get("mlip") or {}).get("relax_parameters") or {})
-    signature = hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:12]
+    signature = _relax_signature(config)
     return [
         {
             "task_id": "RELAX-"
             + hashlib.sha256(
                 f"{plan['model_version']}:{signature}:{row['structure_id']}".encode()
             ).hexdigest()[:12],
-            "task_key": f"relax-screen:{plan['model_version']}:{signature}:{row['structure_id']}",
+            "task_key": _relax_key(plan["model_version"], signature, row["structure_id"]),
             "stage": "relax_and_feature",
             "status": "pending",
             "branch_id": row["branch_id"],
@@ -152,9 +210,7 @@ def diagnose(
         if branch is None:
             raise ValueError(f"unknown_branch:{bid}")
         selected.append(deepcopy(branch))
-        ids = [
-            sid for sid in branch.get("structure_ids") or [] if sid in records and sid in valid_ids
-        ][:count]
+        ids = _selected_structure_ids(branch, records, valid_ids, count)
         if not ids:
             raise ValueError(f"branch_has_no_valid_structure:{bid}")
         for sid in ids:

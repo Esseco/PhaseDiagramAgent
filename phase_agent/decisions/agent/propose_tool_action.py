@@ -18,7 +18,7 @@ def propose_agent_tool_action(
 
             from phase_agent.tools.policy.workflow_policy import settings
 
-            from phase_agent.tools.policy.adaptive_branch_count import policy_for
+            from phase_agent.tools.policy.region_sampling import policy as region_policy
 
             decision_context = {
                 **(state.get("decision_context") or {}),
@@ -37,10 +37,11 @@ def propose_agent_tool_action(
                     **settings(config or {}),
                     "branch_batch_size": 1000,
                 },
-                "branch_count_policy": policy_for(state),
+                "branch_count_policy": region_policy(),
                 "workflow_instruction": (
                     "统一闭环：Branch生成登记→Relax+MLIP-MC封装→回收→选择是否及对哪些候选做DFT→回收→比较继续搜索、补DFT、微调或数值收敛。"
-                    "每次仅提出一个科学动作。每批明确规划100–1000个branch及区域配额，优先小超胞，再按收益探索大超胞；不得超过确认上限；"
+                    "每次切换新模型并完成结构与相图刷新后，必须先审批生成本轮新branch，展示实际数量和分布，再单独审批Relax/MC输入；不得直接MC或跳过生成。"
+                    "每次仅提出一个科学动作。按需比较旧branch续搜、新增branch与DFT；每轮优先考虑新增但不强制凑数。新增按覆盖及多样性受控生成，数量最后统计；优先小超胞，再按证据探索大超胞；"
                     "finetune_min_new_dft是有效新增数据下限，finetune_max_new_dft是可选累积上限。"
                     "达到微调门槛不自动训练；仍需依据误差、覆盖和收益决定并经过审批。"
                     "封装内MC由已确认规则执行，不另行给同批Branch分配MC。"
@@ -116,10 +117,6 @@ def propose_agent_tool_action(
             decision_context["enabled_generation_strategies"] = configured_generation_strategies(
                 config or {}
             )
-            from phase_agent.tools.policy.adaptive_branch_count import (
-                configured_selection_guards,
-            )
-
             if decision_context.get("post_dft_assessment"):
                 from phase_agent.decisions.agent.post_dft_review import (
                     review_output_instruction,
@@ -177,6 +174,20 @@ def propose_agent_tool_action(
                     "generation_strategy_constraint",
                 ):
                     decision_context.pop(key, None)
+                from phase_agent.decisions.agent.branch_pool_review import (
+                    INSTRUCTION as POOL_INSTRUCTION,
+                    pool_context,
+                )
+
+                pool = decision_context.get("branch_pool_facts") or pool_context(state)
+                decision_context["branch_pool_facts"] = pool
+                if (
+                    pool.get("registered_new_branch_count", 0)
+                    or pool.get("existing_branches")
+                    or pool.get("retired_batches")
+                ):
+                    decision_context["branch_pool_review_required"] = True
+                    decision_context["branch_pool_review_contract"] = POOL_INSTRUCTION
                 decision_context["generation_region_contract"] = INSTRUCTION
                 decision_context["workflow_instruction"] += " Branch数量为生成结果，不是预定配额。"
             action = request_validated_action(
@@ -197,6 +208,9 @@ def propose_agent_tool_action(
                 return action
             if not isinstance(action, dict):
                 raise TypeError("agent action must be dict")
+            from phase_agent.decisions.agent.branch_pool_review import expand_review_indices
+
+            action = expand_review_indices(action, decision_context)
             tool = action.get("tool") or action.get("action_type")
             if tool is None and isinstance(action.get("action"), dict):
                 envelope = action
@@ -229,10 +243,6 @@ def propose_agent_tool_action(
                 if len(targets) != 1 or targets[0] not in retryable:
                     raise ValueError("restart_failed_task requires a retryable scientific task_id")
             if (action.get("tool") or action.get("action_type")) == "generate_branches":
-                if (action.get("parameters") or {}).get("sampling_mode") == "region_adaptive":
-                    raise ValueError(
-                        "current_policy_requires_explicit_branch_quota; old frozen region plans remain unchanged"
-                    )
                 unsupported = set(action.get("parameters") or {}) - {
                     "total_quota",
                     "quotas",

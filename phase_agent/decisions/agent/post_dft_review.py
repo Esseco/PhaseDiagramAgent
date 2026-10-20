@@ -97,7 +97,11 @@ def request_review_repair(agent_client, payload, action):
     errors = post_dft_review_errors(action)
     if not errors:
         return action
-    raise ValueError("DFT 后方案无效，未重试：" + "; ".join(errors))
+    from phase_agent.decisions.agent.proposal_validation import preserve_proposal_evidence
+
+    error = ValueError("DFT 后方案无效，未重试：" + "; ".join(errors))
+    preserve_proposal_evidence(error, action)
+    raise error
 
 
 def request_validated_action(agent_client, payload):
@@ -141,9 +145,26 @@ def request_validated_action(agent_client, payload):
         from phase_agent.tools.policy.region_sampling import VERSION, INSTRUCTION
 
         if (context.get("branch_count_policy") or {}).get("version") == VERSION:
+            from phase_agent.decisions.agent.generation_contracts import GenerationRegion
+
             contracts["generation_regions"] = INSTRUCTION
+            contracts["generation_region_item"] = GenerationRegion.model_json_schema()
         else:
             contracts["generation_plan_item"] = GenerationAllocation.model_json_schema()
+        if context.get("branch_pool_review_required"):
+            references = (context.get("evidence_catalog") or {}).get("references") or {}
+            contracts["branch_review_evidence"] = {
+                "references": {
+                    key: {
+                        name: row[name]
+                        for name in ("kind", "source_ref", "method", "version", "model_version")
+                        if name in row
+                    }
+                    for key, row in references.items()
+                    if isinstance(row, dict)
+                },
+                "instruction": "For branch_pool_review, every group/default and generation region, use these exact keys in evidence_refs. JSON field paths and branch IDs are not reference keys. Read the corresponding facts before citing them; existence is not scientific adequacy.",
+            }
     if contracts:
         payload = {**payload, "output_contracts": contracts}
     if context.get("post_dft_assessment"):
@@ -227,6 +248,10 @@ def request_validated_action(agent_client, payload):
         from phase_agent.decisions.agent.generation_plan import derive_generation_totals
 
         action = derive_generation_totals(action)
+        from phase_agent.decisions.agent.branch_review_repair import repair_branch_review
+
+        action = repair_branch_review(tracked_client, payload, action)
+
         from phase_agent.decisions.agent.dialogue_contract import (
             is_dialogue,
             dialogue_errors,

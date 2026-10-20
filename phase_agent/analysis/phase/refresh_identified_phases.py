@@ -2,9 +2,17 @@
 
 
 def refresh_identified_phases(state):
+    from phase_agent.analysis.convergence.mlip_relaxation import (
+        reconcile_relaxation_quality,
+        EXCLUDED,
+    )
+
+    reconcile_relaxation_quality(state, _owned=True)
     by_task = {}
     by_identity = {}
     for task in state.get("tasks") or []:
+        if task.get("task_id") in (state.get("scientific_feedback_errors") or {}):
+            continue
         if task.get("status") != "completed" or task.get("stage") not in {
             "relax_and_feature",
             "deep_search",
@@ -27,6 +35,10 @@ def refresh_identified_phases(state):
 
     changed = False
     for record in state.get("phase_records") or []:
+        if record.get("status") in {EXCLUDED, "excluded_invalid_result"} or record.get(
+            "source_task_id"
+        ) in (state.get("scientific_feedback_errors") or {}):
+            continue
         if record.get("energy_method") not in {"mlip", "dft"} or record.get("energy") is None:
             continue
         key = (

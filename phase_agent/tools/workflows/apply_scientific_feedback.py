@@ -29,9 +29,10 @@ def apply_scientific_feedback(
     active_model_version=None,
     phase_references=None,
     phase_identification_cache_path=None,
+    _owned=False,
 ):
     """Persist each terminal result once, then rebuild hull/reward summaries."""
-    current = deepcopy(state)
+    current = state if _owned else deepcopy(state)
     from phase_agent.persistence.shared_dft import publish, import_records
 
     if manager is not None:
@@ -55,12 +56,31 @@ def apply_scientific_feedback(
         return {"state": current, "recorded": [], "rejected": rejected, "feedback_count": 0}
     from phase_agent.tools.state.dft_result_refresh import DFT_STAGES, validated_magnetic_refresh
 
+    from phase_agent.persistence.ledger.result_validation import (
+        validate_result_binding,
+        InvalidScientificResult,
+    )
+
     candidates = {}
     for incoming in recovered_results or []:
+        if not isinstance(incoming, dict):
+            rejected.append({"task_id": None, "reason": "result_object_required"})
+            continue
         task_id = incoming.get("task_id")
         prior = next(
             (row for row in current.get("tasks", []) if row.get("task_id") == task_id), None
         )
+        try:
+            validate_result_binding(incoming, prior or {})
+        except InvalidScientificResult as error:
+            rejected.append({"task_id": task_id, "reason": error.code})
+            current.setdefault("result_validation_errors", {})[str(task_id)] = {
+                "code": error.code,
+                "task_id": task_id if isinstance(task_id, str) else None,
+                "scope": "task",
+                "automatic_retry": False,
+            }
+            continue
         if prior and prior.get("recovery_cancelled") is True:
             rejected.append({"task_id": task_id, "reason": "dft_recovery_cancelled_by_user"})
             continue
@@ -79,16 +99,53 @@ def apply_scientific_feedback(
         else:
             current.setdefault("tasks", []).append(result)
         candidates[task_id] = result
+    from phase_agent.persistence.ledger.result_validation import (
+        validate_scientific_result,
+        InvalidScientificResult,
+    )
+
+    invalid = current.setdefault("scientific_feedback_errors", {})
+    for task in current.get("tasks") or []:
+        task_id = task.get("task_id")
+        try:
+            validate_scientific_result(task)
+        except InvalidScientificResult as error:
+            invalid[task_id] = {
+                "code": error.code,
+                "task_id": task_id,
+                "scope": "task",
+                "result_path": task.get("result_path"),
+                "automatic_retry": False,
+                "recovery": "保留原结果；核对并重新导入有效凭据，不重算",
+            }
+            candidates.pop(task_id, None)
+            rejected.append({"task_id": task_id, "reason": error.code})
+        else:
+            invalid.pop(task_id, None)
+    for record in current.get("phase_records") or []:
+        if record.get("source_task_id") in invalid:
+            record.update(status="excluded_invalid_result", checks_passed=False)
     # Classification is cached by final geometry; reassess legacy DFT records
     # when phase/scope or captured magnetism changes, even without a new return.
-    current, _ = ensure_phase_identification(
+    from phase_agent.interface_compatibility import call_with_optimizations
+
+    from phase_agent.runtime.turn_process import timed_call
+
+    current, _ = timed_call(
+        "history_phase_identification",
+        call_with_optimizations,
+        ensure_phase_identification,
         current,
         manager,
+        category="processing",
         phase_references=phase_references,
         cache_path=phase_identification_cache_path,
+        _optimizations={"_owned": True},
     )
     processed = current.setdefault("feedback_processed_task_ids", [])
     for task in current.get("tasks", []):
+        if task.get("task_id") in invalid:
+            continue
         if task.get("task_id") in candidates or (
             task.get("task_id") in processed and task.get("stage") in DFT_STAGES
         ):
@@ -188,8 +245,11 @@ def apply_scientific_feedback(
     ):
         previous = deepcopy(current["phase_diagrams"])
         previous_models = current["phase_diagrams_by_model"]
-        output = update_phase_diagram(
+        output = timed_call(
+            "phase_diagram_update",
+            update_phase_diagram,
             current["phase_records"],
+            category="processing",
             output_directory=phase_diagram_directory,
             parent_versions={
                 **{name: row.get("version") for name, row in previous.items()},

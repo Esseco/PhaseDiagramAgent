@@ -120,6 +120,10 @@ async def _project_lifespan(app):
     await asyncio.to_thread(service_stage, config, "核对旧 Studio 会话恢复记录")
     await recover_studio_runs()
 
+    from phase_agent.runtime.studio_payloads import install_studio_payload_views
+
+    await asyncio.to_thread(install_studio_payload_views)
+
     def initialize():
         service_stage(config, "初始化项目处理器和控制页面")
         from phase_agent.runtime.agent_api import create_agent_runtime

@@ -10,10 +10,11 @@ import yaml
 
 from phase_agent.science.training.prepare_mace_finetune import prepare_mace_finetune
 from phase_agent.tools.remote.write_training_submission import training_environment
+from phase_agent.runtime.turn_process import timed_call
 
 
 def prepare_remote_finetune(state, config, *, replacement_directory=None):
-    current = deepcopy(state)
+    current = timed_call("finetune_state_copy", deepcopy, state, category="training_inputs")
     from phase_agent.tools.policy.workflow_policy import active_tasks
 
     if active_tasks(current):
@@ -45,11 +46,19 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         cumulative_training_records,
     )
 
-    records = cumulative_training_records(current)
+    records = timed_call(
+        "finetune_dataset", cumulative_training_records, current, category="training_inputs"
+    )
     from phase_agent.science.training.prepare_main_model import grouped_folds
 
     try:
-        grouped_folds(records, settings)
+        timed_call(
+            "finetune_group_validation",
+            grouped_folds,
+            records,
+            settings,
+            category="training_inputs",
+        )
     except ValueError as error:
         return {
             "status": "insufficient_new_data",
@@ -180,7 +189,14 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     for member in settings["committee"]:
         member.pop("bootstrap_seed", None)
     inputs = directory / "inputs"
-    report = prepare_mace_finetune(records, inputs, config=settings)
+    report = timed_call(
+        "finetune_committee_files",
+        prepare_mace_finetune,
+        records,
+        inputs,
+        config=settings,
+        category="training_inputs",
+    )
     from phase_agent.analysis.convergence.independent_evidence import training_snapshot
 
     report["training_snapshot"] = training_snapshot(records, base)
@@ -225,7 +241,14 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
                 if key != "bootstrap_seed"
             }
         )
-        report["main_model"] = prepare_main_model(records, inputs, main_settings)
+        report["main_model"] = timed_call(
+            "finetune_cv_files",
+            prepare_main_model,
+            records,
+            inputs,
+            main_settings,
+            category="training_inputs",
+        )
     except ValueError as error:
         return {
             "status": "insufficient_new_data",
@@ -266,11 +289,23 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         write_training_submission,
     )
 
-    write_training_submission(inputs, environment)
+    timed_call(
+        "finetune_submission_script",
+        write_training_submission,
+        inputs,
+        environment,
+        category="training_inputs",
+    )
     (directory / "results").mkdir(exist_ok=True)
     from phase_agent.tools.remote.submission_handoff import prepare_handoff
 
-    handoff = prepare_handoff(directory, [inputs / "GPU.sh"])
+    handoff = timed_call(
+        "finetune_delivery_bundle",
+        prepare_handoff,
+        directory,
+        [inputs / "GPU.sh"],
+        category="training_inputs",
+    )
     current.setdefault("remote_finetune_jobs", {})[digest] = {
         "upload_archive": handoff["upload_archive"],
         "directory": str(directory),
@@ -283,7 +318,13 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     current["remote_finetune_jobs"][digest]["handoff"] = handoff
     from phase_agent.tools.remote.submission_layout import write_submission_index
 
-    write_submission_index(root, current)
+    timed_call(
+        "finetune_submission_index",
+        write_submission_index,
+        root,
+        current,
+        category="training_inputs",
+    )
     return {
         "status": "awaiting_remote_training",
         "handoffs": [deepcopy(handoff)],

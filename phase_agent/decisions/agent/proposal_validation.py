@@ -60,6 +60,9 @@ def proposal_errors(action, payload):
                 action.get("parameters", {}), fallback_budget=action.get("budget", 0)
             )
         )
+    from phase_agent.decisions.agent.branch_pool_review import review_errors
+
+    errors.extend(review_errors(action, payload.get("decision_context") or {}))
     if tool == "generate_branches":
         from phase_agent.tools.policy.adaptive_branch_count import (
             generation_review_errors,

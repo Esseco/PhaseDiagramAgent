@@ -4,9 +4,39 @@ from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
 from phase_agent.analysis.state.model_epoch import model_epoch_label
 
 
-def post_dft_lines(state):
-    assessment = post_dft_assessment(state, state.get("confirmed_config") or {})
-    if not assessment or assessment["status"] != "evaluated":
+def _metric_pair(metrics, unit):
+    if metrics.get("mae") is None or metrics.get("rmse") is None:
+        return "暂不可用（缺少有效同帧配对）"
+    return f"{1000 * metrics['mae']:.5g}/{1000 * metrics['rmse']:.5g} {unit}"
+
+
+def reply_assessment(result, review_action):
+    """History is evidence only for an explicit recovery/review in this turn."""
+    rows = [result, *(result.get("events") or [])]
+    if any(row.get("final_action") for row in rows):
+        return None
+    if not (
+        review_action.get("post_dft_review")
+        or result.get("dft_recovery_question")
+        or result.get("recovered_count")
+        or (result.get("manual_wait") or {}).get("recovered_count")
+        # The dialogue entry recovers files before the workflow starts, so its
+        # workflow recovered_count can be zero despite a verified DFT return.
+        or any(
+            counts.get("completed") or counts.get("failed")
+            for stage, counts in (result.get("verified_recovery") or {}).items()
+            if stage in {"dft_single_point", "dft_relax"}
+        )
+    ):
+        return None
+    state = result.get("state") or {}
+    return post_dft_assessment(state, state.get("confirmed_config") or {})
+
+
+def post_dft_lines(state, *, assessment=None):
+    if assessment is None:
+        assessment = post_dft_assessment(state, state.get("confirmed_config") or {})
+    if not assessment:
         return ""
     metrics = assessment["metrics"]
     energy, forces = metrics["energy_per_atom"], metrics["forces"]
@@ -15,7 +45,12 @@ def post_dft_lines(state):
         f"结果回收与分析：{label}",
         f"本轮 DFT：回收 {assessment['recovered_tasks']}/{assessment['expected_tasks']}，合格配对 {assessment['paired_structures']}。",
         f"成功 {assessment['successful_tasks']}、失败 {assessment['failed_tasks']}、已取消 {assessment.get('cancelled_tasks', 0)}；取消项不计DFT验证，不再回收。",
-        f"原模型 {assessment['scope'].get('model_version')}：能量 MAE/RMSE {1000 * energy['mae']:.5g}/{1000 * energy['rmse']:.5g} meV/atom；受力 {1000 * forces['mae']:.5g}/{1000 * forces['rmse']:.5g} meV/Å。",
+        f"原模型 {assessment['scope'].get('model_version')}：能量 MAE/RMSE {_metric_pair(energy, 'meV/atom')}；受力 MAE/RMSE {_metric_pair(forces, 'meV/Å')}。"
+        + (
+            "配对不完整，仅统计已有合格配对；缺失项不计为零。"
+            if assessment["status"] != "evaluated"
+            else ""
+        ),
     ]
     export = next(
         (

@@ -25,6 +25,12 @@ def branch_entry_errors(action, state):
     tool = action.get("tool") or action.get("action_type")
     parameters = action.get("parameters") or {}
     errors = []
+    generation = new_model_generation_facts(state)
+    if generation["required"] and not generation["ready"] and tool == "generate_branches":
+        if parameters.get("module_execution_scope") or (
+            parameters.get("sampling_mode") == "region_adaptive" and not parameters.get("regions")
+        ):
+            errors.append("post_refresh_branch_generation_separate_review_required")
     if training_pending_validation(state) and tool == "update_mlip":
         errors.append("training_already_received_review_required")
     if refresh_active(state) and tool not in {"pause_search", "restart_failed_task"}:

@@ -6,6 +6,17 @@ import json
 
 def decision_evidence_catalog(context):
     catalog = {}
+    pool = context.get("branch_pool_facts")
+    if isinstance(pool, dict):
+        digest = hashlib.sha256(
+            json.dumps(pool, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()[:16]
+        catalog[f"branch_pool:{digest}"] = {
+            "kind": "branch_pool",
+            "source_ref": "decision_context.branch_pool_facts",
+            "model_version": pool.get("active_model_version"),
+            "branch_count": len(pool.get("existing_branches") or []),
+        }
     for method, snapshot in (context.get("current_phase_diagram") or {}).items():
         version = snapshot.get("version")
         if version:

@@ -317,19 +317,22 @@ def _run_job(graph, current, config, key, thread):
     return saved.values
 
 
-def run_training_handoffs(state, config, *, state_path=None, graph=None):
+def run_training_handoffs(state, config, *, state_path=None, graph=None, _owned=False):
     from phase_agent.tools.local.recover_remote_training import INACTIVE
     from filelock import FileLock
     from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     from langgraph.checkpoint.memory import InMemorySaver
 
-    current = deepcopy(state)
+    current = state if _owned else deepcopy(state)
     waits = []
     keys = [
         key
         for key, job in current.get("remote_finetune_jobs", {}).items()
         if job.get("status") not in INACTIVE
     ]
+
+    if not keys:
+        return current, waits
 
     def run(saver):
         nonlocal current

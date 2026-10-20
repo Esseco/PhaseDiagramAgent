@@ -19,6 +19,20 @@ STRATEGY_LABELS = {
 }
 
 
+def mc_scope_lines(params):
+    preview = params.get("budget_preview") or {}
+    lines = [
+        f"MC 总步数目标：{params.get('mc_budget', '待定')} 步；"
+        f"本次计划：{preview.get('requested_steps', '待重算')} 步。"
+    ]
+    if preview.get("phase_diagram_version"):
+        lines.append(
+            f"Ehull 标准：当前 MLIP 相图版本 {preview['phase_diagram_version']} 的 eV/atom 值；"
+            "批准前会复核相图版本与结构能量。"
+        )
+    return lines
+
+
 def concise_generation_lines(params, cost):
     plan = params.get("generation_plan") or []
     total = params.get("total_quota")
@@ -69,10 +83,31 @@ def concise_generation_lines(params, cost):
     if estimated is not None and estimated != 0:
         lines.append(f"本次预计相对预算：{estimated}（不是耗时）。")
     scope = params.get("module_execution_scope")
-    if scope:
+    if scope and (
+        scope.get("maximum_mc_segments") is None or scope.get("relative_cost_upper") is None
+    ):
+        lines.append("审批范围记录不完整：缺少 MC 段数或封装成本上限，需核对原方案后再批准。")
+    elif scope:
         lines.append(
             f"审批包含：生成后自动准备本批Relax–MC封装，最多{scope['maximum_mc_segments']}段MC，封装相对成本上限{scope['relative_cost_upper']:.3g}；超限另行确认。人工上传提交，不本机计算。"
         )
     else:
         lines.append("本次只生成结构，不运行 Relax、MC 或 DFT；本地生成仍会耗时。")
+    return lines
+
+
+def region_scope_lines(params):
+    lines = []
+    for row in params.get("regions") or []:
+        strategy = row.get("strategy")
+        label = STRATEGY_LABELS.get(strategy, (strategy or "区域", ""))[0]
+        lines.append(
+            f"- 优先级 {row.get('priority', '未登记')}，{label}（{row.get('phase', '未登记')}）："
+            f"Na/O₂ {row.get('na_min', '未登记')}–{row.get('na_max', '未登记')}；"
+            f"det(H) {row.get('min_det_H', '未登记')}–{row.get('max_det_H', '未登记')}。"
+        )
+    if lines:
+        lines.append("新增数量生成后统计；按已批准区域和上限执行。")
+    if params.get("max_det_H") is not None:
+        lines.append(f"超胞上限：det(H) ≤ {params['max_det_H']}。")
     return lines

@@ -70,7 +70,8 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             "main_model_index": 0,
             "relax_parameters": {
                 "fmax": 0.05,
-                "relax_steps": 150,
+                "relax_steps": 300,
+                "optimizer": "LBFGS",
                 "relax_cell": True,
                 "mace_default_dtype": "float64",
             },

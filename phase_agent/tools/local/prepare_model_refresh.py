@@ -3,12 +3,16 @@
 from copy import deepcopy
 import hashlib
 from pathlib import Path
+from time import perf_counter
+
+from phase_agent.interface_compatibility import call_with_optimizations
+from phase_agent.runtime.turn_process import timed_call, record_timing, process_event
 
 from phase_agent.configuration.defaults.default_slurm_cluster_config import (
     default_slurm_cluster_config,
 )
 from phase_agent.tools.budget.check_budget import check_budget
-from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
 from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
 from phase_agent.tools.workflows.model_refresh_state import refresh_preview, fingerprint
 from phase_agent.science.mlip.slurm_executor import create_mlip_task_preparer
@@ -32,7 +36,9 @@ class RefreshUploadRunner(ManualUploadBatchRunner):
 
 
 def prepare_model_refresh(*, action, context):
-    state = deepcopy(context["event_state"])
+    state = timed_call(
+        "刷新：建立本批独立状态", deepcopy, context["event_state"], category="processing"
+    )
     config = deepcopy(context["effective_config"])
     refresh = state["model_refresh"]
     wave = int(refresh.get("wave", 0))
@@ -68,15 +74,32 @@ def prepare_model_refresh(*, action, context):
         requested_cost = plan["maximum_total_cost"]
         requested_count = len(rows) + plan["maximum_supplemental_count"]
     else:
-        plan = refresh["plan"]
+        plan = deepcopy(refresh["plan"])
+        reviewed_settings = (action.get("parameters") or {}).get("supplemental_relax_parameters")
+        if (
+            reviewed_settings != ((config.get("mlip") or {}).get("relax_parameters") or {})
+            or plan.get("model") != state.get("active_model")
+            or plan.get("new_model_version") != state.get("active_model_version")
+        ):
+            return {
+                "status": "rejected",
+                "state": state,
+                "reason": "追加弛豫的当前模型或设置与待审方案不一致，需重新审阅；未创建任务或输入文件。",
+            }
         authorization = refresh.get("supplemental_input_authorization") or {}
         if not (
             authorization.get("approved_by")
             and authorization.get("approved_by") == context.get("approval_record_id")
             and authorization.get("config_version") == context.get("config_version")
-            and authorization.get("checksum") == fingerprint(refresh.get("supplemental_candidates") or [])
+            and authorization.get("checksum")
+            == fingerprint(refresh.get("supplemental_candidates") or [])
+            and authorization.get("relax_parameters_checksum") == fingerprint(reviewed_settings)
         ):
-            return {"status": "awaiting_approval", "state": state, "reason": "追加弛豫需单独批准本批具体目标；未创建任务或输入文件。"}
+            return {
+                "status": "awaiting_approval",
+                "state": state,
+                "reason": "追加弛豫需单独批准本批具体目标；未创建任务或输入文件。",
+            }
         if not refresh.get("approved_by") or not refresh.get("supplemental_reservation_key"):
             return {
                 "status": "rejected",
@@ -124,9 +147,14 @@ def prepare_model_refresh(*, action, context):
             + ",".join(checked["reasons"]),
         }
     refresh_id = plan["checksum"]
+    relax_parameters = reviewed_settings if wave else plan["relax_parameters"]
     config["mlip"] = deepcopy(plan["model"])
-    config["mlip"]["relax_parameters"] = plan["relax_parameters"]
+    config["mlip"]["relax_parameters"] = deepcopy(relax_parameters)
     tasks = []
+    process_event(
+        "刷新输入准备", {"task_count": len(rows), "wave": wave, "reuse_approved_plan": True}
+    )
+    reservation_started = perf_counter()
     for row in rows:
         path = Path(row["structure_path"])
         if (
@@ -139,7 +167,7 @@ def prepare_model_refresh(*, action, context):
         if prior:
             tasks.append(prior)
             continue
-        reserved = reserve_budget(
+        reserved = reserve_owned_budget(
             state,
             task_key=key,
             stage="relax_and_feature",
@@ -174,7 +202,7 @@ def prepare_model_refresh(*, action, context):
             "upload_operation_id": refresh_id,
             "parent_decision_id": context.get("approval_record_id"),
             "parameters": {
-                **plan["relax_parameters"],
+                **relax_parameters,
                 "model_refresh_operation": row["operation"],
                 "model_refresh_wave": wave,
             },
@@ -184,7 +212,7 @@ def prepare_model_refresh(*, action, context):
         tasks.append(task)
     if not wave and plan["maximum_supplemental_cost"]:
         hold_key = f"model-refresh:{refresh_id}:supplement-envelope"
-        reserved = reserve_budget(
+        reserved = reserve_owned_budget(
             state,
             task_key=hold_key,
             stage="relax_and_feature",
@@ -201,6 +229,11 @@ def prepare_model_refresh(*, action, context):
             }
         state = reserved["state"]
         state["model_refresh"]["supplemental_reservation_key"] = hold_key
+    record_timing(
+        "刷新：校验结构、登记任务和预留预算",
+        perf_counter() - reservation_started,
+        category="processing",
+    )
     base_preparer = create_mlip_task_preparer(
         context["manager"], context.get("phase_references") or {}, config
     )
@@ -221,7 +254,14 @@ def prepare_model_refresh(*, action, context):
     )
     batches = []
     while True:
-        result = runner.prepare(state)
+        result = timed_call(
+            "刷新：生成子批次输入",
+            call_with_optimizations,
+            runner.prepare,
+            state,
+            _optimizations={"_owned": True, "_defer_archive": True},
+            category="processing",
+        )
         state = result["state"]
         if result["status"] == "no_tasks":
             break

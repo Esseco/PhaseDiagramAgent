@@ -209,9 +209,9 @@ def test_new_model_proposal_uses_regions_and_counts_only_after_generation(monkey
         allowed_tools=["generate_branches"],
         config={"run": {"total_quota": 600, "batch_size": 96}},
     )
-    assert seen[0]["branch_count_policy"]["minimum"] == 100
-    assert seen[0]["branch_count_policy"]["maximum"] == 1000
-    assert proposal["decision_source"] != "llm_agent"
+    assert seen[0]["branch_count_policy"]["count_is_result"] is True
+    assert "minimum" not in seen[0]["branch_count_policy"]
+    assert proposal["decision_source"] == "llm_agent"
     assert (
         not {"total_quota", "quotas", "batch_size", "generation_plan"}
         & proposal["parameters"].keys()

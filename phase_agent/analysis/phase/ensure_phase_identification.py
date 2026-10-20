@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from pathlib import Path
 
 from phase_agent.analysis.phase.identify_result_phase import STAGES, identify_result_phase
+from phase_agent.analysis.phase.phase_identification_cache import (
+    load_cache as _merge_cache_file,
+    compact_cache as _persist_cache_file,
+    append_entry,
+)
 
 
 def ensure_phase_identification(
@@ -15,6 +19,7 @@ def ensure_phase_identification(
     *,
     phase_references=None,
     cache_path=None,
+    _owned=False,
 ):
     """Identify completed result structures and synchronize phase records.
 
@@ -23,7 +28,14 @@ def ensure_phase_identification(
     Unknown results are deliberately not cached: they are retried at the next
     phase-diagram refresh, as a missing/failed identification is not final.
     """
-    current = deepcopy(state or {})
+    current = state if _owned and state is not None else deepcopy(state or {})
+    from phase_agent.analysis.convergence.mlip_relaxation import (
+        reconcile_relaxation_quality,
+        DISCARDED,
+        EXCLUDED,
+    )
+
+    reconcile_relaxation_quality(current, _owned=True)
     reusable_statuses = {"identified", "outside_boundary"}
     cache = {
         key: deepcopy(value)
@@ -39,6 +51,10 @@ def ensure_phase_identification(
 
     tasks = current.setdefault("tasks", [])
     for index, task in enumerate(tasks):
+        if task.get("task_id") in (current.get("scientific_feedback_errors") or {}):
+            continue
+        if task.get("result_disposition") == DISCARDED:
+            continue
         if task.get("stage") not in STAGES or task.get("status") != "completed":
             continue
         checked += 1
@@ -68,7 +84,7 @@ def ensure_phase_identification(
             if key and key not in cache:
                 cache[key] = deepcopy(evidence)
             if key and key not in persisted_keys:
-                _persist_cache_file(cache_file, cache)
+                append_entry(cache_file, key, evidence)
                 persisted_keys.add(key)
                 newly_identified += 1
         else:
@@ -76,6 +92,10 @@ def ensure_phase_identification(
 
     records = current.setdefault("phase_records", [])
     for index, record in enumerate(records):
+        if record.get("status") in {EXCLUDED, "excluded_invalid_result"} or record.get(
+            "source_task_id"
+        ) in (current.get("scientific_feedback_errors") or {}):
+            continue
         if record.get("energy_method") not in {"mlip", "dft"} or record.get("energy") is None:
             continue
         task = task_by_id.get(record.get("source_task_id"))
@@ -132,7 +152,7 @@ def ensure_phase_identification(
                 if key and key not in cache:
                     cache[key] = deepcopy(evidence)
                 if key and key not in persisted_keys:
-                    _persist_cache_file(cache_file, cache)
+                    append_entry(cache_file, key, evidence)
                     persisted_keys.add(key)
                     newly_identified += 1
             else:
@@ -179,6 +199,8 @@ def ensure_phase_identification(
             task["observed_phase"] = observed_phase
             task["phase_identification_status"] = record["phase_identification_status"]
 
+    if newly_identified:
+        _persist_cache_file(cache_file, cache)
     current["phase_identification_cache"] = cache
     report = {
         "checked_results": checked,
@@ -198,47 +220,3 @@ def _cache_key(evidence):
     digest = evidence.get("structure_sha256")
     scope = evidence.get("classification_scope")
     return f"{scope}:{digest}" if scope and digest else None
-
-
-def _merge_cache_file(cache, path):
-    if path is None or not path.is_file():
-        return None
-    try:
-        stored = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(stored, dict):
-            cache.update(
-                {
-                    key: value
-                    for key, value in stored.items()
-                    if isinstance(value, dict)
-                    and value.get("status") in {"identified", "outside_boundary"}
-                }
-            )
-        return None
-    except (OSError, json.JSONDecodeError) as error:
-        # The cache is derivable from final structures. Preserve task/state data
-        # and rebuild the cache rather than blocking result recovery.
-        return f"{type(error).__name__}: {error}"
-
-
-def _persist_cache_file(path, cache):
-    if path is None:
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    merged = {}
-    _merge_cache_file(merged, path)
-    merged.update(
-        {
-            key: value
-            for key, value in cache.items()
-            if isinstance(value, dict) and value.get("status") in {"identified", "outside_boundary"}
-        }
-    )
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(
-        json.dumps(merged, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
-    cache.clear()
-    cache.update(merged)

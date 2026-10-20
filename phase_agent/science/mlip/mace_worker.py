@@ -86,6 +86,9 @@ def run_mace_worker(job: dict) -> dict:
 
         return predict_structure(job)
     if operation == "relax":
+        optimizer = parameters.pop("optimizer", "LBFGS")
+        if optimizer != "LBFGS":
+            raise ValueError("Standalone Relax requires LBFGS")
         model_paths = [str(path) for path in (job.get("model_paths") or [])]
         if model_paths:
             main_index = int(parameters.pop("main_model_index", 0))
@@ -114,7 +117,7 @@ def run_mace_worker(job: dict) -> dict:
             head=mace_head,
             default_dtype=parameters.pop("mace_default_dtype", "float64"),
             fmax=parameters.pop("fmax", 0.05),
-            steps=parameters.pop("relax_steps", 150),
+            steps=parameters.pop("relax_steps", 300),
             relax_cell=parameters.pop("relax_cell", True),
         )
         from pymatgen.core import Structure
@@ -125,6 +128,7 @@ def run_mace_worker(job: dict) -> dict:
         result.update(
             {
                 "status": "completed",
+                "optimizer": optimizer,
                 "structure_path": str(structure_path),
                 "structure_checksum": file_checksum(structure_path),
                 "composition": final.composition.as_dict(),
@@ -134,7 +138,9 @@ def run_mace_worker(job: dict) -> dict:
                 "qbc": {"status": "not_available_single_model", "member_count": 1},
             }
         )
-        if (job.get("parameters") or {}).get("model_refresh_operation"):
+        if (job.get("parameters") or {}).get("model_refresh_operation") and result.get(
+            "optimizer_converged"
+        ) is True:
             from phase_agent.science.mlip.predict_structure import predict_structure
 
             final_job = {**job, "structure_path": str(structure_path)}

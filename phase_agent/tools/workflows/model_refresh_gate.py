@@ -22,7 +22,12 @@ from phase_agent.tools.workflows.model_refresh_state import (
 
 
 def advance_refresh(state, user_message=""):
-    current = deepcopy(state)
+    from phase_agent.analysis.convergence.mlip_relaxation import (
+        reconcile_relaxation_quality,
+        DISCARDED,
+    )
+
+    current = reconcile_relaxation_quality(state)
     refresh = current["model_refresh"]
     if refresh.get("status") != "waiting_results":
         return current, None
@@ -44,17 +49,19 @@ def advance_refresh(state, user_message=""):
             task.get("status") == "completed"
             and task.get("model_version") == refresh["new_model_version"]
             and task.get("checks_passed", True) is True
-            and (
-                task.get("converged") is True
-                or outputs.get("single_point_completed") is True
-            )
+            and (task.get("converged") is True or outputs.get("single_point_completed") is True)
         )
 
-    missing = [tid for tid in refresh["task_ids"] if not accepted(tasks.get(tid, {}))]
+    discarded = {t.get("task_id") for t in rows if t.get("result_disposition") == DISCARDED}
+    if discarded or "discarded_task_ids" in refresh:
+        refresh["discarded_task_ids"] = sorted(discarded)
+    missing = [
+        tid
+        for tid in refresh["task_ids"]
+        if tid not in discarded and not accepted(tasks.get(tid, {}))
+    ]
     if missing and user_message.strip() == "不再等待刷新":
-        refresh["waived_task_ids"] = sorted(
-            set(refresh.get("waived_task_ids", [])) | set(missing)
-        )
+        refresh["waived_task_ids"] = sorted(set(refresh.get("waived_task_ids", [])) | set(missing))
         for tid in missing:
             if tid in tasks:
                 tasks[tid]["refresh_wait_waived"] = True
@@ -76,7 +83,10 @@ def advance_refresh(state, user_message=""):
         return (
             current,
             f"本批有效回收 {len(rows) - len(missing)}/{len(rows)}，还有 {len(unresolved)} 个结果未通过回收。\n"
-            + "\n".join(f"未读到：{tid} → {tasks.get(tid, {}).get('result_path') or '结果路径未登记'}" for tid in sorted(unresolved)[:3])
+            + "\n".join(
+                f"未读到：{tid} → {tasks.get(tid, {}).get('result_path') or '结果路径未登记'}"
+                for tid in sorted(unresolved)[:3]
+            )
             + "\n本次只检查回传，未新增任务、未追加弛豫。",
         )
     plan = refresh["plan"]
@@ -110,20 +120,55 @@ def advance_refresh(state, user_message=""):
         for r in current.get("phase_records") or []
         if r.get("source_version") == refresh["new_model_version"]
     }
+    outside = set()
+    records_by_task = {record.get("source_task_id"): record for record in new_records}
     for task in rows:
-        if accepted(task) and phases.get(task["task_id"]) is None:
-            return (
-                current,
-                f"刷新任务{task['task_id']}尚未进入新版本相图，需完成相识别和能量校验。",
-            )
+        evidence = (task.get("outputs") or {}).get("phase_identification") or {}
+        record = records_by_task.get(task.get("task_id"), {})
+        if (
+            accepted(task)
+            and task.get("phase_identification_status") == "outside_boundary"
+            and evidence.get("status") == "outside_boundary"
+            and evidence.get("observed_phase")
+            and evidence.get("structure_sha256")
+            and evidence.get("classification_scope")
+            and record.get("status") == "outside_search_boundary"
+            and record.get("phase_identification") == evidence
+        ):
+            outside.add(task["task_id"])
+    refresh["outside_boundary_count"] = len(outside)
+    missing_phases = [
+        task
+        for task in rows
+        if accepted(task) and phases.get(task["task_id"]) is None and task["task_id"] not in outside
+    ]
+    if missing_phases:
+        from collections import Counter
+
+        reasons = Counter(
+            ((task.get("outputs") or {}).get("phase_identification") or {}).get("reason")
+            or task.get("phase_identification_reason")
+            or "缺少相图记录或能量证据"
+            for task in missing_phases
+        )
+        explanations = "；".join(
+            f"{count} 个：{str(reason)[:220]}" for reason, count in reasons.items()
+        )
+        return (
+            current,
+            f"刷新结果有 {len(missing_phases)} 项未进入新版本相图，相识别或能量校验受阻。\n"
+            f"原因：{explanations}\n"
+            "下一步：先核对这些结构的相识别和能量证据，必要的处理方案须单独审阅；"
+            "核对完成后先展示新branch生成方案，再审批生成。未新增计算，重复‘同意’不会解除此阻塞。",
+        )
     supplements = []
     if refresh["wave"] == 0:
         original = {r["structure_sha256"]: r for r in plan["candidates"]}
         for task in rows:
             if (
                 not accepted(task)
-                or (task.get("parameters") or {}).get("model_refresh_operation")
-                != "predict"
+                or task.get("task_id") in outside
+                or (task.get("parameters") or {}).get("model_refresh_operation") != "predict"
             ):
                 continue
             entry = phases.get(task["task_id"])
@@ -133,9 +178,7 @@ def advance_refresh(state, user_message=""):
                     f"刷新任务{task['task_id']}缺少唯一新版本Ehull证据，未追加计算。",
                 )
             outputs = task["outputs"]
-            if supplemental_relaxation_required(
-                float(entry["ehull"]), outputs.get("forces")
-            ):
+            if supplemental_relaxation_required(float(entry["ehull"]), outputs.get("forces")):
                 path = Path(outputs["structure_path"])
                 source = original[task["input_structure_sha256"]]
                 supplements.append(
@@ -144,9 +187,7 @@ def advance_refresh(state, user_message=""):
                         "operation": "relax",
                         "approved_input_structure_sha256": source["structure_sha256"],
                         "structure_path": str(path),
-                        "structure_sha256": hashlib.sha256(
-                            path.read_bytes()
-                        ).hexdigest(),
+                        "structure_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                     }
                 )
     refresh["supplemental_candidates"] = supplements
@@ -172,15 +213,11 @@ def advance_refresh(state, user_message=""):
         deferred=plan["total_unique"] - len(initial_ids),
         partial=len(initial_ids) < plan["total_unique"],
     )
-    diagram["refresh_coverage"] = {
-        k: refresh[k] for k in ("refreshed", "deferred", "partial")
-    }
-    current["phase_diagrams"]["mlip"]["refresh_coverage"] = deepcopy(
-        diagram["refresh_coverage"]
-    )
-    current.setdefault("phase_diagrams_by_model", {}).setdefault(
-        refresh["new_model_version"], {}
-    )["refresh_coverage"] = deepcopy(diagram["refresh_coverage"])
+    diagram["refresh_coverage"] = {k: refresh[k] for k in ("refreshed", "deferred", "partial")}
+    current["phase_diagrams"]["mlip"]["refresh_coverage"] = deepcopy(diagram["refresh_coverage"])
+    current.setdefault("phase_diagrams_by_model", {}).setdefault(refresh["new_model_version"], {})[
+        "refresh_coverage"
+    ] = deepcopy(diagram["refresh_coverage"])
     return current, None
 
 
@@ -197,9 +234,7 @@ def run_model_refresh_gate(
     if not refresh_active(state):
         return None
     try:
-        current, waiting = advance_refresh(
-            state, str(context.get("user_message") or "")
-        )
+        current, waiting = advance_refresh(state, str(context.get("user_message") or ""))
     except (ValueError, OSError, KeyError) as error:
         return {
             "status": "not_configured",
@@ -215,11 +250,31 @@ def run_model_refresh_gate(
             "submitted": False,
         }
     if not refresh_active(current):
+        refresh = current["model_refresh"]
+        diagram = (current.get("phase_diagrams") or {}).get("mlip") or {}
         return {
             "status": "completed",
             "state": current,
             "submitted": False,
-            "reason": "新模型结构刷新已完成；下一次继续将评估微调、补DFT、新branch或收敛建议。",
+            "completed_refresh": {
+                "model_version": refresh["new_model_version"],
+                "refreshed": refresh["refreshed"],
+                "deferred": refresh["deferred"],
+                "partial": refresh["partial"],
+                "task_count": len(refresh.get("task_ids") or []),
+                "phase_diagram_entry_count": len(diagram.get("entries") or []),
+                **(
+                    {"discarded_unconverged_count": len(refresh["discarded_task_ids"])}
+                    if refresh.get("discarded_task_ids")
+                    else {}
+                ),
+                **(
+                    {"outside_boundary_count": refresh["outside_boundary_count"]}
+                    if refresh.get("outside_boundary_count")
+                    else {}
+                ),
+            },
+            "reason": "新模型结构刷新已完成；下一步先审阅并批准新branch生成方案，展示生成结果后再单独审阅Relax/MC方案。",
         }
     config = context["effective_config"]
     refresh = current["model_refresh"]
@@ -244,9 +299,13 @@ def run_model_refresh_gate(
     )
 
     if automatic:
+        # The old envelope bounds candidates, not approval of a new configuration.
+        # Bind current settings to a new proposal identity below, then require approval.
         scope_errors = refresh_scope_errors(
-            refresh, session["confirmed_snapshot"]["config_version"]
+            refresh, (refresh.get("approved_scope") or {}).get("config_version")
         )
+        if (refresh.get("plan") or {}).get("model") != current.get("active_model"):
+            scope_errors.append("当前模型与原刷新模型不一致")
         if scope_errors:
             return {
                 "status": "confirmation_required",
@@ -283,9 +342,18 @@ def run_model_refresh_gate(
             if automatic
             else plan["maximum_total_cost"]
         ),
-        "target_ids": [r["structure_id"] for r in (refresh.get("supplemental_candidates", []) if automatic else plan["candidates"])],
+        "target_ids": [
+            r["structure_id"]
+            for r in (
+                refresh.get("supplemental_candidates", []) if automatic else plan["candidates"]
+            )
+        ],
         "decision_source": "approved_refresh_policy",
-        "reason": (f"首批结果已回收，建议另行追加 {len(refresh.get('supplemental_candidates', []))} 个弛豫任务；须单独批准，当前未生成输入。" if automatic else "新模型激活后先刷新累计结构；不混用旧模型能量。"),
+        "reason": (
+            f"首批结果已回收，建议另行追加 {len(refresh.get('supplemental_candidates', []))} 个弛豫任务；须单独批准，当前未生成输入。"
+            if automatic
+            else "新模型激活后先刷新累计结构；不混用旧模型能量。"
+        ),
         "parameters": {
             "mode": "model_refresh_inputs",
             "preview_checksum": plan["checksum"],
@@ -293,13 +361,27 @@ def run_model_refresh_gate(
         },
     }
     if automatic:
-        action["task_key"] += ":supplement:" + fingerprint(refresh.get("supplemental_candidates", []))[:16]
+        relax_parameters = deepcopy((config.get("mlip") or {}).get("relax_parameters") or {})
+        action["parameters"]["supplemental_relax_parameters"] = relax_parameters
+        if relax_parameters:
+            action["reason"] += (
+                f"本批弛豫最多 {relax_parameters.get('relax_steps', 300)} 步，"
+                f"优化器 {relax_parameters.get('optimizer', 'LBFGS')}。"
+            )
+        action["task_key"] += (
+            ":supplement:"
+            + fingerprint(
+                {
+                    "candidates": refresh.get("supplemental_candidates", []),
+                    "config": session["confirmed_snapshot"],
+                    "relax_parameters": relax_parameters,
+                }
+            )[:16]
+        )
     proposal = build_agent_proposal(action, current, runtime_state=current)
     key = pending_key
     stored = (current.get("pending_execution_policies") or {}).get(key) or {}
-    previous = ((stored.get("agent_proposal") or {}).get("raw_action") or {}).get(
-        "task_key"
-    )
+    previous = ((stored.get("agent_proposal") or {}).get("raw_action") or {}).get("task_key")
     # A previous action's approval must never approve a new refresh or changed files.
     if resume_approved:
         human_feedback = "同意"
@@ -361,9 +443,7 @@ def run_model_refresh_gate(
         "stage_cost_limit",
         "reserved_total_cost_limit",
     }
-    deferred_budget_errors = [
-        error for error in validation["errors"] if error in budget_errors
-    ]
+    deferred_budget_errors = [error for error in validation["errors"] if error in budget_errors]
     if not validation["valid"] and (
         automatic or any(error not in budget_errors for error in validation["errors"])
     ):
@@ -424,6 +504,9 @@ def run_model_refresh_gate(
             "approved_by": action["task_key"],
             "checksum": fingerprint(refresh.get("supplemental_candidates", [])),
             "config_version": session["confirmed_snapshot"]["config_version"],
+            "relax_parameters_checksum": fingerprint(
+                action["parameters"]["supplemental_relax_parameters"]
+            ),
         }
     execution = execute_tool_action(
         action,
@@ -441,7 +524,11 @@ def run_model_refresh_gate(
     if result.get("status") == "prepared":
         from phase_agent.tools.remote.submission_handoff import ensure_waiting_handoffs
 
-        ensure_waiting_handoffs(updated)
+        from phase_agent.runtime.turn_process import timed_call
+
+        timed_call(
+            "刷新：整批压缩与交付校验", ensure_waiting_handoffs, updated, category="processing"
+        )
         updated.setdefault("pending_execution_policies", {}).pop(key, None)
         if automatic:
             consume_refresh_scope(updated["model_refresh"])

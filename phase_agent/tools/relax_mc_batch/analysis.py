@@ -13,7 +13,7 @@ from phase_agent.science.mc.second_round_state import (
     first_round_source,
 )
 from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
-from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
 from phase_agent.tools.relax_mc_batch.files import write, rebase
 from phase_agent.tools.remote.integrity import payload_checksum
 
@@ -32,6 +32,7 @@ def feedback(state, results, manager, references, root, model_version):
 
 
 def next_mc(state, manager, manifest, root, index):
+    state = deepcopy(state)
     config, version = manifest["config"], manifest["model_version"]
     task_map = {row["task_id"]: row for row in state["tasks"]}
     rows = []
@@ -85,7 +86,7 @@ def next_mc(state, manager, manifest, root, index):
             mc_steps=child["max_mc_steps"],
             budgets=config["budgets"],
         )["value"]
-        reserved = reserve_budget(
+        reserved = reserve_owned_budget(
             state,
             task_key=child["task_key"],
             stage="deep_search",

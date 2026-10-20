@@ -1,14 +1,15 @@
 """Update independent model-version energy pools from recovered Relax and MC."""
 
-from copy import deepcopy
 from pathlib import Path
 
 from phase_agent.analysis.phase.branch_relax_hull import ENERGY_BASIS, build_relax_hull
 from phase_agent.persistence.ledger.branch_energy_pool_ledger import save_branch_energy_pool
 
 
-def update_local_mlip_hull_pool(state, *, config, path):
-    current = deepcopy(state)
+def update_local_mlip_hull_pool(state, *, config, path, _owned=False):
+    from phase_agent.analysis.convergence.mlip_relaxation import reconcile_relaxation_quality
+
+    current = reconcile_relaxation_quality(state, _owned=_owned)
     if not path:
         return current
     system_id = (config.get("system_config") or config.get("system") or {}).get("system_id")
@@ -20,6 +21,7 @@ def update_local_mlip_hull_pool(state, *, config, path):
         if (
             task.get("stage") not in {"relax_and_feature", "deep_search"}
             or task.get("status") != "completed"
+            or task.get("checks_passed", True) is not True
         ):
             continue
         task_version = task.get("model_version")

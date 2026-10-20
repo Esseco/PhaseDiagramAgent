@@ -27,9 +27,13 @@ def run_mace_with_py_mace(
     if isinstance(structure, (str, Path)):
         structure_path = Path(structure)
     elif hasattr(structure, "to"):
-        structure.to(filename=structure_path)
+        # Older cluster pymatgen releases do not infer POSCAR from input.vasp.
+        structure.to(fmt="poscar", filename=structure_path)
     else:
-        return {"status": "failed", "error": "structure must be a path or pymatgen Structure"}
+        return {
+            "status": "failed",
+            "error": "structure must be a path or pymatgen Structure",
+        }
     job = {
         "operation": operation,
         "structure_path": str(structure_path),

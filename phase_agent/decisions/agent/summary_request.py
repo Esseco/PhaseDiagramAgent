@@ -5,7 +5,16 @@ import hashlib
 import json
 
 TOPICS = {
-    "mc": {"available_branches", "branch_candidates", "mc_entry_conditions"},
+    "mc": {
+        "available_branches",
+        "branch_candidates",
+        "mc_entry_conditions",
+        "relax_mc_entry_conditions",
+        "branch_pool_facts",
+        "branch_pool_review_contract",
+        "branch_pool_review_required",
+        "generation_region_contract",
+    },
     "dft": {
         "qbc_candidates",
         "post_dft_assessment",
@@ -226,6 +235,10 @@ def summary_payload(payload):
         if key not in {"state", "decision_context"}
     }
     result.update(state=view, decision_context={"evidence_catalog": catalog, "loaded_topics": []})
+    if context.get("proposal_validation_feedback"):
+        result["decision_context"]["proposal_validation_feedback"] = deepcopy(
+            context["proposal_validation_feedback"]
+        )
     references = (context.get("evidence_catalog") or {}).get("references") or {}
     result["decision_context"]["evidence_reference_index"] = {
         "references": {

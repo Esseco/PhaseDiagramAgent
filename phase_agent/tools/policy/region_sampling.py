@@ -16,15 +16,16 @@ CONTROLS = {
     "max_seconds": 300,
 }
 INSTRUCTION = (
-    "Branch采用区域优先方案：先依据项目现状、当前模型的有效证据和有效历史记忆选择区域与优先级。"
+    "新模型刷新完成后的首次新branch生成是必需步骤，须先审批生成并展示实际结果，再单独审批Relax/MC输入；本阶段不允许暂缓新增。"
+    "完成首次生成后，Branch按需决策：每轮优先考虑新增，但不强制；先比较旧branch新模型结果与新增收益。需要新增时，再依据有效证据和记忆选择区域与优先级。"
     "parameters.sampling_mode=region_adaptive，regions为1至12个对象，每项含region_id、priority(1最高)、"
     "strategy、phase、min_det_H、max_det_H、na_min、na_max、reason和evidence_refs。"
     "strategy仅coverage/composition/competing_phase/periodic_extension/tm_ordering。"
-    "每项相必须明确；Na范围是Na/O2。禁止quota、quotas、total_quota、batch_size、generation_plan，"
+    "每项phase必须是单个字符串O1、O3、P3或OP2，大小写严格；不能省略、传列表或填写all/多相，多个相须拆成不同region，且遵守项目边界。Na范围是Na/O2。禁止quota、quotas、total_quota、batch_size、generation_plan，"
     "不先定600或任何总数，不把100–1000当必须达到的数量。程序分小批生成，按新增覆盖和初始TM近邻"
     "相关性描述符的多样性控制继续/停止；连续无新颖性停止该区域。达到资源保护阈值暂停等待审阅，"
     "不声称物理收敛。生成后才统计实际branch及相/H/Na分布。"
-    "不能凭空声称缺口、能量优势或历史收益；无证据标注探索假设。允许regions=[]并给defer_reason，"
+    "每个branch初态1至3个，默认3，不沿用旧初态4。不能凭空声称缺口、能量优势或历史收益；无证据标注探索假设。允许regions=[]并给defer_reason，"
     "表示现有池应先消化，不执行新生成。只生成登记branch，不封装Relax/MC/DFT输入或提交。"
 )
 
@@ -41,6 +42,7 @@ def policy():
         "instruction": INSTRUCTION,
         "controls": deepcopy(CONTROLS),
         "count_is_result": True,
+        "prefer_new_branches": True,
         "approval_required": True,
     }
 
@@ -87,8 +89,11 @@ def errors(params):
             output.append(prefix + ":invalid_priority")
         if row.get("strategy") not in STRATEGIES:
             output.append(prefix + ":invalid_strategy")
-        if row.get("phase") not in {"O1", "O3", "P3", "OP2"}:
-            output.append(prefix + ":explicit_phase_required")
+        if not isinstance(row.get("phase"), str) or row["phase"] not in {"O1", "O3", "P3", "OP2"}:
+            output.append(
+                prefix + f":explicit_phase_required; received={row.get('phase')!r}; "
+                "expected one string from O1/O3/P3/OP2; split multiple phases into separate regions"
+            )
         low, high = row.get("min_det_H"), row.get("max_det_H")
         if type(low) is not int or type(high) is not int or not 1 <= low <= high:
             output.append(prefix + ":invalid_supercell_bounds")

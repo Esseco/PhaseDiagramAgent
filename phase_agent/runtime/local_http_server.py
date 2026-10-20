@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
 import secrets
+from filelock import Timeout as FileLockTimeout
 
 
 def create_local_http_server(
@@ -34,12 +35,72 @@ def create_local_http_server(
         protocol_version = "HTTP/1.1"
 
         def do_GET(self):
+            try:
+                self._get()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as error:
+                self._boundary_failure(error, read_only=True)
+
+        def do_POST(self):
+            try:
+                self._post()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as error:
+                self._boundary_failure(error, read_only=False)
+
+        def _boundary_failure(self, error, *, read_only):
+            from phase_agent.runtime.boundary_diagnostics import describe_failure, record_failure
+
+            if read_only:
+                diagnostic = describe_failure(error, boundary="presentation", object_id=self.path)
+            else:
+                diagnostic = record_failure(
+                    getattr(local_control, "state_path", None),
+                    error,
+                    boundary="control_operation",
+                    object_id=self.path,
+                )
+            value = error_formatter("boundary_unavailable", diagnostic["message"])
+            value["diagnostic"] = diagnostic
+            self._json(503, value)
+
+        def _get(self):
             if self.path == "/health":
                 self._json(200, {"status": "ok", "config_protocol": 2})
             elif self.path == "/phase/runtime-code" and self._control_authorized():
                 from phase_agent.runtime.loaded_code import loaded_code_report
 
                 self._json(200, loaded_code_report())
+            elif (
+                self.path == "/phase/recovery/transaction"
+                and self._control_authorized()
+                and local_control is not None
+            ):
+                self._json(200, local_control.recovery_transaction())
+            elif (
+                self.path.startswith("/phase/operations")
+                and self._control_authorized()
+                and local_control is not None
+            ):
+                try:
+                    if self.path == "/phase/operations":
+                        self._json(200, {"operations": local_control.operations.recent()})
+                    elif self.path.startswith("/phase/operations/"):
+                        self._json(200, local_control.operations.get(self.path.rsplit("/", 1)[-1]))
+                    else:
+                        self._json(
+                            404, error_formatter("not_found", "operation endpoint not found")
+                        )
+                except ValueError as error:
+                    self._json(404, error_formatter("not_found", str(error)))
+            elif (
+                self.path == "/phase/diagnostics"
+                and self._control_authorized()
+                and local_control is not None
+            ):
+                self._json(200, local_control.diagnostics())
             elif self.path == "/phase/setup":
                 if not self._is_loopback_client():
                     self._json(403, error_formatter("forbidden", "key setup is local-only"))
@@ -118,7 +179,7 @@ def create_local_http_server(
             else:
                 self._json(404, error_formatter("not_found", "endpoint not found"))
 
-        def do_POST(self):
+        def _post(self):
             if self.path == "/phase/setup/key":
                 if not self._is_loopback_client():
                     self._json(403, error_formatter("forbidden", "key setup is local-only"))
@@ -151,9 +212,11 @@ def create_local_http_server(
                     self._json(502, error_formatter("setup_failed", message))
                 return
             if self.path in {
+                "/phase/operations/resolve",
                 "/phase/propose",
                 "/phase/decision",
                 "/phase/recovery/propose",
+                "/phase/recovery/transaction/resume",
                 "/phase/pause",
                 "/phase/config/patch",
                 "/phase/config/confirm",
@@ -179,50 +242,81 @@ def create_local_http_server(
 
                     validate_control_request(self.path, body)
                     conversation = str(body.get("conversation_id") or "local-control")[:128]
-                    if self.path == "/phase/propose":
-                        response = local_control.propose(
-                            body.get("instruction", ""), conversation_id=conversation
+
+                    route = self.path
+
+                    def execute_control():
+                        if route == "/phase/operations/resolve":
+                            return local_control.resolve_operation(body)
+                        elif route == "/phase/propose":
+                            return local_control.propose(
+                                body.get("instruction", ""), conversation_id=conversation
+                            )
+                        elif route == "/phase/decision":
+                            return local_control.decide(
+                                body.get("decision"),
+                                plan_id=body.get("plan_id"),
+                                expected_state_version=body.get("state_version"),
+                                expected_proposal_hash=body.get("proposal_hash"),
+                                comment=body.get("comment", ""),
+                                conversation_id=conversation,
+                            )
+                        elif route == "/phase/recovery/transaction/resume":
+                            return local_control.resume_recovery_transaction(body["revision"])
+                        elif route == "/phase/recovery/propose":
+                            return local_control.propose_recovery(body)
+                        elif route == "/phase/config/patch":
+                            return local_control.patch_config(
+                                body.get("patch"),
+                                reasons=body.get("reasons"),
+                                impacts=body.get("impacts"),
+                            )
+                        elif route == "/phase/config/confirm":
+                            return local_control.confirm_config(
+                                explicit=body.get("explicit") is True
+                            )
+                        elif route == "/phase/memory/review":
+                            return local_control.review_memory(
+                                body.get("proposal_id"), approved=body.get("approved") is True
+                            )
+                        elif route == "/phase/memory/propose":
+                            return local_control.propose_memory(body.get("record"))
+                        elif route == "/phase/memory/skills/import":
+                            return local_control.propose_skill_import()
+                        elif route == "/phase/memory/skills/publish":
+                            return local_control.publish_skill(
+                                body.get("draft_directory"),
+                                approved=body.get("approved") is True,
+                                version=body.get("version", "1.0.0"),
+                            )
+                        else:
+                            return local_control.pause(
+                                body.get("reason", ""), conversation_id=conversation
+                            )
+
+                    if self.headers.get("Prefer") == "respond-async" and route not in {
+                        "/phase/operations/resolve",
+                        "/phase/recovery/transaction/resume",
+                    }:
+                        import uuid
+
+                        record = local_control.operations.submit(
+                            execute_control,
+                            request_id=self.headers.get("Idempotency-Key") or uuid.uuid4().hex,
+                            request={"route": route, "body": body},
                         )
-                    elif self.path == "/phase/decision":
-                        response = local_control.decide(
-                            body.get("decision"),
-                            plan_id=body.get("plan_id"),
-                            expected_state_version=body.get("state_version"),
-                            expected_proposal_hash=body.get("proposal_hash"),
-                            comment=body.get("comment", ""),
-                            conversation_id=conversation,
-                        )
-                    elif self.path == "/phase/recovery/propose":
-                        response = local_control.propose_recovery(body)
-                    elif self.path == "/phase/config/patch":
-                        response = local_control.patch_config(
-                            body.get("patch"),
-                            reasons=body.get("reasons"),
-                            impacts=body.get("impacts"),
-                        )
-                    elif self.path == "/phase/config/confirm":
-                        response = local_control.confirm_config(
-                            explicit=body.get("explicit") is True
-                        )
-                    elif self.path == "/phase/memory/review":
-                        response = local_control.review_memory(
-                            body.get("proposal_id"), approved=body.get("approved") is True
-                        )
-                    elif self.path == "/phase/memory/propose":
-                        response = local_control.propose_memory(body.get("record"))
-                    elif self.path == "/phase/memory/skills/import":
-                        response = local_control.propose_skill_import()
-                    elif self.path == "/phase/memory/skills/publish":
-                        response = local_control.publish_skill(
-                            body.get("draft_directory"),
-                            approved=body.get("approved") is True,
-                            version=body.get("version", "1.0.0"),
-                        )
+                        self._json(202, record)
                     else:
-                        response = local_control.pause(
-                            body.get("reason", ""), conversation_id=conversation
-                        )
-                    self._json(200, response)
+                        self._json(200, execute_control())
+                except FileLockTimeout:
+                    self._json(
+                        202,
+                        {
+                            "status": "busy",
+                            "message": "项目正在登记另一条请求，本次未执行；请查看处理进度后再操作",
+                            "progress_url": local_control.operations.progress_url(),
+                        },
+                    )
                 except (UnicodeDecodeError, ValueError, KeyError, request_error) as error:
                     self._json(400, error_formatter("invalid_request", str(error)))
                 return
@@ -242,17 +336,7 @@ def create_local_http_server(
                 self._json(400, error_formatter("invalid_request", str(error)))
                 return
             except Exception as error:
-                import traceback
-
-                traceback.print_exc()
-                self.log_error("local workflow failed (%s)", type(error).__name__)
-                self._json(
-                    500,
-                    error_formatter(
-                        "workflow_error",
-                        f"local Agent workflow failed ({type(error).__name__}); inspect server stderr",
-                    ),
-                )
+                self._boundary_failure(error, read_only=False)
                 return
             if payload.get("stream"):
                 self._stream(response)
@@ -279,7 +363,9 @@ def create_local_http_server(
                 return False
 
         def _json(self, status, value):
-            body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            body = json.dumps(
+                value, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

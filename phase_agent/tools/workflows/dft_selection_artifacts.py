@@ -6,6 +6,7 @@ from phase_agent.tools.workflows.generation_artifacts import artifact_path, dete
 from phase_agent.tools.relax_mc_batch.files import read, write
 from phase_agent.tools.workflows.branch_review_view import raw_record
 from phase_agent.tools.workflows.dft_review_view import readable_view
+from phase_agent.tools.workflows.compact_review import review_artifacts
 
 
 def selection_path(action, state):
@@ -24,13 +25,17 @@ def proposal_artifacts(proposal, state):
     path = selection_path(action, state)
     if path is None:
         return {}
+    from phase_agent.tools.workflows.readonly_views import is_read_only
+
+    if is_read_only():
+        return review_artifacts(path, kind="dft", state=state)
     if path.exists():
         saved = read(path)
         original = raw_record(saved)
         if original.get("actual") is not None:
             if original is saved:
                 write(path, readable_view(original), sort_keys=False)
-            return {"json": str(path)}
+            return review_artifacts(path, kind="dft", record=original, state=state)
     candidates = {
         r.get("candidate_id") or r.get("structure_id"): r for r in state.get("qbc_candidates") or []
     }
@@ -118,7 +123,7 @@ def proposal_artifacts(proposal, state):
         "note": "null/unknown 表示记录缺失；未见DFT任务不代表从未计算，训练独立性未提供时不作推断。",
     }
     write(path, readable_view(payload), sort_keys=False)
-    return {"json": str(path)}
+    return review_artifacts(path, kind="dft", record=payload, state=state)
 
 
 def preparation_artifacts(action, state, tasks, validation, prepared=None, manager=None):
@@ -183,4 +188,4 @@ def preparation_artifacts(action, state, tasks, validation, prepared=None, manag
         },
     )
     write(path, readable_view(payload), sort_keys=False)
-    return artifacts
+    return review_artifacts(path, kind="dft", record=payload, state=state)

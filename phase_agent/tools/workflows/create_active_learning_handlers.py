@@ -14,7 +14,7 @@ from phase_agent.tools.dispatch.dispatch_calculation_stage import (
 )
 from phase_agent.tools.workflows.run_branch_generation import run_branch_generation
 from phase_agent.tools.workflows.run_round_scheduler import run_round_scheduler
-from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
 from phase_agent.science.bohb.build_bohb_candidate_pool import build_bohb_candidate_pool
 from phase_agent.science.bohb.collect_bohb_results import collect_bohb_results
 from phase_agent.tools.workflows.prepare_branch_relaxation import (
@@ -742,7 +742,7 @@ def _allocate_mc_bohb(*, action, context):
         )
         accepted, rejected = [], []
         for child in ordered_actions:
-            reservation = reserve_budget(
+            reservation = reserve_owned_budget(
                 state,
                 task_key=child["task_key"],
                 stage="deep_search",
@@ -915,7 +915,7 @@ def _allocate_mc_bohb(*, action, context):
     for child in output.get("actions", []):
         if child["task_key"] not in pending_keys:
             continue
-        reservation = reserve_budget(
+        reservation = reserve_owned_budget(
             state,
             task_key=child["task_key"],
             stage="deep_search",

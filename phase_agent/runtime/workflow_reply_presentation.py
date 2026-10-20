@@ -19,6 +19,7 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
     from phase_agent.runtime.response_preferences import detailed_response
 
     proposal = result.get("agent_proposal") or {}
+    brief_reply = None
     if (
         not (detailed_response() if verbose is None else verbose)
         and result.get("status") == "awaiting_approval"
@@ -29,32 +30,77 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         if not needs_choice(proposal):
             from phase_agent.runtime.concise_dialogue import approval_reply
 
-            return approval_reply(proposal, result.get("state") or {})
-    reply = _format_workflow_reply(result, state_path, verbose=verbose)
+            brief_reply = approval_reply(proposal, result.get("state") or {})
+    reply = (
+        brief_reply
+        if brief_reply is not None
+        else _format_workflow_reply(result, state_path, verbose=verbose)
+    )
+    # Brief approval cards and special status replies must pass through the same
+    # recovered-round presentation as detailed replies.
+    reply = _with_post_dft_reply(
+        result, reply, verbose=detailed_response() if verbose is None else verbose
+    )
+    completed = result.get("completed_generation") or {}
+    if brief_reply is not None and completed:
+        reply = (
+            f"结果：已生成 {completed.get('registered_branches', 0)} 个 branch、{completed.get('registered_structures', 0)} 个初始结构。\n"
+            + reply
+        )
     from phase_agent.runtime.review_file_presentation import file_location_lines
 
-    if result.get("status") == "awaiting_approval":
+    if result.get("status") == "awaiting_approval" and brief_reply is None:
         from phase_agent.tools.workflows.generation_artifacts import proposal_artifacts
 
         plan_artifacts = proposal_artifacts(proposal, result.get("state") or {})
         if plan_artifacts:
-            reply += "\n" + "\n".join(file_location_lines("Branch", plan_artifacts["json"]))
+            reply += "\n" + "\n".join(
+                file_location_lines("Branch 分布与构成文件", plan_artifacts["text"])
+            )
         from phase_agent.tools.workflows.dft_selection_artifacts import (
             proposal_artifacts as dft_artifacts,
         )
 
         dft_details = dft_artifacts(proposal, result.get("state") or {})
         if dft_details:
-            reply += "\n" + "\n".join(file_location_lines("DFT 选点", dft_details["json"]))
-    history = (result.get("state") or {}).get("generation_history") or []
-    selections = (result.get("state") or {}).get("qbc_selection_history") or []
-    if selections and selections[-1].get("artifacts"):
-        reply += "\n" + "\n".join(
-            file_location_lines("DFT 选点及输入任务", selections[-1]["artifacts"]["json"])
-        )
-    if history and (history[-1].get("artifacts") or {}):
-        artifacts = history[-1]["artifacts"]
-        reply += "\n" + "\n".join(file_location_lines("Branch 及结构路径", artifacts["json"]))
+            reply += "\n" + "\n".join(file_location_lines("DFT 选点文件", dft_details["text"]))
+    # State retains all past artifacts. Link one only when this turn actually
+    # identifies the matching final action; a training return is not a DFT selection.
+    current_actions = [
+        row.get("final_action")
+        or (row.get("action") if (row.get("execution") or {}).get("status") == "completed" else {})
+        or {}
+        for row in [result, *(result.get("events") or [])]
+    ]
+    for tool, field, label in (
+        ("select_dft_candidates", "qbc_selection_history", "DFT 选点文件"),
+        ("generate_branches", "generation_history", "Branch 分布与构成文件"),
+    ):
+        keys = {
+            action["task_key"]
+            for action in current_actions
+            if action.get("tool") == tool and action.get("task_key")
+        }
+        if not keys:
+            continue
+        for row in (result.get("state") or {}).get(field) or []:
+            artifact = (row.get("artifacts") or {}).get("json")
+            if row.get("task_key") in keys and artifact:
+                from phase_agent.tools.workflows.compact_review import review_artifacts
+
+                if Path(artifact).is_file():
+                    details = review_artifacts(
+                        artifact,
+                        kind="branch" if tool == "generate_branches" else "dft",
+                        state=result.get("state"),
+                    )
+                    path = details["text"]
+                else:
+                    path = artifact
+                    reply += "\n需注意：已登记的清单文件当前缺失，请核对文件位置。"
+                line = "\n".join(file_location_lines(label, path))
+                if line not in reply:
+                    reply += "\n" + line
     if detailed_response() or verbose:
         from phase_agent.runtime.evidence_reference_presentation import evidence_reference_lines
 
@@ -68,7 +114,71 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         if usage.get("unknown_records"):
             line += f"另有 {usage['unknown_records']} 条记录缺少 GPU 耗时，不按零结算。"
         reply += "\n" + line
-    return reply
+    return _with_refresh_completion(result, reply)
+
+
+def _with_refresh_completion(result, reply):
+    """Keep this turn's verified refresh facts beside its next approval."""
+    facts = result.get("completed_refresh") or next(
+        (
+            event["completed_refresh"]
+            for event in reversed(result.get("events") or [])
+            if event.get("completed_refresh")
+        ),
+        None,
+    )
+    state = result.get("state") or {}
+    if (
+        not facts
+        or facts.get("model_version") != state.get("active_model_version")
+        or (state.get("model_refresh") or {}).get("status") != "completed"
+    ):
+        return reply
+    lines = [
+        "本次：已回收新模型结构刷新结果并更新相图。",
+        f"结果：已刷新 {facts['refreshed']} 个独立结构；新模型相图已核对，包含 {facts['phase_diagram_entry_count']} 条条目。",
+    ]
+    if facts.get("partial"):
+        lines.append(
+            f"覆盖：另有 {facts['deferred']} 个结构未刷新；本次为部分刷新，不代表全面覆盖或科学收敛。"
+        )
+    if facts.get("discarded_unconverged_count"):
+        lines.append(
+            f"排除：{facts['discarded_unconverged_count']} 个弛豫未收敛结果已弃用，原始文件与耗时保留；不进入相图，不自动重试。"
+        )
+    if facts.get("outside_boundary_count"):
+        lines.append(
+            f"边界：{facts['outside_boundary_count']} 个结果已确认属于搜索边界外，记录保留，不进入当前相图。"
+        )
+    lines.extend(line for line in reply.splitlines() if line != "已完成：`workflow`。")
+    if result.get("status") == "awaiting_approval" and state.get("pending_execution_policies"):
+        if not any("确认范围：" in line for line in lines):
+            from phase_agent.runtime.review_presentation import review_card
+
+            proposal = result.get("agent_proposal") or {}
+            match = next(
+                (
+                    (key, row)
+                    for key, row in state["pending_execution_policies"].items()
+                    if row.get("agent_proposal") == proposal
+                ),
+                None,
+            )
+            if match:
+                lines.append("确认范围：" + review_card(*match)["approval_boundary"])
+    if not state.get("pending_execution_policies"):
+        if result.get("followup_error") or result.get("followup_note"):
+            lines.append(
+                "方案说明：" + str(result.get("followup_note") or result["followup_error"])
+            )
+            lines.append(
+                "下一步：下一步方案尚未准备成功，当前尚无待批准方案；请处理上述问题后重新请求下一步方案。"
+            )
+        elif not any(line.startswith(("下一步：", "建议：")) for line in lines):
+            lines.append(
+                "下一步：基于刷新后的相图和覆盖缺口评估后续方案；当前尚无待批准方案，请请求下一步具体方案，展示范围与预算后再批准。"
+            )
+    return "\n".join(lines)
 
 
 def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
@@ -129,7 +239,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             "本次已核对回传并更新记录："
             + summary
             + "。\n"
-            + format_workflow_reply(
+            + _format_workflow_reply(
                 {**result, "verified_recovery": None}, state_path, verbose=verbose
             )
         )
@@ -151,7 +261,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             heading = (
                 f"方案：{card['title']} · 修订 {card['revision']} · {card['proposal_hash'][:12]}"
             )
-            original = format_workflow_reply(
+            original = _format_workflow_reply(
                 {**result, "_review_card_rendered": True}, state_path, verbose=verbose
             )
             return "\n".join(
@@ -181,6 +291,13 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                 for artifact in check["artifact_checks"][:4]:
                     lines.append(f"- {artifact['path']}：{artifact['status']}")
             lines.append("上述为只读核对；原动作不会自动重跑。没有记录或文件缺失不等于没有副作用。")
+            import os
+
+            lines.append(
+                "恢复入口：http://127.0.0.1:"
+                + os.environ.get("PHASE_CONTROL_PORT", "8765")
+                + "/phase/approval；先生成并确认恢复处理方案，结束旧记录；原输入方案会重新待确认。重复回复‘同意’不会解除这条阻塞。"
+            )
             return "\n".join(lines)
         rows = report.get("unsettled") or []
         names = {
@@ -219,9 +336,22 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")),
         {},
     )
-    preview = ((proposal.get("raw_action") or {}).get("parameters") or {}).get("refresh_preview")
+    raw_action = proposal.get("raw_action") or {}
+    params = raw_action.get("parameters") or {}
+    preview = params.get("refresh_preview")
     refresh = (result.get("state") or {}).get("model_refresh") or {}
     if preview and result.get("status") == "awaiting_approval":
+        if "supplemental_relax_parameters" in params:
+            settings = params["supplemental_relax_parameters"]
+            return (
+                "当前：首批刷新已回收，补充弛豫方案待审批。\n"
+                f"本次：拟为 {len(raw_action.get('target_ids') or [])} 个单点候选准备补充弛豫输入。\n"
+                f"设置：最多 {settings.get('relax_steps', 300)} 步，{settings.get('optimizer', 'LBFGS')}；"
+                "未收敛结果排除，不自动延长或重试。\n"
+                f"预计相对成本 {raw_action.get('budget', 0):.1f}；耗时暂无可靠估计。\n"
+                "下一步：查看具体目标后批准、修改或拒绝；本次未创建任务或输入。"
+                "批准仅准备本批输入，不提交计算；首批结果与历史方案保留。"
+            )
         rows = preview["candidates"]
         relax = sum(r["operation"] == "relax" for r in rows)
         seconds = (preview.get("runtime_budget") or {}).get("serial_seconds")
@@ -238,7 +368,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             f"{preview['maximum_supplemental_count']} 个、成本上限 {preview['maximum_supplemental_cost']:.1f}。\n"
             "补充标准：新Ehull<1，或1–10且最大原子力>0.1 eV/Å；已弛豫项不再追加。\n"
             f"未覆盖的分层 {len(preview['coverage_gaps'])} 个；{timing}，单点成本暂按弛豫上界。\n"
-            "同意将批准首批及上述上限内最多一轮补充输入生成；超限另行审批。\n"
+            "同意仅批准首批输入生成；回收后若需补充，按具体目标另行审批。\n"
             "仅生成超算输入；你提交GPU.sh并回传results。不本机计算。"
         )
     if refresh and refresh.get("status") != "completed":
@@ -287,54 +417,54 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         text += "\n下一步方案暂未准备成功；已生成结果保留，未执行后续任务。"
         if verbose:
             text += "\n" + str(result.get("followup_error") or result.get("followup_note"))
-    if (
-        not verbose
-        and not result.get("post_dft_review")
-        and result.get("status")
-        in {
-            "confirmation_required",
-            "awaiting_remote_training",
-            "awaiting_manual_submission",
-            "failed",
-            "rejected",
-            "rejected_by_user",
-            "not_configured",
-            "prepared",
-            "already_prepared",
-            "tasks_in_progress",
-        }
-    ):
+    if not result.get("post_dft_review") and result.get("status") in {
+        "confirmation_required",
+        "awaiting_remote_training",
+        "awaiting_manual_submission",
+        "failed",
+        "rejected",
+        "rejected_by_user",
+        "not_configured",
+        "prepared",
+        "already_prepared",
+        "tasks_in_progress",
+    }:
         # Follow-up replies report the transition, not the previous round again.
-        if result.get("status") == "failed":
+        if verbose or result.get("status") == "failed":
             return text
         return text + f"\n完整记录：`{state_path}`"
-    from phase_agent.analysis.feedback.dft_magnetic_tables import magnetic_chat_summary
+    return text
 
-    question = (result.get("dft_recovery_question") or {}) if isinstance(result, dict) else {}
-    task_ids = set(question.get("recovered_task_ids") or []) if question else None
-    summary = (
-        magnetic_chat_summary((result.get("state") or {}), task_ids=task_ids, verbose=verbose)
-        if isinstance(result, dict)
-        else ""
-    )
+
+def _with_post_dft_reply(result, text, *, verbose):
+    """Reuse round-scoped analysis at the common presentation boundary."""
     from phase_agent.runtime.post_dft_presentation import (
         post_dft_lines,
         post_dft_review_lines,
+        reply_assessment,
     )
 
-    assessment = post_dft_lines(result.get("state") or {}) if isinstance(result, dict) else ""
     events = result.get("events") or []
     proposal = result.get("agent_proposal") or next(
         (row.get("agent_proposal") for row in reversed(events) if row.get("agent_proposal")),
         {},
     )
-    from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
-
     state = result.get("state") or {}
-    round_assessment = post_dft_assessment(state, state.get("confirmed_config") or {})
     review_action = (proposal or {}).get("raw_action") or {
         "post_dft_review": result.get("post_dft_review")
     }
+    round_assessment = reply_assessment(result, review_action)
+    if not round_assessment and not review_action.get("post_dft_review"):
+        return text
+    assessment, summary = "", ""
+    if round_assessment:
+        assessment = post_dft_lines(state, assessment=round_assessment)
+        from phase_agent.analysis.feedback.dft_magnetic_tables import magnetic_chat_summary
+
+        if verbose:
+            summary = magnetic_chat_summary(
+                state, task_ids=set(round_assessment["recovered_task_ids"]), verbose=True
+            )
     review = post_dft_review_lines(
         review_action,
         verbose=verbose,
@@ -638,9 +768,13 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         runtime = cost.get("runtime_budget") or {}
         if runtime.get("serial_seconds") is not None:
             hours = runtime["serial_seconds"] / 3600
-            low, high = runtime["sample_range_seconds"]
+            sample_range = runtime.get("sample_range_seconds")
+            observed = ""
+            if sample_range and len(sample_range) == 2:
+                low, high = sample_range
+                observed = f"（观测范围 {low / 3600:.2g}–{high / 3600:.2g} 小时）"
             lines.append(
-                f"耗时粗估：串行累计约 {hours:.2g} 小时（观测范围 {low / 3600:.2g}–{high / 3600:.2g} 小时）；不含排队，并行后实际完成时间另计。"
+                f"耗时粗估：串行累计约 {hours:.2g} 小时{observed}；不含排队，并行后实际完成时间另计。"
             )
         elif proposed_tool in {
             "allocate_mc_bohb",
@@ -670,54 +804,59 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 or (proposal.get("raw_action") or {}).get("parameters")
                 or {}
             )
-            quotas = params.get("quotas")
-            names = {
-                "coverage": "补覆盖",
-                "composition": "补Na组分",
-                "competing_phase": "竞争相",
-                "periodic_extension": "扩展超胞",
-                "tm_ordering": "TM排布",
-            }
-            strategy = (
-                "、".join(f"{names.get(name, name)} {count}" for name, count in quotas.items())
-                if isinstance(quotas, dict) and quotas
-                else f"覆盖补充（预计 {params.get('total_quota', '按配置')} 个；具体分配由现有 branch 覆盖决定）"
-            )
-            if verbose or not params.get("generation_plan"):
-                lines.append(f"生成策略：{strategy}")
-            plan = params.get("generation_plan") or []
-            for row in plan:
-                target = "全部合法相" if row["phase"] == "all" else row["phase"]
-                x = (
-                    f"，Na/O₂ {row['na_min']:g}–{row['na_max']:g}"
-                    if row.get("na_min") is not None
-                    else ""
-                )
-                cap = f"，det(H)≤{row['max_det_H']}" if row.get("max_det_H") is not None else ""
-                lines.append(
-                    f"- {target}{x}{cap}：{names.get(row['strategy'], row['strategy'])}候选 {row['quota']}；{row['reason']}"
-                )
-            if params.get("max_det_H") is not None:
-                lines.append(f"本轮超胞上限：det(H) ≤ {params['max_det_H']}")
+            if params.get("sampling_mode") == "region_adaptive":
+                from phase_agent.runtime.proposal_presentation import region_scope_lines
+
+                lines.extend(region_scope_lines(params))
             else:
-                lines.append("本轮超胞上限：未单独设置，按已确认的 H 边界")
-            initial_count = params.get("initial_states_per_branch")
-            lines.append(
-                f"入选上限：{params.get('batch_size', '按配置')} 个 branch；"
-                f"每个 branch 静电能前 10 中至多取 {initial_count if initial_count is not None else '按配置'} 个初态"
-            )
-            preview = params.get("generation_cost_preview") or {}
-            if preview:
-                lines.append(
-                    f"后续Relax+MC成本粗估上界：{preview['relax_mc_cost_upper']:.3g}（非本次派发授权）。"
+                quotas = params.get("quotas")
+                names = {
+                    "coverage": "补覆盖",
+                    "composition": "补Na组分",
+                    "competing_phase": "竞争相",
+                    "periodic_extension": "扩展超胞",
+                    "tm_ordering": "TM排布",
+                }
+                strategy = (
+                    "、".join(f"{names.get(name, name)} {count}" for name, count in quotas.items())
+                    if isinstance(quotas, dict) and quotas
+                    else f"覆盖补充（预计 {params.get('total_quota', '按配置')} 个；具体分配由现有 branch 覆盖决定）"
                 )
-                seconds = preview.get("serial_seconds_upper")
+                if verbose or not params.get("generation_plan"):
+                    lines.append(f"生成策略：{strategy}")
+                plan = params.get("generation_plan") or []
+                for row in plan:
+                    target = "全部合法相" if row["phase"] == "all" else row["phase"]
+                    x = (
+                        f"，Na/O₂ {row['na_min']:g}–{row['na_max']:g}"
+                        if row.get("na_min") is not None
+                        else ""
+                    )
+                    cap = f"，det(H)≤{row['max_det_H']}" if row.get("max_det_H") is not None else ""
+                    lines.append(
+                        f"- {target}{x}{cap}：{names.get(row['strategy'], row['strategy'])}候选 {row['quota']}；{row['reason']}"
+                    )
+                if params.get("max_det_H") is not None:
+                    lines.append(f"本轮超胞上限：det(H) ≤ {params['max_det_H']}")
+                else:
+                    lines.append("本轮超胞上限：未单独设置，按已确认的 H 边界")
+                initial_count = params.get("initial_states_per_branch")
                 lines.append(
-                    f"Relax+MC串行耗时粗估：{seconds / 3600:.2g} 小时，不含排队。"
-                    if seconds is not None
-                    else "耗时：实测样本不足，暂不换算小时。"
+                    f"入选上限：{params.get('batch_size', '按配置')} 个 branch；"
+                    f"每个 branch 静电能前 10 中至多取 {initial_count if initial_count is not None else '按配置'} 个初态"
                 )
-                lines.append("本次仅生成branch；后续Relax/MC单独审批。")
+                preview = params.get("generation_cost_preview") or {}
+                if preview:
+                    lines.append(
+                        f"后续Relax+MC成本粗估上界：{preview['relax_mc_cost_upper']:.3g}（非本次派发授权）。"
+                    )
+                    seconds = preview.get("serial_seconds_upper")
+                    lines.append(
+                        f"Relax+MC串行耗时粗估：{seconds / 3600:.2g} 小时，不含排队。"
+                        if seconds is not None
+                        else "耗时：实测样本不足，暂不换算小时。"
+                    )
+                    lines.append("本次仅生成branch；后续Relax/MC单独审批。")
         batch_params = (
             proposal.get("action_parameters")
             or (proposal.get("raw_action") or {}).get("parameters")
@@ -750,16 +889,9 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 or (proposal.get("raw_action") or {}).get("parameters")
                 or {}
             )
-            preview = params.get("budget_preview") or {}
-            lines.append(
-                f"MC 总步数目标：{params.get('mc_budget', '待定')} 步；"
-                f"本次计划：{preview.get('requested_steps', '待重算')} 步。"
-            )
-            if preview.get("phase_diagram_version"):
-                lines.append(
-                    f"Ehull 标准：当前 MLIP 相图版本 {preview['phase_diagram_version']} 的 eV/atom 值；"
-                    "批准前会复核相图版本与结构能量。"
-                )
+            from phase_agent.runtime.proposal_presentation import mc_scope_lines
+
+            lines.extend(mc_scope_lines(params))
         completed = result.get("completed_generation") or {}
         if completed:
             lines.insert(
@@ -845,6 +977,14 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         )
         return f"{reason or '本轮要求超过已确认配置；请先修订配置。'}\n未执行生成或计算。"
     if status == "awaiting_remote_training":
+        from phase_agent.runtime.chat_state_presentation import waiting_training_job
+        from phase_agent.runtime.training_reply import training_delivery_lines
+
+        training = waiting_training_job(result.get("state") or {})
+        if training:
+            delivery = training_delivery_lines(training)
+            if delivery:
+                return "\n".join(delivery)
         payload = (result.get("execution") or {}).get("result") or next(
             (
                 ((event.get("execution") or {}).get("result") or {})
@@ -1100,6 +1240,8 @@ def _friendly_validation_errors(errors):
     mapping = {
         "formal_tool_requires_task_key": "动作缺少内部幂等编号",
         "configuration_not_confirmed": "配置尚未确认",
+        "new_model_branch_generation_required": "新模型刷新后须先生成新branch，展示实际数量和分布，再单独审批Relax/MC方案",
+        "post_refresh_branch_generation_separate_review_required": "首次新branch生成须独立审批并展示实际结果，不能捆绑后续输入或暂缓生成",
         "config_version_mismatch": "当前运行仍绑定旧配置版本；请新建运行，或在尚无科学任务时重新发送该指令",
         "invalid_budget": "Agent 返回的预算格式无效；预算必须是一个非负数值",
         "tool_handler_not_configured": "该动作尚无执行函数，请改选已接通的工具",
@@ -1139,40 +1281,6 @@ def _proposal_directory(state_path, proposal):
 
 
 def _handoff_lines(handoffs, *, collection=None):
-    from phase_agent.runtime.response_preferences import detailed_response
+    from phase_agent.runtime.handoff_presentation import handoff_lines
 
-    if not detailed_response():
-        folders = list(
-            dict.fromkeys(
-                str(row.get("folder") or Path(row["upload_archive"]).parent) for row in handoffs
-            )
-        )
-        lines = ["本轮提交文件夹：" + "、".join(str(Path(folder)) for folder in folders)]
-        returns = list(
-            dict.fromkeys(
-                row.get("return_directory") for row in handoffs if row.get("return_directory")
-            )
-        )
-        if returns:
-            lines.append("结果回传文件夹：" + "、".join(returns))
-        lines.append(
-            "下一步：上传本轮文件夹，执行 `sbatch submit_all.sh`；完成后回传远端 return-results 文件夹，再说“继续”。压缩包自动读取，无需手动解压。"
-        )
-        errors = (collection or {}).get("transfer_errors") or []
-        if errors:
-            lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
-        return lines
-    lines = []
-    for row in handoffs:
-        lines.append(f"交互文件夹：`{row['folder']}`（{row['job_count']} 个作业）。")
-        lines.append(f"压缩包：`{row['upload_archive']}`；总提交脚本：`{row['submit_script']}`。")
-        lines.append(
-            "把三个文件上传到超算同一个目录，在该目录执行 `sbatch submit_all.sh`；Python 在计算节点校验、解压并逐批提交，重复执行会跳过已有提交记录。总脚本只用 sbatch 提交，不直接 bash 执行。"
-        )
-        lines.append(
-            f"结束后回传远端 return-results 文件夹到本地 {row.get('return_directory') or row['results_directory']}，回复“继续”自动读取压缩包，无需手动解压。已按旧方式提交的任务不要再次提交。"
-        )
-    errors = (collection or {}).get("transfer_errors") or []
-    if errors:
-        lines.append("结果包导入失败：" + "；".join(row["reason"] for row in errors[:3]))
-    return lines
+    return handoff_lines(handoffs, collection=collection)

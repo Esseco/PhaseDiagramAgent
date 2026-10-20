@@ -16,7 +16,12 @@ from phase_agent.tools.relax_mc_batch.files import (
     python_environment,
 )
 from phase_agent.tools.relax_mc_batch.analysis import feedback, next_mc
-from phase_agent.tools.relax_mc_batch.run import checkpoint, prepare_wave, publish
+from phase_agent.tools.relax_mc_batch.run import (
+    checkpoint,
+    prepare_wave,
+    publish,
+    SchedulerQueryError,
+)
 
 
 def finish(root, state, manager, manifest, status, reason=None):
@@ -88,8 +93,15 @@ def collect_phase(root, state, manager, manifest, io):
     control = meta["phase_controllers"][str(meta["phase"])]
     batches = [b for b in state["slurm_batches"] if b["batch_id"] in control["batch_ids"]]
     ids = [b["job_id"] for b in batches]
-    if io.active(ids):
-        raise RuntimeError("GPU_phase_still_active; analysis must wait for afterany")
+    scheduler_unknown = False
+    try:
+        if io.active(ids):
+            raise RuntimeError("GPU_phase_still_active; analysis must wait for afterany")
+    except SchedulerQueryError as error:
+        scheduler_unknown = True
+        meta["scheduler_query_error"] = {"job_ids": ids, "diagnostics": error.diagnostics}
+    else:
+        meta.pop("scheduler_query_error", None)
     # Reuse receipt/checksum validation; no scientific task writes shared workflow state.
     from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
 
@@ -99,22 +111,31 @@ def collect_phase(root, state, manager, manifest, io):
     ).collect_results(state)
     expected = {tid for b in batches for tid in b["task_ids"]}
     found = {r["task_id"]: r for r in results if r["task_id"] in expected}
-    for task in state["tasks"]:
-        if task["task_id"] in expected - found.keys():
-            found[task["task_id"]] = {
-                **task,
-                "status": "failed",
-                "error": "ended_without_verified_result",
-            }
+    missing = expected - found.keys()
+    if not scheduler_unknown:
+        for task in state["tasks"]:
+            if task["task_id"] in missing:
+                found[task["task_id"]] = {
+                    **task,
+                    "status": "failed",
+                    "error": "ended_without_verified_result",
+                }
     results = list(found.values())
-    state = feedback(
-        state,
-        results,
-        manager,
-        manifest["phase_references"],
-        root,
-        manifest["model_version"],
-    )
+    if results:
+        state = feedback(
+            state,
+            results,
+            manager,
+            manifest["phase_references"],
+            root,
+            manifest["model_version"],
+        )
+    if scheduler_unknown:
+        state["relax_mc_remote"]["scheduler_query_error"] = {
+            **meta["scheduler_query_error"],
+            "unverified_task_ids": sorted(missing),
+        }
+        return state, results
     for batch in state["slurm_batches"]:
         if batch["batch_id"] in control["batch_ids"]:
             batch["relax_mc_wave_done"] = True
@@ -143,6 +164,16 @@ def advance(root, manifest, io, *, phase=None):
             if phase is not None:
                 state, results = collect_phase(root, state, manager, manifest, io)
                 meta = state["relax_mc_remote"]
+                if meta.get("scheduler_query_error"):
+                    write(root / "scheduler_diagnostics.json", meta["scheduler_query_error"])
+                    return finish(
+                        root,
+                        state,
+                        manager,
+                        manifest,
+                        "partial",
+                        "scheduler_state_unknown; verified results retained; no next phase submitted; inspect recorded job IDs before resuming",
+                    )
                 if any(r.get("status") != "completed" for r in results):
                     return finish(
                         root,

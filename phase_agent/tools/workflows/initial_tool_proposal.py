@@ -60,6 +60,8 @@ def select_initial_proposal(
     from phase_agent.runtime.turn_process import process_event
 
     facts = branch_facts(current)
+    generation = facts["new_model_generation"]
+    generation_required = generation["required"] and not generation["ready"]
     decision_state.setdefault("decision_context", {})["branch_conditions"] = facts
     # Saved snapshots can predate a code update without any scientific change.
     # Refresh current execution facts at the actual model boundary as well.
@@ -140,7 +142,12 @@ def select_initial_proposal(
         if row.get("stage") == "deep_search" and row.get("model_version") == version
     )
     consumed_mc = (current.get("post_dft_decided_mc_tasks") or {}).get(version)
-    post_mc = second_round_completed(current, version) and not assessment and mc_ids != consumed_mc
+    post_mc = (
+        second_round_completed(current, version)
+        and not assessment
+        and mc_ids != consumed_mc
+        and not generation_required
+    )
     if post_mc or assessment:
         from phase_agent.science.qbc.post_mc_candidates import post_mc_candidates
 
@@ -294,6 +301,16 @@ def select_initial_proposal(
         decision_state.setdefault("decision_context", {})["branch_ledger_facts"] = ledger_context(
             context["manager"]
         )
+        from phase_agent.decisions.agent.branch_pool_review import pool_context
+
+        decision_state["decision_context"]["branch_pool_facts"] = pool_context(
+            current, context["manager"].data["branches"]
+        )
+        from phase_agent.tools.relax_mc_batch.plan import registration_facts
+
+        decision_state["decision_context"]["relax_mc_entry_conditions"] = registration_facts(
+            current, context["manager"], effective
+        )
         if current.get("branch_region_review"):
             decision_state["decision_context"]["branch_region_review"] = deepcopy(
                 current["branch_region_review"]
@@ -304,19 +321,36 @@ def select_initial_proposal(
     decision_state.setdefault("decision_context", {})["scientific_decision_brief"] = decision_brief(
         current
     )
+    if generation_required:
+        # The user requires branch generation before downstream searches in a new epoch.
+        allowed = [tool for tool in allowed if tool in {"generate_branches", "pause_search"}]
+        safe_next = None
+        if direction:
+            return {
+                "status": "rejected",
+                "state": current,
+                "reason": "新模型刷新后须先生成新branch并展示结果；旧方向方案需重新审阅。",
+            }
     planned_action = saved_followup(direction) if direction else None
     if planned_action:
         planned_action["decision_source"] = "saved_agent_direction_plan"
-    action = (
-        planned_action
-        or safe_next
-        or propose(
+    action = planned_action or safe_next
+    if not action:
+        from phase_agent.tools.workflows.relax_proposal_feedback import propose_with_relax_feedback
+
+        action, prior_usage, preflight_error = propose_with_relax_feedback(
             decision_state,
             agent_client=agent_client,
             allowed_tools=allowed,
             config=config,
+            propose=propose,
         )
-    )
+        if prior_usage:
+            current = record_budget_usage(current, {"llm_usage": prior_usage})
+        if preflight_error:
+            if action.get("_llm_usage"):
+                current = record_budget_usage(current, {"llm_usage": action["_llm_usage"]})
+            return {"status": "rejected", "state": current, "reason": preflight_error}
     from phase_agent.decisions.agent.dialogue_contract import (
         is_dialogue,
         dialogue_result,

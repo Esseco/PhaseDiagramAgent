@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
-from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
 from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
 from phase_agent.science.mlip.slurm_executor import create_mlip_task_preparer
 from phase_agent.configuration.defaults.default_slurm_cluster_config import (
@@ -128,7 +128,7 @@ def prepare_relax_upload_batches(*, action, context):
             if existing not in state.setdefault("pending_tasks", []):
                 state["pending_tasks"].append(existing)
             continue
-        reservation = reserve_budget(
+        reservation = reserve_owned_budget(
             state,
             task_key=key,
             stage="relax_and_feature",

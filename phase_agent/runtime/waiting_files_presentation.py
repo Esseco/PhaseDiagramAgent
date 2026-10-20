@@ -8,11 +8,23 @@ from phase_agent.tools.relax_mc_batch.handoff import input_directory, output_dir
 
 
 def waiting_file_lines(state):
+    from phase_agent.runtime.local_return_status import pending_dft_return_facts
+
+    arrived = pending_dft_return_facts(state)
+    covered = {task_id for row in arrived for task_id in row["task_ids"]}
+    recovery_lines = []
+    if arrived:
+        recovery_lines = ["本地回传包已到，待本地校验与分析；任务尚未登记不代表超算仍在计算。"]
+        recovery_lines.extend("待校验回传目录：`" + row["directory"] + "`。" for row in arrived)
+        recovery_lines.append(
+            "下一步：回复“已回传，请回收分析”；复用现有结果，无需重新上传输入或提交计算。"
+        )
     from phase_agent.tools.remote.legacy_recovery import recovery_handoffs
 
-    pending = {t.get("task_id") for t in state.get("tasks", []) if awaiting_task_result(t)}
+    pending = {
+        t.get("task_id") for t in state.get("tasks", []) if awaiting_task_result(t)
+    } - covered
     if pending:
-        covered, recovery_lines = set(), []
         for handoff in recovery_handoffs(state):
             members = pending.intersection(handoff["task_ids"]) - covered
             if not members:
@@ -29,12 +41,12 @@ def waiting_file_lines(state):
                     + "`，再说“已回传”；原选点、任务与审批不变。",
                 ]
             )
-        if covered:
-            other = {
-                **state,
-                "tasks": [t for t in state.get("tasks", []) if t.get("task_id") not in covered],
-            }
-            return recovery_lines + _ordinary_waiting_file_lines(other)
+    if covered:
+        other = {
+            **state,
+            "tasks": [t for t in state.get("tasks", []) if t.get("task_id") not in covered],
+        }
+        return recovery_lines + _ordinary_waiting_file_lines(other)
     return _ordinary_waiting_file_lines(state)
 
 
@@ -60,6 +72,24 @@ def _ordinary_waiting_file_lines(state):
                         + str(destination)
                         + "`。修复接收问题后，再说“已回传”重试回收。"
                     )
+                continue
+            summary = batch.get("result_summary") or {}
+            if batch.get("import_checksum") and summary.get("status") in {
+                "partial",
+                "paused",
+                "failed",
+            }:
+                count = sum(row.get("relax_mc_bundle_id") == bid for row in owned)
+                lines.extend(
+                    [
+                        f"本地回收校验已完成，仍有 {count} 项未核对（缺少已核验结果）；当前超算状态尚未确认。",
+                        "回传包内的历史控制器诊断（不是本次本地回收错误，也不是当前作业状态）："
+                        + str(summary.get("reason") or "请核对原批次诊断记录"),
+                        "下一步：先核对原 Slurm 作业及已有结果，确认未完成项后再单独审阅恢复方案；不要重新上传输入或提交整批。",
+                    ]
+                )
+                if destination:
+                    lines.append("原回传目录：`" + str(destination) + "`。")
                 continue
             if (
                 folder is None

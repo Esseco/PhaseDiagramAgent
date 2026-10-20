@@ -40,7 +40,14 @@ def proposal_changes(record):
         else:
             changes.append({"field": path, "before": before, "after": after})
 
-    for key in ("tool", "target_ids", "parameters", "budget", "reason", "expected_purpose"):
+    for key in (
+        "tool",
+        "target_ids",
+        "parameters",
+        "budget",
+        "reason",
+        "expected_purpose",
+    ):
         compare(old.get(key), new.get(key), key)
     return changes
 
@@ -67,6 +74,8 @@ def review_card(plan_id, record):
         scope = f"计划生成 {params['total_quota']} 个 branch，实际数量生成后核验"
     if preview:
         scope = f"首批刷新 {len(preview.get('candidates') or [])} 个结构；暂缓 {preview.get('deferred', '未记录')} 个"
+        if "supplemental_relax_parameters" in params:
+            scope = f"追加弛豫 {len(targets)} 个单点候选；首批结果保留"
     boundary = "完成本次动作后停止；后续新动作需另行审阅。"
     if tool in {"prepare_local_batch_files", "select_dft_candidates", "update_mlip"}:
         boundary = "完成本批输入准备后停止；提交超算属于后续操作。"
@@ -74,6 +83,8 @@ def review_card(plan_id, record):
         boundary = "生成并登记 branch，按已展示范围准备 Relax+MC 输入后停止；不提交超算。"
     if preview:
         boundary = "仅准备本次已展示目标的输入；回收后若需补充弛豫，须按具体目标另行审批。"
+        if "supplemental_relax_parameters" in params:
+            boundary = "仅准备本批补充弛豫输入后停止；不提交计算，不自动延长或重试。"
     from phase_agent.runtime.chat_approval_rules import is_sensitive_proposal
 
     region_mode = tool == "generate_branches" and params.get("sampling_mode") == "region_adaptive"
@@ -83,11 +94,18 @@ def review_card(plan_id, record):
             "仅生成并登记branch及初始结构，保存实际统计后停止；不准备Relax/MC输入，不计算或提交。"
         )
 
+    deferred = region_mode and not params.get("regions")
+    if deferred:
+        scope = "暂不新增branch，优先复用已有池"
+        boundary = "仅确认暂缓新增；后续搜索输入需另行提案和审批，不计算或提交。"
+
     return {
         "plan_id": plan_id,
         "revision": record.get("revision", 0),
         "proposal_hash": proposal_hash(proposal),
-        "title": "生成branch（区域优先）"
+        "title": "暂缓新增branch（复用已有池）"
+        if deferred
+        else "生成branch（按需）"
         if region_mode
         else LABELS.get(tool, tool or "待审阅动作"),
         "purpose": proposal.get("expected_purpose") or proposal.get("reason") or "未记录",

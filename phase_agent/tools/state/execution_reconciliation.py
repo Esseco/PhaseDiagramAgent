@@ -51,6 +51,16 @@ def _validate_checks(checks, resolution, attestation):
     if resolution == "verified_no_effect":
         import math
 
+        if (checks.get("preparation_progress") or {}).get("boundary") in {
+            "effects_possible",
+            "complete",
+        }:
+            raise ValueError("输入准备已进入文件写入；先核对并恢复产出，不能声明无副作用")
+        if checks.get("preparation_progress") and any(
+            row["status"] == "directory" for row in checks["artifact_checks"]
+        ):
+            raise ValueError("输入准备目录已存在；先核对其中产出，不能声明无副作用")
+
         reserved = 0.0
         for row in checks["budget_reservations"]:
             amount = row.get("reserved_cost", row.get("relative_cost"))
@@ -152,6 +162,7 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
     if plan["business_fingerprint"] != business_fingerprint(state):
         raise ValueError("recovery_state_changed; 核对期间业务状态已变化，请重新生成处理方案")
     invocation = plan["identity"]["invocation_id"]
+    original_pending = (updated.get("pending_execution_policies") or {}).get(invocation)
     issue = _issue(state_path, state, invocation)
     checks = inspect_execution(state, issue, state_path=state_path)
     if issue["identity"] != plan["identity"] or checks != plan["checks"]:
@@ -266,9 +277,17 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
     updated.setdefault("recovery_review_history", []).append(
         {"plan_id": plan_id, "decision": "confirm_sensitive", "audit": audit}
     )
+    restored_plan = None
+    if plan["resolution"] == "verified_no_effect":
+        from phase_agent.tools.state.recovered_input_plan import reoffer_input_plan
+
+        restored_plan = reoffer_input_plan(
+            updated, original_pending, identity=plan["identity"], review_id=plan_id
+        )
     return {
         "status": recovered_status,
         "state": updated,
         "submitted": False,
+        "restored_plan_id": restored_plan,
         "reason": "核对记录已保存，原回执保留，旧动作禁止重放；下一项科学动作仍需单独审批。",
     }

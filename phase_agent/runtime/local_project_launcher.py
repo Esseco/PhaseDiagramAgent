@@ -474,6 +474,19 @@ def _check_start_cancelled(cancel_event, process=None):
         raise RuntimeError("启动已取消；服务保持停止")
 
 
+def restart_agent(path: Path, process=None, *, port: int | None = None, cancel_event=None):
+    """Explicitly stop and relaunch one project, excluding concurrent launches."""
+    from phase_agent.runtime.project_service import project_lock
+
+    _check_start_cancelled(cancel_event)
+    with project_lock(path, lock_name="launch.lock"):
+        _check_start_cancelled(cancel_event)
+        if not stop_project_service(path, process):
+            raise RuntimeError("原服务未能停止，未启动新服务；请稍后重试")
+        _check_start_cancelled(cancel_event)
+        return _start_agent(path, port=port, cancel_event=cancel_event)
+
+
 def start_agent(
     path: Path, *, port: int | None = None, cancel_event=None
 ) -> tuple[object, str, bool]:

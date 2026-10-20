@@ -223,7 +223,7 @@ def test_review_is_presented_not_only_purpose():
     )
     for label in ("本轮发现", "微调取舍", "新branch取舍", "补DFT取舍", "收敛与停止", "数据局限"):
         assert label in text
-    assert text.index("本轮总结") < text.index("下一步建议") < text.index("回复“同意”")
+    assert text.index("本轮总结") < text.index("下一步建议") < text.index("确认范围：")
     assert text.count("微调取舍") == 1
 
 

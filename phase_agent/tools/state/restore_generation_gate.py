@@ -3,8 +3,8 @@
 from copy import deepcopy
 
 
-def restore_generation_gate(state, manager):
-    current = deepcopy(state)
+def restore_generation_gate(state, manager, *, _owned=False):
+    current = state if _owned else deepcopy(state)
     if current.get("dedup_gate") is not None or manager is None:
         return current
     records = manager.data.get("structures") or {}

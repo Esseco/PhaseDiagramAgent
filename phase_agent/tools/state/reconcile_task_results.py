@@ -18,7 +18,26 @@ def reconcile_task_results(state: dict | None, recovered_results=None, *, _owned
     tasks = current.setdefault("tasks", deepcopy(current.get("pending_tasks") or []))
     processed = current.setdefault("processed_task_ids", [])
     reconciled = []
-    for incoming in recovered_results or []:
+    from phase_agent.persistence.ledger.result_validation import (
+        validate_scientific_result,
+        validate_result_binding,
+        InvalidScientificResult,
+    )
+
+    for index, incoming in enumerate(recovered_results or []):
+        try:
+            validate_scientific_result(incoming)
+        except InvalidScientificResult as error:
+            task_id = (
+                incoming.get("task_id")
+                if isinstance(incoming, dict) and isinstance(incoming.get("task_id"), str)
+                else None
+            )
+            current.setdefault("result_validation_errors", {})[
+                task_id or f"invalid-item-{index}"
+            ] = {"code": error.code, "task_id": task_id, "scope": "task", "automatic_retry": False}
+            reconciled.append({"status": "rejected", "task_id": task_id, "reason": error.code})
+            continue
         result = deepcopy(incoming)
         task_id = result.get("task_id")
         task_key = result.get("task_key")
@@ -36,6 +55,21 @@ def reconcile_task_results(state: dict | None, recovered_results=None, *, _owned
             (index for index, item in enumerate(tasks) if item.get("task_id") == task_id),
             None,
         )
+        try:
+            prior = tasks[existing_index] if existing_index is not None else {}
+            validate_result_binding(result, prior)
+        except InvalidScientificResult as error:
+            current.setdefault("result_validation_errors", {})[task_id] = {
+                "code": error.code,
+                "task_id": task_id,
+                "scope": "task",
+                "result_path": result.get("result_path"),
+                "automatic_retry": False,
+                "recovery": "核对原始结果和绑定，重新校验回传；不重投计算",
+            }
+            reconciled.append({"status": "rejected", "task_id": task_id, "reason": error.code})
+            continue
+        current.setdefault("result_validation_errors", {}).pop(task_id, None)
         if existing_index is not None and tasks[existing_index].get("recovery_cancelled") is True:
             reconciled.append(
                 {

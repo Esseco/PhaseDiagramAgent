@@ -14,10 +14,14 @@ ENERGY_BASIS = "total_eV_with_actual_cell_composition"
 
 
 def build_relax_hull(records, *, model_version, system_id=None):
+    from phase_agent.analysis.convergence.mlip_relaxation import relaxation_failure
+
     rows = [
         deepcopy(r)
         for r in records
         if r.get("model_version") == model_version
+        and r.get("checks_passed", True) is True
+        and not relaxation_failure({"stage": "relax_and_feature", **r})
         and (
             r.get("converged") is True
             or r.get("single_point_completed") is True

@@ -30,6 +30,9 @@ def update_phase_diagram(
     if energy_basis not in {"total", "per_atom", "per_formula_unit"}:
         raise ValueError("energy_basis 必须是 total/per_atom/per_formula_unit")
     output = {"energy_basis": energy_basis, "diagrams": {}, "mlip_by_version": {}}
+    from phase_agent.analysis.convergence.mlip_relaxation import relaxation_failure
+
+    tasks = {t.get("task_id"): t for t in (output_state or {}).get("tasks") or []}
     versions = sorted(
         {
             str(item.get("model_version") or item.get("source_version") or "unknown")
@@ -56,6 +59,11 @@ def update_phase_diagram(
         normalized, rejected = [], []
         for item in selected:
             try:
+                if method == "mlip" and (
+                    item.get("checks_passed", True) is not True
+                    or relaxation_failure(tasks.get(item.get("source_task_id")) or item)
+                ):
+                    raise ValueError("MLIP relaxation quality standard not passed")
                 if method == "dft":
                     from phase_agent.science.dft.spin_acceptance import spin_standard_passed
 

@@ -47,7 +47,7 @@ def build_direction_graph(checkpointer):
 
 def direction_checkpoint(state_path, proposal, decision=None):
     from filelock import FileLock
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     from langgraph.types import Command
 
     direction = proposal["direction"]
@@ -62,7 +62,7 @@ def direction_checkpoint(state_path, proposal, decision=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     config = {"configurable": {"thread_id": identity}}
     with FileLock(str(path) + ".lock", timeout=10):
-        with SqliteSaver.from_conn_string(str(path)) as saver:
+        with SqliteSaver.from_conn_string(str(path), maintain_history=False) as saver:
             graph = build_direction_graph(saver)
             snapshot = graph.get_state(config)
             if not snapshot.values:

@@ -49,7 +49,7 @@ def generated():
         ("prepare_local_batch_files", "mc_inputs"),
     ],
 )
-def test_refresh_requires_new_generation_before_new_scientific_search(tool, mode):
+def test_refresh_requires_new_generation_before_downstream_route(tool, mode):
     s = switched()
     assert "new_model_branch_generation_required" in branch_entry_errors(
         {"tool": tool, "target_ids": ["old_branch"], "parameters": {"mode": mode}}, s
@@ -64,19 +64,12 @@ def test_refresh_requires_new_generation_before_new_scientific_search(tool, mode
     )
 
 
-def test_first_search_targets_new_branches_and_then_dft_can_follow():
+def test_first_search_can_mix_old_and_new_branches_and_choose_dft():
     s = generated()
     assert new_model_search_errors(s, ["b1"]) == []
-    assert new_model_search_errors(s, ["old_branch"]) == [
-        "first_new_model_search_requires_generated_branches"
-    ]
-    assert new_model_search_errors(s, ["b1", "old_branch"])
-    assert new_model_search_errors(s, dft=True) == ["new_model_branch_search_required_before_dft"]
-    s["tasks"] = [
-        {"model_version": "new", "stage": "deep_search", "branch_id": "b1", "status": "completed"}
-    ]
-    assert new_model_search_errors(s, dft=True) == []
     assert new_model_search_errors(s, ["old_branch"]) == []
+    assert new_model_search_errors(s, ["b1", "old_branch"]) == []
+    assert new_model_search_errors(s, dft=True) == []
 
 
 @pytest.mark.parametrize(
@@ -99,8 +92,8 @@ def test_baseline_model_and_explicit_current_validation_are_preserved():
     assert new_model_search_errors(s, ["old_branch"]) == []
     s = switched()
     s["training_validation_planning"] = {"status": "active", "scope": {"model_version": "new"}}
-    assert new_model_search_errors(s, dft=True) == []
-    assert new_model_search_errors(s, ["old_branch"])
+    assert new_model_search_errors(s, dft=True) == ["new_model_branch_generation_required"]
+    assert new_model_search_errors(s, ["old_branch"]) == ["new_model_branch_generation_required"]
 
 
 def test_direct_diagnosis_cannot_bypass_prerequisite():
@@ -185,7 +178,7 @@ def test_context_transport_and_cached_snapshot_keep_prerequisite():
     s["current_state_snapshot"] = {"decision_context": {}}
     c = agent_state_summary(s)["decision_context"]
     compact = proposal_material({"decision_context": c})["decision_context"]["new_model_generation"]
-    assert compact["required"] and not compact["ready"]
+    assert compact["post_refresh"] and compact["required"] and not compact["ready"]
     assert compact["generated_branch_ids"] == []
 
 
@@ -194,8 +187,8 @@ def test_status_reports_the_missing_current_generation_stage():
 
     s = switched()
     s["model_refresh"].update(supplemental_declined_by_user=True, recovered_task_count=285)
-    assert "等待生成本轮新branch" in brief_chat_state(s)
+    assert "先生成新branch" in brief_chat_state(s)
     s = generated()
     assert "本轮新branch已登记" in brief_chat_state(s)
     s["tasks"] = [{"status": "pending", "stage": "relax_and_feature", "model_version": "new"}]
-    assert "等待生成本轮新branch" not in brief_chat_state(s)
+    assert "等待按需搜索方案" not in brief_chat_state(s)

@@ -15,6 +15,7 @@ from phase_agent.runtime.local_project_launcher import (
     read_project_registry,
     register_project,
     registry_path,
+    restart_agent,
     start_agent,
     _stop_owned_process,
     _load_config,
@@ -234,18 +235,27 @@ def main():
             except (OSError, ValueError, KeyError) as error:
                 display(str(error))
 
-    def launch():
+    def launch(*, restarting=False):
         path = selected()
         if path is None or path in busy:
             return
         busy.add(path)
-        start_cancellations[path] = threading.Event()
-        display(f"正在启动 {path.parent.name}… 初始化和旧会话恢复可能需要等待；请勿重复启动。")
+        cancel_event = start_cancellations[path] = threading.Event()
+        previous_process = owned.get(path)
+        operation = "重启" if restarting else "启动"
+        display(
+            f"正在{operation} {path.parent.name}… 初始化和旧会话恢复可能需要等待；请勿重复操作。"
+        )
         refresh()
 
         def worker():
             try:
-                process, token, reused = start_agent(path, cancel_event=start_cancellations[path])
+                if restarting:
+                    process, token, reused = restart_agent(
+                        path, previous_process, cancel_event=cancel_event
+                    )
+                else:
+                    process, token, reused = start_agent(path, cancel_event=cancel_event)
                 service = {"studio_port": process.studio_port, "control_port": process.control_port}
                 replies.put(("ready", path, (process, reused, service)))
             except Exception as error:
@@ -253,7 +263,7 @@ def main():
                     (
                         "message",
                         path,
-                        f"启动失败：{error}",
+                        f"{operation}失败：{error}",
                     )
                 )
             finally:
@@ -267,7 +277,8 @@ def main():
             return
         if path in start_cancellations:
             start_cancellations[path].set()
-        process = owned.get(path)
+        # During restart the saved handle can still refer to the previous process.
+        process = None if path in busy else owned.get(path)
         from phase_agent.runtime.local_project_launcher import stop_project_service
 
         if stop_project_service(path, process):
@@ -323,6 +334,7 @@ def main():
         (
             ("选择文件夹", add),
             ("启动服务", launch),
+            ("重启服务", lambda: launch(restarting=True)),
             ("查看本轮过程", open_process),
             ("停止服务", stop),
         )

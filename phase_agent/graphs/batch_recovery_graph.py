@@ -96,7 +96,7 @@ def build_batch_recovery_graph(checkpointer=None):
 def recover_batch_stages(state, state_path, *, graph=None):
     from copy import copy
     from filelock import FileLock
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     from langgraph.types import Command
 
     tasks = [
@@ -126,7 +126,7 @@ def recover_batch_stages(state, state_path, *, graph=None):
         "recursion_limit": 16,
     }
     with FileLock(str(path) + ".lock", timeout=10):
-        with SqliteSaver.from_conn_string(str(path)) as saver:
+        with SqliteSaver.from_conn_string(str(path), maintain_history=False) as saver:
             executable = copy(graph) if graph is not None else build_batch_recovery_graph(saver)
             executable.checkpointer = saver
             snapshot = executable.get_state(config)

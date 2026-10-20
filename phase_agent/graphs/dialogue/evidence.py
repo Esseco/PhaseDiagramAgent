@@ -90,11 +90,16 @@ def conversation_facts(facts, project):
     }
 
 
-def read_topics(facts, topics):
+def read_topics(facts, topics, *, manager=None):
     from phase_agent.analysis.state.build_decision_context import build_decision_context
 
     fields = {
-        "mc": ("mc_entry_conditions", "available_branches", "current_phase_diagram"),
+        "mc": (
+            "mc_entry_conditions",
+            "available_branches",
+            "current_phase_diagram",
+            "branch_pool_facts",
+        ),
         "dft": (
             "qbc_candidates",
             "post_dft_assessment",
@@ -130,6 +135,15 @@ def read_topics(facts, topics):
     selected = {key for topic in topics for key in fields[topic]}
     context = build_decision_context(facts) if selected else {}
     result = {key: deepcopy(context.get(key)) for key in selected}
+    if "mc" in topics and manager is not None:
+        from phase_agent.tools.relax_mc_batch.plan import registration_facts
+
+        config = facts.get("confirmed_config") or {}
+        config = {
+            **config,
+            "mlip": {**(config.get("mlip") or {}), **(facts.get("active_model") or {})},
+        }
+        result["relax_mc_entry_conditions"] = registration_facts(facts, manager, config)
     if "configuration" in topics:
         result["confirmed_configuration"] = deepcopy(facts.get("confirmed_config") or {})
     if "model" in topics:

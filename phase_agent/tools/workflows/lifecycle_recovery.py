@@ -1,6 +1,8 @@
 """Result collection, scientific feedback, waiting and round assessment."""
 
 from copy import deepcopy
+from phase_agent.interface_compatibility import call_with_optimizations
+from phase_agent.runtime.turn_process import timed_call
 from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
 from phase_agent.tools.workflows.apply_scientific_feedback import apply_scientific_feedback
 from phase_agent.tools.workflows.lifecycle_support import (
@@ -25,14 +27,32 @@ def _collect_workflow_results(frame):
     state_path = frame["state_path"]
     from phase_agent.tools.state.restore_generation_gate import restore_generation_gate
 
-    loaded_state = restore_generation_gate(loaded_state, manager)
+    loaded_state = timed_call(
+        "history_generation_gate",
+        call_with_optimizations,
+        restore_generation_gate,
+        loaded_state,
+        manager,
+        _optimizations={"_owned": True},
+        category="processing",
+    )
     from phase_agent.tools.local.recover_remote_training import recover_remote_training
 
-    loaded_state, training_returns = recover_remote_training(loaded_state)
+    loaded_state, training_returns = timed_call(
+        "training_return_inspection",
+        call_with_optimizations,
+        recover_remote_training,
+        loaded_state,
+        _optimizations={"_owned": True},
+        category="processing",
+    )
     if loaded_state.get("relax_mc_batches"):
         from phase_agent.tools.relax_mc_batch.results import recover_available
 
-        loaded_state = recover_available(
+        loaded_state = timed_call(
+            "relax_mc_return_inspection",
+            call_with_optimizations,
+            recover_available,
             loaded_state,
             {
                 "manager": manager,
@@ -40,11 +60,18 @@ def _collect_workflow_results(frame):
                 "config_version": frame["snapshot"]["config_version"],
                 "phase_references": frame["phase_references"],
             },
+            _optimizations={"_owned": True},
+            category="processing",
         )
     collector = task_runner or result_collector
     if collector is not None:
         if hasattr(collector, "collect_results_with_report"):
-            collected = collector.collect_results_with_report(loaded_state)
+            collected = timed_call(
+                "scientific_return_collection",
+                collector.collect_results_with_report,
+                loaded_state,
+                category="processing",
+            )
             automatic_results = collected["results"]
             collection_report = collected["report"]
         else:
@@ -55,7 +82,15 @@ def _collect_workflow_results(frame):
     import_records(loaded_state, effective_config)
     shared_results = reusable_results(loaded_state, manager, effective_config)
     combined_results = [*(recovered_results or []), *automatic_results, *shared_results]
-    pre_reconciled = reconcile_task_results(loaded_state, combined_results)
+    pre_reconciled = timed_call(
+        "history_task_reconciliation",
+        call_with_optimizations,
+        reconcile_task_results,
+        loaded_state,
+        combined_results,
+        _optimizations={"_owned": True},
+        category="processing",
+    )
     from phase_agent.tools.workflows.comparison_model_registry import remember_comparison_models
 
     remember_comparison_models(pre_reconciled["state"], effective_config)
@@ -87,11 +122,13 @@ def _collect_workflow_results(frame):
 def _advance_training_workflow(frame, *, graph=None):
     from phase_agent.tools.local.training_handoff import advance_training_handoffs
 
-    current, waits = advance_training_handoffs(
+    current, waits = call_with_optimizations(
+        advance_training_handoffs,
         frame["pre_reconciled"]["state"],
         frame["effective_config"],
         state_path=frame.get("state_path") or frame["effective_config"].get("state_path"),
         graph=graph,
+        _optimizations={"_owned": True},
     )
     frame["pre_reconciled"]["state"] = current
     return {**frame, "loaded_state": current, "training_handoffs": waits}
@@ -126,7 +163,10 @@ def _analyze_workflow_results(frame):
     phase_cache_path = frame["phase_cache_path"]
     execution_mode = frame["execution_mode"]
     collection_report = frame["collection_report"]
-    feedback = apply_scientific_feedback(
+    feedback = timed_call(
+        "scientific_feedback_processing",
+        call_with_optimizations,
+        apply_scientific_feedback,
         pre_reconciled["state"],
         combined_results,
         manager=manager,
@@ -139,16 +179,30 @@ def _analyze_workflow_results(frame):
         or (effective_config.get("mlip") or {}).get("name"),
         phase_references=phase_references,
         phase_identification_cache_path=phase_cache_path,
+        _optimizations={"_owned": True},
+        category="processing",
     )
     from phase_agent.analysis.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
     from phase_agent.tools.cost.gpu_usage_ledger import update_gpu_usage
 
-    update_gpu_usage(feedback["state"], effective_config, combined_results)
+    timed_call(
+        "history_gpu_accounting",
+        update_gpu_usage,
+        feedback["state"],
+        effective_config,
+        combined_results,
+        category="processing",
+    )
 
-    feedback["state"] = update_local_mlip_hull_pool(
+    feedback["state"] = timed_call(
+        "mlip_pool_processing",
+        call_with_optimizations,
+        update_local_mlip_hull_pool,
         feedback["state"],
         config=effective_config,
         path=effective_config.get("branch_energy_pool_ledger_path"),
+        _optimizations={"_owned": True},
+        category="processing",
     )
     feedback["state"]["budget_limits"] = deepcopy(effective_config.get("budgets") or {})
     feedback["state"]["branch_candidates"] = _branch_candidates_for_agent(manager)

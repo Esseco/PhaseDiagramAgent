@@ -24,10 +24,12 @@ def test_partial_restart_and_failure_reports(tmp_path):
     assert report["relax_and_feature"]["completed_ids"] == ["r1", "r2"]
     assert report["dft_single_point"]["waived_ids"] == ["d1"]
     assert report["deep_search"]["status"] == "failures_require_review"
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     from phase_agent.graphs.batch_recovery_graph import build_batch_recovery_graph
 
-    with SqliteSaver.from_conn_string(str(tmp_path / "langgraph_batches.sqlite")) as saver:
+    with SqliteSaver.from_conn_string(
+        str(tmp_path / "langgraph_batches.sqlite"), maintain_history=False
+    ) as saver:
         thread = list(saver.list(None))[0].config["configurable"]["thread_id"]
         assert (
             build_batch_recovery_graph(saver)

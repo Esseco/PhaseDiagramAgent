@@ -52,11 +52,32 @@ def approval_reply(proposal, state):
     reason = proposal.get("reason") or (proposal.get("raw_action") or {}).get("reason")
     if reason and reason != purpose:
         result += str(reason).rstrip("。") + "。"
-    evidence = (proposal.get("raw_action") or {}).get("evidence_reference_check") or {}
+    scope_lines = []
+    if tool == "generate_branches" and params.get("sampling_mode") != "region_adaptive":
+        from phase_agent.runtime.proposal_presentation import concise_generation_lines
+
+        scope_lines = concise_generation_lines(params, {})[1:]
+    elif tool == "generate_branches":
+        from phase_agent.runtime.proposal_presentation import region_scope_lines
+
+        scope_lines = region_scope_lines(params)
+    elif tool == "allocate_mc_bohb":
+        from phase_agent.runtime.proposal_presentation import mc_scope_lines
+
+        scope_lines = mc_scope_lines(params)
+    elif "supplemental_relax_parameters" in params:
+        settings = params["supplemental_relax_parameters"]
+        count = len((proposal.get("raw_action") or {}).get("target_ids") or [])
+        result = f"待确认：为 {count} 个单点候选追加弛豫输入；首批结果保留。"
+        scope_lines = [
+            f"设置：最多 {settings.get('relax_steps', 300)} 步，{settings.get('optimizer', 'LBFGS')}；未收敛结果排除，不自动延长或重试。"
+        ]
     jobs = workload.get("gpu_jobs_upper_by_wave")
     budget = (
         f"最多 {sum(jobs)} 个 GPU 计算作业，另 1 个控制作业" if jobs else "计算量待任务展开后估算"
     )
+    if "supplemental_relax_parameters" in params:
+        budget = f"本批 {count} 个弛豫任务；预计相对成本 {(proposal.get('estimated_cost') or {}).get('estimated_total_cost', '未记录')}"
     if workload:
         count = workload.get("relax_structure_tasks")
         waves = workload.get("mc_task_upper") or []
@@ -70,9 +91,17 @@ def approval_reply(proposal, state):
         if seconds is not None
         else "；耗时暂无可靠估计。"
     )
+    if (
+        tool == "generate_branches"
+        and params.get("sampling_mode") == "region_adaptive"
+        and not params.get("regions")
+    ):
+        budget = "暂不新增branch；后续搜索工作量另行提案，不执行计算。"
     if proposal.get("recommended_action") == "check_convergence":
         budget = "仅检查已有数据，不新增计算任务。"
-    from phase_agent.runtime.evidence_reference_presentation import evidence_reference_lines
+    from phase_agent.runtime.evidence_reference_presentation import (
+        evidence_reference_lines,
+    )
 
     evidence_lines = [
         line.replace("依据提醒：", "需注意：", 1)
@@ -87,14 +116,14 @@ def approval_reply(proposal, state):
 
     artifact_lines = []
     if artifacts:
-        artifact_lines = file_location_lines("Branch", artifacts["json"])
+        artifact_lines = file_location_lines("Branch 分布与构成文件", artifacts["text"])
     from phase_agent.tools.workflows.dft_selection_artifacts import (
         proposal_artifacts as dft_artifacts,
     )
 
     dft_details = dft_artifacts(proposal, state)
     if dft_details:
-        artifact_lines.extend(file_location_lines("DFT 选点", dft_details["json"]))
+        artifact_lines.extend(file_location_lines("DFT 选点文件", dft_details["text"]))
     shared = (proposal.get("raw_action") or {}).get("_shared_dft_snapshot")
     if shared is not None:
         artifact_lines.append(
@@ -106,7 +135,8 @@ def approval_reply(proposal, state):
         [
             "本次：" + purpose,
             "结果：" + result,
-            "下一步：回复‘同意’或提出修改。确认范围：" + boundary,
+            *[line for line in scope_lines if line],
+            "下一步：回复‘同意’、‘拒绝’或提出修改。确认范围：" + boundary,
             "预算：" + budget,
             *evidence_lines,
             *artifact_lines,
@@ -130,7 +160,6 @@ def concise_body(reply, state):
         "本次仅查看",
         "完整记录：",
         "详细记录：",
-        "当前状态：",
         "当前项目状态：",
         "累计任务：",
         "剩余相对预算",
@@ -161,12 +190,32 @@ def concise_body(reply, state):
         line = re.sub(r"config-\d+-[a-f0-9]+", "已确认配置", line)
         if line not in lines:
             lines.append(line)
+    # A status query can include the full approval card. Keep its exact scope
+    # and one review instruction, instead of printing two competing next steps.
+    next_steps = [line for line in lines if line.startswith("下一步：")]
+    scoped = next((line for line in next_steps if "确认范围：" in line), None)
+    if scoped and len(next_steps) > 1:
+        boundary = scoped.split("确认范围：", 1)[1]
+        merged = "下一步：查看方案后回复“同意”“拒绝”或提出修改。确认范围：" + boundary
+        if any("本次查询不会批准" in line for line in next_steps):
+            merged += "本次查询不会批准。"
+        index = next(i for i, line in enumerate(lines) if line.startswith("下一步："))
+        lines = [line for line in lines if not line.startswith("下一步：")]
+        lines.insert(index, merged)
     if not any(line.startswith("本次：") for line in lines):
         lines.insert(
             0,
             "本次："
             + (
-                "已保存输入或计算方案，等待确认。"
+                "未生成有效新方案，原待审方案保留。"
+                if state.get("pending_execution_policies")
+                and any(
+                    line.startswith(
+                        ("本轮未执行：", "本轮失败：", "结果：本轮未执行：", "结果：本轮失败：")
+                    )
+                    for line in lines
+                )
+                else "已保存输入或计算方案，等待确认。"
                 if state.get("pending_execution_policies")
                 else "已检查当前项目状态。"
             ),

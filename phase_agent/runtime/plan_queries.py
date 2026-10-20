@@ -1,5 +1,7 @@
 """Inspect persisted pending plans without rerunning scientific decisions."""
 
+from phase_agent.tools.workflows.readonly_views import read_only_view
+
 
 def is_plan_query(message):
     text = str(message).lower().replace(" ", "").strip("？?。.!！")
@@ -21,6 +23,7 @@ def is_plan_query(message):
     }
 
 
+@read_only_view
 def pending_plan_reply(state):
     pending = state.get("pending_execution_policies") or {}
     regeneration = [
@@ -50,7 +53,7 @@ def pending_plan_reply(state):
         approval = (
             "请在本机审批页核对并批准："
             + f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
-            if card.get("sensitive")
+            if card.get("sensitive") and row.get("review_kind") != "model_activation"
             else "核对后可回复‘同意’或‘拒绝’。"
         )
         return (
@@ -79,6 +82,18 @@ def pending_plan_reply(state):
     if not proposal:
         return "待确认记录缺少具体方案，暂不可批准；请检查方案记录。未执行任务。"
     raw = proposal.get("raw_action") or {}
+    from phase_agent.tools.policy.branch_conditions import branch_entry_errors
+
+    prerequisites = branch_entry_errors(raw, state)
+    if (
+        "new_model_branch_generation_required" in prerequisites
+        or "post_refresh_branch_generation_separate_review_required" in prerequisites
+    ):
+        return (
+            "已保存方案：\n暂不可批准：新模型刷新后须先生成新branch并展示实际数量、分布和结构清单。"
+            "原方案保留，但不能跳过此步骤执行。\n"
+            "下一步：提出新的branch生成方案供审批；生成结果展示后，再单独审批Relax/MC方案。"
+        )
     task_key = raw.get("task_key")
     effective = (state.get("effective_decisions") or {}).get(task_key) or {}
     blocked = effective.get("status") in {

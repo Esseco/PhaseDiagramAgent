@@ -39,8 +39,10 @@ def post_refresh_search_context(state):
         "relax_completed": counts[("relax_and_feature", "completed")],
         "instruction": (
             "当前模型已激活且结构与相图刷新完成。旧微调审阅和验证计划不是新轮次的执行指令。"
-            "先生成本轮新branch，再进行Relax+MC搜索；是否完成由new_model_generation事实判断。"
-            "旧branch池用于生成依据，不能把复用旧branch当作本轮新增。"
+            "刷新后必须先生成当前模型的新branch：先审批生成方案，生成后展示实际数量和分布，"
+            "再单独审批Relax/MC方案；不得直接复用旧branch跳过生成，也不得把后续输入捆绑进首次生成。"
+            "完成首次生成后，按需比较旧branch在新模型下续搜、新增branch及DFT。"
+            "旧branch的新模型基态、近简并、收益及续搜规则均应纳入判断；复用不冒充新增。"
             "刷新任务不等于新一轮MC搜索；缺少独立验证不构成必须先补DFT的条件。"
             "若选择DFT，说明当前候选的具体价值以及为何此时优于branch搜索；不机械扩搜或花满预算。"
             "训练/CV误差仍不等于独立测试，未验证的精度保持未知。每次一个动作，照常审批。"

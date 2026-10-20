@@ -93,5 +93,5 @@ def test_completed_refresh_does_not_claim_waiting_for_upload():
         ],
     }
     text = brief_chat_state(state)
-    assert "全部回收" in text and "待相识别" in text
+    assert "全部回收" in text and "相识别受阻" in text
     assert "等待结果" not in text

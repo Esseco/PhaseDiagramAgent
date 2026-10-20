@@ -69,12 +69,17 @@ def estimate_proposal_cost(action, state):
         }
     if tool == "prepare_local_batch_files" and params.get("mode") == "model_refresh_inputs":
         preview = params.get("refresh_preview") or {}
+        supplemental = "supplemental_relax_parameters" in params
         return {
             "workload": [
                 {
                     "stage": "relax_and_feature",
-                    "tasks": len(preview.get("candidates") or []),
-                    "maximum_supplemental_tasks": preview.get("maximum_supplemental_count"),
+                    "tasks": len(action.get("target_ids") or [])
+                    if supplemental
+                    else len(preview.get("candidates") or []),
+                    "maximum_supplemental_tasks": 0
+                    if supplemental
+                    else preview.get("maximum_supplemental_count"),
                     "estimated_cost": float(action.get("budget", 0)),
                 }
             ],

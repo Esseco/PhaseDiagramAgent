@@ -43,7 +43,8 @@ def default_run_config() -> dict[str, Any]:
             "main_model_index": 0,
             "relax_parameters": {
                 "fmax": 0.05,
-                "relax_steps": 150,
+                "relax_steps": 300,
+                "optimizer": "LBFGS",
                 "relax_cell": True,
                 "mace_default_dtype": "float64",
             },

@@ -43,7 +43,7 @@ def restore_control(state_path, state):
         return state
     if not record.get("restore_allowed", True):
         raise ValueError(
-            "stale_business_state_after_financial_reconciliation; reload verified state backup"
+            "stale_business_state_after_result_or_financial_reconciliation; reload current verified state"
         )
     binding = record["binding"]
     if any(
@@ -108,6 +108,11 @@ def reconciliation_patch(before, after):
             set(before.get("pending_execution_policies") or {})
             - set(after.get("pending_execution_policies") or {})
         ),
+        "pending_add": {
+            key: value
+            for key, value in (after.get("pending_execution_policies") or {}).items()
+            if value != (before.get("pending_execution_policies") or {}).get(key)
+        },
         "recoveries_remove": sorted(
             set(before.get("pending_execution_recoveries") or {})
             - set(after.get("pending_execution_recoveries") or {})

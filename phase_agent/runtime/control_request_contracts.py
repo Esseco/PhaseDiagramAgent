@@ -10,6 +10,19 @@ class ControlRequest(BaseModel):
     conversation_id: str = "local-control"
 
 
+class RecoveryTransactionResumeRequest(ControlRequest):
+    revision: Identifier
+
+
+class OperationResolveRequest(ControlRequest):
+    operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    record_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    state_version: Identifier
+    evidence_note: Identifier
+    external_jobs: Literal["none_found", "registered_only", "not_applicable"]
+    output_inventory: Literal["checked_no_outputs", "registered_outputs"]
+
+
 class ProposeRequest(ControlRequest):
     instruction: Identifier
 
@@ -71,7 +84,9 @@ class SkillPublishRequest(ControlRequest):
 
 
 MODELS = {
+    "/phase/operations/resolve": OperationResolveRequest,
     "/phase/propose": ProposeRequest,
+    "/phase/recovery/transaction/resume": RecoveryTransactionResumeRequest,
     "/phase/decision": DecisionRequest,
     "/phase/recovery/propose": RecoveryProposeRequest,
     "/phase/pause": PauseRequest,

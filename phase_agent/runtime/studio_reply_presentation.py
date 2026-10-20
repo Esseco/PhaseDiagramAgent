@@ -1,6 +1,7 @@
 """Present a Studio turn as status and advice without changing scientific decisions."""
 
 from phase_agent.runtime.chat_state_presentation import brief_chat_state
+from phase_agent.runtime.review_file_presentation import inventory_location_lines
 
 
 def format_turn_reply(reply, state, *, configuring=False):
@@ -88,7 +89,11 @@ def format_turn_reply(reply, state, *, configuring=False):
             and "本轮未执行" not in text
         ):
             return "\n".join(
-                [brief_chat_state(state).replace("当前：", "当前状态：", 1), *delivery]
+                [
+                    brief_chat_state(state).replace("当前：", "当前状态：", 1),
+                    *delivery,
+                    *inventory_location_lines(text),
+                ]
             )
     if not configuring and state.get("pending_execution_policies"):
         # A rejected new proposal must not hide the existing approval object.
@@ -110,13 +115,16 @@ def format_turn_reply(reply, state, *, configuring=False):
             text += "\n" + saved_plan_details()
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    current = next((line for line in lines if line.startswith(("当前：", "当前阶段："))), None)
+    current = next(
+        (line for line in lines if line.startswith(("当前：", "当前阶段：", "当前状态："))), None
+    )
     if current:
         current = current.replace("当前阶段：", "当前状态：", 1).replace("当前：", "当前状态：", 1)
     else:
         current = brief_chat_state(state, configuring=configuring).replace(
             "当前：", "当前状态：", 1
         )
+    reported_current = current
     if (
         not configuring
         and not state.get("tasks")
@@ -127,6 +135,11 @@ def format_turn_reply(reply, state, *, configuring=False):
         current = "当前状态：尚未开始搜索。"
     body = []
     for line in lines:
+        if line.startswith(("当前：", "当前阶段：", "当前状态：")):
+            normalized = "当前状态：" + line.split("：", 1)[1]
+            if normalized != reported_current:
+                body.append("需注意：" + line.split("：", 1)[1])
+            continue
         if line.startswith(
             (
                 "当前：",
@@ -177,7 +190,14 @@ def format_turn_reply(reply, state, *, configuring=False):
             body = [line for line in body if not line.startswith("建议：")]
             body.insert(
                 0,
-                "建议：先核对原任务与执行回执，当前方案暂不可批准。",
+                next(
+                    (
+                        line.replace("下一步：", "建议：", 1)
+                        for line in pending_details.splitlines()
+                        if line.startswith("下一步：")
+                    ),
+                    "建议：先核对原任务与执行回执，当前方案暂不可批准。",
+                ),
             )
             if pending_details not in text:
                 body.append(pending_details)

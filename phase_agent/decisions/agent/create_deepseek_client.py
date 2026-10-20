@@ -116,7 +116,9 @@ def create_deepseek_client(
         from time import monotonic
 
         bounded_control = payload.get("bounded_control") is True
-        effective_timeout = min(float(total_timeout), 12.0) if bounded_control else float(total_timeout)
+        effective_timeout = (
+            min(float(total_timeout), 12.0) if bounded_control else float(total_timeout)
+        )
         deadline = monotonic() + max(0.001, effective_timeout)
         planning = (payload.get("evidence_reader") or {}).get("phase") == "select_topics"
         important = not bounded_control and needs_deep_reasoning(payload)
@@ -157,7 +159,7 @@ def create_deepseek_client(
                 "content": (
                     "Select read-only evidence topics. Follow the evidence_request contract only. JSON only; no scientific action or conclusion."
                     if planning
-                    else RELAX_MC_PREFERENCE
+                    else ("" if bounded_control else RELAX_MC_PREFERENCE)
                     + (
                         system_prompt
                         or (
@@ -407,7 +409,13 @@ def create_deepseek_client(
         from phase_agent.runtime.turn_process import timed_call
 
         return timed_call(
-            "API 总时限 " + str(min(float(total_timeout), 12.0) if payload.get("bounded_control") is True else total_timeout) + " 秒",
+            "API 总时限 "
+            + str(
+                min(float(total_timeout), 12.0)
+                if payload.get("bounded_control") is True
+                else total_timeout
+            )
+            + " 秒",
             cached_request,
             payload,
             uncached_call,
