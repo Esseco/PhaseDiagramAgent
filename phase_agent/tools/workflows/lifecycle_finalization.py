@@ -25,7 +25,9 @@ def prepare_workflow_actions(frame, *, event_loop):
     # Transfer only the private frame already detached by lifecycle loading.
     # Never add private keywords to injected or legacy event-loop interfaces.
     target = getattr(event_loop, "func", event_loop)
-    ownership = {"_owned": True} if frame.get("saved_input_only") and target is run_action_turn else {}
+    ownership = (
+        {"_owned": True} if frame.get("saved_input_only") and target is run_action_turn else {}
+    )
     return event_loop(
         feedback["state"],
         config_session,

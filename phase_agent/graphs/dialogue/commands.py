@@ -198,15 +198,6 @@ def _is_status_command(message):
     }
 
 
-def _phase_csv_request(message):
-    value = " ".join(str(message or "").lower().split())
-    export_verb = any(word in value for word in ("导出", "输出", "给我"))
-    named_artifact = "相图" in value or "csv" in value
-    return (
-        export_verb and named_artifact and ("当前" in value or "最新" in value or "相图" in value)
-    )
-
-
 def _classify_history_decision(message):
     value = " ".join(str(message).strip().lower().split())
     if value in {"继续", "continue"}:

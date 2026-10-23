@@ -83,6 +83,14 @@ def commit_result_recovery(state_path, desired_state, files, *, expected_hashes,
         }
         _write_json(transaction_path, journal)
         record = {
+            **(
+                {
+                    "path_relocations": previous["path_relocations"],
+                    "path_relocation_revision": previous.get("path_relocation_revision"),
+                }
+                if previous and previous.get("path_relocations")
+                else {}
+            ),
             "schema_version": 1,
             "state_path": str(state_path),
             "revision": revision,

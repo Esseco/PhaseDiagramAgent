@@ -67,13 +67,7 @@ from phase_agent.runtime.response_preferences import ACTIONABLE_REPLY_RULE
 CONFIG_AGENT_SYSTEM_PROMPT += "\n" + ACTIONABLE_REPLY_RULE
 
 
-BOOTSTRAP_HINTS = {
-    "notes": [
-        "初始时提示用户可发送‘项目名称：Cr 相图’设置交互显示名称；名称可稍后设置，不阻止配置。",
-        "母结构目录使用当前项目的配置；不要沿用其他项目的目录或相列表。",
-        "远端模型路径由用户提供，仅保存为元数据。",
-    ],
-}
+from phase_agent.configuration.runtime.project_template import BOOTSTRAP_HINTS
 
 
 RECOMMENDED_CONFIG_CHECKS = (
@@ -450,6 +444,7 @@ class ConfigurationChatHandler:
         message = _latest_user_message(messages)
 
         from phase_agent.runtime.project_display_name import project_name_reply
+
         name_reply = project_name_reply(message, self.state_path)
         if name_reply is not None:
             return name_reply
@@ -1294,7 +1289,16 @@ class ConfigurationChatHandler:
             if source_hash_before != imported_config_hash:
                 raise ValueError("配置文件在读取或生成 H 期间发生变化，请保存后重新读取")
 
-        except (OSError, TypeError, ValueError, KeyError) as error:
+            verified_source = summarize_config_for_agent(
+                config,
+                source_path=self.editable_config_path,
+                source_hash=imported_config_hash,
+                generated_h=bool(
+                    (config.get("system") or {}).get("H_generation", {}).get("enabled")
+                ),
+            )
+
+        except (OSError, TypeError, ValueError, OverflowError, KeyError) as error:
             return f"配置 JSON 未导入：{error}\n当前草稿未更改。"
 
         updated = replace_config_from_json(
@@ -1325,13 +1329,6 @@ class ConfigurationChatHandler:
         agent_passed = False
 
         readiness = self.configuration_readiness(updated)
-
-        verified_source = summarize_config_for_agent(
-            config,
-            source_path=self.editable_config_path,
-            source_hash=imported_config_hash,
-            generated_h=bool((config.get("system") or {}).get("H_generation", {}).get("enabled")),
-        )
 
         if callable(self.agent_client):
             try:

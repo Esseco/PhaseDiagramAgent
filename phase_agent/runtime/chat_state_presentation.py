@@ -156,10 +156,13 @@ def brief_chat_state(state, *, configuring=False):
         counts = {}
         for row in active:
             name = names.get(row.get("stage"), "任务")
-            counts[name] = counts.get(name, 0) + 1
+            batch = (state.get("relax_mc_batches") or {}).get(row.get("relax_mc_bundle_id")) or {}
+            label = "项结果待核验" if batch.get("import_checksum") else "个待完成"
+            key = (name, label)
+            counts[key] = counts.get(key, 0) + 1
         return (
             "当前："
-            + "、".join(f"{name} {count} 个待完成" for name, count in counts.items())
+            + "、".join(f"{name} {count} {label}" for (name, label), count in counts.items())
             + "。"
         )
     from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment

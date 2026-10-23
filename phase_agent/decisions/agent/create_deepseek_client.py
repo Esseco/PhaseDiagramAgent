@@ -1,4 +1,4 @@
-"""创建单次调用、失败直接回报的 DeepSeek JSON 客户端。"""
+"""DeepSeek JSON client with one bounded recovery for truncated reasoning."""
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ def create_deepseek_client(
     thinking=None,
     routine_max_tokens=1600,
     reasoning_max_tokens=8192,
+    reasoning_effort="high",
     proposal_harness="legacy",
     deepagents_max_tokens=4096,
     deepagents_recursion_limit=8,
@@ -62,6 +63,8 @@ def create_deepseek_client(
         raise ValueError("需要 api_key 或 DEEPSEEK_API_KEY")
     if thinking not in {None, "enabled", "disabled"}:
         raise ValueError("thinking 必须是 enabled、disabled 或 None")
+    if reasoning_effort not in {"low", "high", "max"}:
+        raise ValueError("reasoning_effort must be low, high or max")
     if proposal_harness not in {"legacy", "deepagents", "hybrid"}:
         raise ValueError("proposal_harness must be legacy or deepagents")
     if proposal_harness == "hybrid":
@@ -78,6 +81,7 @@ def create_deepseek_client(
             thinking=thinking,
             routine_max_tokens=routine_max_tokens,
             reasoning_max_tokens=reasoning_max_tokens,
+            reasoning_effort=reasoning_effort,
         )
 
         def deep_factory():
@@ -133,6 +137,14 @@ def create_deepseek_client(
         # its candidate evidence still needs enough output headroom on the first call.
         if not count and important:
             count = evidence_row_count(context.get("qbc_candidates"))
+        if important:
+            # MC output also carries selected branch IDs and a structured allocation/review.
+            count = max(
+                count,
+                evidence_row_count(
+                    (context.get("mc_entry_conditions") or {}).get("available_allocations")
+                ),
+            )
         if planning or payload.get("semantic_dialogue") is True:
             count = 0
         contracts = payload.get("output_contracts") or {}
@@ -200,25 +212,50 @@ def create_deepseek_client(
         if bounded_control:
             max_tokens_this_try = 384
             thinking_this_try = "disabled"
+        effort_this_try = reasoning_effort
+        if isinstance(payload.get("analysis_plan"), dict):
+            from phase_agent.decisions.agent.analysis_context import AnalysisPlan
+
+            try:
+                plan = AnalysisPlan.model_validate(payload["analysis_plan"])
+                effort_this_try = plan.reasoning_effort or reasoning_effort
+            except ValueError:
+                pass  # Invalid scopes retain the configured effort.
+        from urllib.parse import urlsplit
+
+        endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        official = urlsplit(base_url)
+        can_continue = (
+            official.scheme == "https"
+            and official.netloc == "api.deepseek.com"
+            and official.path.rstrip("/") in {"", "/v1", "/beta"}
+        )
+        continuation = None
+        response_prefix = ""
         input_tokens = output_tokens = 0
         last_error = None
 
-        # A failed response is surfaced immediately; user decides when to retry.
+        # Only reasoning length exhaustion gets one recovery under the same deadline.
         from phase_agent.graphs.cancellation import check_cancelled
 
-        for attempt in range(1):
+        for attempt in range(2 if thinking_this_try == "enabled" else 1):
             check_cancelled()
             body = {
                 "model": model,
-                "messages": messages,
+                "messages": messages if continuation is None else messages + [continuation],
                 "response_format": {"type": "json_object"},
                 "max_tokens": max_tokens_this_try,
                 "temperature": 0.0,
             }
+            if continuation is not None:
+                # Prefix completion rejects JSON response_format; strict local parsing remains mandatory.
+                body.pop("response_format")
             if thinking_this_try is not None:
                 body["thinking"] = {"type": thinking_this_try}
+            if thinking_this_try == "enabled":
+                body["reasoning_effort"] = effort_this_try
             request = urllib.request.Request(
-                f"{base_url.rstrip('/')}/chat/completions",
+                endpoint,
                 data=json.dumps(body).encode("utf-8"),
                 headers={
                     "Authorization": f"Bearer {key}",
@@ -232,10 +269,19 @@ def create_deepseek_client(
                 model,
                 payload.get("mode"),
                 attempt,
-                sum(len(m["content"]) for m in messages),
+                sum(
+                    len(m.get("content") or "") + len(m.get("reasoning_content") or "")
+                    for m in body["messages"]
+                ),
                 phase="evidence_topics" if planning else "analysis",
                 max_output_tokens=max_tokens_this_try,
                 reasoning_enabled=thinking_this_try == "enabled",
+                reasoning_effort=effort_this_try if thinking_this_try == "enabled" else None,
+                recovery_kind="prefix_continuation"
+                if continuation is not None
+                else "restart"
+                if attempt
+                else None,
             )
             try:
                 from phase_agent.runtime.api_deadline import (
@@ -316,7 +362,7 @@ def create_deepseek_client(
                 last_error = DeepSeekResponseError(
                     "invalid_api_response", "DeepSeek API 返回内容格式异常。"
                 )
-                continue
+                break
 
             usage = result.get("usage") or {}
             finish_api_call(usage_entry, usage)
@@ -327,7 +373,7 @@ def create_deepseek_client(
                 last_error = DeepSeekResponseError(
                     "missing_choice", "DeepSeek API 没有返回可用回答。"
                 )
-                continue
+                break
 
             choice = choices[0]
             finish_reason = choice.get("finish_reason")
@@ -337,6 +383,39 @@ def create_deepseek_client(
             content = message.get("content")
             if usage_entry is not None:
                 usage_entry["response_chars"] = len(content) if isinstance(content, str) else 0
+            if finish_reason == "length" and thinking_this_try == "enabled":
+                last_error = DeepSeekResponseError(
+                    "output_truncated",
+                    f"模型思考与回答达到输出预算 {max_tokens_this_try} token，方案被截断。"
+                    "本轮未取得有效方案；可提高 reasoning_max_tokens 或缩小本轮决策范围后重试。",
+                )
+                if attempt == 0 and max_tokens_this_try < 32768:
+                    if not isinstance(content, str) or not content.strip():
+                        # Pure-thinking exhaustion: retain thinking and all evidence,
+                        # but avoid replaying the same runaway effort unchanged.
+                        effort_this_try = {"max": "high", "high": "low", "low": "low"}[
+                            effort_this_try
+                        ]
+                    if (
+                        can_continue
+                        and isinstance(content, str)
+                        and content.lstrip().startswith("{")
+                    ):
+                        try:
+                            json.loads(content)
+                        except json.JSONDecodeError:
+                            # Official prefix continuation retains work in memory, never in diagnostics.
+                            continuation = {
+                                "role": "assistant",
+                                "prefix": True,
+                                "content": content,
+                                "reasoning_content": message.get("reasoning_content") or "",
+                            }
+                            response_prefix = content
+                            endpoint = "https://api.deepseek.com/beta/chat/completions"
+                    max_tokens_this_try = min(32768, max_tokens_this_try * 2)
+                    continue
+                break
             if not isinstance(content, str) or not content.strip():
                 reasoning_content = message.get("reasoning_content")
                 last_error = DeepSeekResponseError(
@@ -346,14 +425,10 @@ def create_deepseek_client(
                     f"正文长度=0，思考字段长度={len(reasoning_content or '')}，"
                     f"输出 token={int(usage.get('completion_tokens') or 0)}）。",
                 )
-                if finish_reason in {
-                    "content_filter",
-                    "insufficient_system_resource",
-                    "aborted",
-                }:
-                    break
-                continue
+                break
 
+            if response_prefix and not content.startswith(response_prefix):
+                content = response_prefix + content
             try:
                 if finish_reason == "length":
                     raise ValueError("incomplete response")
@@ -364,19 +439,13 @@ def create_deepseek_client(
                     "DeepSeek 返回的内容无法解析为 JSON 对象 "
                     f"（结束原因={finish_reason or '未知'}，字符数={len(content)}）。",
                 )
-                if finish_reason in {
-                    "content_filter",
-                    "insufficient_system_resource",
-                    "aborted",
-                }:
-                    break
-                continue
+                break
 
             if not isinstance(action, dict):
                 last_error = DeepSeekResponseError(
                     "invalid_json_object", "DeepSeek 返回的 JSON 不是对象。"
                 )
-                continue
+                break
 
             action["_llm_usage"] = {
                 "calls": attempt + 1,
@@ -387,6 +456,7 @@ def create_deepseek_client(
                 "mode": payload.get("mode", "unknown"),
                 "transport_metrics": payload.get("transport_metrics"),
                 "reasoning_enabled": thinking_this_try == "enabled",
+                "reasoning_effort": effort_this_try if thinking_this_try == "enabled" else None,
             }
             return action
 

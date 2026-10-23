@@ -34,9 +34,7 @@ def migrate_persisted_state(state: dict, *, _owned=False) -> dict:
             current["current_state_snapshot"]
         )
     current["state_snapshots"] = [
-        item
-        if item.get("history_format") == "summary-v1"
-        else migrate_state_snapshot(item)
+        item if item.get("history_format") == "summary-v1" else migrate_state_snapshot(item)
         for item in current.get("state_snapshots") or []
     ]
     return current

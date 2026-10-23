@@ -55,6 +55,7 @@ def fixture(tmp_path):
             "structure_path": "/cluster/work/inputs/final.vasp",
             "structure_checksum": hashlib.sha256(structure.read_bytes()).hexdigest(),
             "energy": -1.0,
+            "energy_unit": "eV",
             "composition": {"Na": 1},
         },
     }

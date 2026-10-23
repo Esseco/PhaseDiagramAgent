@@ -477,6 +477,8 @@ def import_registered_bundles(directories, *, locations=None):
 
 def registered_return_locations(state):
     """Only persisted local handoffs may select an archive's import root."""
+    from phase_agent.tools.remote.legacy_recovery import _original_source_folder
+
     locations = {}
     rows = list(state.get("slurm_batches") or [])
     for job in (state.get("remote_finetune_jobs") or {}).values():
@@ -498,7 +500,7 @@ def registered_return_locations(state):
             raise ValueError("batch_output_directory_mismatch")
         target = {
             "directory": handoff["import_directory"],
-            "batch": folder.name[:-6],
+            "batch": _original_source_folder(state, handoff)[:-6],
             "input_archive": handoff["upload_archive"],
         }
         if str(output) in locations and locations[str(output)] != target:
@@ -510,7 +512,7 @@ def registered_return_locations(state):
         folder = Path(handoff["folder"])
         locations[handoff["return_directory"]] = {
             "directory": handoff["import_directory"],
-            "batch": folder.name[:-6],
+            "batch": _original_source_folder(state, handoff)[:-6],
             "input_archive": handoff["upload_archive"],
             "allowed_prefixes": handoff["allowed_prefixes"],
             "runtime_roots": handoff["runtime_roots"],

@@ -33,7 +33,6 @@ LABELS = {
     "inspection": "检查当前项目",
     "config_import": "核对配置",
     "dft_recovery": "检查 DFT 回传",
-    "export": "准备结果导出",
     "finetune": "检查模型更新",
     "mc": "检查 MC 状态",
     "rerun": "核对已确认的历史重做",

@@ -9,6 +9,9 @@ import subprocess
 import traceback
 import zipfile
 
+if "preflight_environment" not in globals():
+    from phase_agent.tools.remote.environment_preflight import preflight_environment
+
 
 # Generated standalone drivers receive these constants from the shared policy.
 if "MAX_ARCHIVE_FILES" not in globals():
@@ -21,7 +24,11 @@ if "MAX_ARCHIVE_FILES" not in globals():
 
 def prepare_work(root):
     archive = root / "inputs.zip"
-    fingerprint = hashlib.sha256(archive.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with archive.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    fingerprint = digest.hexdigest()
     work = root / "work"
     receipt = work / ".input_fingerprint"
     with zipfile.ZipFile(archive) as zipped:
@@ -59,8 +66,12 @@ def prepare_work(root):
                 or any(p in {"", ".", ".."} for p in name.split("/"))
             ):
                 raise ValueError("Unsafe input path")
-            payload = zipped.read(name)
-            if len(payload) != row["size"] or hashlib.sha256(payload).hexdigest() != row["sha256"]:
+            digest, size = hashlib.sha256(), 0
+            with zipped.open(name) as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    size += len(chunk)
+            if size != row["size"] or digest.hexdigest() != row["sha256"]:
                 raise ValueError("Input checksum mismatch")
         if receipt.exists():
             if receipt.read_text() != fingerprint:
@@ -72,7 +83,8 @@ def prepare_work(root):
             for name in names:
                 target = work.joinpath(*PurePosixPath(name).parts)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(zipped.read(name))
+                with zipped.open(name) as stream, target.open("wb") as output:
+                    shutil.copyfileobj(stream, output, 1024 * 1024)
             # The coordinator needs the archive's manifest as well as its payload.
             (work / "transfer_manifest.json").write_bytes(manifest_bytes)
             receipt.write_text(fingerprint)
@@ -96,6 +108,11 @@ def main(root=None):
     with (root / "run.log").open("a", encoding="utf-8") as log:
         try:
             work = prepare_work(root)
+            preflight_environment(
+                work,
+                ["submit_all.sh"],
+                required_modules=("numpy", "scipy", "pymatgen", "ase", "torch", "mace"),
+            )
             env = dict(os.environ, SLURM_SUBMIT_DIR=str(work))
             code = subprocess.call(
                 ["bash", "submit_all.sh"],
@@ -123,6 +140,7 @@ def main(root=None):
                 return code
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+            preflight = getattr(exc, "report", None)
             traceback.print_exc(file=log)
     publish_diagnostics(
         root,
@@ -132,6 +150,7 @@ def main(root=None):
             "returncode": code,
             "error": error,
             "results_available": (output / "results.zip").is_file(),
+            "preflight": locals().get("preflight"),
         },
     )
     print(f"Return this complete output folder: {output}")

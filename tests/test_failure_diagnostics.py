@@ -73,6 +73,7 @@ def test_diagnostics_collect_evidence_without_wavefunction_contents(tmp_path, mo
     assert len(result["files"]["out"]["text"]) == 65536
 
 
+@pytest.mark.real_project
 def test_failed_legacy_return_includes_root_diagnostics(tmp_path, monkeypatch):
     state, h = setup_original(tmp_path)
     derived = prepare_recovery_handoff(state, h, CPU)

@@ -16,7 +16,21 @@
 
 配置问题读 configuration；模型语义与输出错误读 decisions/agent；审批、预算、准备与回执读 tools；证据与相图读 analysis；算法和远端计算读 science；状态和记忆读 persistence；启动及服务读 runtime。HTTP/API 仅是传输接口，不能另建决策循环。详细位置见各包 README。
 
-### 兼容范围
+### 扩展模块的最短路径
+
+| 要改什么 | 所属位置 | 必须保持的边界 |
+| --- | --- | --- |
+| 新项目、文件路径、离线诊断 | `runtime/local_project_launcher.py`、`runtime/project_diagnostics.py` | 项目数据独立；诊断只读，坏文件分段报告 |
+| 新参数或结构自由度 | `configuration/schema`、`configuration/defaults` | 返回字段错误；不替用户猜测科学边界 |
+| 对话意图、配置查看、审批衔接 | `graphs/dialogue/graph.py`、`nodes.py`、`saved_control.py` | 路由接入已有图；查看不修订、不执行 |
+| 回传→分析→下一份方案 | `graphs/project/graph.py` 与相应节点 | 先观察实际证据；每轮最多执行一个已批准动作 |
+| 增加科学动作 | `graphs/actions`、`tools/dispatch` 现有注册入口 | 复用契约、预算、版本和回执；不另建执行循环 |
+| 常见文件故障隔离 | `tools/remote/batch_runner.py`、`integrity.py` | 单任务失败不抛弃整批；校验读取的同一份字节 |
+| 会话连续性、已批准知识 | `persistence/memory/` | 项目/线程隔离；历史对话不能授权，模型版本过滤保留 |
+
+图中只存可序列化事实，模型/锁/回调放 Runtime context。新的故障恢复路径先确定副作用归属：文件读取可重新尝试，未知执行必须走原回执核对。`node_trace` 是可选观测记录，不能成为科学操作成功与否的裁决者。
+
+### 旧数据兼容
 
 已保存的旧模块描述符通过 module_references.py 转换，旧科学数据有显式读取/迁移工具。保留数据兼容不等于保留旧执行框架。Pydantic 只验证契约；可选 Deep Agents/混合客户端只产生分析提案，仍进入同一个 LangGraph 校验与审批路径。
 
@@ -88,3 +102,10 @@ For generated projects, mc_entry_conditions is shared between model context, bou
 ### Proactive proposal after generation
 
 After successful generation with registered structures, lifecycle action completion prepares at most one further proposal using the existing interactive approval interface. A deterministic :next-proposal invocation carries no human feedback or replay record. It never authorizes another action. Generation results remain visible if proposal preparation fails; new pending approval is rebound for the conversation. Result recovery already precedes analysis and the next decision in the project graph; completion reports must enter that workflow rather than be treated as verified completion or answer-only guidance. This does not poll HPC or run without a new user/recovery event.
+
+
+### Project scaffold and input admission ownership
+
+`configuration/runtime/project_template.py` owns runtime defaults, bootstrap hints and the thin data-project entry. `configuration/session/project_scaffold.py` stages and reads back a new project; the launcher registers it only after publication. Do not copy application code into each data workspace.
+
+`tools/remote/input_validation.py` checks final upload bytes and keeps bounded, content-addressed process caches. `submission_handoff` and `relax_mc_batch/handoff` enforce it inside existing approved preparation; no second scheduler or extra scientific action is introduced. `environment_preflight.py` is embedded in standalone compute entries, uses module discovery and Bash parsing without importing model frameworks, and runs before child submission. Successful state facts contain only status, validator version, fingerprint and remote-check scope; presentation must not re-read ZIP files. See [recovery guide](../guides/recovery.md) for commands, limits and recovery semantics.

@@ -27,6 +27,14 @@ def revise_pending_proposal(
     prepare_debug_relax,
     apply_generation_defaults,
 ):
+    if (proposal.get("raw_action") or {}).get(
+        "tool"
+    ) == "select_dft_candidates" and "qbc_candidates" in current:
+        from phase_agent.tools.workflows.dft_proposal_evidence import refresh_dft_evidence
+
+        refresh_dft_evidence(
+            current, decision_state, (context or {}).get("effective_config") or config
+        )
     from phase_agent.decisions.agent.resolve_mc_budget_feedback import (
         resolve_mc_budget_feedback,
         resolve_mc_full_plan_steps,
@@ -224,9 +232,23 @@ def revise_pending_proposal(
         }
     from phase_agent.tools.workflows.attach_dft_preview import attach_dft_preview
 
-    revised_action, preview_error = attach_dft_preview(
-        revision["action"], current, (context or {}).get("effective_config") or config
-    )
+    if revision["action"].get("tool") == "select_dft_candidates":
+        from phase_agent.tools.workflows.prepare_dft_proposal import prepare_dft_proposal
+
+        preparation = prepare_dft_proposal(
+            revision["action"],
+            current,
+            decision_state,
+            (context or {}).get("effective_config") or config,
+            agent_client=agent_client,
+            revise=revise,
+        )
+        current = preparation.state
+        revised_action, preview_error = preparation.action, preparation.error
+    else:
+        revised_action, preview_error = attach_dft_preview(
+            revision["action"], current, (context or {}).get("effective_config") or config
+        )
     if preview_error:
         return {
             "status": "rejected",

@@ -75,7 +75,9 @@ def reconcile_task_results(state: dict | None, recovered_results=None, *, _owned
                 {
                     "status": "rejected",
                     "task_id": task_id,
-                    "reason": "dft_recovery_cancelled_by_user",
+                    "reason": "dft_recovery_cancelled_by_user"
+                    if tasks[existing_index].get("stage") in {"dft_single_point", "dft_relax"}
+                    else "task_wait_cancelled_by_user",
                 }
             )
             continue

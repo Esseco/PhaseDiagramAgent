@@ -21,10 +21,14 @@ from phase_agent.tools.relax_mc_batch.run import (
     prepare_wave,
     publish,
     SchedulerQueryError,
+    completion_outcome,
 )
+
+from phase_agent.tools.relax_mc_batch.failure_diagnostics import unverified_task_ids
 
 
 def finish(root, state, manager, manifest, status, reason=None):
+    status, reason = completion_outcome(state, status, reason)
     state["relax_mc_remote"]["status"] = status
     checkpoint(root, state, manager)
     archive = publish(root, state, manifest, status, reason)
@@ -92,6 +96,16 @@ def collect_phase(root, state, manager, manifest, io):
     meta = state["relax_mc_remote"]
     control = meta["phase_controllers"][str(meta["phase"])]
     batches = [b for b in state["slurm_batches"] if b["batch_id"] in control["batch_ids"]]
+    expected = {tid for batch in batches for tid in batch["task_ids"]}
+    if (
+        not expected
+        or {b["batch_id"] for b in batches} != set(control["batch_ids"])
+        or any(not b["task_ids"] for b in batches)
+        or not expected <= {t["task_id"] for t in state.get("tasks") or []}
+    ):
+        raise ValueError(
+            "phase_task_scope_invalid; inspect original job/task mapping; no submission"
+        )
     ids = [b["job_id"] for b in batches]
     scheduler_unknown = False
     try:
@@ -105,21 +119,15 @@ def collect_phase(root, state, manager, manifest, io):
     # Reuse receipt/checksum validation; no scientific task writes shared workflow state.
     from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
 
-    results = ManualUploadBatchRunner(
+    runner = ManualUploadBatchRunner(
         root / "jobs",
         worker_command=manifest["config"]["supercomputer"]["worker"]["command"],
-    ).collect_results(state)
-    expected = {tid for b in batches for tid in b["task_ids"]}
+    )
+    results = runner.collect_results(state)
     found = {r["task_id"]: r for r in results if r["task_id"] in expected}
     missing = expected - found.keys()
-    if not scheduler_unknown:
-        for task in state["tasks"]:
-            if task["task_id"] in missing:
-                found[task["task_id"]] = {
-                    **task,
-                    "status": "failed",
-                    "error": "ended_without_verified_result",
-                }
+    from phase_agent.tools.relax_mc_batch.failure_diagnostics import record_remote_diagnostics
+
     results = list(found.values())
     if results:
         state = feedback(
@@ -130,11 +138,17 @@ def collect_phase(root, state, manager, manifest, io):
             root,
             manifest["model_version"],
         )
+    missing |= unverified_task_ids(state, expected)
+    record_remote_diagnostics(
+        root, state, results, missing, getattr(runner, "last_collection_report", {}), io
+    )
     if scheduler_unknown:
         state["relax_mc_remote"]["scheduler_query_error"] = {
             **meta["scheduler_query_error"],
             "unverified_task_ids": sorted(missing),
         }
+        return state, results
+    if missing:
         return state, results
     for batch in state["slurm_batches"]:
         if batch["batch_id"] in control["batch_ids"]:
@@ -174,6 +188,15 @@ def advance(root, manifest, io, *, phase=None):
                         "partial",
                         "scheduler_state_unknown; verified results retained; no next phase submitted; inspect recorded job IDs before resuming",
                     )
+                if (meta.get("failure_diagnostics") or {}).get("unverified_task_ids"):
+                    return finish(
+                        root,
+                        state,
+                        manager,
+                        manifest,
+                        "paused",
+                        "remote_results_unverified; see return_diagnostics.json; no next phase submitted",
+                    )
                 if any(r.get("status") != "completed" for r in results):
                     return finish(
                         root,
@@ -198,6 +221,7 @@ def advance(root, manifest, io, *, phase=None):
                         in {
                             "phase_diagram_unavailable",
                             "continuation_pool_below_minimum",
+                            "tasks_in_progress",
                         }
                         else "completed"
                     )

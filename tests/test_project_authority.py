@@ -212,10 +212,17 @@ def test_header_is_rebuilt_from_model_activation_result_and_pending_draft(tmp_pa
 
     state = facts(tmp_path)
     card = current_project(state, {"status": "draft", "draft_revision": 19, "config": {}})
+    from phase_agent.runtime.response_preferences import response_detail
+
     text = format_epoch_reply("切换完成。", state, project_card=card)
-    assert text.startswith(tmp_path.name + " · epoch1 · 当前模型 new")
-    assert "设置修改待确认" in text
-    assert "config-v16" not in text
+    assert text.startswith(tmp_path.name + " · epoch1 · ")
+    assert "设置提醒：设置草稿尚未应用" in text
+    assert card["active_model"]["version"] == "new"
+    with response_detail("detailed"):
+        detailed = format_epoch_reply("切换完成。", state, project_card=card)
+    assert detailed.startswith(tmp_path.name + " · epoch1 · 当前模型 new")
+    assert "设置修改待确认" in detailed
+    assert "config-v16" not in text and "config-v16" not in detailed
 
 
 def test_legacy_cached_snapshot_gets_current_card_without_state_mutation():
@@ -433,8 +440,8 @@ def test_scientific_model_uses_actual_project_even_with_old_workspace_in_snapsho
     captured = []
 
     def model(payload):
-        captured.append(payload)
-        if len(captured) == 1:
+        captured.append(deepcopy(payload))
+        if payload.get("semantic_dialogue"):
             return {"kind": "advance", "answer": "分析当前项目"}
         return {"tool": "check_convergence", "parameters": {}, "budget": 0, "reason": "检查"}
 
@@ -442,6 +449,11 @@ def test_scientific_model_uses_actual_project_even_with_old_workspace_in_snapsho
     snapshot = handler.workflow_kwargs["config_session"]["confirmed_snapshot"]
     snapshot["config"].setdefault("storage", {})["workspace_root"] = str(tmp_path / "old-project")
     handler([{"role": "user", "content": "已经回收，分析下一步"}], conversation_id="t")
-    assert len(captured) == 2
-    assert captured[1]["state"]["current_project"]["project_path"] == str(tmp_path)
-    assert captured[1]["conversation_facts"]["current_project"]["project"] == tmp_path.name
+    assert sum(bool(row.get("semantic_dialogue")) for row in captured) == 1
+    scientific = [row for row in captured if not row.get("semantic_dialogue")]
+    assert scientific
+    for payload in scientific:
+        assert payload["state"]["current_project"]["project_path"] == str(tmp_path)
+        assert payload["conversation_facts"]["current_project"]["project"] == tmp_path.name
+        assert not payload.get("validation_errors")
+    assert not read_json(handler.state_path, {}).get("tasks")

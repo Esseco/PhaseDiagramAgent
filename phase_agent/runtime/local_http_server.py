@@ -37,7 +37,7 @@ def create_local_http_server(
         def do_GET(self):
             try:
                 self._get()
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
             except Exception as error:
                 self._boundary_failure(error, read_only=True)
@@ -45,7 +45,7 @@ def create_local_http_server(
         def do_POST(self):
             try:
                 self._post()
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
             except Exception as error:
                 self._boundary_failure(error, read_only=False)
@@ -64,7 +64,10 @@ def create_local_http_server(
                 )
             value = error_formatter("boundary_unavailable", diagnostic["message"])
             value["diagnostic"] = diagnostic
-            self._json(503, value)
+            try:
+                self._json(503, value)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
 
         def _get(self):
             if self.path == "/health":

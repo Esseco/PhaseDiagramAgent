@@ -4,6 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 import pickle
 import sqlite3
+from phase_agent.persistence.sqlite_paths import readonly_uri
 import zlib
 
 
@@ -78,9 +79,7 @@ def compact_sqlite(source, destination, *, preserve_all=False):
 
     from contextlib import closing
 
-    with closing(
-        sqlite3.connect(Path(source).resolve().as_uri() + "?mode=ro", uri=True)
-    ) as original:
+    with closing(sqlite3.connect(readonly_uri(source), uri=True)) as original:
         with closing(sqlite3.connect(destination)) as target:
             original.backup(target)
     with sqlite3.connect(destination) as conn:

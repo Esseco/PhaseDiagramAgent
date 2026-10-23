@@ -15,6 +15,7 @@ from phase_agent.runtime.runtime_config_io import (
     _import_reference,
     _reject_secrets,
     _session_from_state,
+    runtime_base_directory,
 )
 
 
@@ -35,18 +36,7 @@ def compose_runtime(
         search_client_settings,
     )
 
-    base = config_file.parent
-    if (settings.get("shared_dft") or {}).get(
-        "diagram_id"
-    ) == "diagram_default" and base.parent.name == "diagrams":
-        system_root = base.parent.parent
-        descriptor_file = system_root / "system.json"
-        if (
-            descriptor_file.is_file()
-            and json.loads(descriptor_file.read_text(encoding="utf-8")).get("default_diagram")
-            == base.name
-        ):
-            base = system_root
+    base = runtime_base_directory(config_file, settings)
     missing = [key for key in ("state_path", "ledger_path") if not settings.get(key)]
     if missing:
         raise ValueError(f"运行时配置缺少 {missing}；请编辑 {config_file}")
@@ -59,6 +49,14 @@ def compose_runtime(
         else None
     )
     state = _load_json_object(state_path, "state") if state_path.is_file() else {}
+    if state and settings.get("local_path_relocations"):
+        from phase_agent.configuration.session.relocate_workspace_paths import (
+            relocate_workspace_paths,
+        )
+
+        state = relocate_workspace_paths(
+            state, settings["local_path_relocations"], base, preserve_snapshots=True
+        )
     if state:
         from phase_agent.tools.remote.submission_storage import restore_state_archives
 
@@ -194,17 +192,14 @@ def compose_runtime(
     state_path, ledger_path = selected_state_path, selected_ledger_path
     state = _load_json_object(state_path, "state") if state_path.is_file() else {}
     if state and settings.get("local_path_relocations"):
-        # Rebind only operational training pointers; historical snapshots stay intact.
         from phase_agent.configuration.session.relocate_workspace_paths import (
             relocate_workspace_paths,
         )
         from phase_agent.tools.local.recover_remote_training import recover_remote_training
 
-        for job in (state.get("remote_finetune_jobs") or {}).values():
-            pointers = {"directory": job.get("directory")}
-            rebound = relocate_workspace_paths(pointers, settings["local_path_relocations"], base)
-            if rebound.get("directory"):
-                job["directory"] = rebound["directory"]
+        state = relocate_workspace_paths(
+            state, settings["local_path_relocations"], base, preserve_snapshots=True
+        )
         state, _ = recover_remote_training(state)
         write_json(state_path, state)
     if state and state.get("confirmed_config_version") != snapshot.get("config_version"):
@@ -277,10 +272,11 @@ def compose_runtime(
         "approval_directory",
         "local_action_directory",
         "mlip",
+        "python_environments",
     ):
         if key in settings:
             value = deepcopy(settings[key])
-            if key != "mlip" and isinstance(value, str):
+            if key not in {"mlip", "python_environments"} and isinstance(value, str):
                 value = str(_resolve_path(value, base))
             runtime_config[key] = value
     runtime_config.update(

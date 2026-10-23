@@ -15,13 +15,21 @@ def tmp_path(tmp_path_factory):
     return tmp_path_factory.mktemp("n")
 
 
+@pytest.fixture(autouse=True)
+def fake_environment(monkeypatch):
+    # These tests replace scientific execution; actual preflight has its own suite.
+    monkeypatch.setattr(driver, "preflight_environment", lambda *a, **k: {"status": "passed"})
+
+
 def package(root):
     root.mkdir()
     (root / "submit_all.sh").write_text(
-        '#!/bin/bash\n#SBATCH --gres=gpu:1\nset -euo pipefail\ncd -- "${SLURM_SUBMIT_DIR:?x}"\npython3 run_batch.py\n'
+        '#!/bin/bash\n#SBATCH --gres=gpu:1\nset -euo pipefail\ncd -- "${SLURM_SUBMIT_DIR:?x}"\npython3 run_batch.py\n', newline="\n"
     )
     (root / "inputs").mkdir()
-    (root / "inputs/structure.vasp").write_text("structure")
+    (root / "inputs/structure.vasp").write_text("test\n1\n1 0 0\n0 1 0\n0 0 1\nNa\n1\nDirect\n0 0 0\n")
+    (root / "run_batch.py").write_text("print('fake coordinator')\n")
+    (root / "batch.json").write_text(json.dumps({"schema_version": 1}))
     create_bundle(root, input_files(root), root / "inputs.zip", kind="inputs")
     return compact_handoff(root)
 
@@ -35,7 +43,7 @@ def test_named_three_files_manifest_resume_and_output(tmp_path, monkeypatch):
         "submit_all.sh",
         "run_upload.py",
     }
-    assert (folder / "run_upload.py").read_text() == BOOTSTRAP
+    assert (folder / "run_upload.py").read_text(encoding="utf-8") == BOOTSTRAP
     script = (folder / "submit_all.sh").read_text()
     assert "python3 run_upload.py" in script and "python3 - <<" not in script
     assert script.index("SLURM_JOB_ID") < script.index("python3")

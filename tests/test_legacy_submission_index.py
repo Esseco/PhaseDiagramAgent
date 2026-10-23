@@ -27,3 +27,31 @@ def test_other_project_or_other_diagram_is_rejected(tmp_path):
         other.mkdir(parents=True)
         with pytest.raises(ValueError, match="outside"):
             index_operation_path(root, other)
+
+
+def test_mc_index_shows_current_cancelled_waits_and_historical_inputs(tmp_path):
+    root = tmp_path / "project/submissions"
+    root.mkdir(parents=True)
+    state = {
+        "active_model_version": "m1",
+        "tasks": [{"relax_mc_bundle_id": "b1", "recovery_cancelled": True}] * 5,
+        "relax_mc_batches": {
+            "b0": {
+                "bundle_id": "b0",
+                "model_version": "m0",
+                "status": "completed",
+                "directory": str(root / "relax_mc_batches/epoch0_RelaxMC_Batch01"),
+            },
+            "b1": {
+                "bundle_id": "b1",
+                "model_version": "m1",
+                "status": "failed",
+                "directory": str(root / "relax_mc_batches/epoch1_RelaxMC_Batch01"),
+            },
+        },
+    }
+    text = write_submission_index(root, state).read_text(encoding="utf-8")
+    assert "停止等待 5 个 MC" in text and "当前模型" in text and "历史" in text
+    assert "epoch1_RelaxMC_Batch01_input/" in text
+    assert "epoch1_RelaxMC_Batch01_output/" in text
+    assert "verified" in text and "勿重复提交" in text

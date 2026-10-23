@@ -15,6 +15,7 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
     """Group compatible MLIP tasks per job; keep DFT at one task per job."""
 
     def _select(self, state, tasks):
+        tasks = self._scope_tasks(tasks)
         selected = super()._select(state, tasks)
         if not selected:
             return selected
@@ -262,7 +263,13 @@ def _bundle_mc_backend(directory):
     source = Path(Process_AL_MC.__file__).parent
     target = Path(directory) / "mc_backend/Process_AL_MC"
     target.mkdir(parents=True, exist_ok=True)
-    for name in ("__init__.py", "MC_sample.py", "occupation_history.py", "relax.py"):
+    for name in (
+        "__init__.py",
+        "MC_sample.py",
+        "occupation_history.py",
+        "relax.py",
+        "structure_check.py",
+    ):
         shutil.copy2(source / name, target / name)
     if (source / "ordering").is_dir():
         shutil.copytree(

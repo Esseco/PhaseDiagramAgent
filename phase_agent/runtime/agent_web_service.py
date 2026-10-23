@@ -59,7 +59,35 @@ def create_control_server(handler, runtime_config, *, port):
         from phase_agent.runtime.studio_runtime import _message_lock
 
         with _message_lock:
-            return handler(*args, **kwargs)
+            from phase_agent.graphs.dialogue.commands import (
+                _latest_user_message,
+                _open_webui_metadata_reply,
+            )
+            from phase_agent.runtime.agent_api import _chat_content
+            from phase_agent.runtime.turn_process import record_turn
+            from phase_agent.runtime.interaction_reports import save_interaction
+            from phase_agent.runtime.studio_runtime import project_handler
+            from phase_agent.runtime.turn_process import read_presentation_state
+            from pathlib import Path
+
+            message = _latest_user_message(args[0] if args else kwargs.get("messages", []))
+            if _open_webui_metadata_reply(message) is not None:
+                return handler(*args, **kwargs)
+            with record_turn(runtime_config, message, kwargs.get("conversation_id")) as record:
+                reply = _chat_content(handler(*args, **kwargs))
+                owner = project_handler(handler)
+                state = read_presentation_state(owner.state_path) if owner else {}
+                try:
+                    return save_interaction(
+                        Path(runtime_config).resolve().parent,
+                        message,
+                        reply,
+                        reply,
+                        state,
+                        record=record,
+                    )
+                except (OSError, ValueError, TypeError):
+                    return reply + "\n交互 Markdown 保存失败；保留本轮答复，未重放操作。"
 
     return create_server(
         chat,

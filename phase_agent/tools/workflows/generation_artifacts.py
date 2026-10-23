@@ -67,6 +67,7 @@ def proposal_artifacts(proposal, state):
         "task_key": action.get("task_key"),
         "model_version": state.get("active_model_version"),
         "config_version": state.get("confirmed_config_version"),
+        "branch_pool_review": action.get("branch_pool_review"),
         "quantity_reason": (action.get("decision_review") or {}).get("rationale")
         or (action.get("scientific_decision") or {}).get("rationale")
         or action.get("reason"),
@@ -103,6 +104,7 @@ def proposal_artifacts(proposal, state):
                         "na_min",
                         "na_max",
                         "reason",
+                        "evidence_refs",
                         "x",
                     )
                     if k in row

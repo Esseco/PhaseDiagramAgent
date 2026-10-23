@@ -8,6 +8,9 @@ import shutil
 import subprocess
 import zipfile
 
+if "preflight_environment" not in globals():
+    from phase_agent.tools.remote.environment_preflight import preflight_environment
+
 
 def safe_path(root, name):
     path = PurePosixPath(name)
@@ -101,7 +104,11 @@ def _run(root):
 
     with (root / ".submit.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        archive_hash = hashlib.sha256((root / "inputs.zip").read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        with (root / "inputs.zip").open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        archive_hash = digest.hexdigest()
         receipt_path = root / ".submitted_jobs.json"
         receipt = (
             json.loads(receipt_path.read_text())
@@ -132,11 +139,12 @@ def _run(root):
                 entry = archive.getinfo(row["path"])
                 if (entry.external_attr >> 16) & 0o170000 == 0o120000:
                     raise ValueError("Symlink in archive")
-                content = archive.read(entry)
-                if (
-                    len(content) != row["size"]
-                    or hashlib.sha256(content).hexdigest() != row["sha256"]
-                ):
+                digest, size = hashlib.sha256(), 0
+                with archive.open(entry) as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                        size += len(chunk)
+                if size != row["size"] or digest.hexdigest() != row["sha256"]:
                     raise ValueError("Input checksum mismatch: " + row["path"])
                 if (
                     target.exists()
@@ -161,14 +169,29 @@ def _run(root):
                 target = safe_path(root, row["path"])
                 if not target.exists():
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(archive.read(row["path"]))
+                    with archive.open(row["path"]) as stream, target.open("wb") as output:
+                        shutil.copyfileobj(stream, output, 1024 * 1024)
         try:
+            remaining = [
+                job for job in jobs if receipt["jobs"].get(job, {}).get("status") != "submitted"
+            ]
+            modules = set()
+            for job in remaining:
+                for source in safe_path(root, job).parent.rglob("task.json"):
+                    task = json.loads(source.read_text(encoding="utf-8-sig"))
+                    if task.get("worker_job") and task.get("stage") in {
+                        "relax_and_feature",
+                        "deep_search",
+                    }:
+                        modules.update(("numpy", "scipy", "pymatgen", "ase", "torch", "mace"))
             preflight_models(
                 root,
                 [job for job in jobs if receipt["jobs"].get(job, {}).get("status") != "submitted"],
             )
-        except (FileNotFoundError, ValueError, PermissionError) as error:
-            receipt["model_preflight"] = {
+            if remaining:
+                preflight_environment(root, remaining, required_modules=modules)
+        except (FileNotFoundError, ValueError, PermissionError, RuntimeError) as error:
+            receipt["model_preflight"] = getattr(error, "report", None) or {
                 "status": "failed",
                 "error": str(error),
                 "location": "remote",

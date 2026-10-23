@@ -18,6 +18,24 @@ def reusable_selection(state):
         and result.get("status") == "rejected"
         and result.get("reason") in {"DFT 参数模板尚未确认", "DFT 公共模板尚未确认"}
     )
+    validation = result.get("validation") or {}
+    validation_rejected = (
+        record.get("status") == "rejected"
+        and execution.get("status") == "completed"
+        and result.get("status") == "rejected"
+        and validation.get("valid") is False
+        and bool(validation.get("errors") or validation.get("rejected"))
+        and result.get("tasks") == []
+        and outcome.get("task_ids") == []
+        and outcome.get("artifacts") == []
+        and outcome.get("dispatch_status") == "completed"
+        and outcome.get("result_status") == "rejected"
+        and outcome.get("tool") == "select_dft_candidates"
+        and not execution.get("error")
+        and not outcome.get("error")
+        and bool(state.get("confirmed_config_version"))
+        and bool(state.get("active_model_version"))
+    )
     audit = (state.get("execution_reconciliations") or {}).get(record.get("record_id")) or {}
     identity = audit.get("identity") or {}
     from phase_agent.tools.policy.file_approval import proposal_hash
@@ -34,7 +52,7 @@ def reusable_selection(state):
         and identity.get("action_hash") == proposal_hash(record.get("final_action") or action)
     )
     if (
-        not (template_rejected or verified_failure)
+        not (template_rejected or verified_failure or validation_rejected)
         or (record.get("human_feedback") or {}).get("decision") != "approve"
         or action.get("tool") != "select_dft_candidates"
         or not action.get("task_key")
@@ -61,4 +79,7 @@ def reusable_selection(state):
         return None
     reused = deepcopy(proposal)
     reused["reuse_source_record_id"] = record["record_id"]
+    if validation_rejected:
+        # This handler rejects validation before reserving costs or creating tasks.
+        reused["reuse_requires_preview"] = True
     return reused

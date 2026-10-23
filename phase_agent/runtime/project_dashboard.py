@@ -24,6 +24,7 @@ from phase_agent.runtime.local_project_launcher import (
 )
 from phase_agent.runtime.project_service import read_service
 from phase_agent.runtime.project_service import service_directory
+from phase_agent.runtime.studio_conversation_panel import conversation_url
 
 
 def select_folder(folder, registry, *, execution_mode="debug"):
@@ -76,7 +77,7 @@ def set_project_mode(config, mode):
         raise ValueError("请先停止此项目服务，再更改运行模式")
     settings = _load_config(config)
     settings.update(execution_mode=mode, resume_existing_project=True)
-    settings.setdefault("run_steps_per_click", 10)
+    settings["run_steps_per_click"] = 1
     temporary = config.with_suffix(".tmp")
     temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(config)
@@ -127,8 +128,20 @@ def send_start(config, service, token):
     return value["messages"][-1]["content"]
 
 
-def main():
+def open_project_conversations(config):
+    service = read_service(config)
+    if not service:
+        raise ValueError("请先启动所选项目服务，再选择或继续对话。")
+    import webbrowser
+
+    return webbrowser.open(conversation_url(service["studio_port"]))
+
+
+def main(initial_project=None):
     registry = registry_path()
+    if initial_project is not None:
+        initial_project = Path(initial_project).resolve()
+        register_project(initial_project, registry=registry)
     app = tk.Tk()
     app.title("相图搜索 · 项目管理")
     app.geometry("980x680")
@@ -139,7 +152,7 @@ def main():
         anchor="w", padx=20, pady=(16, 4)
     )
     ttk.Label(
-        app, text="选择文件夹并启动服务，复制下方 Studio 网址到浏览器。计算操作在 Studio 中完成。"
+        app, text="选择项目并启动服务，点击“选择／继续对话”打开历史会话。计算操作在 Studio 中完成。"
     ).pack(anchor="w", padx=20, pady=(0, 12))
     buttons = ttk.Frame(app)
     buttons.pack(fill="x", padx=20, pady=(0, 12))
@@ -227,7 +240,7 @@ def main():
             try:
                 service = read_service(path)
                 url = (
-                    f"\n\nStudio 网址：\nhttps://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:{service['studio_port']}"
+                    f"\n\n选择／继续对话：\n{conversation_url(service['studio_port'])}"
                     if service
                     else "\n\n服务尚未启动。"
                 )
@@ -320,6 +333,15 @@ def main():
                 return
         app.destroy()
 
+    def open_conversations():
+        path = selected()
+        if path is None:
+            return
+        try:
+            open_project_conversations(path)
+        except ValueError as error:
+            display(str(error))
+
     def open_process():
         path = selected()
         service = read_service(path) if path else None
@@ -335,14 +357,15 @@ def main():
             ("选择文件夹", add),
             ("启动服务", launch),
             ("重启服务", lambda: launch(restarting=True)),
+            ("选择／继续对话", open_conversations),
             ("查看本轮过程", open_process),
             ("停止服务", stop),
         )
     ):
         ttk.Button(buttons, text=label, command=command).grid(
-            row=0, column=column, sticky="ew", padx=3, pady=4
+            row=column // 3, column=column % 3, sticky="ew", padx=3, pady=4
         )
-        buttons.columnconfigure(column, weight=1)
+        buttons.columnconfigure(column % 3, weight=1)
 
     def auto_refresh():
         try:
@@ -354,6 +377,16 @@ def main():
     tree.bind("<<TreeviewSelect>>", show)
     tree.bind("<Double-1>", show)
     refresh()
+    if initial_project is not None and tree.exists(str(initial_project)):
+        tree.selection_set(str(initial_project))
+        show()
+    from phase_agent.runtime.project_registry import registry_recovery_notice
+
+    notice = registry_recovery_notice(registry)
+    if notice:
+        text.configure(state="normal")
+        text.insert("end", "\n\n" + notice)
+        text.configure(state="disabled")
     app.after(200, drain)
     app.after(3000, auto_refresh)
     app.protocol("WM_DELETE_WINDOW", close)

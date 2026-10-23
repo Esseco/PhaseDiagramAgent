@@ -115,7 +115,7 @@ def test_refresh_requires_own_approval_and_generates_portable_single_point(tmp_p
     assert portable["worker_job"]["structure_path"] == "initial.vasp"
     assert "structure_path" not in portable
     assert "Model-refresh-0001" in task["input_path"] and "Single-point" in task["input_path"]
-    assert "epoch1_new" in task["input_path"]
+    assert "epoch1" in __import__("pathlib").Path(task["input_path"]).parts
     assert second["state"]["model_refresh"]["wave"] == 0
 
 

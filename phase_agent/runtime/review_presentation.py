@@ -128,7 +128,7 @@ def revision_lines(record):
     if not changes:
         return []
     import json
-    from phase_agent.runtime.turn_process import clean
+    from phase_agent.text_safety import clean
 
     def short(value):
         text = json.dumps(clean(value), ensure_ascii=False)

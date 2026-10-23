@@ -76,9 +76,7 @@ def result_files(root, state, candidates):
                 referenced(item, base, required=required)
 
     for task in state.get("tasks") or []:
-        terminal = task.get("status") in {"completed", "failed", "timeout", "cancelled"}
-        if not terminal:
-            continue
+        # A controller may fail before collecting already finished worker files.
         completed = task.get("status") == "completed"
         path = Path(task.get("result_path") or "")
         path = path if path.is_absolute() else root / path
@@ -114,7 +112,7 @@ def result_files(root, state, candidates):
         for name in ("mc_occupations.bin", "checkpoint.json", "checkpoint.json.gz"):
             include(name, directory)
         outputs = task.get("outputs") or {}
-        for row in outputs.get("pool_summary") or []:
+        for row in outputs.get("pool_summary") or raw_outputs.get("pool_summary") or []:
             name = row.get("structure_file")
             if name:
                 value = include(name, directory)

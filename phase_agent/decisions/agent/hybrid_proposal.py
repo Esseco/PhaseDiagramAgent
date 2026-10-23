@@ -3,7 +3,12 @@
 from time import perf_counter
 
 ROUTINE_MODES = {"configuration_dialogue", "configuration_json_review"}
-PROPOSAL_MODES = {"autonomous_search", "repair_post_dft_action", "round_budget_review_repair"}
+PROPOSAL_MODES = {
+    "autonomous_search",
+    "repair_post_dft_action",
+    "round_budget_review_repair",
+    "proposal_contract_repair",
+}
 
 
 def choose_harness(payload):

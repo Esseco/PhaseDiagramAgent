@@ -13,6 +13,7 @@ def search_client_settings(settings):
         "thinking": settings.get("thinking"),
         "routine_max_tokens": int(settings.get("routine_max_tokens", 1600)),
         "reasoning_max_tokens": int(settings.get("reasoning_max_tokens", 8192)),
+        "reasoning_effort": settings.get("reasoning_effort", "high"),
     }
 
 

@@ -110,7 +110,7 @@ def test_invalid_dialogue_cannot_smuggle_tool_execution(tmp_path):
 
 
 def test_memory_is_thread_scoped_and_survives_handler_restart(tmp_path):
-    from phase_agent.graphs.dialogue.memory import remember_turn, recent_turns
+    from phase_agent.persistence.memory.conversation import remember_turn, recent_turns
 
     state = tmp_path / "state.json"
     remember_turn(state, "a", "我只研究O3", "已记录")

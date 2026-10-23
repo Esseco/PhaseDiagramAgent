@@ -102,13 +102,14 @@ def test_new_snapshot_caller_accepts_held_old_memory_and_migration_functions(mon
     assert calls == ["migration", "memory"]
 
 
-def test_stale_code_blocks_studio_before_handler_and_turn_records(tmp_path, monkeypatch):
-    from phase_agent.runtime import loaded_code, studio_runtime, turn_process
+def test_stale_code_blocks_handler_and_returns_diagnostic_markdown(tmp_path, monkeypatch):
+    from phase_agent.runtime import loaded_code, studio_runtime
 
     owner = Mock()
     monkeypatch.setattr(studio_runtime, "_handler", owner)
-    record = Mock(side_effect=AssertionError("must not create a turn record"))
-    monkeypatch.setattr(turn_process, "record_turn", record)
+    config = tmp_path / "agent_runtime.json"
+    config.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("PHASE_AGENT_RUNTIME_CONFIG", str(config))
     monkeypatch.setattr(
         loaded_code,
         "loaded_code_report",
@@ -117,10 +118,12 @@ def test_stale_code_blocks_studio_before_handler_and_turn_records(tmp_path, monk
             "modules": [{"module": "old_module", "status": "source_changed"}],
         },
     )
-    with pytest.raises(RuntimeError, match="手动重新启动"):
-        studio_runtime.send_project_message("同意", "original-thread")
+    reply = studio_runtime.send_project_message("同意", "original-thread")
+    assert "手动重新启动" in reply and "本轮未执行" in reply
+    report = Path(reply.split("交互记录地址：", 1)[1])
+    assert report.is_file() and "old_module" in report.read_text(encoding="utf-8")
     owner.assert_not_called()
-    record.assert_not_called()
+    assert config.read_text(encoding="utf-8") == "{}"
 
 
 def test_runtime_code_endpoint_is_authenticated_and_read_only(monkeypatch):

@@ -20,12 +20,8 @@ def confirmed_file_unchanged(handler, session):
         return False
     try:
         config = load_editable_config_json(source, snapshot)
-        config = resolve_phase_reference_directory(
-            config, base_directory=handler.base_directory
-        )
-        expected = editable_comparison_baseline(
-            snapshot, source, handler.base_directory
-        )
+        config = resolve_phase_reference_directory(config, base_directory=handler.base_directory)
+        expected = editable_comparison_baseline(snapshot, source, handler.base_directory)
         if configuration_changes(expected, config):
             return False
         known = session.get("agent_reviewed_mother_digest") or session.get(

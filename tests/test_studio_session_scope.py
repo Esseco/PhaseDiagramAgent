@@ -56,7 +56,7 @@ def test_checkpointed_thread_context_is_available_to_fresh_handler(tmp_path, mon
 
 
 def test_fresh_studio_handler_restores_only_last_turn(tmp_path, monkeypatch):
-    from phase_agent.graphs.dialogue.memory import remember_turn
+    from phase_agent.persistence.memory.conversation import remember_turn
 
     path = tmp_path / "state.json"
     remember_turn(path, "A", "旧内容", "旧答复")

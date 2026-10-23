@@ -14,6 +14,7 @@ from phase_agent.science.mlip.predict_structure import predict_structure
 
 
 @pytest.mark.parametrize("project", ["O3-1ele-NaCoO2", "O3-1ele-NaCrO2", "O3-2ele-NaFeMn"])
+@pytest.mark.real_project
 def test_actual_project_structure_roundtrip_with_explicit_format(tmp_path, monkeypatch, project):
     root = Path("E:/0-PhaseDiagram") / project
     state = json.loads((root / "workflow_state/state.json").read_text(encoding="utf-8"))

@@ -220,6 +220,18 @@ def revise_tool_proposal(
         "decision_context": deepcopy(state.get("decision_context") or {}),
         "instruction": "Analyze the human comment and return a revised action with action_type, parameters, reason, expected_cost, target_ids, expected_purpose and current_state_analysis. Do not execute it.",
     }
+    if "select_dft_candidates" in allowed_tools:
+        from phase_agent.analysis.phase.phase_dft_sampling import dft_sampling_reference
+        from phase_agent.decisions.qbc_selection.dft_round_policy import dft_task_limit
+
+        payload["decision_context"]["dft_selection_policy"] = {
+            "reference_framework": dft_sampling_reference(),
+            **((config or {}).get("dft") or {}).get("selection", {}),
+            "max_tasks_per_round": dft_task_limit(config or {}),
+            "single_point_cost_per_round": None,
+            "round_task_scope": "single_point_and_relax_combined_including_registered_tasks",
+            "batch_size_instruction": "Choose the count from independent scientific evidence; do not fill the cap. Costs are estimates, not a round cost ceiling.",
+        }
     branch_policy = (proposal.get("decision_context") or {}).get("branch_count_policy") or (
         (source_state or {}).get("branch_count_policy")
     )

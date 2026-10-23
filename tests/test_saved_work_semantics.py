@@ -105,7 +105,10 @@ def test_invalid_control_cannot_execute(tmp_path, monkeypatch, action):
     result = route_saved_control(
         {"facts": rejected_template_state(), "message": "那就这么办吧"}, r, [{"plan_id": "p"}]
     )
-    assert "未取得有效语义判断" in result["reply"]
+    if action.get("plan_id") == "invented":
+        assert "方案不一致" in result["reply"] and "本次未执行" in result["reply"]
+    else:
+        assert "未取得有效语义判断" in result["reply"]
     assert ctx.scientific_call is None and c.call_count == 1
 
 

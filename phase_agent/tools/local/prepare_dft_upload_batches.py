@@ -22,6 +22,11 @@ def prepare_dft_upload_batches(*, action, context, _owned=False):
         and (not requested or row.get("task_id") in requested)
     ]
 
+    if tasks:
+        from phase_agent.configuration.schema.python_environments import python_environment
+
+        python_environment(config, "remote", mlip=True)
+
     from phase_agent.persistence.shared_dft import reusable_results
     from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
     from phase_agent.tools.workflows.apply_scientific_feedback import apply_scientific_feedback
@@ -72,13 +77,8 @@ def prepare_dft_upload_batches(*, action, context, _owned=False):
             )
         return result
 
-    runner = ManualUploadBatchRunner(root, worker_command=[], dispatcher=dispatch)
-    # Restrict the existing runner to this approved preparation request.
-    select = runner._select
     ids = {row["task_id"] for row in tasks}
-    runner._select = lambda current, rows: select(
-        current, [row for row in rows if row.get("task_id") in ids]
-    )
+    runner = ManualUploadBatchRunner(root, worker_command=[], dispatcher=dispatch, task_ids=ids)
     from phase_agent.runtime.turn_process import timed_call, record_timing, process_event
 
     process_event("复用既定DFT输入计划", {"task_count": len(tasks), "scope": "input_files_only"})

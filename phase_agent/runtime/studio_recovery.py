@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from phase_agent.persistence.sqlite_paths import readonly_uri
 from copy import copy
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def can_resume_message(config_path, message_identity):
     from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
     from phase_agent.graphs.scientific_graph import scientific_graph
 
-    connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, check_same_thread=False)
+    connection = sqlite3.connect(readonly_uri(path), uri=True, check_same_thread=False)
     try:
         graph = copy(scientific_graph())
         graph.checkpointer = SqliteSaver(connection)

@@ -8,7 +8,7 @@ Agent 在已确认的结构边界与预算内推荐 branch、MC、DFT 和模型�
 Process_PhaseDiagram/
 ├── phase_agent/                 # 唯一应用包
 │   ├── graphs/                  # LangGraph 图、State、节点和 Runtime context
-│   │   ├── dialogue/            # 用户对话与有限会话记忆
+│   │   ├── dialogue/            # 对话路由与上下文组织
 │   │   ├── project/             # initialize → observe → wait → analyze → react → finalize
 │   │   └── actions/             # 提案 → 人工审批 → 校验 → 工具 → 审计
 │   ├── tools/                   # 动作执行、预算、权限、远端脚本
@@ -31,6 +31,10 @@ Process_PhaseDiagram/
 
 原顶层分层包与旧入口已移出源码目录；备份位于同级 `_Process_PhaseDiagram_source_backups`。不要把备份加入 PYTHONPATH。保存的旧适配器模块引用由 `phase_agent/module_references.py` 明确转换；配置字段、科学状态及审批内容保持原格式。
 
+## 项目文件
+
+项目数据统一按 `epoch0/`、`epoch1/` 组织：交互记录在 `interaction_records/epochN/`，提交与回传在 `submissions/epochN/`，分析结果在 `analysis_outputs/epochN/`。完整模型版本写在各轮说明和机器记录中。目录树、上传/回传入口及代码维护点见 [项目文件管理](docs/guides/project-files.md)。
+
 ## 快速开始
 
 默认本地环境为 `py1`。在源码目录启动，项目数据目录可以独立存放：
@@ -42,6 +46,8 @@ python -m phase_agent.runtime.local_project_launcher
 ```
 
 启动器中选择已有 `agent_runtime.json`，或新建独立项目并选择包含初始结构的目录。启动器是项目选择窗口，Studio 提供后续对话和图调试。
+
+启动前或遇到故障时，可用 `python -m phase_agent.runtime.project_diagnostics --runtime '项目目录/agent_runtime.json'` 独立检查。它不启动服务、不修改项目，逐项返回文件/字段问题和恢复步骤；见 [检查与恢复](docs/guides/recovery.md)。
 
 已有项目也可直接启动：
 

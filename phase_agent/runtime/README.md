@@ -18,6 +18,7 @@ python -m phase_agent.runtime.studio_service --runtime-config '项目目录/agen
 ## 从哪里读
 
 - [local_project_launcher.py](local_project_launcher.py)
+- [project_registry.py](project_registry.py)：非科学项目索引的原子更新、坏清单备份恢复；不修改项目配置或账本。
 - [studio_service.py](studio_service.py)
 - [studio_runtime.py](studio_runtime.py)
 - [runtime_composition.py](runtime_composition.py)

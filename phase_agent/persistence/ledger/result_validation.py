@@ -53,12 +53,16 @@ def validate_scientific_result(result):
     for key in (
         "phase_identification",
         "qbc",
-        "pool_summary",
         "spin_state_check",
         "magnetic_check",
     ):
         if outputs.get(key) is not None and not isinstance(outputs[key], dict):
             raise InvalidScientificResult("result_output_object_required:" + key)
+    summary = outputs.get("pool_summary")
+    if summary is not None and (
+        not isinstance(summary, list) or any(not isinstance(row, dict) for row in summary)
+    ):
+        raise InvalidScientificResult("result_output_object_list_required:pool_summary")
     for key in ("energy", "energy_per_atom"):
         value = outputs.get(key)
         if value is not None and (

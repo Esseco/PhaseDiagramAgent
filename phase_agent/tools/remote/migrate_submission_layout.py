@@ -54,9 +54,7 @@ def inventory(directory):
 def atomic_json(path, value):
     path = Path(path)
     temporary = path.with_name(path.name + ".layout.tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(temporary, path)
 
 
@@ -74,11 +72,7 @@ def migrate_submission_layout(project, backup_directory):
         backup = backup / datetime.now().strftime("%Y%m%dT%H%M%S%f")
     backup.mkdir(parents=True, exist_ok=False)
     ledger_path = project / "workflow_state/ledgers/phase_data.json"
-    files = [
-        p
-        for p in [state_path, ledger_path, root / "RELAX_UPLOAD_PLAN.json"]
-        if p.is_file()
-    ]
+    files = [p for p in [state_path, ledger_path, root / "RELAX_UPLOAD_PLAN.json"] if p.is_file()]
     saved = {}
     for path in files:
         relative = path.relative_to(project)

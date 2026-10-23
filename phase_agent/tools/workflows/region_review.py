@@ -101,6 +101,8 @@ def write_proposal(proposal, state):
             "task_key": action.get("task_key"),
             "config_version": state.get("confirmed_config_version"),
             "model_version": state.get("active_model_version"),
+            "reason": action.get("reason"),
+            "branch_region_review_notes": action.get("branch_region_review_notes"),
             "parameters": compact_params,
             "branch_pool_review": action.get("branch_pool_review"),
         },

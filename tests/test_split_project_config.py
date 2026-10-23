@@ -213,3 +213,65 @@ def test_split_template_migration_without_baseline_preserves_both_files(tmp_path
     with pytest.raises(ValueError, match="基线"):
         write_project_config_patch(initial, {"run.seed": 47})
     assert (initial.read_bytes(), runtime.read_bytes()) == old
+
+
+@pytest.mark.parametrize(
+    "field", ["dft.selection.single_point_cost_per_round", "round_strategy.maximum_dft_budget"]
+)
+def test_split_patch_materializes_missing_null_before_template_migration(tmp_path, field):
+    from copy import deepcopy
+
+    initial, runtime, before = setup(tmp_path)
+    expected = deepcopy(before)
+    cursor = before
+    parts = field.split(".")
+    for part in parts[:-1]:
+        cursor = cursor[part]
+    cursor[parts[-1]] = 5000.0
+    cursor = expected
+    for part in parts[:-1]:
+        cursor = cursor[part]
+    cursor[parts[-1]] = None
+    document = read_document(initial)
+    document["profile_digest"] = "old-template"
+    write_document(initial, document)
+
+    changes = write_project_config_patch(
+        initial, {field: None}, expected_hash=editable_project_hash(initial), baseline_config=before
+    )
+
+    assert load_editable_config_json(initial, before) == expected
+    assert [change["path"] for change in changes] == [field]
+    assert changes[0]["new"] is None
+    assert read_document(initial)["run_config_file"] == runtime.name
+
+
+@pytest.mark.parametrize(
+    "field", ["dft.selection.single_point_cost_per_round", "round_strategy.maximum_dft_budget"]
+)
+def test_split_patch_updates_existing_nullable_override_and_is_idempotent(tmp_path, field):
+    initial, runtime, before = setup(tmp_path)
+    initial_field = field.split(".")[0] in INITIAL_ROOTS
+    target, other = (initial, runtime) if initial_field else (runtime, initial)
+    document = read_document(target)
+    cursor = document.setdefault("overrides" if initial_field else "config", {})
+    parts = field.split(".")
+    for part in parts[:-1]:
+        cursor = cursor.setdefault(part, {})
+    cursor[parts[-1]] = 5000.0
+    write_document(target, document)
+    other_bytes = other.read_bytes()
+
+    changes = write_project_config_patch(
+        initial, {field: None}, expected_hash=editable_project_hash(initial), baseline_config=before
+    )
+
+    actual = load_editable_config_json(initial, before)
+    for part in parts:
+        actual = actual[part]
+    assert actual is None
+    assert changes[0]["file"] == str(target)
+    assert other.read_bytes() == other_bytes
+    identity = editable_project_hash(initial)
+    assert write_project_config_patch(initial, {field: None}, expected_hash=identity) == []
+    assert editable_project_hash(initial) == identity

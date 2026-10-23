@@ -23,7 +23,9 @@ def test_complete_wave_requires_all_tasks():
 
 def test_candidates_use_recovered_structure(tmp_path):
     path = tmp_path / "final.vasp"
-    path.write_text("structure")
+    path.write_text(
+        "fixture\n1.0\n5 0 0\n0 5 0\n0 0 5\nCo O\n1 2\nDirect\n0 0 0\n0.3 0.3 0.3\n0.7 0.7 0.7\n"
+    )
     state = {
         "phase_diagrams": {
             "mlip": {

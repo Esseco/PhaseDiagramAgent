@@ -1,6 +1,7 @@
 """Select a small, applicable set of approved knowledge for one decision."""
 
 from copy import deepcopy
+from collections import defaultdict
 import json
 import re
 from phase_agent.persistence.memory.legacy_knowledge_records import legacy_knowledge_records
@@ -34,19 +35,29 @@ def retrieve_relevant_knowledge(
     eligible = [
         row
         for row in records
-        if row.get("status") == "active" and row.get("approved_by_user") is True
+        if isinstance(row, dict)
+        and isinstance(row.get("knowledge_id"), str)
+        and isinstance(row.get("statement"), str)
+        and isinstance(row.get("applicability", {}), dict)
+        and isinstance(row.get("supersedes", []), list)
+        and isinstance(row.get("scope", ""), str)
+        and isinstance(row.get("maturity", ""), str)
+        and row.get("status") == "active"
+        and row.get("approved_by_user") is True
     ]
+    by_id = defaultdict(list)
+    for row in eligible:
+        by_id[row["knowledge_id"]].append(row)
     superseded = {
         old.get("knowledge_id")
         for row in eligible
-        for old in eligible
-        if old.get("knowledge_id") in (row.get("supersedes") or [])
-        and all(row.get(key) == old.get(key) for key in ("scope", "system_id", "category"))
+        for identity in (row.get("supersedes") or [])
+        if isinstance(identity, str)
+        for old in by_id.get(identity, [])
+        if all(row.get(key) == old.get(key) for key in ("scope", "system_id", "category"))
         and row.get("applicability", {}) == old.get("applicability", {})
     }
-    for row in records:
-        if row.get("status") != "active" or row.get("approved_by_user") is not True:
-            continue
+    for row in eligible:
         if row.get("knowledge_id") in superseded:
             continue
         if row.get("model_dependent") and row.get("model_version") != model_version:

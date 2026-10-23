@@ -4,6 +4,8 @@
 
 ## 从哪里读
 
+- [记忆模块职责与接口](memory/README.md)
+- [memory/conversation.py](memory/conversation.py)
 - [memory/decision_memory.py](memory/decision_memory.py)
 - [memory/retrieve_relevant_knowledge.py](memory/retrieve_relevant_knowledge.py)
 - [memory/review_queue.py](memory/review_queue.py)

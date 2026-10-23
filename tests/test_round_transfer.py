@@ -124,6 +124,7 @@ def test_fake_sbatch_dispatch_retries_do_not_duplicate(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", run)
     namespace = {"__name__": "test_driver"}
     exec(DRIVER, namespace)
+    namespace["preflight_environment"] = lambda *args, **kwargs: {"status": "passed"}
     namespace["run"](remote)
     namespace["run"](remote)
     assert len(calls) == 3

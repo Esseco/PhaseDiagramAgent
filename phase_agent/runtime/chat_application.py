@@ -21,7 +21,6 @@ from phase_agent.graphs.dialogue.commands import (
     _latest_user_message,
     _open_webui_metadata_reply,
     _is_status_command,
-    _phase_csv_request,
     _classify_history_decision,
     _deepseek_switch_reply,
 )
@@ -86,6 +85,7 @@ class RunWorkflowChatHandler:
         # tail rather than repeatedly sending the full session or summarizing it.
         with self.lock:
             from phase_agent.runtime.project_display_name import project_name_reply
+
             name_reply = project_name_reply(_latest_user_message(messages), self.state_path)
             if name_reply is not None:
                 return name_reply
@@ -100,7 +100,7 @@ class RunWorkflowChatHandler:
                 elif conversation_id in self.studio_dialogues:
                     self.recent_dialogue = list(self.studio_dialogues[conversation_id])[-2:]
                 else:
-                    from phase_agent.graphs.dialogue.memory import recent_turns
+                    from phase_agent.persistence.memory.conversation import recent_turns
 
                     self.recent_dialogue = [
                         {"role": role, "content": row[key]}
@@ -120,20 +120,25 @@ class RunWorkflowChatHandler:
                     {"role": "assistant", "content": str(reply)[:16000]},
                 ][-2:]
                 if studio_turn:
+                    self.studio_dialogues.pop(conversation_id, None)
                     self.studio_dialogues[conversation_id] = list(self.recent_dialogue)
+                    while len(self.studio_dialogues) > 32:
+                        self.studio_dialogues.pop(next(iter(self.studio_dialogues)))
+                from phase_agent.persistence.memory.conversation import remember_turn
+
+                remember_turn(
+                    self.state_path,
+                    conversation_id,
+                    _latest_user_message(messages),
+                    reply,
+                    facts_signature=(getattr(self, "turn_context", {}) or {}).get(
+                        "facts_signature"
+                    ),
+                )
         if _open_webui_metadata_reply(_latest_user_message(messages)) is not None:
             return reply
         if str(reply).startswith("当前项目状态："):
             return reply  # Progress already contains its stage; avoid duplicate headers.
-        from phase_agent.graphs.dialogue.memory import remember_turn
-
-        remember_turn(
-            self.state_path,
-            conversation_id,
-            _latest_user_message(messages),
-            reply,
-            facts_signature=(getattr(self, "turn_context", {}) or {}).get("facts_signature"),
-        )
         if read_only_reply:
             return reply
         state = read_json(self.state_path, {}) or {}

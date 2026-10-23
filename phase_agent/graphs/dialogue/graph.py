@@ -41,7 +41,6 @@ def build_project_turn_graph(science=None):
         "inspection",
         "config_import",
         "dft_recovery",
-        "export",
         "finetune",
         "mc",
         "rerun",
@@ -71,7 +70,7 @@ def build_project_turn_graph(science=None):
     graph.add_conditional_edges(
         "prepare_context",
         lambda s: END if "reply" in s else s["operation"],
-        [END, "configure", "review", "decide", "scientific_workflow"],
+        [END, "configure", "inspect_configuration", "review", "decide", "scientific_workflow"],
     )
     graph.add_conditional_edges(
         "decide",

@@ -9,9 +9,7 @@ def approved_refresh_scope(plan, config_version):
         "model_version": plan["new_model_version"],
         "config_version": config_version,
         "eligible_structure_ids": [
-            row["structure_id"]
-            for row in plan["candidates"]
-            if row["operation"] == "predict"
+            row["structure_id"] for row in plan["candidates"] if row["operation"] == "predict"
         ],
         "maximum_count": plan["maximum_supplemental_count"],
         "maximum_cost": plan["maximum_supplemental_cost"],
@@ -63,8 +61,7 @@ def refresh_scope_errors(refresh, config_version):
     import math
 
     if any(
-        not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0
-        for cost in costs
+        not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0 for cost in costs
     ):
         errors.append("补充成本缺失或无效")
     elif sum(costs) > scope.get("maximum_cost", 0):

@@ -9,6 +9,7 @@ def test_ui_builds_folder_project_controls(tmp_path, monkeypatch):
     monkeypatch.setattr(project_dashboard, "registry_path", lambda: tmp_path / "projects.json")
     original = tk.Tk
     labels = []
+    positions = {}
 
     def window():
         root = original()
@@ -23,7 +24,15 @@ def test_ui_builds_folder_project_controls(tmp_path, monkeypatch):
                 if "text" in widget.keys():
                     label = str(widget.cget("text"))
                     labels.append(label)
-                    if label in {"选择文件夹", "启动服务", "重启服务", "查看本轮过程", "停止服务"}:
+                    if label in {
+                        "选择文件夹",
+                        "启动服务",
+                        "重启服务",
+                        "选择／继续对话",
+                        "查看本轮过程",
+                        "停止服务",
+                    }:
+                        positions[label] = widget.grid_info()
                         assert widget.winfo_ismapped()
                         assert 0 <= widget.winfo_rooty() - root.winfo_rooty() < 200
                         assert (
@@ -41,8 +50,17 @@ def test_ui_builds_folder_project_controls(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tk, "Tk", window)
     project_dashboard.main()
-    for name in ("选择文件夹", "启动服务", "重启服务", "查看本轮过程", "停止服务"):
+    for name in (
+        "选择文件夹",
+        "启动服务",
+        "重启服务",
+        "选择／继续对话",
+        "查看本轮过程",
+        "停止服务",
+    ):
         assert name in labels
+    assert {int(item["row"]) for item in positions.values()} == {0, 1}
+    assert {int(item["column"]) for item in positions.values()} == {0, 1, 2}
     assert "更多" not in labels
     assert "刷新" not in labels
     assert "设置 / 密钥" not in labels
@@ -64,7 +82,7 @@ def test_mode_switch_preserves_other_project_settings(tmp_path, monkeypatch):
     value = json.loads(config.read_text())
     assert value["deepseek"]["model"] == "existing"
     assert value["resume_existing_project"] is True
-    assert value["run_steps_per_click"] == 10
+    assert value["run_steps_per_click"] == 1
     monkeypatch.setattr(project_dashboard, "read_service", lambda _: {"status": "ready"})
     with pytest.raises(ValueError, match="先停止"):
         project_dashboard.set_project_mode(config, "debug")

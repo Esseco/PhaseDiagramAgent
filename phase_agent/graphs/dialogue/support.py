@@ -161,19 +161,13 @@ def review_presented_proposal(handler, state, message, *, requested_review=None)
 
 def fresh_turn_context(handler, state, messages, conversation_id):
     from phase_agent.runtime.conversation_context import conversation_context
-    from phase_agent.graphs.dialogue.memory import recent_turns
+    from phase_agent.persistence.memory.conversation import recent_turns
 
-    from phase_agent.runtime.project_context import handler_project_context, current_config_session
-    from phase_agent.analysis.state.project_authority import confirmed_configuration
+    from phase_agent.runtime.project_context import handler_project_context
 
     context = conversation_context(state, messages)
     context["current_project"] = handler_project_context(handler, state)
-    config = confirmed_configuration(state, current_config_session(handler))
-    context["project_settings"] = {
-        key: config.get(key)
-        for key in ("system", "python_environments", "run", "calculation", "budgets", "convergence")
-    }
-    from phase_agent.runtime.turn_process import clean
+    from phase_agent.text_safety import clean
 
     context["project_settings"] = clean(
         context["current_project"]["configuration"]["effective_settings"]

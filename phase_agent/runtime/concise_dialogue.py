@@ -70,7 +70,7 @@ def approval_reply(proposal, state):
         count = len((proposal.get("raw_action") or {}).get("target_ids") or [])
         result = f"待确认：为 {count} 个单点候选追加弛豫输入；首批结果保留。"
         scope_lines = [
-            f"设置：最多 {settings.get('relax_steps', 300)} 步，{settings.get('optimizer', 'LBFGS')}；未收敛结果排除，不自动延长或重试。"
+            f"设置：最多 {settings.get('relax_steps', 500)} 步，{settings.get('optimizer', 'LBFGS')}；未收敛结果排除，不自动延长或重试。"
         ]
     jobs = workload.get("gpu_jobs_upper_by_wave")
     budget = (
@@ -202,7 +202,9 @@ def concise_body(reply, state):
         index = next(i for i, line in enumerate(lines) if line.startswith("下一步："))
         lines = [line for line in lines if not line.startswith("下一步：")]
         lines.insert(index, merged)
-    if not any(line.startswith("本次：") for line in lines):
+    if state.get("pending_execution_policies") and not any(
+        line.startswith("本次：") for line in lines
+    ):
         lines.insert(
             0,
             "本次："
@@ -220,7 +222,6 @@ def concise_body(reply, state):
                 else "已检查当前项目状态。"
             ),
         )
-    lines.append(
-        "预算：" + ("；".join(dict.fromkeys(budgets)) if budgets else "本次未提供新的计算预算。")
-    )
+    if budgets:
+        lines.append("预算：" + "；".join(dict.fromkeys(budgets)))
     return "\n".join(lines)

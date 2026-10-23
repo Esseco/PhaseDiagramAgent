@@ -41,6 +41,7 @@ def test_invalid_result_pointer_is_missing_not_a_directory_crash(tmp_path, value
     assert _task_result_path(state["tasks"][0], None) is None
 
 
+@pytest.mark.real_project
 def test_refresh_saved_pairs_retains_task_identity_and_labels():
     state = co_state()
     training = deepcopy(state["dft_training_records"])
@@ -55,6 +56,7 @@ def test_refresh_saved_pairs_retains_task_identity_and_labels():
     assert result["dft_training_records"] == training and result["new_dft_records"] == pending
 
 
+@pytest.mark.real_project
 def test_refresh_explicit_old_scope_recovers_all_saved_groups():
     state = co_state()
     ids = [r["task_id"] for r in state["dft_dataset_records"]]

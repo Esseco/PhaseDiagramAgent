@@ -37,6 +37,29 @@ def _size(value):
     return len(json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":")))
 
 
+def compact_current_proposal(proposal):
+    """Keep the complete action; omit only recomputed previews and transport metadata."""
+    raw = (
+        deepcopy(proposal.get("raw_action") or proposal)
+        if isinstance(proposal, dict)
+        else deepcopy(proposal)
+    )
+    if not isinstance(raw, dict):
+        return raw
+    raw.pop("decision_context", None)
+    raw.pop("_llm_usage", None)
+    params = raw.get("parameters")
+    if isinstance(params, dict):
+        for key in (
+            "dft_input_preview",
+            "generation_cost_preview",
+            "module_execution_scope",
+            "relax_mc_preview",
+        ):
+            params.pop(key, None)  # Recomputed and rebound after revision.
+    return raw
+
+
 def prepare_llm_request(payload):
     if payload.get("bounded_control") is True:
         # This contract has no scientific tools, candidate tables or action history.
@@ -77,6 +100,13 @@ def prepare_llm_request(payload):
         context.pop("current_project")
         context["current_project_ref"] = "state.current_project"
     _reference_duplicate_catalog(context)
+    field_index = (result.get("evidence_reader") or {}).get("field_index")
+    if field_index and context.get("evidence_catalog") == field_index:
+        # Same read-only discovery index, not two independent evidence sources.
+        context["evidence_catalog"] = {
+            "format": "evidence_ref_v1",
+            "source_ref": "/evidence_reader/field_index",
+        }
     # These are aliases, not additional evidence. Persistent state is untouched.
     for alias, canonical in (
         ("recent_action_history", "search_history"),
@@ -114,19 +144,7 @@ def prepare_llm_request(payload):
             short.pop(key)
     context["short_term_memory"] = short
     if "current_proposal" in result:
-        proposal = result["current_proposal"] or {}
-        raw = deepcopy(proposal.get("raw_action") or proposal)
-        raw.pop("decision_context", None)
-        raw.pop("_llm_usage", None)
-        params = raw.get("parameters") or {}
-        params.pop("dft_input_preview", None)  # Recomputed from current evidence.
-        for key in (
-            "generation_cost_preview",
-            "module_execution_scope",
-            "relax_mc_preview",
-        ):
-            params.pop(key, None)  # Program-derived previews are rebound after revision.
-        result["current_proposal"] = raw
+        result["current_proposal"] = compact_current_proposal(result["current_proposal"])
     context["transport_policy"] = {
         "candidate_counts": counts,
         "candidate_truncation": False,
@@ -207,6 +225,17 @@ def needs_deep_reasoning(payload):
         "dialogue_contract_repair",
     }:
         return False
+    # This scope is chosen by the model during the read-only evidence phase;
+    # it changes reasoning effort, never scientific permissions or validation.
+    plan = payload.get("analysis_plan")
+    if isinstance(plan, dict):
+        from phase_agent.decisions.agent.analysis_context import AnalysisPlan
+        from pydantic import ValidationError
+
+        try:
+            return AnalysisPlan.model_validate(plan).needs_reasoning()
+        except ValidationError:
+            pass  # Missing/invalid scope retains the conservative scientific policy.
     if "scientific_decision" in (payload.get("output_contracts") or {}):
         return True
     if payload.get("decision_kind") in {

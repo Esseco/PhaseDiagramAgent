@@ -7,7 +7,11 @@ from pathlib import Path
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
 
-DRIVER = Path(__file__).with_name("submission_dispatcher.py").read_text(encoding="utf-8")
+DRIVER = (
+    Path(__file__).with_name("environment_preflight.py").read_text(encoding="utf-8")
+    + "\n"
+    + Path(__file__).with_name("submission_dispatcher.py").read_text(encoding="utf-8")
+)
 
 
 def dispatcher_gpu_directive(first_script):
@@ -47,13 +51,10 @@ def write_dispatch_entry(folder, first_script):
         "",
     )
     gpu = dispatcher_gpu_directive(first_script)
-    activation = next(
-        (
-            line
-            for line in first_script.splitlines()
-            if line.startswith("source ") and "activate" in line
-        ),
-        "",
+    activation = "\n".join(
+        line
+        for line in first_script.splitlines()
+        if (line.startswith("source ") and "activate" in line) or line.startswith("conda activate ")
     )
     write_unix_shell_script(
         script,
@@ -70,11 +71,7 @@ def write_dispatch_entry(folder, first_script):
 def handoff_root(directory):
     directory = Path(directory)
     return next(
-        (
-            p
-            for p in [directory, *directory.parents]
-            if p.name.startswith("epoch") and "_" in p.name
-        ),
+        (p for p in [directory, *directory.parents] if re.fullmatch(r"epoch\d+(?:_.+)?", p.name)),
         directory,
     )
 
@@ -180,13 +177,18 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
             if not re.fullmatch(r"[A-Za-z0-9]+", operation_label):
                 raise ValueError("Invalid handoff operation label")
             label = label.split("_", 1)[0] + "_" + operation_label
-        folder = package_folder(base / "archives" / "01-upload", label, key)
+        epoch = label.split("_", 1)[0]
+        transfer_root = base / epoch / "transfers"
+        folder = package_folder(transfer_root, label.split("_", 1)[-1], key)
         archive = folder / "inputs.zip"
         if not archive.exists():
             create_bundle(portable, portable_files, archive, kind="inputs")
     script, dispatcher = write_dispatch_entry(
         folder, (directory / scripts[0]).read_text(encoding="utf-8")
     )
+    from phase_agent.tools.remote.input_validation import validate_handoff, verification_summary
+
+    verification = verification_summary(validate_handoff(folder))
     paired = folder.name.endswith("_input")
     destination = (
         folder.with_name(folder.name[:-6] + "_output") if paired else directory / "return-results"
@@ -204,6 +206,7 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
         "job_count": len(scripts),
         "layout_version": 4 if paired else 3,
         "package_fingerprint": key,
+        "verification": verification,
     }
 
 
@@ -273,8 +276,22 @@ def ensure_waiting_handoffs(state):
 
 def finalize_prepared_handoffs(state):
     """Make delivery part of preparation, with explicit recoverable failure facts."""
+    from phase_agent.tools.remote.input_validation import (
+        InputValidationError,
+        validate_handoff,
+        verification_summary,
+    )
+
     try:
         ensure_waiting_handoffs(state)
+    except InputValidationError as error:
+        return {
+            "status": "not_configured",
+            "state": state,
+            "reason": str(error),
+            "verification": error.report,
+            "submitted": False,
+        }
     except Exception as error:
         return {
             "status": "not_configured",
@@ -303,6 +320,20 @@ def finalize_prepared_handoffs(state):
         ):
             missing.append(batch.get("batch_id"))
         else:
+            if str(folder) in handoffs:
+                handoff["verification"] = handoffs[str(folder)]["verification"]
+                continue
+            try:
+                handoff["verification"] = verification_summary(validate_handoff(folder))
+            except InputValidationError as error:
+                handoff["verification"] = error.report
+                return {
+                    "status": "not_configured",
+                    "state": state,
+                    "reason": str(error),
+                    "verification": error.report,
+                    "submitted": False,
+                }
             handoffs[str(folder)] = handoff
     if missing:
         return {

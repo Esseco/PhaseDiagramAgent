@@ -40,6 +40,7 @@ def tmp_path(tmp_path_factory):
 @pytest.mark.parametrize(
     "project,count,accepted", [("O3-1ele-NaCoO2", 35, 30), ("O3-1ele-NaCrO2", 15, 12)]
 )
+@pytest.mark.real_project
 def test_actual_selection_reassessment_pair_import_and_training_inputs(
     tmp_path, monkeypatch, project, count, accepted
 ):

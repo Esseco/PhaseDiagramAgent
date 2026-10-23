@@ -32,7 +32,11 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
     }
     relax_only = set(stage_counts) == {"relax_and_feature"}
     waiting_ids = {r["task_id"] for r in waiting}
-    handoffs = {r["handoff"]["folder"]: r["handoff"] for r in state.get("slurm_batches", []) if r.get("handoff") and waiting_ids.intersection(r.get("task_ids", []))}
+    handoffs = {
+        r["handoff"]["folder"]: r["handoff"]
+        for r in state.get("slurm_batches", [])
+        if r.get("handoff") and waiting_ids.intersection(r.get("task_ids", []))
+    }
     return {
         "handoffs": list(handoffs.values()),
         "upload_archives": sorted(

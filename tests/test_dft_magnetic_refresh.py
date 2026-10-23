@@ -147,7 +147,7 @@ def test_partial_reply_missing_magnetism_is_explicit_and_round_scoped():
     question = {"recovered_task_ids": ["D1"], "scope": {"model_version": "m1"},
                 "recovered_tasks": 1, "expected_tasks": 2, "recovery_ratio": .5, "pending_task_ids": ["D2"]}
     reply = format_workflow_reply({"status": "awaiting_dft_recovery_decision", "state": state,
-                                  "dft_recovery_question": question}, "state.json")
+                                  "dft_recovery_question": question}, "state.json", verbose=True)
     assert "缺少磁矩 1" in reply and "未评估 1" in reply
     assert "重新提取" in reply and "还要继续回收" in reply
     assert "异常 0" in reply and "异常 1" not in reply

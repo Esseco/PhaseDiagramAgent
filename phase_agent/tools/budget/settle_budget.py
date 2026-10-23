@@ -41,10 +41,7 @@ def _settle_budget_in_place(
     reservation = updated.setdefault("budget_reservations", {}).get(task_key)
     if reservation is None:
         return {"status": "unknown_reservation", "state": updated}
-    if (
-        reservation.get("settlement_id") == settlement_id
-        or reservation.get("status") == "settled"
-    ):
+    if reservation.get("settlement_id") == settlement_id or reservation.get("status") == "settled":
         return {
             "status": "already_settled",
             "state": updated,
@@ -52,9 +49,7 @@ def _settle_budget_in_place(
         }
     if task_status not in {"completed", "failed", "timeout", "cancelled"}:
         return {"status": "not_terminal", "state": updated}
-    reserved = float(
-        reservation.get("reserved_cost", reservation.get("relative_cost", 0))
-    )
+    reserved = float(reservation.get("reserved_cost", reservation.get("relative_cost", 0)))
     if actual_cost is not None:
         actual = max(0.0, float(actual_cost))
         estimated = None
@@ -62,9 +57,7 @@ def _settle_budget_in_place(
         basis = cost_source or "reported_actual_cost"
     else:
         actual = None
-        estimated = (
-            max(0.0, float(estimated_cost)) if estimated_cost is not None else reserved
-        )
+        estimated = max(0.0, float(estimated_cost)) if estimated_cost is not None else reserved
         accounted = estimated
         basis = cost_source or (
             "estimated_cost"
@@ -73,9 +66,7 @@ def _settle_budget_in_place(
         )
     released = max(0.0, reserved - accounted)
     usage = updated.setdefault("budget_usage", {})
-    usage["total_relative_cost"] = (
-        float(usage.get("total_relative_cost", 0)) + accounted
-    )
+    usage["total_relative_cost"] = float(usage.get("total_relative_cost", 0)) + accounted
     if actual is not None:
         usage["actual_total_relative_cost"] = (
             float(usage.get("actual_total_relative_cost", 0)) + actual
@@ -85,15 +76,11 @@ def _settle_budget_in_place(
             float(usage.get("estimated_total_relative_cost", 0)) + estimated
         )
     stage_name = reservation.get("stage", "unclassified")
-    stage = usage.setdefault("stages", {}).setdefault(
-        stage_name, {"tasks": 0, "cost": 0.0}
-    )
+    stage = usage.setdefault("stages", {}).setdefault(stage_name, {"tasks": 0, "cost": 0.0})
     stage["tasks"] += 1
     stage["cost"] += accounted
     key = "actual_cost" if actual is not None else "estimated_cost"
-    stage[key] = float(stage.get(key, 0)) + (
-        actual if actual is not None else estimated
-    )
+    stage[key] = float(stage.get(key, 0)) + (actual if actual is not None else estimated)
     updated["reserved_relative_cost"] = max(
         0.0, float(updated.get("reserved_relative_cost", 0)) - reserved
     )

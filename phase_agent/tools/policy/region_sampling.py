@@ -21,7 +21,7 @@ INSTRUCTION = (
     "parameters.sampling_mode=region_adaptive，regions为1至12个对象，每项含region_id、priority(1最高)、"
     "strategy、phase、min_det_H、max_det_H、na_min、na_max、reason和evidence_refs。"
     "strategy仅coverage/composition/competing_phase/periodic_extension/tm_ordering。"
-    "每项phase必须是单个字符串O1、O3、P3或OP2，大小写严格；不能省略、传列表或填写all/多相，多个相须拆成不同region，且遵守项目边界。Na范围是Na/O2。禁止quota、quotas、total_quota、batch_size、generation_plan，"
+    "每项phase必须是项目boundary.P允许的单个相字符串（如O1、O3、P2、P3、OP2，具体以项目边界为准），大小写严格；不能省略、传列表或填写all/多相，多个相须拆成不同region，且遵守项目边界。Na范围是Na/O2。禁止quota、quotas、total_quota、batch_size、generation_plan，"
     "不先定600或任何总数，不把100–1000当必须达到的数量。程序分小批生成，按新增覆盖和初始TM近邻"
     "相关性描述符的多样性控制继续/停止；连续无新颖性停止该区域。达到资源保护阈值暂停等待审阅，"
     "不声称物理收敛。生成后才统计实际branch及相/H/Na分布。"
@@ -89,10 +89,16 @@ def errors(params):
             output.append(prefix + ":invalid_priority")
         if row.get("strategy") not in STRATEGIES:
             output.append(prefix + ":invalid_strategy")
-        if not isinstance(row.get("phase"), str) or row["phase"] not in {"O1", "O3", "P3", "OP2"}:
+        if not isinstance(row.get("phase"), str) or row["phase"] not in {
+            "O1",
+            "O3",
+            "P2",
+            "P3",
+            "OP2",
+        }:
             output.append(
                 prefix + f":explicit_phase_required; received={row.get('phase')!r}; "
-                "expected one string from O1/O3/P3/OP2; split multiple phases into separate regions"
+                "expected one string from O1/O3/P2/P3/OP2; split multiple phases into separate regions"
             )
         low, high = row.get("min_det_H"), row.get("max_det_H")
         if type(low) is not int or type(high) is not int or not 1 <= low <= high:

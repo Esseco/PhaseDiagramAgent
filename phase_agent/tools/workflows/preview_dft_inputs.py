@@ -3,6 +3,7 @@
 from copy import deepcopy
 import math
 from phase_agent.science.qbc.build_candidate_metrics import build_qbc_candidate_metrics
+from phase_agent.decisions.qbc_selection.dft_round_policy import dft_task_limit, round_dft_tasks
 from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
 
 
@@ -30,6 +31,16 @@ def preview_dft_inputs(action, state, config):
     selected = [row for row in decisions if row.get("action") in {"DFT_RELAX", "DFT_SINGLE_POINT"}]
     if not selected:
         return None, "未选择实际 DFT 结构；不能生成输入文件。"
+    try:
+        max_tasks = dft_task_limit(config)
+    except ValueError as error:
+        return None, f"DFT 数量配置无效：{error}"
+    prior = round_dft_tasks(state, config)
+    if len(selected) + len(prior) > max_tasks:
+        return None, (
+            f"本轮 DFT 任务超过上限（单点与优化合计最多 {max_tasks} 个，"
+            f"已登记 {len(prior)} 个，本次 {len(selected)} 个），请按需要减少选点后重新预览。"
+        )
     qbc = deepcopy(config.get("qbc") or {})
     qbc["selection_policy"] = deepcopy((config.get("dft") or {}).get("selection") or {})
     qbc["budget_limits"] = deepcopy(config.get("budgets") or {})
@@ -81,31 +92,14 @@ def preview_dft_inputs(action, state, config):
         return None, "DFT 方案未通过筛选/预算校验，需修订后再批准：" + str(
             validation.get("errors") or validation.get("rejected")
         )
-    total = sum(row["relative_cost"] for row in accepted)
-    selection = (config.get("dft") or {}).get("selection") or {}
-    single_points = [row for row in accepted if row["action"] == "DFT_SINGLE_POINT"]
-    max_points = int(selection.get("single_point_max_per_round", 100))
-    max_point_cost = float(selection.get("single_point_cost_per_round", 5000))
-    model = config.get("mlip") or {}
-    version = model.get("version") or model.get("name") or state.get("active_model_version")
-    prior = [
-        row
-        for row in state.get("tasks") or []
-        if row.get("stage") == "dft_single_point"
-        and row.get("model_version") == version
-        and row.get("generation_cycle") == len(state.get("generation_history") or [])
-        and row.get("status") != "cancelled"
-    ]
-    if (
-        len(single_points) + len(prior) > max_points
-        or sum(row["relative_cost"] for row in single_points)
-        + sum(float(row.get("planned_relative_cost") or 0) for row in prior)
-        > max_point_cost
-    ):
-        return (
-            None,
-            f"本轮单点方案超过上限（最多 {max_points} 个、相对成本 {max_point_cost:g}），请按相/Na/QBC分层调整后重新预览。",
+    from phase_agent.tools.workflows.dft_coverage_review import coverage_errors
+
+    missing_review = coverage_errors(action, candidates)
+    if missing_review:
+        return None, "DFT 的 D/H 独立疑点未完整审阅；增加或替换代表，或明确暂缓理由：" + "; ".join(
+            missing_review
         )
+    total = sum(row["relative_cost"] for row in accepted)
     if not math.isfinite(total) or total <= 0:
         return None, "DFT 成本尚未确定，不能以零成本批准。"
     return {

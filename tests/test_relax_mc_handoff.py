@@ -22,14 +22,29 @@ from phase_agent.runtime.agent_api import format_workflow_reply
 from phase_agent.science.mlip.slurm_executor import execute_mlip_task
 
 
-def test_normal_relax_stop_is_eligible_for_phase_analysis(tmp_path):
+def _write_vasp(path, label="fixture", *, full_na=False):
+    from pymatgen.core import Lattice, Structure
+    from pymatgen.io.vasp import Poscar
+
+    species = ["Na", "Fe", "Mn", "O", "O", "O", "O"]
+    positions = [[0, 0, 0], [.3, .3, .3], [.7, .7, .7], [.1, .4, .1],
+                 [.4, .1, .4], [.4, .7, .7], [.7, .4, .7]]
+    if full_na:
+        species.insert(1, "Na")
+        positions.insert(1, [.5, 0, .5])
+    Poscar(Structure(Lattice.cubic(8), species, positions), comment=label).write_file(path)
+
+
+@pytest.mark.parametrize("optimizer_converged", [True, False, None])
+def test_normal_stop_requires_verified_optimizer_convergence(tmp_path, optimizer_converged):
     structure = tmp_path / "final.vasp"
-    structure.write_text("mock", encoding="utf-8")
+    _write_vasp(structure)
     with patch(
         "phase_agent.science.mlip.slurm_executor.run_mace_worker",
         return_value={
             "status": "completed",
             "relax_stopped_normally": True,
+            "optimizer_converged": optimizer_converged,
             "structure_path": str(structure),
             "energy": -5.0,
             "energy_unit": "eV",
@@ -49,7 +64,7 @@ def test_normal_relax_stop_is_eligible_for_phase_analysis(tmp_path):
                 },
             }
         )
-    assert result["converged"] is True
+    assert result["converged"] is (optimizer_converged is True)
     assert result["outputs"]["energy"] == -5.0
 
 
@@ -74,9 +89,9 @@ def test_final_structure_must_be_downloaded_before_recovery(tmp_path):
 @pytest.mark.parametrize("second_segment", [False, True])
 def test_mc_inputs_use_relaxed_structure_and_full_na_template(tmp_path, second_segment):
     relaxed = tmp_path / "relaxed.vasp"
-    relaxed.write_text("relaxed")
+    _write_vasp(relaxed, "relaxed")
     full_na = tmp_path / "full_na.vasp"
-    full_na.write_text("full Na")
+    _write_vasp(full_na, "full Na", full_na=True)
     manager = SimpleNamespace(
         data={
             "branches": {"B1": {"structure_ids": ["S1"]}},
@@ -162,24 +177,24 @@ def test_mc_inputs_use_relaxed_structure_and_full_na_template(tmp_path, second_s
     assert sorted(len(batch["task_ids"]) for batch in result["batches"]) == [1, 20]
     first = Path(result["batches"][0]["directory"])
     task = json.loads(next(first.glob("*/task.json")).read_text(encoding="utf-8"))
-    assert (first / task["calculation_directory"] / "initial.vasp").read_text() == "relaxed"
+    assert (first / task["calculation_directory"] / "initial.vasp").read_bytes() == relaxed.read_bytes()
     assert (
         first / task["calculation_directory"] / "full_na_structure.vasp"
-    ).read_text() == "full Na"
+    ).read_bytes() == full_na.read_bytes()
     assert task["worker_job"]["segment_budget"] == 10
 
 
 def _completed_relax_fixture(tmp_path):
     initial = tmp_path / "initial.vasp"
-    initial.write_text("initial", encoding="utf-8")
+    _write_vasp(initial, "initial")
     full_na = tmp_path / "full_na.vasp"
-    full_na.write_text("full Na", encoding="utf-8")
+    _write_vasp(full_na, "full Na", full_na=True)
     signature = hashlib.sha256(b"{}").hexdigest()[:12]
     structures, tasks, rows = {}, [], []
     for index in range(3):
         sid = f"S{index}"
         final = tmp_path / f"relaxed-{index}.vasp"
-        final.write_text(f"relaxed {index}", encoding="utf-8")
+        _write_vasp(final, f"relaxed {index}")
         structures[sid] = {
             "branch_id": "B1",
             "source_path": str(initial),
@@ -290,8 +305,8 @@ def test_completed_relax_advances_to_mc_and_prepares_upload_files(tmp_path):
     )
     batch = Path(result["mc_upload"]["batches"][0]["directory"])
     mc_dir = next(batch.glob("*/task.json")).parent
-    assert (mc_dir / "initial.vasp").read_text(encoding="utf-8") == "relaxed 2"
-    assert (mc_dir / "full_na_structure.vasp").read_text(encoding="utf-8") == "full Na"
+    assert (mc_dir / "initial.vasp").read_bytes() == (tmp_path / "relaxed-2.vasp").read_bytes()
+    assert (mc_dir / "full_na_structure.vasp").read_bytes() == (tmp_path / "full_na.vasp").read_bytes()
     assert "#SBATCH --job-name=mc-" in (batch / "GPU.sh").read_text(encoding="utf-8")
 
 

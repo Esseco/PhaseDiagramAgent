@@ -35,6 +35,7 @@ def tmp_path(tmp_path_factory):
 @pytest.mark.parametrize(
     "project,expected", [("O3-1ele-NaCoO2", 30), ("O3-1ele-NaCrO2", 12), ("O3-2ele-NaFeMn", 0)]
 )
+@pytest.mark.real_project
 def test_true_dialogue_notice_analysis_proposal_approval_delivery(
     tmp_path, monkeypatch, project, expected
 ):
@@ -302,7 +303,7 @@ def test_true_dialogue_notice_analysis_proposal_approval_delivery(
     job = next(iter(final["remote_finetune_jobs"].values()))
     assert job["submitted"] is False and job["activated"] is False
     assert len(final["new_dft_records"]) == expected
-    folders = list((local / "submissions").rglob("epoch0_Finetune_Batch01_input"))
+    folders = list((local / "submissions").rglob("Finetune_Batch01_input"))
     assert len(folders) == 1
     folder = folders[0]
     assert {p.name for p in folder.iterdir()} == {

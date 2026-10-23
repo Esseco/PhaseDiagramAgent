@@ -10,6 +10,9 @@ def export_current_phase_diagram(state, *, directory=None, method="mlip"):
     if method not in {"mlip", "dft", "combined"}:
         raise ValueError("相图方法只能是 mlip、dft 或 combined")
     snapshot = (state.get("phase_diagrams") or {}).get(method) or {}
+    from phase_agent.analysis.phase.phase_boundary import assert_snapshot_boundary
+
+    assert_snapshot_boundary(state, snapshot)
     if method == "combined":
         if snapshot.get("model_version") != state.get("active_model_version"):
             raise ValueError("综合相图与当前模型不一致，请由 Agent 更新")

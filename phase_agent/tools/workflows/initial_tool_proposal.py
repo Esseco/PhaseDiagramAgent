@@ -42,6 +42,31 @@ def select_initial_proposal(
 
         saved = reusable_selection(current)
         if saved is not None:
+            if saved.pop("reuse_requires_preview", False):
+                from phase_agent.tools.workflows.prepare_dft_proposal import prepare_dft_proposal
+
+                preparation = prepare_dft_proposal(
+                    saved["raw_action"],
+                    current,
+                    decision_state,
+                    (context or {}).get("effective_config") or config,
+                    agent_client=None,
+                    revise=revise,
+                )
+                if preparation.status == "rejected":
+                    return {
+                        "status": "rejected",
+                        "state": current,
+                        "reason": "原 DFT 选点仍未通过当前预检；原方案保留，请修订后再批准："
+                        + preparation.error,
+                        "submitted": False,
+                    }
+                saved = {
+                    **build_agent_proposal(
+                        preparation.action, decision_state, runtime_state=current
+                    ),
+                    "reuse_source_record_id": saved["reuse_source_record_id"],
+                }
             return {
                 "_proposal_selected": True,
                 "current": current,
@@ -173,47 +198,16 @@ def select_initial_proposal(
                     and r.get("candidate_id") not in prior_relax
                 )
             ]
-        decision_state["qbc_candidates"] = deepcopy(current["qbc_candidates"])
-        decision_state.setdefault("decision_context", {})["qbc_candidates"] = deepcopy(
-            current["qbc_candidates"]
-        )
-        from phase_agent.decisions.qbc_selection.recommend_post_mc_dft import (
-            recommend_post_mc_dft,
-        )
-
-        recommendation = recommend_post_mc_dft(current["qbc_candidates"], effective, current)
-        current["dft_audit_candidate_ids"] = [
-            r["candidate_id"]
-            for r in recommendation["selected_candidates"]
-            if r.get("dft_selection_mode") == "independent_audit"
-        ]
-        decision_state["decision_context"]["independent_audit_candidate_ids"] = current[
-            "dft_audit_candidate_ids"
-        ]
-        decision_state["decision_context"]["dft_sampling_recommendation"] = {
-            "candidate_ids": [row["candidate_id"] for row in recommendation["selected_candidates"]],
-            "summary": recommendation["summary"],
-            "instruction": "此为可选参考而非最终决定；结合记忆与现状自行选择。兼顾near-hull、相、Na、已知QBC与抽查，缺失QBC不评分；偏离覆盖目标说明理由。",
-        }
-        from phase_agent.tools.budget.estimate_stage_cost import estimate_dft_cost
-
-        decision_state["decision_context"]["dft_candidate_costs"] = [
-            {
-                "candidate_id": row["candidate_id"],
-                "single_point_cost": estimate_dft_cost("DFT_SINGLE_POINT", row, effective["qbc"]),
-                "relax_cost": estimate_dft_cost("DFT_RELAX", row, effective["qbc"]),
-            }
-            for row in current["qbc_candidates"]
-        ]
-        decision_state["decision_context"]["dft_stage_limits"] = (
-            effective.get("budgets") or {}
-        ).get("stage_limits")
         if not current["qbc_candidates"] and not assessment:
             return {
                 "status": "not_configured",
                 "state": current,
                 "reason": "第二轮 MC 已完成；DFT 候选缺少当前相图中唯一匹配的已识别结构与 Ehull/atom。未追加 MC 或回退 Relax。",
             }
+    if "select_dft_candidates" in allowed and "qbc_candidates" in current:
+        from phase_agent.tools.workflows.dft_proposal_evidence import refresh_dft_evidence
+
+        refresh_dft_evidence(current, decision_state, effective)
     safe_next = (
         choose_debug_next_action(
             current,

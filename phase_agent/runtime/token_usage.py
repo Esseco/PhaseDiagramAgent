@@ -18,7 +18,14 @@ def begin_api_call(model, mode, attempt, input_chars, **metadata):
         {
             k: v
             for k, v in metadata.items()
-            if k in {"phase", "max_output_tokens", "reasoning_enabled"}
+            if k
+            in {
+                "phase",
+                "max_output_tokens",
+                "reasoning_enabled",
+                "reasoning_effort",
+                "recovery_kind",
+            }
         }
     )
     record.setdefault("model_requests", []).append(entry)

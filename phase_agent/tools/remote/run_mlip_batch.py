@@ -41,14 +41,9 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
         marker = task_dir / "task.finished.json"
         if marker.is_file() and (task_dir / "result.json").is_file():
             try:
-                if (
-                    json.loads(marker.read_text(encoding="utf-8")).get("status")
-                    == "completed"
-                ):
+                if json.loads(marker.read_text(encoding="utf-8")).get("status") == "completed":
                     exported.append(
-                        export_batch_result(
-                            task_dir, results_directory, create_archive=False
-                        )
+                        export_batch_result(task_dir, results_directory, create_archive=False)
                     )
                     continue
             except (OSError, ValueError) as error:
@@ -86,9 +81,7 @@ def run_mlip_batch(manifest_path="manifest.json", *, executor=None):
         if marker.is_file() and (task_dir / "result.json").is_file():
             try:
                 exported.append(
-                    export_batch_result(
-                        task_dir, results_directory, create_archive=False
-                    )
+                    export_batch_result(task_dir, results_directory, create_archive=False)
                 )
             except (OSError, ValueError) as error:
                 print(f"结果汇集失败 {entry['task_id']}: {error}", file=sys.stderr)

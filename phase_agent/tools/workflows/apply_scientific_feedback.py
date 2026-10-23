@@ -82,7 +82,14 @@ def apply_scientific_feedback(
             }
             continue
         if prior and prior.get("recovery_cancelled") is True:
-            rejected.append({"task_id": task_id, "reason": "dft_recovery_cancelled_by_user"})
+            rejected.append(
+                {
+                    "task_id": task_id,
+                    "reason": "dft_recovery_cancelled_by_user"
+                    if prior.get("stage") in {"dft_single_point", "dft_relax"}
+                    else "task_wait_cancelled_by_user",
+                }
+            )
             continue
         if task_id in processed:
             if incoming.get("stage") not in DFT_STAGES or prior is None:
@@ -203,6 +210,7 @@ def apply_scientific_feedback(
             if not is_refresh:
                 feedback_rows.append({**result, "phase_record": phase_record})
 
+    _restore_revalidated_phase_records(current, manager)
     refresh_identified_phases(current)
     # Preserve the existing cached classification for dataset/phase consumers.
     phases = {r.get("source_task_id"): r for r in current.get("phase_records", [])}
@@ -281,6 +289,54 @@ def apply_scientific_feedback(
         "feedback_count": len(feedback_rows),
         "metadata_refreshed_task_ids": refreshed,
     }
+
+
+def _restore_revalidated_phase_records(state, manager):
+    """Re-admit saved evidence only; never replay ledger writes or cost settlement."""
+    from phase_agent.persistence.ledger.collect_calculation_results import _phase_record
+
+    tasks = {task.get("task_id"): task for task in state.get("tasks") or []}
+    invalid = state.get("scientific_feedback_errors") or {}
+    processed = set(state.get("feedback_processed_task_ids") or [])
+    for record in state.get("phase_records") or []:
+        task_id = record.get("source_task_id")
+        task = tasks.get(task_id)
+        if (
+            record.get("status") != "excluded_invalid_result"
+            or task_id in invalid
+            or task_id not in processed
+            or not task
+            or task.get("status") != "completed"
+            or task.get("structure_id") not in manager.data.get("structures", {})
+        ):
+            continue
+        structure = manager.data["structures"][task["structure_id"]]
+        if not any(
+            row.get("result_id") == record.get("record_id")
+            and (row.get("metadata") or {}).get("task_id") == task_id
+            for row in (structure.get("stage_history") or {}).get(task.get("stage"), [])
+        ):
+            continue
+        checked = _phase_record(
+            manager, task["structure_id"], record.get("record_id"), task.get("stage"), task
+        )
+        if checked and all(
+            record.get(key) == checked.get(key)
+            for key in (
+                "source_task_id",
+                "structure_id",
+                "stage",
+                "energy",
+                "energy_unit",
+                "energy_method",
+                "model_version",
+                "source_version",
+                "composition",
+                "structure_path",
+                "structure_sha256",
+            )
+        ):
+            record.update(status=checked["status"], checks_passed=checked["checks_passed"])
 
 
 def _record_rewards(state, previous, diagrams, feedback_rows):

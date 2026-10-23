@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from Process_AL_MC.structure_check import check_structure
+
 from phase_agent.science.structures.boundary_utils import load_structure
 from phase_agent.science.structures.identify_branch import identify_branch_parameters
 from phase_agent.science.structures.validate_structure_transition import (
@@ -24,6 +26,22 @@ def run_structure_check(
     config.update(parameters or {})
     try:
         present = load_structure(structure)
+        basic = check_structure(present, minimum_distance=config["minimum_distance"])
+        if basic["status"] == "invalid":
+            return {
+                "stage": "simple_check",
+                "status": "completed",
+                "converged": False,
+                "structure": present,
+                "outputs": {
+                    "checks_passed": False,
+                    "failed_checks": basic["failed_checks"],
+                    "minimum_distance": basic["minimum_distance"],
+                    "structure_check": basic,
+                },
+                "actual_cost": None,
+                "error": None,
+            }
         identified = identify_branch_parameters(
             present, boundary, phase_references=phase_references
         )
@@ -31,11 +49,7 @@ def run_structure_check(
             expected_branch or {}, identified, policy=config.get("structure_transition_policy")
         )
         mismatches = list(transition["constraint_violations"])
-        distances = present.distance_matrix
-        positive = distances[distances > 1e-12]
-        minimum = float(positive.min()) if positive.size else None
-        if minimum is not None and minimum < config["minimum_distance"]:
-            mismatches.append("minimum_distance")
+        minimum = basic["minimum_distance"]
         passed = not mismatches
         return {
             "stage": "simple_check",
@@ -48,6 +62,7 @@ def run_structure_check(
                 "checks_passed": passed,
                 "failed_checks": mismatches,
                 "structure_transition": transition,
+                "structure_check": basic,
             },
             "actual_cost": None,
             "error": None,

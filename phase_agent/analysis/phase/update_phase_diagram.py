@@ -30,6 +30,20 @@ def update_phase_diagram(
     if energy_basis not in {"total", "per_atom", "per_formula_unit"}:
         raise ValueError("energy_basis 必须是 total/per_atom/per_formula_unit")
     output = {"energy_basis": energy_basis, "diagrams": {}, "mlip_by_version": {}}
+    from phase_agent.analysis.phase.phase_boundary import (
+        phase_boundary_rule,
+        outside_phase_boundary,
+    )
+
+    phase_rule = phase_boundary_rule(output_state)
+    excluded = {
+        (review.get("model_version"), record_id)
+        for review in (output_state or {}).get("phase_quality_exclusions") or []
+        for record_id in review.get("record_ids") or []
+    }
+    from phase_agent.analysis.phase.phase_quality_restore import restored_records
+
+    excluded -= restored_records(output_state)
     from phase_agent.analysis.convergence.mlip_relaxation import relaxation_failure
 
     tasks = {t.get("task_id"): t for t in (output_state or {}).get("tasks") or []}
@@ -47,6 +61,11 @@ def update_phase_diagram(
             for item in records
             if str(item.get("energy_method", "")).lower() == method
             and item.get("status", "completed") == "completed"
+            and (
+                method != "mlip"
+                or (item.get("model_version") or item.get("source_version"), item.get("record_id"))
+                not in excluded
+            )
             and (
                 method != "mlip"
                 or str(item.get("model_version") or item.get("source_version") or "unknown")
@@ -73,6 +92,8 @@ def update_phase_diagram(
                         raise ValueError("DFT quality/spin standard not passed")
                 if item.get("energy_unit") != "eV":
                     raise ValueError("相图记录 energy_unit 必须为 'eV'")
+                if outside_phase_boundary(item, phase_rule):
+                    raise ValueError("phase_outside_composition_boundary")
                 composition = Composition(item["composition"])
                 energy = _total_energy(item, composition, energy_basis)
                 normalized.append(
@@ -91,6 +112,7 @@ def update_phase_diagram(
             rejected,
             energy_basis,
             (parent_versions or {}).get(method),
+            phase_rule=phase_rule,
         )
         if method == "mlip":
             snapshot["model_version"] = model_version
@@ -218,7 +240,7 @@ def _total_energy(item, composition, basis):
     return energy
 
 
-def _build_snapshot(method, records, rejected, basis, parent):
+def _build_snapshot(method, records, rejected, basis, parent, *, phase_rule=None):
     payload = [
         {
             "record_id": item.get("record_id"),
@@ -231,9 +253,17 @@ def _build_snapshot(method, records, rejected, basis, parent):
         }
         for item in records
     ]
+    identity = {
+        "method": method,
+        "basis": basis,
+        "algorithm": "na_eform_hull_v1",
+        "entries": payload,
+    }
+    if phase_rule is not None:
+        identity["phase_boundary_rule"] = phase_rule
     version = hashlib.sha256(
         json.dumps(
-            {"method": method, "basis": basis, "algorithm": "na_eform_hull_v1", "entries": payload},
+            identity,
             sort_keys=True,
         ).encode()
     ).hexdigest()[:12]
@@ -248,6 +278,8 @@ def _build_snapshot(method, records, rejected, basis, parent):
         "rejected": rejected,
         "status": "completed",
     }
+    if phase_rule is not None:
+        snapshot["phase_boundary_rule"] = phase_rule
     if not records:
         snapshot.update({"status": "unknown", "reason": "no_identified_energy_records"})
         return snapshot

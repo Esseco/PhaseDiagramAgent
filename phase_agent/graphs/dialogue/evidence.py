@@ -35,6 +35,11 @@ def conversation_facts(facts, project):
     from phase_agent.analysis.state.task_failure_facts import task_failure_facts
 
     tasks = facts.get("tasks") or []
+    from phase_agent.tools.state.task_wait_cancellation import (
+        cancellation_scopes,
+        latest_cancellation_facts,
+    )
+
     failure_facts = task_failure_facts(facts)
     current_failures = [
         row
@@ -43,8 +48,17 @@ def conversation_facts(facts, project):
         or row.get("model_version") in (None, facts["active_model_version"])
     ]
     refresh = refresh_result_facts(facts)
+    from phase_agent.analysis.phase.phase_quality_reports import quality_summary
+
     return {
         "current_project": deepcopy(project),
+        "phase_diagram_quality": quality_summary(facts),
+        "task_wait_cancellation_scopes": cancellation_scopes(facts),
+        "task_wait_cancellation": latest_cancellation_facts(facts),
+        "recent_task_wait_cancellations": [
+            {key: row.get(key) for key in ("task_id", "scope_id", "remote_cancel_sent")}
+            for row in (facts.get("task_wait_cancellations") or [])[-6:]
+        ],
         "batch_return_facts": batch_return_facts(facts),
         "current_status": facts.get("status"),
         "human_constraints": deepcopy(
@@ -173,6 +187,7 @@ def read_topics(facts, topics, *, manager=None):
 
 def read_limit_reply(facts):
     refresh = refresh_result_facts(facts)
+
     groups = refresh["failure_groups"]
     if groups:
         causes = "；".join(f"{row['count']} 个任务：{row['reason']}" for row in groups[:3])

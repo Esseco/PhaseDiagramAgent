@@ -30,10 +30,7 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
         original_sha = hashlib.sha256(original_bytes).hexdigest()
         if original_sha != bound["original_result_sha256"]:
             raise ValueError("reassessment_original_result_changed")
-        if (
-            original.get("stage") != "dft_single_point"
-            or original.get("status") != "failed"
-        ):
+        if original.get("stage") != "dft_single_point" or original.get("status") != "failed":
             raise ValueError("reassessment_requires_known_failed_static")
         outputs = original.get("outputs") or {}
         if not all(
@@ -48,9 +45,7 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
             raise ValueError("reassessment_final_frame_not_verified")
         worker = safe(source, task["input_directory"])
         config = json.loads((worker / "workflow.json").read_text(encoding="utf-8"))
-        checkpoint = json.loads(
-            (worker / "workflow_state.json").read_text(encoding="utf-8")
-        )
+        checkpoint = json.loads((worker / "workflow_state.json").read_text(encoding="utf-8"))
         entry = (checkpoint.get("stages") or {}).get("static") or {}
         if (
             config.get("calculation") != "static"
@@ -65,9 +60,9 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
         ):
             raise ValueError("reassessment_original_input_changed")
         model = json.loads(comparison_path.read_text(encoding="utf-8"))
-        if model != options["model"] or model.get(
-            "version", model.get("name")
-        ) != original.get("model_version"):
+        if model != options["model"] or model.get("version", model.get("name")) != original.get(
+            "model_version"
+        ):
             raise ValueError("reassessment_original_model_changed")
         model_sha = file_checksum(Path(model["model_path"]))
         if model.get("model_sha256") and model_sha != model["model_sha256"]:
@@ -84,9 +79,7 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
         cache.mkdir(parents=True, exist_ok=True)
         cached_path = cache / "result.json"
         cached = (
-            json.loads(cached_path.read_text(encoding="utf-8"))
-            if cached_path.is_file()
-            else {}
+            json.loads(cached_path.read_text(encoding="utf-8")) if cached_path.is_file() else {}
         )
         if (cached.get("recovery_provenance") or {}).get("cache_key") != cache_key:
             derived = deepcopy(original)
@@ -103,12 +96,8 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
                 "cache_key": cache_key,
             }
             _write(cached_path, derived)
-            receipt = json.loads(
-                (destination / "task.finished.json").read_text(encoding="utf-8")
-            )
-            receipt.update(
-                status="completed", result_checksum=file_checksum(cached_path)
-            )
+            receipt = json.loads((destination / "task.finished.json").read_text(encoding="utf-8"))
+            receipt.update(status="completed", result_checksum=file_checksum(cached_path))
             _write(cache / "task.finished.json", receipt)
         print(
             f"[{tid}] geometry verified; supplementing original-model same-frame prediction",
@@ -144,7 +133,5 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
 
 def _write(path, payload):
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
     temporary.replace(path)

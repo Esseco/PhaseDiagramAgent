@@ -114,6 +114,9 @@ def export_dft_products(state, directory):
             ("metrics.csv", METRIC_FIELDS, metric_rows),
         ):
             _publish_csv(dft_product_path(root, name), fields, rows)
+        from phase_agent.analysis.feedback.dft_magnetic_plots import export_magnetic_plots
+
+        magnetic_plots = export_magnetic_plots(magnetism, root / "diagnostics" / "magnetic_plots")
         version_root = model_output_directory(
             directory, scope.get("model_version") or "unknown-model", state=state
         )
@@ -131,6 +134,7 @@ def export_dft_products(state, directory):
             "directory": str(root),
             "round_scope": scope,
             "parity_plots": plots,
+            "magnetic_plots": magnetic_plots,
             "records": len(records),
             "matched_structures": metrics["matched_structures"],
             "expected_tasks": expected,
@@ -169,6 +173,9 @@ def publish_output_catalog(state, directory):
     from phase_agent.analysis.feedback.output_catalog import output_catalog, catalog_markdown
 
     path = Path(directory) / "output_index.md"
+    from phase_agent.analysis.feedback.workspace_guide import publish_epoch_guides
+
+    publish_epoch_guides(directory, state)
     _publish_bytes(path, catalog_markdown(output_catalog(state), Path(directory)).encode("utf-8"))
     state.pop("output_index_csv_path", None)
     state["output_index_path"] = str(path)

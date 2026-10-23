@@ -1,1 +1,1 @@
-"""Long- and short-term decision memory persistence."""
+"""Thread-scoped conversation storage and explicitly reviewed scientific knowledge."""

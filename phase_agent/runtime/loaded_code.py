@@ -8,6 +8,8 @@ import sys
 from types import CodeType, FunctionType
 
 WATCHED_MODULES = (
+    "phase_agent.runtime.interaction_reports",
+    "phase_agent.tools.relax_mc_batch.failure_diagnostics",
     "phase_agent.runtime.agent_api",
     "phase_agent.runtime.control_request_contracts",
     "phase_agent.tools.workflows.lifecycle_initialization",
@@ -240,6 +242,14 @@ def loaded_code_report(*, module_names=None, source_root=None):
     }
 
 
+class LoadedCodeChangedError(RuntimeError):
+    """Known no-execution block with inspectable module evidence."""
+
+    def __init__(self, message, report):
+        super().__init__(message)
+        self.report = report
+
+
 def assert_loaded_code_current():
     report = loaded_code_report()
     if report["status"] == "manual_reload_required":
@@ -248,8 +258,9 @@ def assert_loaded_code_current():
             for row in report["modules"]
             if row["status"] not in {"not_loaded", "matches"}
         ]
-        raise RuntimeError(
+        raise LoadedCodeChangedError(
             "运行中的代码与磁盘源码不一致；本次未推进科研任务。"
             "请先结束当前请求，再由用户手动重新启动项目服务加载一致版本。涉及模块："
-            + ", ".join(changed)
+            + ", ".join(changed),
+            report,
         )

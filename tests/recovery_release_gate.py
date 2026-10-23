@@ -5,8 +5,54 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 TARGETS = [
+    "tests/test_selection_reason_reports.py",
+    "tests/test_dft_environment_admission.py",
+    "tests/test_project_registry_recovery.py",
+    "tests/test_new_project_run.py",
+    "tests/test_preparation_scope.py",
+    "tests/test_relax_input_recovery.py",
+    "tests/test_task_wait_cancellation.py",
+    "tests/test_upload_task_boundaries.py",
+    "tests/test_dialogue_resilience.py",
+    "tests/test_legacy_submission_index.py",
+    "tests/test_report_inventory.py",
+    "tests/test_report_state_reuse.py",
+    "tests/test_concrete_interaction_reply.py",
+    "tests/test_interaction_efficiency.py",
+    "tests/test_compact_action_history.py",
+    "tests/test_approval_history_performance.py",
+    "tests/test_execution_consistency.py",
+    "tests/test_input_admission.py",
+    "tests/test_environment_preflight.py",
+    "tests/test_project_scaffold_contract.py",
+    "tests/test_local_project_launcher.py",
+    "tests/test_project_dashboard.py",
+    "tests/test_relax_mc_compact_handoff.py",
+    "tests/test_remote_input_contract.py",
+    "tests/test_graph_architecture_contract.py",
+    "tests/test_domain_memory.py",
+    "tests/test_decision_memory.py",
+    "tests/test_memory_experience.py",
+    "tests/test_memory_action_scope.py",
+    "tests/test_memory_token_management.py",
+    "tests/test_interaction_context.py",
+    "tests/test_saved_work_semantics.py",
+    "tests/test_conversation_contract.py",
+    "tests/test_interaction_continuity.py",
+    "tests/test_repeatable_runtime.py",
+    "tests/test_runtime_doctor.py",
+    "tests/test_dialogue_memory_resilience.py",
+    "tests/test_sqlite_paths.py",
+    "tests/test_startup_reliability.py",
+    "tests/test_scientific_scope.py",
+    "tests/test_interaction_markdown.py",
+    "tests/test_return_failure_evidence.py",
+    "tests/test_training_remote_manifest.py",
+    "tests/test_remote_model_references.py",
+    "tests/test_result_contract_recovery.py",
     "tests/test_agent_retry_guard.py",
     "tests/test_stability_boundaries.py",
     "tests/test_stability_diagnostics.py",
@@ -65,36 +111,43 @@ TARGETS = [
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--basetemp", required=True, help="Short writable test directory")
+    parser.add_argument(
+        "--basetemp", help="Short writable parent for this run; contents are preserved"
+    )
     parser.add_argument("--junitxml")
     args = parser.parse_args()
-    base = Path(args.basetemp).resolve()
     root = Path(__file__).resolve().parents[1]
     if not (root / "phase_agent").is_dir():
         raise ValueError("Run from an installed source checkout")
-    temporary = base.parent / (base.name + "-temp")
-    temporary.mkdir(parents=True, exist_ok=True)
-    environment = {
-        **os.environ,
-        "TEMP": str(temporary),
-        "TMP": str(temporary),
-        "PYTHONUTF8": "1",
-        "PYTHONDONTWRITEBYTECODE": "1",
-    }
-    command = [
-        sys.executable,
-        "-m",
-        "pytest",
-        *TARGETS,
-        "-q",
-        "-p",
-        "no:cacheprovider",
-        "--tb=short",
-        "--basetemp=" + str(base),
-    ]
-    if args.junitxml:
-        command.append("--junitxml=" + str(Path(args.junitxml).resolve()))
-    return subprocess.run(command, cwd=root, env=environment).returncode
+    parent = Path(args.basetemp).resolve() if args.basetemp else Path(tempfile.gettempdir()) / "pdt"
+    parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt" and not str(parent).startswith("\\\\?\\"):
+        # TemporaryDirectory cleanup must retain extended paths for long-return fixtures.
+        name = str(parent)
+        parent = Path("\\\\?\\UNC\\" + name[2:] if name.startswith("\\\\") else "\\\\?\\" + name)
+    with tempfile.TemporaryDirectory(prefix="", dir=parent) as directory:
+        temporary = Path(directory)
+        environment = {
+            **os.environ,
+            "TEMP": str(temporary),
+            "TMP": str(temporary),
+            "PYTHONUTF8": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            *TARGETS,
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--tb=short",
+            "--basetemp=" + str(temporary / "t"),
+        ]
+        if args.junitxml:
+            command.append("--junitxml=" + str(Path(args.junitxml).resolve()))
+        return subprocess.run(command, cwd=root, env=environment).returncode
 
 
 if __name__ == "__main__":

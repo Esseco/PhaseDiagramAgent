@@ -20,6 +20,12 @@ def build_decision_context(state, *, recent_limit=5):
     from phase_agent.analysis.state.scientific_decision_brief import decision_brief
     from phase_agent.tools.relax_mc_batch.plan import batch_facts
 
+    saved_candidates = state.get("qbc_candidates") or []
+    current_snapshot = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    if saved_candidates and current_snapshot.get("entries"):
+        from phase_agent.analysis.phase.phase_quality_reports import candidate_quality_evidence
+
+        saved_candidates = candidate_quality_evidence(state, saved_candidates)
     memory = state.get("decision_memory") or {}
     long_term = memory.get("long_term") or {}
     diagrams = state.get("phase_diagrams") or state.get("phase_diagram_state") or {}
@@ -32,7 +38,10 @@ def build_decision_context(state, *, recent_limit=5):
             summarize_phase_coverage,
         )
 
+        from phase_agent.analysis.phase.phase_quality_reports import quality_summary
+
         phase_summary[method] = {
+            "quality_diagnostics": quality_summary(state, method=method, snapshot=snapshot),
             **{k: deepcopy(snapshot.get(k)) for k in ("status", "version", "energy_basis_id")},
             "entry_count": len(entries),
             "phase_coverage": summarize_phase_coverage(entries),
@@ -196,8 +205,10 @@ def build_decision_context(state, *, recent_limit=5):
     )
 
     from phase_agent.decisions.agent.branch_pool_review import pool_context
+    from phase_agent.tools.state.task_wait_cancellation import latest_cancellation_facts
 
     context = {
+        "task_wait_cancellation": latest_cancellation_facts(state),
         "mc_entry_conditions": mc_allocation_facts(state),
         "refresh_result_facts": refresh_result_facts(state),
         "gpu_usage_summary": deepcopy(state.get("gpu_usage_summary") or {}),
@@ -299,7 +310,8 @@ def build_decision_context(state, *, recent_limit=5):
             for row in (state.get("generation_history") or [])[-5:]
         ],
         "available_branches": candidate_evidence(state.get("branch_candidates") or []),
-        "qbc_candidates": candidate_evidence(state.get("qbc_candidates") or []),
+        "qbc_candidates": candidate_evidence(saved_candidates),
+        "independent_audit_candidate_ids": deepcopy(state.get("dft_audit_candidate_ids") or []),
         "relax_mc_batches": batch_facts(state),
         "recent_experience": {
             "limit": recent_limit,

@@ -227,7 +227,7 @@ def patch_split_project(path, patch, *, expected_hash=None, baseline_config=None
             if not isinstance(cursor, dict):
                 raise ValueError("字段不能向下展开：" + dotted_path)
         old = deepcopy(cursor.get(parts[-1]))
-        if old != value:
+        if parts[-1] not in cursor or old != value:
             cursor[parts[-1]] = deepcopy(value)
             changes.append(
                 {

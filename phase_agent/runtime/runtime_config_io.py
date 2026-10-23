@@ -27,11 +27,32 @@ def _resolve_path(value, base):
     return path if path.is_absolute() else (base / path).resolve()
 
 
+def runtime_base_directory(config_file, settings):
+    """Resolve the existing default-diagram alias identically for run and diagnosis."""
+    base = Path(config_file).resolve().parent
+    if (settings.get("shared_dft") or {}).get(
+        "diagram_id"
+    ) == "diagram_default" and base.parent.name == "diagrams":
+        system_root = base.parent.parent
+        descriptor = system_root / "system.json"
+        if (
+            descriptor.is_file()
+            and _load_json_object(descriptor, "system").get("default_diagram") == base.name
+        ):
+            return system_root
+    return base
+
+
 def _load_json_object(path, label):
     try:
-        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        value = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     except FileNotFoundError as error:
         raise ValueError(f"{label}不存在：{path}") from error
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            f"{label} JSON 无效：{path}，第 {error.lineno} 行第 {error.colno} 列；"
+            "修正文件后重新读取"
+        ) from error
     if not isinstance(value, dict):
         raise ValueError(f"{label}必须是 JSON object：{path}")
     return value

@@ -20,8 +20,21 @@ def main(argv=None):
     recover.add_argument("--destination", required=True)
     recover.add_argument("--job-evidence", required=True)
     recover.add_argument("--remote-root", required=True)
+    register = sub.add_parser(
+        "register-recovery", help="verify and select a collect-only archive; never submit"
+    )
+    register.add_argument("--state", required=True)
+    register.add_argument("--bundle-id", required=True)
+    register.add_argument("--archive", required=True)
     args = parser.parse_args(argv)
-    if args.command == "run":
+    if args.command == "register-recovery":
+        from phase_agent.tools.relax_mc_batch.files import read
+        from phase_agent.tools.relax_mc_batch.recovery_receipt import register_recovery
+
+        state = read(args.state)
+        record = state["relax_mc_batches"][args.bundle_id]
+        result = register_recovery(record, state, args.archive)
+    elif args.command == "run":
         from phase_agent.tools.relax_mc_batch.run import run_batch
 
         result = run_batch(args.root, submit=args.submit, dry_run=args.dry_run, phase=args.phase)

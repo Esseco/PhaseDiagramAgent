@@ -6,6 +6,18 @@ from os.path import commonprefix
 
 
 TABLE_FIELDS = {
+    "task_observations",
+    "reports",
+    "comparable_cohorts",
+    "observed_budget_outcomes",
+    "decision_feedback",
+    "model_round_summary",
+    "stages",
+    "existing_branches",
+    "available_allocations",
+    "lowest_ehull_entries",
+    "recent_action_history",
+    "selection_purposes",
     "available_branches",
     "qbc_candidates",
     "search_coverage",
@@ -30,7 +42,7 @@ def _size(value):
 
 
 def table_rows(rows):
-    if not isinstance(rows, list) or len(rows) < 8 or not all(isinstance(r, dict) for r in rows):
+    if not isinstance(rows, list) or len(rows) < 2 or not all(isinstance(r, dict) for r in rows):
         return rows
     # Group mixed schemas without inventing null values or losing row order.
     columns = list(rows[0])
@@ -50,7 +62,16 @@ def table_rows(rows):
             ],
         }
         return table if _size(table) < _size(rows) else rows
-    common = {key: rows[0][key] for key in columns if all(r[key] == rows[0][key] for r in rows)}
+    # Python equates True/1/1.0; wire evidence must retain their JSON types.
+    common = {
+        key: rows[0][key]
+        for key in columns
+        if all(
+            json.dumps(r[key], sort_keys=True, default=str)
+            == json.dumps(rows[0][key], sort_keys=True, default=str)
+            for r in rows
+        )
+    }
     columns = [key for key in columns if key not in common]
     table = {
         "format": "column_table_v1",

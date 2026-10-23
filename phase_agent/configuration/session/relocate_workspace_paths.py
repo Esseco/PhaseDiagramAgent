@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 
-def relocate_workspace_paths(config, relocations, workspace):
+def relocate_workspace_paths(config, relocations, workspace, *, preserve_snapshots=False):
     root = Path(workspace).resolve()
     pairs = []
     root_moves = [
@@ -25,22 +25,60 @@ def relocate_workspace_paths(config, relocations, workspace):
         ) and not explicit_move:
             raise ValueError("工作区迁移映射不能跨工作区")
         pairs.extend(((str(old), str(new)), (old.as_posix(), new.as_posix())))
+        if old.drive.endswith(":") and not str(old).startswith("\\\\?\\"):
+            extended = "\\\\?\\" + str(old)
+            pairs.extend(((extended, str(new)), (extended.replace("\\", "/"), new.as_posix())))
 
-    pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
+    destinations = {old.replace("\\", "/").rstrip("/").lower(): new for old, new in pairs}
+
+    path_starts = {old[:3].lower() for old, _ in pairs}
 
     def rewrite(value):
         if isinstance(value, dict):
-            return {key: rewrite(item) for key, item in value.items()}
+            return {
+                key: deepcopy(item)
+                if preserve_snapshots
+                and key
+                in {
+                    "confirmed_config",
+                    "confirmed_snapshot",
+                    "source_config_snapshot",
+                    "agent_proposal",
+                    "raw_action",
+                    "final_action",
+                    "action_records",
+                    "invocations",
+                    "local_path_relocations",
+                    "path_relocations",
+                }
+                else rewrite(item)
+                for key, item in value.items()
+            }
         if isinstance(value, list):
             return [rewrite(item) for item in value]
         if isinstance(value, str):
-            for old, new in pairs:
-                if value.lower() == old.lower():
-                    return new
-                if value.lower().startswith(
-                    old.lower().rstrip("/\\") + ("/" if "/" in value else "\\")
-                ):
-                    return new.rstrip("/\\") + value[len(old.rstrip("/\\")) :]
+            if value[:3].lower() not in path_starts:
+                return value
+            seen = set()
+            while value not in seen:
+                if len(seen) > len(destinations):
+                    break
+                seen.add(value)
+                prefix = value.replace("\\", "/").rstrip("/").lower()
+                while prefix not in destinations:
+                    if "/" not in prefix:
+                        return value
+                    prefix = prefix.rsplit("/", 1)[0]
+                new = destinations[prefix]
+                if "/" in value:
+                    new = new.replace("\\", "/")
+                else:
+                    new = new.replace("/", "\\")
+                candidate = new.rstrip("/\\") + value[len(prefix) :]
+                if candidate == value:
+                    return value
+                value = candidate
+            raise ValueError("工作区路径迁移映射存在循环")
         return deepcopy(value)
 
     return rewrite(config)

@@ -93,7 +93,7 @@ def test_generic_branch_reason_cannot_pass_post_dft_gate():
         agent_client=lambda request: {"tool": "generate_branches", "reason": "扩展覆盖"},
     )
     assert action["tool"] == "pause_search"
-    assert "DFT 后方案无效，未重试" in action["fallback_reason"]
+    assert "post_dft_review" in action["fallback_reason"]
 
 
 def test_review_reports_specific_missing_field_and_choice_conflict():
@@ -124,17 +124,20 @@ def test_llm_repairs_once_with_exact_feedback_and_consistent_schema():
             "post_dft_review": review(),
         }
 
-    result = propose_agent_tool_action(
+    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+
+    result = request_validated_action(
+        client,
         {
-            "available_branches": [{}],
+            "instruction": "Return one proposal; do not execute",
+            "allowed_tools": ["generate_branches", "adjust_strategy", "pause_search"],
             "decision_context": {"post_dft_assessment": {"status": "evaluated"}},
         },
-        allowed_tools=["generate_branches", "adjust_strategy", "pause_search"],
-        agent_client=client,
     )
-    assert result["tool"] == "pause_search"
-    assert "未重试" in result["fallback_reason"]
-    assert len(requests) == 1
+    assert result["tool"] == "generate_branches"
+    assert valid_post_dft_review(result)
+    assert len(requests) == 2
+    assert requests[0]["output_contracts"] == requests[1]["output_contracts"]
 
 
 def test_repair_failure_is_bounded_and_not_approved():
@@ -144,17 +147,18 @@ def test_repair_failure_is_bounded_and_not_approved():
         requests.append(payload)
         return {"tool": "generate_branches", "parameters": parameters()}
 
-    result = propose_agent_tool_action(
-        {
-            "available_branches": [{}],
-            "decision_context": {"post_dft_assessment": {"status": "evaluated"}},
-        },
-        allowed_tools=["generate_branches", "pause_search"],
-        agent_client=client,
-    )
-    assert len(requests) == 1
-    assert result["tool"] == "pause_search"
-    assert "post_dft_review" in result["fallback_reason"]
+    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+
+    with pytest.raises(ValueError, match="post_dft_review"):
+        request_validated_action(
+            client,
+            {
+                "instruction": "Return one proposal; do not execute",
+                "allowed_tools": ["generate_branches", "pause_search"],
+                "decision_context": {"post_dft_assessment": {"status": "evaluated"}},
+            },
+        )
+    assert len(requests) == 2
 
 
 def test_repair_usage_includes_both_calls():
@@ -171,18 +175,21 @@ def test_repair_usage_includes_both_calls():
             "_llm_usage": {"calls": 1, "input_tokens": 10, "output_tokens": 5, "cost": None},
         }
 
-    with pytest.raises(ValueError) as failure:
-        request_validated_action(
-            client,
-            {
-                "instruction": "Return JSON",
-                "allowed_tools": ["generate_branches"],
-                "decision_context": {"post_dft_assessment": {"status": "evaluated"}},
-            },
-        )
-    assert len(calls) == 1
-    assert failure.value.llm_usage["calls"] == 1
-    assert failure.value.llm_usage["input_tokens"] == 10
+    result = request_validated_action(
+        client,
+        {
+            "instruction": "Return JSON",
+            "allowed_tools": ["generate_branches"],
+            "decision_context": {"post_dft_assessment": {"status": "evaluated"}},
+        },
+    )
+    assert len(calls) == 2
+    assert result["_llm_usage"] == {
+        "calls": 2,
+        "input_tokens": 20,
+        "output_tokens": 10,
+        "cost": None,
+    }
 
 
 def test_direct_finetune_recommendation_and_conditional_enablement_notice():

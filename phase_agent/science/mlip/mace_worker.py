@@ -117,7 +117,7 @@ def run_mace_worker(job: dict) -> dict:
             head=mace_head,
             default_dtype=parameters.pop("mace_default_dtype", "float64"),
             fmax=parameters.pop("fmax", 0.05),
-            steps=parameters.pop("relax_steps", 300),
+            steps=parameters.pop("relax_steps", 500),
             relax_cell=parameters.pop("relax_cell", True),
         )
         from pymatgen.core import Structure
@@ -261,6 +261,7 @@ def run_mace_worker(job: dict) -> dict:
         "restart_mode": "new_segment_from_structure" if operation == "mc" else None,
         "summary": status,
         "pool_summary": summary,
+        "structure_check_counts": status.get("structure_check_counts"),
         "returned_structure": returned is not None,
         "energy": energy,
         "energy_per_atom": energy_per_atom,

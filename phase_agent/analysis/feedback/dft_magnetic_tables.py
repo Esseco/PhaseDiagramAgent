@@ -39,7 +39,12 @@ def magnetic_rows(records):
                 else "out_of_range"
                 if index in bad
                 else "unknown"
-                if applies and element in {"Fe", "Mn"}
+                if applies
+                and element
+                in (
+                    set(check.get("supported_elements", ["Fe", "Mn"]))
+                    | set(check.get("explicit_elements") or [])
+                )
                 else "not_checked"
             )
             moment = moments[index] if index < len(moments) else None
@@ -48,6 +53,8 @@ def magnetic_rows(records):
                 or (check.get("expected_abs_ranges") or {}).get(element)
                 or [None, None]
             )
+            if assessment == "not_checked":
+                interval = [None, None]
             rows.append(
                 {
                     "model_version": record.get("model_version"),
@@ -101,16 +108,27 @@ def magnetic_chat_summary(state, *, detail_limit=4, task_ids=None, verbose=True)
         if missing or unassessed:
             text += f"缺少磁矩 {len(missing)} 个、未评估 {len(unassessed)} 个；缺失证据需重新提取。"
         return text
+    ranges = sorted(
+        {
+            (element, *interval)
+            for record in checked
+            for element, interval in (
+                (record.get("magnetic_check") or {}).get("expected_abs_ranges") or {}
+            ).items()
+            if element in (record.get("magnetic_check") or {}).get("supported_elements", [])
+        }
+    )
+    range_text = "、".join(f"{element} {low:g}–{high:g}" for element, low, high in ranges)
     lines = [
         f"磁矩：已回收 {len(records)} 个结果，缺少磁矩 {len(missing)} 个、未评估 {len(unassessed)} 个。",
-        f"层状 Fe/Mn 自旋：符合标准 {counts['passed']}、异常 {counts['rejected']}、未知 {counts['unknown']}；不适用 {skipped} 个。",
-        "预期 |磁矩|：Fe 3.5–4.5、Mn 3.0–4.0 μB；按原子逐一检查，不是严格基态证明。",
+        f"磁矩范围检查：符合标准 {counts['passed']}、异常 {counts['rejected']}、未知 {counts['unknown']}；不适用 {skipped} 个。",
+        f"预期 |磁矩|：{range_text or '范围证据未记录'} μB；按原子逐一检查，不是严格基态证明。",
     ]
     normal = [
         a for r in checked for a in (r.get("magnetic_check") or {}).get("reasonable_atoms") or []
     ]
     details = []
-    for element in ("Fe", "Mn"):
+    for element in sorted({atom["element"] for atom in normal}):
         values = [a["absolute_moment"] for a in normal if a["element"] == element]
         if values:
             details.append(
@@ -146,7 +164,7 @@ def magnetic_chat_summary(state, *, detail_limit=4, task_ids=None, verbose=True)
         )
     if missing:
         lines.append(
-            "层状 Fe/Mn 的缺失磁矩不能由能量/受力恢复，需在超算重新提取并回传同任务结果；补充检查不重复记账。"
+            "缺失磁矩不能由能量/受力恢复，需在超算重新提取并回传同任务结果；补充检查不重复记账。"
         )
-    lines.append("层状 Fe/Mn 数据仅通过检查后参与相图、微调和误差评估；原始结果保留。")
+    lines.append("适用磁矩限制的数据仅通过检查后参与相图、微调和误差评估；所有元素原始磁矩保留。")
     return "\n".join(lines)

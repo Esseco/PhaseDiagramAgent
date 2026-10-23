@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
-from phase_agent.runtime.agent_api import RunWorkflowChatHandler
+from tests.test_unified_react_dialogue import make_handler
 
 
 def record(name, x, energy, *, fe=1, method="mlip", version="m1"):
@@ -58,8 +58,9 @@ def test_csv_request_uses_current_snapshot_without_running_workflow(tmp_path):
         "phase_diagrams": {"mlip": snapshot},
         "pending_mc_regeneration": {"directory": "untouched"}}, ensure_ascii=False), encoding="utf-8")
     calls = []
-    handler = RunWorkflowChatHandler({"state_path": str(state_path),
-        "phase_diagram_directory": str(tmp_path)}, workflow=lambda **kw: calls.append(kw))
+    handler = make_handler(tmp_path, lambda payload: {"kind": "phase_diagram", "operation": "export_csv"})
+    handler.workflow_kwargs["phase_diagram_directory"] = str(tmp_path)
+    handler.workflow = lambda **kw: calls.append(kw)
     for request in ("导出当前版本csv", "导出当前版本相图", "输出最新相图"):
         reply = handler([{"role": "user", "content": request}])
         assert snapshot["version"] in reply
@@ -82,8 +83,9 @@ def test_missing_current_csv_is_restored_from_saved_snapshot_only(tmp_path):
         "phase_diagrams": {"mlip": snapshot}, "pending_mc_regeneration": {"keep": True}},
         ensure_ascii=False), encoding="utf-8")
     calls = []
-    handler = RunWorkflowChatHandler({"state_path": str(state_path),
-        "phase_diagram_directory": str(tmp_path)}, workflow=lambda **kw: calls.append(kw))
+    handler = make_handler(tmp_path, lambda payload: {"kind": "phase_diagram", "operation": "export_csv"})
+    handler.workflow_kwargs["phase_diagram_directory"] = str(tmp_path)
+    handler.workflow = lambda **kw: calls.append(kw)
     reply = handler([{"role": "user", "content": "导出当前版本相图"}])
     assert str(current_csv) in reply
     assert current_csv.is_file()

@@ -7,7 +7,7 @@ import shutil
 from uuid import uuid4
 from filelock import FileLock
 
-BUILD_VERSION = "collect-only-v1"
+BUILD_VERSION = "collect-only-v2"
 
 from phase_agent.tools.remote.transfer_bundle import (
     import_bundle,
@@ -18,6 +18,7 @@ from phase_agent.tools.remote.transfer_bundle import (
 from phase_agent.tools.remote.integrity import verify_result
 from phase_agent.tools.remote.resolve_local_relax_structure import resolve_local_relax_structure
 from phase_agent.tools.state.normalize_task_result import normalize_task_result
+from phase_agent.persistence.ledger.result_validation import validate_scientific_result
 from phase_agent.tools.relax_mc_batch.files import read, write, rebase
 from phase_agent.tools.relax_mc_batch.analysis import candidate_pool
 
@@ -179,6 +180,7 @@ def _build_recovery_return(
             {**task, "object_id": task.get("object_id", task["structure_id"])},
             payload or checked["result"],
         )
+        validate_scientific_result(normalized)
         normalized = relocate(normalized)
         normalized["result_path"] = str(result_path)
         tasks[tid] = normalized
@@ -206,10 +208,17 @@ def _build_recovery_return(
         for t in state["tasks"]
         if t.get("status") in {"failed", "timeout", "cancelled"}
     ]
-    complete = not remaining and not failed and phase == 3
+    segments = {
+        t["segment_index"]
+        for t in state["tasks"]
+        if t.get("stage") == "deep_search" and type(t.get("segment_index")) is int
+    }
+    complete = (
+        not remaining and not failed and phase == 3 and (not segments or {0, 1, 2} <= segments)
+    )
     report["batch_complete"] = complete
     report["verified_failed_task_ids"] = failed
-    report["next_phase_not_submitted"] = not remaining and not failed and phase != 3
+    report["next_phase_not_submitted"] = not remaining and not failed and not complete
     summary["failed_task_ids"] = failed
     summary.update(
         status="completed" if complete else "partial",
@@ -223,7 +232,23 @@ def _build_recovery_return(
         recovery=report,
     )
     waves = list(summary.get("completed_mc_waves") or [])
-    if not remaining and type(phase) is int and 1 <= phase <= 3 and phase - 1 not in waves:
+    if segments:
+        waves = [
+            index
+            for index in sorted(segments)
+            if all(
+                t.get("status") == "completed"
+                for t in state["tasks"]
+                if t.get("stage") == "deep_search" and t.get("segment_index") == index
+            )
+        ]
+    elif (
+        not remaining
+        and not failed
+        and type(phase) is int
+        and 1 <= phase <= 3
+        and phase - 1 not in waves
+    ):
         waves.append(phase - 1)
     summary["completed_mc_waves"] = sorted(waves)
     candidates = candidate_pool(state)

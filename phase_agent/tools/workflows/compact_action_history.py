@@ -23,6 +23,17 @@ def _audit_without_state(record, *, owned):
 
 def compact_state_history(state, *, _owned=False):
     """Remove redundant embedded state snapshots from old and new audit rows."""
+    for key in ("tasks", "pending_tasks"):
+        if isinstance(state.get(key), list):
+            state[key] = [
+                compact_action_history(row, _owned=_owned)
+                if isinstance(row.get("state"), dict)
+                and isinstance(row["state"].get("tasks"), list)
+                and row.get("stage") is None
+                and str(row.get("task_id", "")).endswith(":task")
+                else row
+                for row in state[key]
+            ]
     for key in ("action_records", "decisions", "event_history"):
         if isinstance(state.get(key), list):
             state[key] = [compact_action_history(row, _owned=_owned) for row in state[key]]

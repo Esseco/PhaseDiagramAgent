@@ -282,6 +282,8 @@ def test_imported_partial_batch_does_not_recommend_whole_batch_resubmission():
     }
     before = deepcopy(state)
     text = "\n".join(waiting_file_lines(state))
-    assert "1 项未核对" in text and "核对原 Slurm 作业" in text
+    assert "仍缺 1 项结果的核验凭据" in text
+    assert "不能证明计算失败" in text
+    assert "不要重新上传输入或提交整批" in text
     assert "提交：" not in text and "sbatch" not in text
     assert state == before

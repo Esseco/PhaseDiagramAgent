@@ -21,6 +21,27 @@ DEFAULT_BATCH_SIZES = {
     "dft_single_point": 1,
     "dft_relax": 1,
 }
+REMOTE_STAGES = frozenset(DEFAULT_BATCH_SIZES) | {"offline_check_dedup"}
+
+
+def _upload_eligible(state, task):
+    if (
+        task.get("stage") not in REMOTE_STAGES
+        or task.get("status") != "pending"
+        or task.get("slurm_batch_id")
+        or not awaiting_task_result(task)
+        or ((state.get("budget_reservations") or {}).get(task.get("task_key")) or {}).get("status")
+        not in {"reserved", "submitted"}
+    ):
+        return False
+    gate = state.get("dedup_gate") or {}
+    if gate and task.get("stage") != "offline_check_dedup":
+        valid = set(gate.get("valid_structure_ids") or [])
+        if gate.get("status") != "ready" or (
+            valid and task.get("structure_id") and task["structure_id"] not in valid
+        ):
+            return False
+    return True
 
 
 class RemoteBatchRunner:
@@ -35,6 +56,7 @@ class RemoteBatchRunner:
         stage_batch_sizes=None,
         stage_profiles=None,
         task_preparer=None,
+        task_ids=None,
     ):
         self.root = Path(root_directory)
         self.worker_command = list(worker_command)
@@ -43,13 +65,16 @@ class RemoteBatchRunner:
         self.batch_sizes["deep_search"] = mc_batch_limit(self.batch_sizes["deep_search"])
         self.stage_profiles = deepcopy(stage_profiles or {})
         self.task_preparer = task_preparer
+        self.task_ids = None if task_ids is None else frozenset(task_ids)
         self.last_collection_report = {}
 
     def prepare(self, state, *, _owned=False, _defer_index=False):
         current = state if _owned else deepcopy(state)
         tasks = current.setdefault("tasks", [])
-        _assign_upload_operations(current, tasks)
-        selected = self._select(current, tasks)
+        scoped = self._scope_tasks(tasks)
+        eligible = [task for task in scoped if _upload_eligible(current, task)]
+        _assign_upload_operations(current, eligible)
+        selected = self._select(current, scoped)
         if not selected:
             return {"status": "no_tasks", "state": current, "batch": None}
         batch_id = f"remote-{len(current.get('slurm_batches') or []) + 1:06d}"
@@ -269,120 +294,132 @@ class RemoteBatchRunner:
                 continue
             if not previously_processed:
                 report["considered_count"] += 1
-            task_dir, snapshot, location_error = _locate_task_directory(task, directories)
-            result = reassessed_results.get(task_id) or _task_result_path(task, task_dir)
-            marker = result.with_name("task.finished.json") if result and result.name else None
-            # Already received jobs are not newly missing returns. A re-extracted
-            # DFT JSON may supplement magnetism, but still needs full verification.
-            if previously_processed and (
-                result is None or not result.is_file() or not marker.is_file()
-            ):
-                continue
-            if result is None or not result.is_file():
-                report["missing_result_count"] += 1
-                _add_collection_detail(report, task_id, "result_missing")
-                continue
-            if marker is None or not marker.is_file():
-                report["missing_marker_count"] += 1
-                _add_collection_detail(report, task_id, "completion_marker_missing")
-                continue
-            if location_error:
-                report["invalid_count"] += 1
-                _add_collection_detail(report, task_id, location_error)
-                continue
-            expected, identity_error = _expected_result_identity(task, snapshot)
-            if identity_error:
-                report["invalid_count"] += 1
-                _add_collection_detail(report, task_id, identity_error)
-                continue
-            checked = verify_result(result, marker, expected)
-            if not checked["valid"]:
-                report["invalid_count"] += 1
-                _add_collection_detail(report, task_id, checked["reason"])
-                continue
-            payload = checked["result"]
-            if payload.get("status") not in {
-                "completed",
-                "failed",
-                "timeout",
-                "cancelled",
-            }:
-                continue
-            if task.get("stage") in DFT_STAGES:
-                outputs = payload.get("outputs") or {}
-                if outputs.get("training_file"):
-                    from phase_agent.tools.remote.integrity import file_checksum
-
-                    training = result.parent / "training.json"
-                    if (
-                        Path(str(outputs["training_file"])).name != "training.json"
-                        or not training.is_file()
-                        or outputs.get("training_checksum") != file_checksum(training)
-                    ):
-                        report["invalid_count"] += 1
-                        _add_collection_detail(
-                            report,
-                            task_id,
-                            "training_file_missing_or_checksum_mismatch",
-                        )
-                        continue
-            if (
-                task.get("stage") in {"relax_and_feature", "deep_search"}
-                and payload.get("status") == "completed"
-            ):
-                from phase_agent.tools.remote.resolve_local_relax_structure import (
-                    resolve_local_relax_structure,
+            task_report = report
+            if previously_processed:
+                task_report = report.setdefault(
+                    "metadata_refresh_report",
+                    {"invalid_count": 0, "missing_structure_count": 0, "details_preview": []},
                 )
-
-                payload = resolve_local_relax_structure(payload, result.parent)
-                if payload is None:
-                    report["missing_structure_count"] += 1
-                    _add_collection_detail(
-                        report, task_id, "final_structure_missing_or_checksum_mismatch"
-                    )
+            try:
+                task_dir, snapshot, location_error = _locate_task_directory(task, directories)
+                result = reassessed_results.get(task_id) or _task_result_path(task, task_dir)
+                marker = result.with_name("task.finished.json") if result and result.name else None
+                # Already received jobs are not newly missing returns. A re-extracted
+                # DFT JSON may supplement magnetism, but still needs full verification.
+                if previously_processed and (
+                    result is None or not result.is_file() or not marker.is_file()
+                ):
                     continue
-            elif task.get("stage") in DFT_STAGES and payload.get("status") == "completed":
-                outputs = payload.get("outputs") or {}
-                raw_structure = (
-                    outputs.get("structure_path") if outputs.get("structure") is None else None
-                )
-                if raw_structure:
-                    local_structure = (
-                        result.parent / Path(str(raw_structure).replace("\\", "/")).name
-                    )
-                    if not local_structure.is_file():
-                        report["missing_structure_count"] += 1
-                        _add_collection_detail(report, task_id, "final_structure_missing")
-                        continue
-                    expected_checksum = outputs.get("structure_checksum")
-                    if expected_checksum:
+                if result is None or not result.is_file():
+                    report["missing_result_count"] += 1
+                    _add_collection_detail(task_report, task_id, "result_missing")
+                    continue
+                if marker is None or not marker.is_file():
+                    report["missing_marker_count"] += 1
+                    _add_collection_detail(task_report, task_id, "completion_marker_missing")
+                    continue
+                if location_error:
+                    task_report["invalid_count"] += 1
+                    _add_collection_detail(task_report, task_id, location_error)
+                    continue
+                expected, identity_error = _expected_result_identity(task, snapshot)
+                if identity_error:
+                    task_report["invalid_count"] += 1
+                    _add_collection_detail(task_report, task_id, identity_error)
+                    continue
+                checked = verify_result(result, marker, expected)
+                if not checked["valid"]:
+                    task_report["invalid_count"] += 1
+                    _add_collection_detail(task_report, task_id, checked["reason"])
+                    continue
+                payload = checked["result"]
+                if payload.get("status") not in {
+                    "completed",
+                    "failed",
+                    "timeout",
+                    "cancelled",
+                }:
+                    continue
+                if task.get("stage") in DFT_STAGES:
+                    outputs = payload.get("outputs") or {}
+                    if outputs.get("training_file"):
                         from phase_agent.tools.remote.integrity import file_checksum
 
-                        if file_checksum(local_structure) != expected_checksum:
-                            report["missing_structure_count"] += 1
+                        training = result.parent / "training.json"
+                        if (
+                            Path(str(outputs["training_file"])).name != "training.json"
+                            or not training.is_file()
+                            or outputs.get("training_checksum") != file_checksum(training)
+                        ):
+                            task_report["invalid_count"] += 1
                             _add_collection_detail(
-                                report, task_id, "final_structure_checksum_mismatch"
+                                task_report,
+                                task_id,
+                                "training_file_missing_or_checksum_mismatch",
                             )
                             continue
-                    payload["outputs"] = {
-                        **outputs,
-                        "structure_path": str(local_structure.resolve()),
-                    }
-            compact = _compact_result_for_state(payload, result)
-            if previously_processed:
-                from phase_agent.tools.state.dft_result_refresh import (
-                    validated_magnetic_refresh,
-                )
+                if (
+                    task.get("stage") in {"relax_and_feature", "deep_search"}
+                    and payload.get("status") == "completed"
+                ):
+                    from phase_agent.tools.remote.resolve_local_relax_structure import (
+                        resolve_local_relax_structure,
+                    )
 
-                refresh = validated_magnetic_refresh(task, compact)
-                if refresh["status"] == "unchanged":
-                    continue
-                if refresh["status"] == "rejected":
-                    report["invalid_count"] += 1
-                    _add_collection_detail(report, task_id, refresh["reason"])
-                    continue
-                report["metadata_refresh_count"] = report.get("metadata_refresh_count", 0) + 1
-            recovered.append(compact)
+                    payload = resolve_local_relax_structure(payload, result.parent)
+                    if payload is None:
+                        task_report["missing_structure_count"] += 1
+                        _add_collection_detail(
+                            task_report, task_id, "final_structure_missing_or_checksum_mismatch"
+                        )
+                        continue
+                elif task.get("stage") in DFT_STAGES and payload.get("status") == "completed":
+                    outputs = payload.get("outputs") or {}
+                    raw_structure = (
+                        outputs.get("structure_path") if outputs.get("structure") is None else None
+                    )
+                    if raw_structure:
+                        local_structure = (
+                            result.parent / Path(str(raw_structure).replace("\\", "/")).name
+                        )
+                        if not local_structure.is_file():
+                            task_report["missing_structure_count"] += 1
+                            _add_collection_detail(task_report, task_id, "final_structure_missing")
+                            continue
+                        expected_checksum = outputs.get("structure_checksum")
+                        if expected_checksum:
+                            from phase_agent.tools.remote.integrity import file_checksum
+
+                            if file_checksum(local_structure) != expected_checksum:
+                                task_report["missing_structure_count"] += 1
+                                _add_collection_detail(
+                                    task_report, task_id, "final_structure_checksum_mismatch"
+                                )
+                                continue
+                        payload["outputs"] = {
+                            **outputs,
+                            "structure_path": str(local_structure.resolve()),
+                        }
+                compact = _compact_result_for_state(payload, result)
+                if previously_processed:
+                    from phase_agent.tools.state.dft_result_refresh import (
+                        validated_magnetic_refresh,
+                    )
+
+                    refresh = validated_magnetic_refresh(task, compact)
+                    if refresh["status"] == "unchanged":
+                        continue
+                    if refresh["status"] == "rejected":
+                        task_report["invalid_count"] += 1
+                        _add_collection_detail(task_report, task_id, refresh["reason"])
+                        continue
+                    report["metadata_refresh_count"] = report.get("metadata_refresh_count", 0) + 1
+                recovered.append(compact)
+            except OSError as error:
+                task_report["invalid_count"] += 1
+                _add_collection_detail(
+                    task_report, task_id, f"result_read_unavailable:{type(error).__name__}"
+                )
         report["recovered_count"] = len(recovered)
         if report["invalid_count"] or report["missing_structure_count"]:
             report["status"] = "needs_attention" if not recovered else "partial"
@@ -393,36 +430,18 @@ class RemoteBatchRunner:
         self.last_collection_report = report
         return {"results": recovered, "report": report}
 
+    def _scope_tasks(self, tasks):
+        return (
+            tasks
+            if self.task_ids is None
+            else [t for t in tasks if t.get("task_id") in self.task_ids]
+        )
+
     def _select(self, state, tasks):
-        reservations = state.get("budget_reservations") or {}
         chosen = []
         anchor = None
-        gate = state.get("dedup_gate") or {}
-        valid_after_dedup = set(gate.get("valid_structure_ids") or [])
-        for task in tasks:
-            if (
-                task.get("status") != "pending"
-                or task.get("slurm_batch_id")
-                or not awaiting_task_result(task)
-            ):
-                continue
-            if (
-                gate
-                and gate.get("status") != "ready"
-                and task.get("stage") != "offline_check_dedup"
-            ):
-                continue
-            if (
-                gate.get("status") == "ready"
-                and task.get("stage") != "offline_check_dedup"
-                and valid_after_dedup
-            ):
-                if task.get("structure_id") and task.get("structure_id") not in valid_after_dedup:
-                    continue
-            if (reservations.get(task.get("task_key")) or {}).get("status") not in {
-                "reserved",
-                "submitted",
-            }:
+        for task in self._scope_tasks(tasks):
+            if not _upload_eligible(state, task):
                 continue
             candidate = _compatibility(task)
             if anchor is None:
@@ -519,12 +538,13 @@ def _assign_upload_operations(state, tasks):
         for sid in row.get("registered_ids") or []
     }
     branch_groups = {}
+    history_tasks = state.get("tasks") or tasks
     relax_batches = {
         row["batch_id"]: row
         for row in state.get("slurm_batches") or []
         if row.get("calculation_group") == "Relax-screening"
     }
-    for task in tasks:
+    for task in history_tasks:
         group = structure_groups.get(task.get("structure_id"))
         if group and task.get("branch_id"):
             branch_groups.setdefault(task["branch_id"], set()).add(group)
@@ -534,6 +554,8 @@ def _assign_upload_operations(state, tasks):
         for row in preview.get("allocations") or []:
             allocation_by_key[row.get("task_key")] = preview.get("allocation_checksum")
     for task in tasks:
+        if task.get("stage") not in DEFAULT_BATCH_SIZES or task.get("status") != "pending":
+            continue
         if task.get("model_refresh_id"):
             continue  # Refresh spans search groups and has its own explicit scope.
         if not task.get("slurm_batch_id") and not task.get("search_group_index"):
@@ -554,7 +576,7 @@ def _assign_upload_operations(state, tasks):
         ):
             matches = [
                 row
-                for row in tasks
+                for row in history_tasks
                 if row.get("stage") == "relax_and_feature"
                 and row.get("branch_id") == task.get("branch_id")
                 and row.get("slurm_batch_id") in relax_batches
@@ -610,7 +632,12 @@ def _task_directories_by_id(state, *, task_ids=None):
         if manifest is not None and manifest.is_file():
             try:
                 root = manifest.parent
-                for row in json.loads(manifest.read_text(encoding="utf-8")):
+                rows = json.loads(manifest.read_text(encoding="utf-8-sig"))
+                if not isinstance(rows, list):
+                    raise ValueError("manifest_must_be_list")
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
                     if (
                         task_ids is not None
                         and row.get("task_id")
@@ -632,8 +659,10 @@ def _task_directories_by_id(state, *, task_ids=None):
             if not task_file.is_file():
                 continue
             try:
-                payload = json.loads(task_file.read_text(encoding="utf-8"))
+                payload = json.loads(task_file.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
+                continue
+            if not isinstance(payload, dict):
                 continue
             task_id = payload.get("task_id")
             if task_ids is not None and task_id not in task_ids:
@@ -659,8 +688,10 @@ def _locate_task_directory(task, indexed):
         if not snapshot_path.is_file():
             continue
         try:
-            snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            snapshot = json.loads(snapshot_path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
+            return directory, None, "task_snapshot_invalid"
+        if not isinstance(snapshot, dict):
             return directory, None, "task_snapshot_invalid"
         if snapshot.get("task_id") != task_id:
             return directory, snapshot, "task_snapshot_id_mismatch"

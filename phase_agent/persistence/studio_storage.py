@@ -286,4 +286,50 @@ def install_mutation_adapters(checkpoint, ops):
         ops._replace_thread_id = replace_mapping
 
     ops.Threads.copy = staticmethod(guarded(ops.Threads.copy))
-    ops._delete_checkpoints_for_thread = guarded(ops._delete_checkpoints_for_thread)
+    original_delete_checkpoints = ops._delete_checkpoints_for_thread
+    if not getattr(original_delete_checkpoints, "_phase_async_checkpoint_delete", False):
+
+        @wraps(original_delete_checkpoints)
+        async def delete_checkpoints(thread_id, conn, run_id=None):
+            from langgraph_api import config as api_config
+
+            if api_config.USE_CUSTOM_CHECKPOINTER:
+                return await original_delete_checkpoints(thread_id, conn, run_id)
+
+            def erase():
+                memory = checkpoint.MEMORY
+                if memory is None:
+                    memory = ops.Checkpointer()
+                manager = memory._phase_storage
+                with manager.lock, manager.reading():
+                    tid = str(thread_id)
+                    if not run_id:
+                        # The saver clears this thread's storage, writes and blobs.
+                        memory.delete_thread(tid)
+                    elif tid in memory.storage:
+                        # Preserve the native run rollback's metadata selection.
+                        for namespace, entries in list(memory.storage[tid].items()):
+                            for identity, (_, metadata, _) in list(entries.items()):
+                                if memory.serde.loads_typed(metadata).get("run_id") == str(run_id):
+                                    del entries[identity]
+                            if not entries:
+                                del memory.storage[tid][namespace]
+                    manager.changed()
+
+            return await asyncio.to_thread(erase)
+
+        delete_checkpoints._phase_async_checkpoint_delete = True
+        ops._delete_checkpoints_for_thread = delete_checkpoints
+
+    original_delete = getattr(ops.Threads, "delete", None)
+    if original_delete is not None and not getattr(original_delete, "_phase_serial_delete", False):
+        delete_lock = asyncio.Lock()
+
+        @wraps(original_delete)
+        async def delete_thread(*args, **kwargs):
+            # Native delete retains a list index across checkpoint deletion's await.
+            async with delete_lock:
+                return await original_delete(*args, **kwargs)
+
+        delete_thread._phase_serial_delete = True
+        ops.Threads.delete = staticmethod(delete_thread)

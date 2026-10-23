@@ -12,7 +12,7 @@ from pathlib import Path
 
 import json
 
-import re
+from phase_agent.text_safety import clean
 
 import uuid
 
@@ -24,43 +24,41 @@ from functools import wraps
 _current = ContextVar("turn_process", default=None)
 
 
-def clean(value, depth=0):
+def presentation_signature(path):
+    """Include administrative revisions as well as the atomically replaced state."""
+    from phase_agent.tools.state.workflow_control import control_path
 
-    if depth > 8:
-        return "…"
+    signatures = []
+    for source in (Path(path), control_path(path)):
+        try:
+            stat = source.stat()
+            signatures.append((stat.st_size, stat.st_mtime_ns, stat.st_ino))
+        except FileNotFoundError:
+            signatures.append(None)
+    return tuple(signatures)
 
-    if isinstance(value, dict):
-        return {
-            str(k): clean(v, depth + 1)
-            for k, v in list(value.items())[:40]
-            if not any(
-                word in str(k).lower()
-                for word in (
-                    "key",
-                    "token",
-                    "password",
-                    "credential",
-                    "secret",
-                    "authorization",
-                )
-            )
+
+def remember_presentation_state(path, state, signature):
+    """Hold a read-only answer's facts for rendering, within this turn only."""
+    record = _current.get()
+    if record is not None and signature == presentation_signature(path):
+        record["_presentation_state"] = {
+            "path": str(Path(path).resolve()),
+            "signature": signature,
+            "value": state,
         }
 
-    if isinstance(value, (list, tuple)):
-        return [clean(v, depth + 1) for v in value[:30]]
 
-    if isinstance(value, str):
-        value = re.sub(r"(?i)\bBearer\s+\S+|\bsk-[A-Za-z0-9_-]+", "[已隐藏凭据]", value)
+def read_presentation_state(path):
+    """Consume fresh read-only facts once; never provide them to business readers."""
+    record = _current.get()
+    cached = record.pop("_presentation_state", None) if record is not None else None
+    if cached and cached["path"] == str(Path(path).resolve()):
+        if cached["signature"] == presentation_signature(path):
+            return cached["value"]
+    from phase_agent.tools.step_runner.file_protocol import read_json
 
-        value = re.sub(
-            r"(?i)((?:api[_ -]?key|password|secret|token|密码)\s*[:=：]\s*)\S+",
-            r"\1[已隐藏凭据]",
-            value,
-        )
-
-        return value[:4000]
-
-    return value if value is None or isinstance(value, (bool, int, float)) else type(value).__name__
+    return read_json(path, {}) or {}
 
 
 def reuse_initial_state(path):
@@ -259,8 +257,6 @@ def record_turn(runtime_config, message, thread_id):
         record["status"] = "已返回答复（执行结果以业务记录为准）"
 
     except Exception as error:
-        process_event("本轮异常", {"type": type(error).__name__, "message": str(error)})
-
         record["status"] = "异常结束"
         failed = next(
             (row for row in reversed(record["timings"]) if row.get("status") == "failed"),
@@ -269,7 +265,15 @@ def record_turn(runtime_config, message, thread_id):
         record["failure_summary"] = {
             "type": type(error).__name__,
             "stage": failed.get("name", "本轮处理"),
+            "message": clean(str(error)),
         }
+        from traceback import extract_tb
+
+        record["failure_summary"]["locations"] = [
+            {"file": frame.filename, "line": frame.lineno, "function": frame.name}
+            for frame in extract_tb(error.__traceback__)[-12:]
+        ]
+        process_event("本轮异常", record["failure_summary"])
         code = getattr(error, "status_code", None)
         if type(code) is int:
             record["failure_summary"]["http_status"] = code
@@ -278,11 +282,22 @@ def record_turn(runtime_config, message, thread_id):
 
     finally:
         end_turn(record["id"])
+        if record.get("status") == "异常结束" and not record.get("interaction_report"):
+            try:
+                from phase_agent.runtime.interaction_reports import save_interaction
+
+                failure = record.get("failure_summary") or {}
+                message_text = f"本轮失败：{failure.get('type', 'unknown')}；阶段：{failure.get('stage', '本轮处理')}。"
+                message_text += "\n原因：" + str(failure.get("message") or "原因未记录")
+                save_interaction(root, message, message_text, message_text, {}, record=record)
+            except (OSError, ValueError, TypeError):
+                pass  # Report failure cannot replace the original business exception.
         from phase_agent.runtime.token_usage import usage_summary
 
         record["token_usage"] = usage_summary(record)
         record.pop("_model_request_cache", None)
         record.pop("_initial_state", None)
+        record.pop("_presentation_state", None)
         record["duration_seconds"] = round(monotonic() - started, 3)
 
         _current.reset(token)

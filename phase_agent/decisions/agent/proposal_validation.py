@@ -4,6 +4,65 @@ from copy import deepcopy
 from phase_agent.decisions.agent.action_contracts import action_contract_errors
 
 
+def proposal_schema_errors(action, context=None):
+    """Check wire fields only; scientific prerequisites and authorization stay separate."""
+    from phase_agent.decisions.agent.dialogue_contract import is_dialogue
+
+    if is_dialogue(action):
+        return []
+    errors = action_contract_errors(action)
+    if errors:
+        return errors
+    tool = action.get("tool") or action.get("action_type")
+    if tool == "select_dft_candidates":
+        from phase_agent.decisions.agent.dft_contracts import dft_contract_errors
+
+        errors.extend(dft_contract_errors(action.get("parameters", {}).get("decisions")))
+    if tool == "allocate_mc_bohb":
+        from phase_agent.decisions.agent.mc_contracts import mc_contract_errors
+
+        errors.extend(
+            mc_contract_errors(
+                action.get("parameters", {}), fallback_budget=action.get("budget", 0)
+            )
+        )
+    if tool == "generate_branches":
+        from phase_agent.decisions.agent.generation_plan import (
+            derive_generation_totals,
+            validate_generation_plan,
+        )
+        from phase_agent.tools.policy.region_sampling import MODE, VERSION
+
+        params = action.get("parameters") or {}
+        region_policy = ((context or {}).get("branch_count_policy") or {}).get("version") == VERSION
+        if (
+            "generation_plan" in params
+            and params.get("sampling_mode") != MODE
+            and not region_policy
+        ):
+            try:
+                reviewed = derive_generation_totals(action)
+                validate_generation_plan(reviewed["parameters"])
+            except (ValueError, TypeError) as error:
+                errors.append(f"parameters.generation_plan: {error}")
+    if (context or {}).get("post_dft_assessment"):
+        from phase_agent.decisions.agent.post_dft_review import (
+            REVIEW_TOOLS,
+            normalize_review_choice,
+        )
+        from phase_agent.decisions.agent.decision_contracts import review_contract_errors
+
+        if tool in REVIEW_TOOLS:
+            # Existing wire aliases stay compatible without changing the saved action.
+            review = normalize_review_choice(action).get("post_dft_review")
+            errors.extend(
+                review_contract_errors(review)
+                if isinstance(review, dict)
+                else ["post_dft_review: 缺少分析对象"]
+            )
+    return errors
+
+
 def proposal_errors(action, payload):
     from phase_agent.decisions.agent.dialogue_contract import (
         is_dialogue,
@@ -11,14 +70,19 @@ def proposal_errors(action, payload):
     )
 
     if is_dialogue(action):
-        if action.get("kind") in {"advance", "review", "inspect_evidence"} and not (
-            payload.get("decision_context") or {}
-        ).get("conversation_controls"):
+        if action.get("kind") in {
+            "advance",
+            "review",
+            "inspect_evidence",
+            "cancel_waits",
+            "phase_diagram",
+            "phase_quality_review",
+        } and not (payload.get("decision_context") or {}).get("conversation_controls"):
             return [
                 "dialogue.kind: observation is already complete; return a concrete tool proposal or a factual answer, never advance/review again"
             ]
         return dialogue_errors(action, payload.get("unified_dialogue") is True)
-    errors = action_contract_errors(action)
+    errors = proposal_schema_errors(action, payload.get("decision_context"))
     if errors:
         return errors
     from phase_agent.decisions.agent.round_budget_review import (
@@ -48,18 +112,6 @@ def proposal_errors(action, payload):
         from phase_agent.decisions.agent.post_dft_review import post_dft_review_errors
 
         errors.extend(post_dft_review_errors(action))
-    if tool == "select_dft_candidates":
-        from phase_agent.decisions.agent.dft_contracts import dft_contract_errors
-
-        errors.extend(dft_contract_errors(action.get("parameters", {}).get("decisions")))
-    if tool == "allocate_mc_bohb":
-        from phase_agent.decisions.agent.mc_contracts import mc_contract_errors
-
-        errors.extend(
-            mc_contract_errors(
-                action.get("parameters", {}), fallback_budget=action.get("budget", 0)
-            )
-        )
     from phase_agent.decisions.agent.branch_pool_review import review_errors
 
     errors.extend(review_errors(action, payload.get("decision_context") or {}))

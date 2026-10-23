@@ -110,6 +110,36 @@ class SlurmIO:
         terminal = {"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY"}
         return {job for job, values in states.items() if not values.issubset(terminal)}
 
+    def evidence(self, ids):
+        """Read registered job outcomes for diagnostics, never infer task completion."""
+        command = [
+            "sacct",
+            "--noheader",
+            "--allocations",
+            "--parsable2",
+            "--jobs",
+            ",".join(ids),
+            "--format=JobIDRaw,State,ExitCode,Reason",
+        ]
+        rows = {job: {"state": "UNKNOWN", "exit_code": None} for job in ids}
+        try:
+            result = subprocess.run(
+                command, check=False, capture_output=True, text=True, timeout=20
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return {job: {**row, "query_error": str(error)[:1024]} for job, row in rows.items()}
+        if result.returncode:
+            return {job: {**row, "query_error": result.stderr[:1024]} for job, row in rows.items()}
+        for line in result.stdout.splitlines():
+            cells = line.split("|")
+            if len(cells) >= 4 and cells[0] in rows:
+                rows[cells[0]] = {
+                    "state": cells[1].split()[0].rstrip("+") if cells[1].strip() else "UNKNOWN",
+                    "exit_code": cells[2] or None,
+                    "reason": cells[3],
+                }
+        return rows
+
 
 def checkpoint(root, state, manager):
     write(Path(root) / "workflow_state.json", rebase(state, root, portable=True))
@@ -211,14 +241,23 @@ def wave(
                     batch["missing_receipt_polls"] = batch.get("missing_receipt_polls", 0) + 1
                     if batch["missing_receipt_polls"] < 3:
                         continue
-                # All queue jobs have ended: missing verified results is a failure, not a retry.
-                for tid in set(batch["task_ids"]) - set(collected):
-                    task = next(t for t in state["tasks"] if t["task_id"] == tid)
-                    collected[tid] = {
-                        **task,
-                        "status": "failed",
-                        "error": "scheduler_ended_without_verified_result",
-                    }
+                if absent:
+                    from phase_agent.tools.relax_mc_batch.failure_diagnostics import (
+                        record_remote_diagnostics,
+                    )
+
+                    record_remote_diagnostics(
+                        root,
+                        state,
+                        list(collected.values()),
+                        absent,
+                        getattr(runner, "last_collection_report", {}),
+                        io,
+                    )
+                    checkpoint(root, state, manager)
+                    raise RuntimeError(
+                        "remote_results_unverified; see return_diagnostics.json; no resubmission"
+                    )
                 batch["relax_mc_wave_done"] = True
             elif not batch.get("job_id") and len(active_ids) < concurrency:
                 batch["submission_state"] = "submitting"
@@ -234,11 +273,65 @@ def wave(
                     "remote_wait_timeout; existing jobs retained, resume after inspection"
                 )
             time.sleep(poll_seconds)
+    if any(r.get("status") in {"failed", "timeout", "cancelled"} for r in collected.values()):
+        from phase_agent.tools.relax_mc_batch.failure_diagnostics import record_remote_diagnostics
+
+        record_remote_diagnostics(
+            root,
+            state,
+            list(collected.values()),
+            [],
+            getattr(runner, "last_collection_report", {}),
+            io,
+        )
     return state, list(collected.values())
+
+
+def completion_outcome(state, status, reason=None):
+    if status == "completed":
+        from phase_agent.tools.relax_mc_batch.failure_diagnostics import unverified_task_ids
+
+        if unverified_task_ids(state):
+            return (
+                "paused",
+                "remote_results_unverified; inspect return_diagnostics.json; no resubmission",
+            )
+        if any(
+            t.get("status") in {"failed", "timeout", "cancelled"} for t in state.get("tasks") or []
+        ):
+            return "partial", reason or "verified_task_failures_require_review; no resubmission"
+    return status, reason
 
 
 def publish(root, state, manifest, status, reason=None):
     root = Path(root)
+    from phase_agent.tools.relax_mc_batch.failure_diagnostics import (
+        record_remote_diagnostics,
+        compact_diagnostics,
+    )
+
+    diagnostic = (state.get("relax_mc_remote") or {}).get("failure_diagnostics")
+    if diagnostic is None:
+        from phase_agent.tools.relax_mc_batch.failure_diagnostics import unverified_task_ids
+
+        diagnostic = record_remote_diagnostics(
+            root, state, state.get("tasks") or [], unverified_task_ids(state), {}, None
+        )
+    diagnostic = {
+        **deepcopy(diagnostic),
+        **{
+            key: manifest[key]
+            for key in ("bundle_id", "plan_checksum", "model_version", "config_version")
+        },
+    }
+    if reason and (root / "failure.json").is_file():
+        failure = read(root / "failure.json")
+        diagnostic["controller"] = {
+            "origin": "remote_controller",
+            "error": reason[:2048],
+            "traceback": str(failure.get("traceback") or "")[-4096:],
+        }
+    write(root / "return_diagnostics.json", diagnostic)
     write(
         root / "result_summary.json",
         {
@@ -248,6 +341,7 @@ def publish(root, state, manifest, status, reason=None):
             "config_version": manifest["config_version"],
             "status": status,
             "reason": reason,
+            "diagnostics": compact_diagnostics(diagnostic, "return_diagnostics.json"),
             "task_count": len(state.get("tasks") or []),
             "gpu_job_count": len(state.get("slurm_batches") or []),
             "completed_mc_waves": (state.get("relax_mc_remote") or {}).get(
@@ -266,7 +360,12 @@ def publish(root, state, manifest, status, reason=None):
     candidates = candidate_pool(state)
     files = [
         root / name
-        for name in ("workflow_state.json", "result_summary.json", "candidate_pool.json")
+        for name in (
+            "workflow_state.json",
+            "result_summary.json",
+            "candidate_pool.json",
+            "return_diagnostics.json",
+        )
     ]
     if (root / "failure.json").is_file():
         files.append(root / "failure.json")
@@ -354,11 +453,17 @@ def run_batch(
                                 in {
                                     "phase_diagram_unavailable",
                                     "continuation_pool_below_minimum",
+                                    "tasks_in_progress",
                                 }
                                 else "completed"
                             )
                             reason = plan.get("reason", plan["status"])
                             break
+                expected = {
+                    t["task_id"]
+                    for t in state["tasks"]
+                    if t.get("status") in {"pending", "running"}
+                }
                 state, results = wave(
                     root,
                     state,
@@ -376,17 +481,35 @@ def run_batch(
                     root,
                     manifest["model_version"],
                 )
+                from phase_agent.tools.relax_mc_batch.failure_diagnostics import (
+                    unverified_task_ids,
+                    record_remote_diagnostics,
+                )
+
+                unverified = unverified_task_ids(state, expected)
+                if unverified:
+                    for batch in state.get("slurm_batches") or []:
+                        if unverified.intersection(batch.get("task_ids") or []):
+                            batch.pop("relax_mc_wave_done", None)
+                    record_remote_diagnostics(root, state, results, unverified, {}, io)
+                    status, reason = (
+                        "paused",
+                        "remote_results_unverified; inspect return_diagnostics.json; no resubmission",
+                    )
+                    checkpoint(root, state, manager)
+                    break
+                if any(row.get("status") != "completed" for row in results):
+                    status, reason = (
+                        "paused",
+                        "Phase failures require inspection; no automatic resubmission",
+                    )
+                    checkpoint(root, state, manager)
+                    break
                 meta = state["relax_mc_remote"]
                 if phase:
                     meta["completed_mc_waves"].append(phase - 1)
                 meta["phase"] = phase + 1
                 checkpoint(root, state, manager)
-                if phase and any(row.get("status") != "completed" for row in results):
-                    status, reason = (
-                        "paused",
-                        "MC failures require inspection; no automatic resubmission",
-                    )
-                    break
         except Exception as error:
             status, reason = "failed", f"{type(error).__name__}: {error}"
             write(
@@ -397,10 +520,7 @@ def run_batch(
             # overwrite them with the caller's older copy after an exception.
             if state_file.is_file():
                 state = rebase(read(state_file), root)
-        if status == "completed" and any(
-            t.get("status") == "failed" for t in state.get("tasks") or []
-        ):
-            status = "partial"
+        status, reason = completion_outcome(state, status, reason)
         state["relax_mc_remote"]["status"] = status
         checkpoint(root, state, manager)
         archive = publish(root, state, manifest, status, reason)

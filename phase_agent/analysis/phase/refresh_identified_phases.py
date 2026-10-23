@@ -35,9 +35,11 @@ def refresh_identified_phases(state):
 
     changed = False
     for record in state.get("phase_records") or []:
-        if record.get("status") in {EXCLUDED, "excluded_invalid_result"} or record.get(
-            "source_task_id"
-        ) in (state.get("scientific_feedback_errors") or {}):
+        if record.get("status") in {
+            EXCLUDED,
+            "excluded_invalid_result",
+            "excluded_phase_quality_review",
+        } or record.get("source_task_id") in (state.get("scientific_feedback_errors") or {}):
             continue
         if record.get("energy_method") not in {"mlip", "dft"} or record.get("energy") is None:
             continue

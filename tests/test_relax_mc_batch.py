@@ -289,6 +289,7 @@ def test_model_missing_and_input_corruption_submit_no_children(tmp_path, monkeyp
 
 def test_return_import_rebases_results_preserves_ledger_and_is_idempotent(tmp_path, monkeypatch):
     manager, state, config, context, action, result = package(tmp_path)
+    config["phase_diagram_directory"] = str(tmp_path / "analysis")
     execute, calls = fake_executor(monkeypatch)
     outcome = run_batch(result["directory"], submit=True, batch_executor=execute)
     returned = Path(result["expected_results_archive"])
@@ -304,11 +305,18 @@ def test_return_import_rebases_results_preserves_ledger_and_is_idempotent(tmp_pa
     assert imported["state"]["qbc_candidates"]
     assert all(Path(r["structure_path"]).is_file() for r in imported["state"]["qbc_candidates"])
     assert len(manager.data["branches"]) == 13 and len(manager.data["structures"]) == 13
+    analysis = imported["state"]["relax_mc_batches"][result["bundle_id"]]["phase_analysis"]
+    assert analysis["status"] == "completed", analysis
+    artifacts = [*analysis["plot_paths"], analysis["markdown_path"], analysis["review_report_path"]]
+    assert all(Path(path).is_file() for path in artifacts)
+    timestamps = {path: Path(path).stat().st_mtime_ns for path in artifacts}
     repeated = import_results(
         action={"parameters": {"bundle_id": result["bundle_id"]}},
         context={**context, "event_state": imported["state"]},
     )
     assert repeated["status"] == "already_imported"
+    assert repeated["state"]["relax_mc_batches"][result["bundle_id"]]["phase_analysis"] == analysis
+    assert timestamps == {path: Path(path).stat().st_mtime_ns for path in artifacts}
 
 
 def test_prior_model_hull_is_carried_and_model_mismatch_is_rejected(tmp_path):

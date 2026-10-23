@@ -44,6 +44,12 @@ def project_readiness(state, config, settings, *, workspace):
             t.get("task_id")
             for t in state.get("tasks") or []
             if t.get("recovery_cancelled") is True
+            and t.get("stage") in {"dft_single_point", "dft_relax"}
+        ],
+        "cancelled_mc_task_ids": [
+            t.get("task_id")
+            for t in state.get("tasks") or []
+            if t.get("recovery_cancelled") is True and t.get("stage") == "deep_search"
         ],
         "training_provenance": {
             "known": known,

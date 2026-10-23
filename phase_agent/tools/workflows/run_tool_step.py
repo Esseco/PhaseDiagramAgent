@@ -831,6 +831,12 @@ def _validation_graph_node(frame):
     from phase_agent.tools.policy.workflow_policy import needs_human
 
     effective = (frame.get("context") or {}).get("effective_config") or config
+    from phase_agent.configuration.schema.python_environments import dft_environment_error
+
+    environment_error = dft_environment_error(action, effective)
+    if environment_error:
+        validation["valid"] = False
+        validation.setdefault("errors", []).append(environment_error)
     if needs_human(action, effective) and mode not in {"interactive", "dry_run"}:
         validation["errors"].append("sensitive_action_requires_human_approval")
         validation["valid"] = False

@@ -25,9 +25,12 @@ def verify_result(result_path, marker_path, expected: dict) -> dict:
     if not result_path.is_file() or not marker_path.is_file():
         return {"valid": False, "reason": "result_or_completion_marker_missing"}
     try:
-        result = json.loads(result_path.read_text(encoding="utf-8"))
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+        result_bytes = result_path.read_bytes()
+        result = json.loads(result_bytes.decode("utf-8-sig"))
+        marker = json.loads(marker_path.read_text(encoding="utf-8-sig"))
+    except OSError as error:
+        return {"valid": False, "reason": f"result_read_unavailable:{type(error).__name__}"}
+    except ValueError as error:
         return {"valid": False, "reason": f"invalid_json:{error}"}
     if not isinstance(result, dict) or not isinstance(marker, dict):
         return {"valid": False, "reason": "result_and_marker_objects_required"}
@@ -53,7 +56,8 @@ def verify_result(result_path, marker_path, expected: dict) -> dict:
             return {"valid": False, "reason": f"result_{key}_mismatch"}
     if marker.get("task_checksum") != expected.get("task_checksum"):
         return {"valid": False, "reason": "task_checksum_mismatch"}
-    if marker.get("result_checksum") != file_checksum(result_path):
+    # Verify the exact bytes parsed above, even if a download replaces the file mid-read.
+    if marker.get("result_checksum") != hashlib.sha256(result_bytes).hexdigest():
         return {"valid": False, "reason": "result_checksum_mismatch"}
     if result.get("stage") in {"dft_single_point", "dft_relax"}:
         try:

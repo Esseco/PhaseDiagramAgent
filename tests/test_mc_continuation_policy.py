@@ -137,7 +137,7 @@ def test_sequential_preview_dispatch_and_third_segment_use_same_real_task_plan(
 ):
     import json
     from types import SimpleNamespace
-    from tests.test_relax_mc_handoff import _completed_relax_fixture
+    from tests.test_relax_mc_handoff import _completed_relax_fixture, _write_vasp
     from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull
     from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
     from phase_agent.tools.workflows.create_active_learning_handlers import _allocate_mc_bohb
@@ -166,7 +166,7 @@ def test_sequential_preview_dispatch_and_third_segment_use_same_real_task_plan(
         )
         entries.extend(rename(state["phase_diagrams"]["mlip"]["entries"]))
         final = folder / "mc-final.vasp"
-        final.write_text(f"mc {i}")
+        _write_vasp(final, f"mc {i}")
         segment = {
             "task_id": f"MC:{i}",
             "task_key": f"mc:{i}",
@@ -244,7 +244,7 @@ def test_sequential_preview_dispatch_and_third_segment_use_same_real_task_plan(
         {"manager": manager},
         config,
     )
-    assert "round_kind" not in adaptive_action["parameters"]
+    assert adaptive_action["parameters"]["round_kind"] == partial["parameters"]["round_kind"] == "second"
     adaptive_result = _allocate_mc_bohb(
         action=adaptive_action,
         context={
@@ -325,7 +325,7 @@ def test_sequential_preview_dispatch_and_third_segment_use_same_real_task_plan(
     for row in current["tasks"]:
         if row.get("stage") == "deep_search" and row.get("status") == "pending":
             final = tmp_path / (row["task_id"] + ".vasp")
-            final.write_text("next")
+            _write_vasp(final, "next")
             row.update(
                 status="completed",
                 energy_improvement=0.01,

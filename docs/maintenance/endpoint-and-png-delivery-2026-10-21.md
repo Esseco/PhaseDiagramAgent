@@ -1,0 +1,17 @@
+# Endpoint-normalized plots and project synchronization
+
+Goal: independently normalize all before/after plots to each retained endpoint pair, sharing existing formation-energy code and NumPy interpolation; keep H/D scientific definitions and decisions unchanged. Sync Co Na1=O3 boundary to real project with backups/audit; publish current plots/reviews for data-bearing projects. Never restart services or submit jobs.
+Reuse: build_composition_hull_entries, Process_Phasediagram plotting, saved normalized energies, existing quality/preview and report routines, config session snapshot and boundary cleanup/locked persistence.
+Files: shared endpoint energy helper in formation-entry module, phase quality preview/comparison/Markdown, normal plot adapter, round artifact receipt version, tests and current guide. Project: Co active config/session/state/ledger and derived hull; Cr/FeMn derived plots/reports, Mn/Ni no fabricated data.
+Risks: crosses must use right-panel reference; H must stay on common original reference; no per-phase rebasing; protected endpoint candidates and old review identities must remain stable. Boundary cleanup must preserve backups, raw results and branch peers, and be limited to disallowed Co endpoint phases.
+Verification: meaningful synthetic normalization/invariance/cross/receipt tests plus existing targeted quality/thermodynamic/chat/round regressions and ruff. Compare baseline hashes and back up before source deployment. Use actual current project data, verify endpoints are zero on both panels, H/D and remaining identities unchanged except explicit boundary scope; formal state/ledger unchanged for derived-only Cr/FeMn. Clean owned TemporaryDirectory and remove this plan.
+
+User steering: prioritize current near-hull geometries only, defer far members until recursively exposed. Keep primary DFT Ehull bound to current formal hull after executed exclusions; hypothetical distances are conditional evidence, not a replacement Ehull. Preserve units and hull version through existing QBC metrics, gate far-point D priority, test real data per recursion layer. No new DFT weighting, quotas, jobs or hypothetical formal deletions.
+
+<!-- direct-epoch-task -->
+Direct epoch follow-up: remove verified legacy junction/hardlink aliases, use real epoch directories, mechanically rebind operational JSON/CSV pointers; preserve immutable scientific payloads and frozen configs via explicit relocation records. Reuse path relocation, atomic publishing and workflow control guard for stale writers/checkpoints. Back up source and metadata, compare baseline bytes, test direct migration rollback, chained paths, stale state rebinding and task/result workflows. Do not touch services or scientific values.
+<!-- /direct-epoch-task -->
+
+Current export scope: default only PNG at 300 dpi; vectors only on explicit semantic model formats. Reuse dialogue contract and existing adapters; no keyword intent rules. Verify default/explicit/invalid formats and retained cross references. Archive duplicate derived plots before deletion; keep formal state/ledger unchanged. Source changes load on the next user-managed startup; no service operations.
+
+Delivery closed: endpoint project synchronization and six PNG plots published. Default PNG300 and explicit semantic vector formats verified by 43 targeted tests. New D v2 remains a read-only analysis, without a production cutoff. Formal state/ledger unchanged during this delivery. No service operations.

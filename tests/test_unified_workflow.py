@@ -141,6 +141,7 @@ def test_training_minimum_and_inflight_gate():
 
 def test_optional_max_counts_inflight_dft_and_does_not_force_training():
     config = {"workflow": {"finetune_min_new_dft": 1, "finetune_max_new_dft": 2}}
+    config["budgets"] = {"enforcement": "hard"}
     state = {
         "tasks": [
             {"task_id": "a", "structure_id": "a", "status": "running", "stage": "dft_single_point"}
@@ -153,6 +154,8 @@ def test_optional_max_counts_inflight_dft_and_does_not_force_training():
         },
     }
     assert action_errors(action, state, config) == ["dft_accumulation_exceeds_finetune_max"]
+    config["budgets"]["enforcement"] = "advisory"
+    assert action_errors(action, state, config) == []
     assert (
         action_errors(
             {"tool": "generate_branches", "parameters": {"total_quota": 1}}, state, config
@@ -253,6 +256,7 @@ def test_declining_dft_remains_allowed_above_new_accumulation_limit():
 @pytest.mark.parametrize("stage", ["dft_single_point", "dft_relax"])
 def test_direct_dft_stage_cannot_bypass_accumulation_limit(stage):
     config = {"workflow": {"finetune_min_new_dft": 1, "finetune_max_new_dft": 1}}
+    config["budgets"] = {"enforcement": "hard"}
     state = {
         "new_dft_records": [
             {
@@ -271,6 +275,8 @@ def test_direct_dft_stage_cannot_bypass_accumulation_limit(stage):
         "parameters": {},
     }
     assert "dft_accumulation_exceeds_finetune_max" in action_errors(action, state, config)
+    config["budgets"]["enforcement"] = "advisory"
+    assert action_errors(action, state, config) == []
     if stage == "dft_relax":
         assert needs_human(action, config)
 

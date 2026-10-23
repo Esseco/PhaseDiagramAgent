@@ -30,9 +30,7 @@ RUNTIME = (
 )
 
 
-def prepare_reassessment_handoff(
-    state, original, *, source_directory, returned_archive
-):
+def prepare_reassessment_handoff(state, original, *, source_directory, returned_archive):
     """Add a new sibling only; no mutation of state or previously exported packages."""
     plan = recovery_plan(state, original)
     validate_bundle(returned_archive)
@@ -45,13 +43,11 @@ def prepare_reassessment_handoff(
             name = task["result_directory"] + "/result.json"
             payload = returned.read(name)
             row = json.loads(payload)
-            receipt = json.loads(
-                returned.read(task["result_directory"] + "/task.finished.json")
-            )
+            receipt = json.loads(returned.read(task["result_directory"] + "/task.finished.json"))
             digest = hashlib.sha256(payload).hexdigest()
-            if receipt.get("result_checksum") != digest or receipt.get(
+            if receipt.get("result_checksum") != digest or receipt.get("status") != row.get(
                 "status"
-            ) != row.get("status"):
+            ):
                 raise ValueError("reassessment_source_receipt_invalid")
             if any(
                 receipt.get(k) != v or row.get(k) != v
@@ -88,17 +84,13 @@ def prepare_reassessment_handoff(
             }
     if not options["eligible_tasks"]:
         raise ValueError("no_verified_final_frames_for_reassessment")
-    if not Path(source_directory).is_absolute() and not str(
-        source_directory
-    ).startswith("/"):
+    if not Path(source_directory).is_absolute() and not str(source_directory).startswith("/"):
         raise ValueError("reassessment_source_directory_must_be_absolute")
     from Process_Vasp.workflows import atomate_runner
 
     with tempfile.TemporaryDirectory(prefix="reassess-input-") as temporary:
         root = Path(temporary)
-        (root / "recovery_plan.json").write_text(
-            json.dumps(plan, sort_keys=True), encoding="utf-8"
-        )
+        (root / "recovery_plan.json").write_text(json.dumps(plan, sort_keys=True), encoding="utf-8")
         (root / "repair_options.json").write_text(
             json.dumps(options, sort_keys=True), encoding="utf-8"
         )
@@ -114,17 +106,9 @@ def prepare_reassessment_handoff(
         for directory in list((root / "runtime").rglob("*")):
             if directory.is_dir():
                 (directory / "__init__.py").write_text("", encoding="utf-8")
-        payloads = sorted(
-            p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
-        )
-        extras = [
-            p for p in payloads if p not in {"recovery_plan.json", "_transfer.py"}
-        ]
-        runner = (
-            Path(__file__)
-            .with_name("legacy_recovery_runner.py")
-            .read_text(encoding="utf-8")
-        )
+        payloads = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+        extras = [p for p in payloads if p not in {"recovery_plan.json", "_transfer.py"}]
+        runner = Path(__file__).with_name("legacy_recovery_runner.py").read_text(encoding="utf-8")
         runner = runner.rsplit('\nif __name__ == "__main__":', 1)[0]
         runner += """
 def _reassessment_factory(work, plan):
@@ -142,16 +126,12 @@ if __name__ == "__main__":
     raise SystemExit(main(extra_payloads=EXTRA_PAYLOADS, transform_factory=_reassessment_factory))
 """
         runner = "EXTRA_PAYLOADS = " + repr(tuple(extras)) + "\n" + runner
-        template = (
-            Path(__file__).with_name("mlip_gpu_template.sh").read_text(encoding="utf-8")
-        )
+        template = Path(__file__).with_name("mlip_gpu_template.sh").read_text(encoding="utf-8")
         environment = options["model"].get("environment")
         if not environment:
             raise ValueError("reassessment_remote_mlip_environment_missing")
         activation = (
-            ""
-            if environment == "current"
-            else "conda activate " + shlex.quote(environment)
+            "" if environment == "current" else "conda activate " + shlex.quote(environment)
         )
         command = (
             'set -euo pipefail\n: "${SLURM_JOB_ID:?Use sbatch submit_all.sh}"\n'
@@ -165,9 +145,7 @@ if __name__ == "__main__":
             .replace("python3 run_mlip_task.py", command)
         )
         # Stop if scientific environment activation fails, before calling Python.
-        script = script.replace(
-            "export cuda_path=", "set -euo pipefail\nexport cuda_path=", 1
-        )
+        script = script.replace("export cuda_path=", "set -euo pipefail\nexport cuda_path=", 1)
         source = Path(original["folder"])
         for sequence in range(1, 100):
             folder = source.with_name(
@@ -182,9 +160,7 @@ if __name__ == "__main__":
                 folder / "inputs.zip",
                 kind="inputs",
             )
-            (folder / "recover_results.py").write_text(
-                runner, encoding="utf-8", newline="\n"
-            )
+            (folder / "recover_results.py").write_text(runner, encoding="utf-8", newline="\n")
             write_unix_shell_script(folder / "submit_all.sh", script)
             output.mkdir()
             return _descriptor(original, folder, plan)

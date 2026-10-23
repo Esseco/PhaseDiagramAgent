@@ -4,7 +4,7 @@ from phase_agent.runtime.local_project_launcher import create_project
 from phase_agent.runtime.project_dashboard import select_folder
 
 
-@pytest.mark.parametrize("mode,steps", [("debug", 1), ("automatic", 10)])
+@pytest.mark.parametrize("mode,steps", [("debug", 1), ("automatic", 1)])
 def test_initial_mode_saved_and_existing_selection_preserved(tmp_path, mode, steps):
     registry = tmp_path / "registry.json"
     path = create_project(tmp_path / "project", registry=registry, execution_mode=mode)

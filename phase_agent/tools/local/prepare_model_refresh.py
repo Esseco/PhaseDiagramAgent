@@ -23,16 +23,13 @@ class RefreshUploadRunner(ManualUploadBatchRunner):
         super().__init__(*args, **kwargs)
         self.refresh_id, self.wave = refresh_id, wave
 
-    def _select(self, state, tasks):
-        return super()._select(
-            state,
-            [
-                t
-                for t in tasks
-                if t.get("model_refresh_id") == self.refresh_id
-                and t.get("model_refresh_wave") == self.wave
-            ],
-        )
+    def _scope_tasks(self, tasks):
+        return [
+            t
+            for t in super()._scope_tasks(tasks)
+            if t.get("model_refresh_id") == self.refresh_id
+            and t.get("model_refresh_wave") == self.wave
+        ]
 
 
 def prepare_model_refresh(*, action, context):

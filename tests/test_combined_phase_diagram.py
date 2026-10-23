@@ -66,7 +66,7 @@ def test_export_reuses_unchanged_snapshot(tmp_path):
     state, _ = fixture()
     refresh_combined_phase_diagram(state, tmp_path)
     path = Path(state["phase_diagrams"]["combined"]["csv_path"])
-    assert path == tmp_path / "epoch0_m1/phase_diagrams/combined/phase_diagram.csv"
+    assert path == tmp_path / "epoch0/phase_diagrams/combined/phase_diagram.csv"
     timestamp = path.stat().st_mtime_ns
     refresh_combined_phase_diagram(state, tmp_path)
     assert path.stat().st_mtime_ns == timestamp

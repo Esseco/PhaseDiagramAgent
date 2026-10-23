@@ -2,6 +2,8 @@
 
 
 def validate_configuration_space(system: dict) -> dict:
+    if not isinstance(system, dict):
+        return {"valid": False, "errors": ["system 必须是对象"]}
     space = system.get("configuration_space")
     if space is None:  # Existing saved configurations keep their original behavior.
         return {"valid": True, "errors": []}
@@ -12,8 +14,8 @@ def validate_configuration_space(system: dict) -> dict:
         return {"valid": False, "errors": ["roles 必须分别定义 H、P、x、T、N"]}
     errors = []
     for name in ("H", "P", "x", "T"):
-        if roles[name] not in {"fixed", "branch"}:
-            errors.append(f"{name} 当前只支持 fixed 或 branch")
+        if roles[name] not in ("fixed", "branch"):
+            errors.append(f"system.configuration_space.roles.{name} 当前只支持 fixed 或 branch")
     if roles["N"] != "internal":
         errors.append("N 当前由 branch 内 Na/空位搜索处理，必须为 internal")
     if roles["T"] == "fixed" and space.get("fixed_T_source") != "phase_reference":
@@ -28,12 +30,18 @@ def validate_configuration_space(system: dict) -> dict:
             if roles[name] == "fixed" and fixed.get(name) is None:
                 errors.append(f"{name} 固定时必须提供 fixed_values.{name}")
     boundary = system.get("boundary") or {}
+    if not isinstance(boundary, dict):
+        errors.append("system.boundary 必须是对象")
+        return {"valid": False, "errors": errors}
     if isinstance(fixed, dict):
         from phase_agent.science.structures.boundary_utils import allowed_phases, normalize_H, det_H
 
         if roles["P"] == "fixed" and fixed.get("P") is not None and boundary.get("P"):
-            if str(fixed["P"]).upper() not in allowed_phases(boundary["P"]):
-                errors.append("fixed_values.P is outside system.boundary.P")
+            try:
+                if str(fixed["P"]).upper() not in allowed_phases(boundary["P"]):
+                    errors.append("fixed_values.P is outside system.boundary.P")
+            except (ValueError, TypeError):
+                errors.append("system.boundary.P must define phase names or phase groups")
         if roles["x"] == "fixed" and fixed.get("x") is not None:
             from fractions import Fraction
 
@@ -48,6 +56,8 @@ def validate_configuration_space(system: dict) -> dict:
                 normalized = normalize_H(fixed["H"])
                 det_H(normalized)
                 matrices = boundary.get("H") or {}
+                if not isinstance(matrices, dict):
+                    raise ValueError("system.boundary.H must map phases to matrices")
                 phases = [str(fixed.get("P")).upper()] if roles["P"] == "fixed" else matrices
                 if matrices and not any(
                     normalized == normalize_H(h)

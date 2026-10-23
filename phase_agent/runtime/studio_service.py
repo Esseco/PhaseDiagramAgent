@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import socket
+from phase_agent.runtime.studio_conversation_panel import conversation_url
 from urllib.request import ProxyHandler, build_opener
 
 
@@ -158,7 +159,7 @@ def run_service(args):
                     )
                     print(f"READY: Studio API http://127.0.0.1:{args.port}", flush=True)
                     print(
-                        f"Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:{args.port}",
+                        f"Studio conversations: {conversation_url(args.port)}",
                         flush=True,
                     )
                     print(

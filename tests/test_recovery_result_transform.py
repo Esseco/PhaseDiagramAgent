@@ -8,6 +8,7 @@ import pytest
 def tmp_path(tmp_path_factory):
     return tmp_path_factory.mktemp('x')
 
+@pytest.mark.real_project
 def test_collection_transform_is_optional_and_original_is_read_only(tmp_path,monkeypatch):
     state,h=setup_original(tmp_path)
     derived=prepare_recovery_handoff(state,h,CPU)

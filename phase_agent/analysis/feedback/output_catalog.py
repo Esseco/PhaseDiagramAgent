@@ -33,7 +33,8 @@ def catalog_markdown(rows, root):
             current = label
         target = Path(row["path"])
         try:
-            target_text = target.resolve().relative_to(root.resolve()).as_posix()
+            relative = target.resolve().relative_to(root.resolve())
+            target_text = relative.as_posix()
         except ValueError:
             target_text = target.as_posix()
         group = (
@@ -80,6 +81,8 @@ def output_catalog(state):
             ("magnetic_csv_path", "magnetic_moments"),
         ):
             add(version, group, round_name, product, export.get(field))
+        for name, path in (export.get("magnetic_plots", {}).get("files") or {}).items():
+            add(version, group, round_name, f"magnetic_distribution_{name}", path)
         for category in ("comparisons/plots", "training"):
             path = Path(export["directory"]) / category
             if path.exists():

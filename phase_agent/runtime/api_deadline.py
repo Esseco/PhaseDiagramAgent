@@ -1,4 +1,5 @@
 """Bound wall-clock waiting; detached workers perform HTTP only, never actions."""
+
 from queue import Queue, Empty
 from threading import Thread, BoundedSemaphore
 from time import monotonic
@@ -17,6 +18,7 @@ class APITransportBusy(RuntimeError):
 def read_response(request, socket_timeout, deadline):
     import urllib.request
     from phase_agent.graphs.cancellation import check_cancelled
+
     if monotonic() >= deadline:
         raise APIDeadlineExceeded()
     if not _slots.acquire(blocking=False):
@@ -25,7 +27,9 @@ def read_response(request, socket_timeout, deadline):
 
     def network_only():
         try:
-            with urllib.request.urlopen(request, timeout=min(socket_timeout, max(.001, deadline-monotonic()))) as response:
+            with urllib.request.urlopen(
+                request, timeout=min(socket_timeout, max(0.001, deadline - monotonic()))
+            ) as response:
                 result.put((True, response.read()))
         except BaseException as error:
             result.put((False, error))
@@ -39,7 +43,7 @@ def read_response(request, socket_timeout, deadline):
         if remaining <= 0:
             raise APIDeadlineExceeded()
         try:
-            ok, value = result.get(timeout=min(.2, remaining))
+            ok, value = result.get(timeout=min(0.2, remaining))
         except Empty:
             continue
         if monotonic() >= deadline:
@@ -52,6 +56,7 @@ def read_response(request, socket_timeout, deadline):
 def local_analysis(payload):
     """Saved facts only; never propose executable actions or infer authorization."""
     from phase_agent.runtime.turn_process import _current
+
     record = _current.get()
     if record and record.get("local_analysis"):
         return record["local_analysis"]

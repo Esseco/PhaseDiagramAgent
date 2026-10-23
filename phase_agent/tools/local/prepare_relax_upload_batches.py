@@ -4,6 +4,7 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+import zipfile
 
 from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
 from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
@@ -105,8 +106,10 @@ def prepare_relax_upload_batches(*, action, context):
 
     migrated_ids = _verified_migrated_relax_ids(state, model, version)
     created = []
+    approved_keys = set()
     for bid, sid, cost in planned:
         key = f"relax-screen:{version}:{settings_id}:{sid}"
+        approved_keys.add(key)
         existing = next(
             (row for row in state.get("tasks") or [] if row.get("task_key") == key), None
         )
@@ -115,16 +118,30 @@ def prepare_relax_upload_batches(*, action, context):
         if existing:
             if existing.get("status") == "completed" or _task_files_complete(existing):
                 continue
-            for field in (
-                "slurm_batch_id",
-                "slurm_array_index",
-                "batch_id",
-                "input_path",
-                "result_path",
-                "task_checksum",
-            ):
-                existing.pop(field, None)
-            existing["status"] = "pending"
+            bound = any(
+                existing.get(k) for k in ("slurm_batch_id", "batch_id", "input_path", "job_id")
+            )
+            if bound and not existing.get("recovery_cancelled"):
+                try:
+                    _restore_registered_inputs(state, existing, root)
+                except (OSError, ValueError, KeyError, zipfile.BadZipFile, EOFError) as error:
+                    return {
+                        "status": "not_configured",
+                        "reason": "原输入恢复校验未通过：" + str(error),
+                        "task_ids": [existing["task_id"]],
+                        "recovery": "保留原批次、作业和回执；补回原上传包或修复指定文件后重试，不重投计算。",
+                        "state": context.get("event_state") or {},
+                    }
+                if _task_files_complete(existing):
+                    continue
+            if bound or existing.get("status") != "pending" or existing.get("recovery_cancelled"):
+                return {
+                    "status": "not_configured",
+                    "reason": "existing_relax_inputs_require_recovery",
+                    "task_ids": [existing["task_id"]],
+                    "recovery": "原输入缺失或已有执行/取消记录；从原上传归档恢复，执行状态不明时走审批页恢复核对。只有明确审核过的未提交输入重建可解除原绑定。",
+                    "state": context.get("event_state") or {},
+                }
             if existing not in state.setdefault("pending_tasks", []):
                 state["pending_tasks"].append(existing)
             continue
@@ -165,6 +182,11 @@ def prepare_relax_upload_batches(*, action, context):
         created.append(task)
     runner = ManualUploadBatchRunner(
         root,
+        task_ids={
+            row["task_id"]
+            for row in state.get("tasks") or []
+            if row.get("task_key") in approved_keys
+        },
         worker_command=command,
         stage_batch_sizes=((config.get("supercomputer") or {}).get("batch_sizes") or {}),
         stage_profiles=default_slurm_cluster_config(),
@@ -228,3 +250,20 @@ def _task_files_complete(task):
         )
         and (directory.parent / "GPU.sh").is_file()
     )
+
+
+def _restore_registered_inputs(state, task, root):
+    """Restore immutable original inputs only; never reset a submitted task identity."""
+    from phase_agent.tools.remote.submission_storage import restore_storage_directory
+
+    batch_id = task.get("slurm_batch_id") or task.get("batch_id")
+    batch = next(
+        (row for row in state.get("slurm_batches") or [] if row.get("batch_id") == batch_id), {}
+    )
+    if not batch.get("upload_directory") or not task.get("input_path"):
+        return
+    directory = Path(batch["upload_directory"]).resolve()
+    source = Path(task["input_path"]).resolve()
+    if not directory.is_relative_to(Path(root).resolve()) or source.parent.parent != directory:
+        raise ValueError("registered_input_path_outside_upload_batch")
+    restore_storage_directory(directory.parent, "inputs")

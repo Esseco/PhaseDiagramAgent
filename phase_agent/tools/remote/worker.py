@@ -63,9 +63,7 @@ def run_remote_task(manifest_path, array_index, *, executor):
             "status",
         )
     }
-    marker.update(
-        {"result_file": result_path.name, "result_checksum": file_checksum(result_path)}
-    )
+    marker.update({"result_file": result_path.name, "result_checksum": file_checksum(result_path)})
     _write(result_path.with_name("task.finished.json"), marker)
     published_path = (root / entry["result_path"]).resolve()
     if published_path != result_path.resolve():
@@ -75,16 +73,12 @@ def run_remote_task(manifest_path, array_index, *, executor):
             published_path.parent.name != result_path.parent.name
             or published_path.name != "result.json"
         ):
-            raise ValueError(
-                "remote result destination must retain the task directory name"
-            )
+            raise ValueError("remote result destination must retain the task directory name")
         export_batch_result(result_path.parent, published_path.parent.parent)
     else:
         from phase_agent.tools.remote.transfer_bundle import result_bundle
 
-        result_bundle(
-            result_path.parent.parent, [result_path.parent], result_path.parent.name
-        )
+        result_bundle(result_path.parent.parent, [result_path.parent], result_path.parent.name)
     return payload
 
 
@@ -92,8 +86,7 @@ def _write(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(f"{path}.tmp")
     temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
         encoding="utf-8",
     )
     temporary.replace(path)

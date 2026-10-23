@@ -63,6 +63,10 @@ def _ordinary_waiting_file_lines(state):
             directory = batch.get("directory")
             folder = input_directory(directory) if directory else None
             destination = output_directory(directory) if directory else None
+            verification = batch.get("verification") or {}
+            if verification.get("status") == "failed":
+                lines.extend(_validation_failure_lines(verification))
+                continue
             if batch.get("return_error"):
                 lines.append("回传核对失败：" + str(batch["return_error"]))
                 lines.append("结果包已回传但尚未登记；请保留原包，无需重新上传输入或提交计算。")
@@ -74,18 +78,20 @@ def _ordinary_waiting_file_lines(state):
                     )
                 continue
             summary = batch.get("result_summary") or {}
-            if batch.get("import_checksum") and summary.get("status") in {
-                "partial",
-                "paused",
-                "failed",
-            }:
+            if batch.get("import_checksum"):
                 count = sum(row.get("relax_mc_bundle_id") == bid for row in owned)
+                reason = str(summary.get("reason") or "")
                 lines.extend(
                     [
-                        f"本地回收校验已完成，仍有 {count} 项未核对（缺少已核验结果）；当前超算状态尚未确认。",
+                        f"结果：已回传部分的本地回收校验已完成；仍缺 {count} 项结果的核验凭据，尚不能确认它们是否已计算完成。",
+                        (
+                            "原因：旧回传记录显示 Slurm 队列查询失败；这不能证明计算失败，超算当前状态仍未核实。"
+                            if "squeue" in reason
+                            else f"原因：这 {count} 项缺少已核验结果，现有证据不足以判断计算成功或失败。"
+                        ),
                         "回传包内的历史控制器诊断（不是本次本地回收错误，也不是当前作业状态）："
-                        + str(summary.get("reason") or "请核对原批次诊断记录"),
-                        "下一步：先核对原 Slurm 作业及已有结果，确认未完成项后再单独审阅恢复方案；不要重新上传输入或提交整批。",
+                        + (reason or "请核对原批次诊断记录"),
+                        f"下一步：请回传原作业的 sacct 状态和 _output 诊断文件；Agent 据此核对这 {count} 项。不要重新上传输入或提交整批。",
                     ]
                 )
                 if destination:
@@ -147,6 +153,16 @@ def _brief_waiting_file_lines(state):
         row for row in state.get("slurm_batches", []) if ids.intersection(row.get("task_ids") or [])
     ]
     handoffs = [row.get("handoff") or {} for row in batches]
+    failed = next(
+        (
+            h["verification"]
+            for h in handoffs
+            if (h.get("verification") or {}).get("status") == "failed"
+        ),
+        None,
+    )
+    if failed:
+        return _validation_failure_lines(failed)
     folders = list(
         dict.fromkeys(
             Path(h["folder"])
@@ -266,6 +282,9 @@ def _detailed_waiting_file_lines(state):
     shown_handoffs, destinations = set(), []
     for batch in batches:
         handoff = batch.get("handoff") or {}
+        if (handoff.get("verification") or {}).get("status") == "failed":
+            lines.extend(_validation_failure_lines(handoff["verification"]))
+            continue
         if handoff.get("upload_archive") and handoff.get("submit_script"):
             key = (handoff["upload_archive"], handoff["submit_script"])
             if key not in shown_handoffs:
@@ -308,3 +327,14 @@ def _detailed_waiting_file_lines(state):
         "下一步：若尚未提交，按上述文件和脚本操作；已提交的不要重复提交。计算完成后回传对应结果，保留任务子目录，再说“继续”。"
     )
     return lines
+
+
+def _validation_failure_lines(report):
+    issue = next(iter(report.get("issues") or []), {})
+    location = str(issue.get("file") or "交付文件")
+    if issue.get("line"):
+        location += ":" + str(issue["line"])
+    return [
+        "输入验收未通过，尚不能提交：" + str(issue.get("code") or "需核对") + " · " + location,
+        report.get("next_step") or "修复后重新检查原交付目录，保留已登记任务和回执。",
+    ]

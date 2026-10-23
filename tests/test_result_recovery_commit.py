@@ -155,3 +155,44 @@ def test_long_lived_manager_reloads_committed_ledger_once_per_revision(tmp_path)
     assert refresh_manager_after_recovery(manager, {"workflow_control_revision": "r1"}, path)
     assert id(manager) == identity and manager.data["recovery_fact"] == "new"
     assert not refresh_manager_after_recovery(manager, {"workflow_control_revision": "r1"}, path)
+
+
+
+@pytest.mark.parametrize("extended_posix", [False, True])
+def test_extended_drive_paths_relocate_without_touching_approved_snapshots(tmp_path, extended_posix):
+    from copy import deepcopy
+    from phase_agent.configuration.session.relocate_workspace_paths import relocate_workspace_paths
+    from phase_agent.tools.policy.file_approval import proposal_hash
+
+    old = tmp_path / "submissions/verified/batch"
+    new = tmp_path / "submissions/epoch1/verified_results/batch"
+    native = "\\\\?\\" + str(old / "initial_relaxed.vasp")
+    source = native.replace(chr(92), "/") if extended_posix else native
+    unmapped = chr(92) * 2 + "?" + chr(92) + str(tmp_path / "elsewhere/unmapped.vasp")
+    proposal = {"raw_action": {"parameters": {"structure_path": source}}}
+    original = {"structure_path": source, "outside": unmapped, "energy": -123.456,
+                "confirmed_snapshot": {"structure_path": source}, "agent_proposal": proposal,
+                "action_records": [{"final_action": {"structure_path": source}}]}
+    before = deepcopy(original)
+    changed = relocate_workspace_paths(original, [{"from": str(old), "to": str(new)}], tmp_path, preserve_snapshots=True)
+    assert Path(changed["structure_path"]) == new / "initial_relaxed.vasp"
+    assert changed["outside"] == unmapped and changed["energy"] == -123.456
+    assert changed["confirmed_snapshot"] == original["confirmed_snapshot"]
+    assert proposal_hash(changed["agent_proposal"]) == proposal_hash(proposal)
+    assert changed["action_records"] == original["action_records"] and original == before
+
+
+def test_recovery_commit_keeps_existing_path_relocation_control(tmp_path):
+    from phase_agent.tools.state.workflow_control import control_path, read_control
+
+    state, ledger, old, hashes = setup(tmp_path)
+    moves = [{"from": str(tmp_path / "old"), "to": str(tmp_path / "new")}]
+    control_path(state).write_text(json.dumps({"state_path": str(state.resolve()),
+        "revision": "prior", "patch": {}, "path_relocations": moves,
+        "path_relocation_revision": "paths-prior"}), encoding="utf-8")
+    commit_result_recovery(state, old, {ledger: {"structures": {}}}, expected_hashes=hashes,
+                           evidence={"maintenance": "verified_path_repair"})
+    saved = read_control(state)
+    assert saved["path_relocations"] == moves
+    assert saved["path_relocation_revision"] == "paths-prior"
+    assert saved["restore_allowed"] is False

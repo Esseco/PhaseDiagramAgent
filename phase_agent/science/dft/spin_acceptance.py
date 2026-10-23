@@ -1,4 +1,4 @@
-"""Fe/Mn high-spin proxy as a scoped DFT quality gate, not a ground-state proof."""
+"""Scoped default and manual element-moment gates, not a ground-state proof."""
 
 from phase_agent.science.dft.magnetic_diagnostics import diagnose_result_magnetism, LAYERED_PHASES
 from phase_agent.science.dft.layered_spin_scope import layered_spin_scope
@@ -8,8 +8,8 @@ def apply_dft_spin_standard(result, manager=None):
     """Preserve execution status/raw labels; mark target DFT science eligibility.
 
     This empirical proxy does not compare alternative magnetic-order energies.
-    It cannot certify a rigorous ground state. Only known layered oxides with
-    Fe/Mn are subject to the gate; unrelated systems retain previous behavior.
+    It cannot certify a rigorous ground state. Implicit Fe/Mn defaults apply
+    to layered oxides; explicitly configured element ranges apply to any phase.
     """
     current = diagnose_result_magnetism(result, manager)
     if current.get("stage") not in {"dft_single_point", "dft_relax"}:
@@ -25,8 +25,26 @@ def apply_dft_spin_standard(result, manager=None):
             branch = (manager.data.get("branches") or {}).get(record.get("branch_id")) or {}
             composition = record.get("composition") or branch.get("composition") or {}
         elements = {element for element, count in composition.items() if count and float(count) > 0}
-    target_elements = "O" in elements and bool(elements & {"Fe", "Mn"})
-    applies = layered is not False and target_elements
+    system = (manager.data.get("system_config") or {}) if manager is not None else {}
+    overrides = (
+        system.get("dft_magnetic_abs_ranges", {})
+        if manager is not None
+        else {
+            element: (report.get("expected_abs_ranges") or {}).get(element)
+            for element in report.get("explicit_elements") or []
+        }
+    )
+    explicit = set(overrides) if isinstance(overrides, dict) else set()
+    from phase_agent.science.dft.magnetic_constraints import magnetic_abs_ranges
+
+    try:
+        magnetic_abs_ranges(manager, overrides=overrides)
+        invalid_config = False
+    except (ValueError, TypeError, OverflowError, ImportError):
+        invalid_config = True
+    default_target = "O" in elements and bool(elements & {"Fe", "Mn"} - explicit)
+    manual_target = bool(elements & explicit)
+    applies = (layered is not False and default_target) or manual_target or invalid_config
     prior = outputs.get("spin_state_check") or {}
     reasons = current.setdefault("quality_rejection_reasons", [])
     if "checks_passed_before_spin" not in current:
@@ -38,24 +56,27 @@ def apply_dft_spin_standard(result, manager=None):
             reasons.remove("dft_spin_standard_not_passed")
         current["checks_passed"] = current["checks_passed_before_spin"] is True and not reasons
     evidence = {
-        "criterion": "layered_fe_mn_high_spin_local_moment_proxy_v1",
+        "criterion": "element_local_moment_ranges_v1"
+        if explicit
+        else "layered_fe_mn_high_spin_local_moment_proxy_v1",
+        "explicit_elements": sorted(explicit),
         "applies": applies,
         "magnetic_ground_state_proven": False,
         "evidence_sha256": report.get("evidence_sha256"),
     }
     if not applies:
         evidence.update(status="not_applicable", reason="outside_layered_Fe_Mn_oxide_scope")
-    elif layered is None:
+    elif layered is None and default_target:
         evidence.update(status="unknown", reason="final_layered_scope_unresolved")
         current["checks_passed"] = False
         if "dft_spin_standard_not_passed" not in reasons:
             reasons.append("dft_spin_standard_not_passed")
     elif report.get("status") == "passed" and report.get("checked_atoms", 0) > 0:
-        evidence.update(status="passed", reason="expected_local_high_spin_ranges_satisfied")
+        evidence.update(status="passed", reason="expected_local_moment_ranges_satisfied")
     else:
         evidence.update(
             status="rejected" if report.get("status") == "warning" else "unknown",
-            reason=report.get("reason") or "Fe_Mn_spin_evidence_not_accepted",
+            reason=report.get("reason") or "magnetic_constraint_evidence_not_accepted",
         )
         current["checks_passed"] = False
         if "dft_spin_standard_not_passed" not in reasons:
@@ -67,6 +88,12 @@ def apply_dft_spin_standard(result, manager=None):
 def spin_standard_passed(row):
     """Pure consumer guard for saved records, with legacy non-target compatibility."""
     report = row.get("spin_state_check") or (row.get("outputs") or {}).get("spin_state_check") or {}
+    source = {**row, **(row.get("outputs") or {})}
+    check = source.get("magnetic_check") or {}
+    raw = source.get("magnetic_moments") or check
+    explicit = set(check.get("explicit_elements") or report.get("explicit_elements") or [])
+    if explicit & set(raw.get("elements") or []):
+        return report.get("applies") is True and report.get("status") == "passed"
     if not report:
         source = {**row, **(row.get("outputs") or {})}
         raw = source.get("magnetic_moments") or {}

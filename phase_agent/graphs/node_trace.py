@@ -3,10 +3,21 @@
 from pathlib import Path
 import json
 import time
-from filelock import FileLock
+import logging
+from filelock import FileLock, Timeout
 
 
 def append_node_trace(frame, node, elapsed, *, error=None):
+    try:
+        _append_node_trace(frame, node, elapsed, error=error)
+    except (OSError, Timeout, TypeError, ValueError) as failure:
+        # Optional telemetry must not mask a committed action or its original failure.
+        logging.getLogger(__name__).warning(
+            "Node trace unavailable for %s (%s)", node, type(failure).__name__
+        )
+
+
+def _append_node_trace(frame, node, elapsed, *, error=None):
     path = frame.get("state_path") or (frame.get("effective_config") or {}).get("state_path")
     if not path:
         return

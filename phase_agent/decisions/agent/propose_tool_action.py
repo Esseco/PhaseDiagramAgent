@@ -90,10 +90,16 @@ def propose_agent_tool_action(
                     },
                 },
             }
+            from phase_agent.analysis.phase.phase_dft_sampling import dft_sampling_reference
+            from phase_agent.decisions.qbc_selection.dft_round_policy import dft_task_limit
+
             decision_context["dft_selection_policy"] = {
-                "single_point_max_per_round": 100,
-                "single_point_cost_per_round": 5000.0,
+                "reference_framework": dft_sampling_reference(),
                 **((config or {}).get("dft") or {}).get("selection", {}),
+                "max_tasks_per_round": dft_task_limit(config or {}),
+                "single_point_cost_per_round": None,
+                "round_task_scope": "single_point_and_relax_combined_including_registered_tasks",
+                "batch_size_instruction": "Choose the count from independent scientific evidence; do not fill the cap. Costs are estimates, not a round cost ceiling.",
                 "supported_input_types": ["DFT_SINGLE_POINT", "DFT_RELAX"],
                 "instruction": "遵守已确认的单点优先和 max_relax_fraction 优化数量上限；单点不先优化。不得把全部候选分为优化后依赖执行器自动改成单点。",
             }

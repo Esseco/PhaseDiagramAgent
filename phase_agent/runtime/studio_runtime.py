@@ -33,15 +33,51 @@ def send_project_message(text, thread_id):
     from phase_agent.runtime.agent_api import _chat_content
 
     with _message_lock:
-        from phase_agent.runtime.loaded_code import assert_loaded_code_current
-
-        assert_loaded_code_current()
         from phase_agent.graphs.cancellation import check_cancelled
 
         check_cancelled()
         from phase_agent.runtime.turn_process import record_turn, process_event
 
-        with record_turn(os.environ["PHASE_AGENT_RUNTIME_CONFIG"], text, thread_id):
+        with record_turn(os.environ["PHASE_AGENT_RUNTIME_CONFIG"], text, thread_id) as record:
+            from phase_agent.runtime.loaded_code import (
+                assert_loaded_code_current,
+                LoadedCodeChangedError,
+            )
+
+            try:
+                assert_loaded_code_current()
+            except LoadedCodeChangedError as error:
+                record["failure_summary"] = {
+                    "type": type(error).__name__,
+                    "stage": "运行版本核对",
+                    "code": "manual_reload_required",
+                    "message": str(error),
+                    "modules": [
+                        row
+                        for row in error.report["modules"]
+                        if row["status"] not in {"not_loaded", "matches"}
+                    ],
+                }
+                process_event("本轮异常", record["failure_summary"])
+                reply = (
+                    "本轮未执行：运行中的代码与磁盘源码不一致。\n原因："
+                    + str(error)
+                    + "\n下一步：请在方便时手动重新启动项目服务加载一致版本；本次不会自动重启或重放请求。"
+                )
+                from phase_agent.runtime.interaction_reports import save_interaction
+
+                try:
+                    return save_interaction(
+                        Path(os.environ["PHASE_AGENT_RUNTIME_CONFIG"]).resolve().parent,
+                        text,
+                        reply,
+                        reply,
+                        {},
+                        record=record,
+                    )
+                except (OSError, ValueError, TypeError) as report_error:
+                    process_event("交互记录保存失败", {"type": type(report_error).__name__})
+                    return reply + "\n需注意：错误 Markdown 保存失败，请查看过程页诊断。"
             from phase_agent.runtime.studio_session_scope import studio_project_session
 
             with studio_project_session():
@@ -49,9 +85,10 @@ def send_project_message(text, thread_id):
                     _handler([{"role": "user", "content": text}], conversation_id=thread_id)
                 )
             process_event("完整答复", {"reply": reply})
+            full_reply = reply
             from phase_agent.runtime.response_preferences import detailed_response
 
-            from phase_agent.tools.step_runner.file_protocol import read_json
+            from phase_agent.runtime.turn_process import read_presentation_state
             from phase_agent.runtime.chat_state_presentation import format_epoch_reply
             from phase_agent.runtime.project_context import handler_project_context
 
@@ -59,7 +96,7 @@ def send_project_message(text, thread_id):
             owner = current_handler or _handler
             owner_path = getattr(owner, "__dict__", {}).get("state_path")
             current_state = (
-                read_json(owner_path, {}) or {} if isinstance(owner_path, (str, Path)) else {}
+                read_presentation_state(owner_path) if isinstance(owner_path, (str, Path)) else {}
             )
             if not detailed_response():
                 from phase_agent.runtime.studio_reply_presentation import format_turn_reply
@@ -86,6 +123,22 @@ def send_project_message(text, thread_id):
             from phase_agent.runtime.runtime_diagnostics import diagnostic_notice
 
             reply += diagnostic_notice(os.environ["PHASE_AGENT_RUNTIME_CONFIG"])
+            from phase_agent.runtime.interaction_reports import save_interaction
+
+            try:
+                reply = save_interaction(
+                    Path(os.environ["PHASE_AGENT_RUNTIME_CONFIG"]).resolve().parent,
+                    text,
+                    full_reply,
+                    reply,
+                    current_state,
+                    record=record,
+                )
+            except (OSError, ValueError, TypeError) as error:
+                process_event(
+                    "交互记录保存失败", {"type": type(error).__name__, "message": str(error)}
+                )
+                reply += "\n交互 Markdown 保存失败；保留本轮答复，未重放操作。"
             process_event("本轮答复", {"reply": reply})
             return reply
 

@@ -128,13 +128,19 @@ def test_scientific_proposal_reuse_or_refresh_preserves_usage(tmp_path, changed)
     handler = make_handler(tmp_path, model)
 
     def scientific():
-        payload = deepcopy(calls[0])
+        from phase_agent.analysis.state.build_state_snapshot import build_state_snapshot
+
+        # The scientific workflow supplies full evidence; the dialogue request is a summary.
+        payload = {
+            "mode": "autonomous_search",
+            "state": build_state_snapshot({}, snapshot_index=0, config_version=None),
+        }
         if changed:
-            payload["state"]["current_convex_hull"]["dft"]["version"] = "new-result"
+            payload["state"]["current_convex_hull"]["dft"] = {"version": "new-result"}
         return handler.workflow_kwargs["agent_client"](payload)
 
     result = decide_from_saved_facts(handler, {}, "suggest next step", scientific)
-    assert len(calls) == (2 if changed else 1)
+    assert len(calls) == (3 if changed else 1)  # Changed evidence requires summary + evidence read.
     persisted = read_json(handler.state_path, {})["budget_usage"]["llm"]
     unrecorded = result.get("_llm_usage") or {}
     assert persisted["calls"] + unrecorded.get("calls", 0) == len(calls)
@@ -162,5 +168,8 @@ def test_current_message_is_separate_from_historical_context():
     messages = json.loads(request.call_args.args[0].data)["messages"]
     assert messages[-1]["role"] == "user"
     assert "now propose a plan" in messages[-1]["content"]
-    assert "previously only explain" not in messages[-1]["content"]
+    payload = json.loads(messages[-1]["content"])
+    assert payload["user_instruction"] == "now propose a plan"
+    assert payload["conversation_facts"]["recent_turns"] == ["previously only explain"]
+    assert "current instruction takes precedence" in messages[0]["content"]
     assert json.loads(messages[1]["content"])["conversation_facts"]["recent_turns"]

@@ -62,7 +62,26 @@ def diagnose_result_magnetism(result, manager=None):
         values = raw.get("moments")
         if values is not None and not raw.get("noncollinear", False):
             values = [float(value) for value in values]
+        from phase_agent.science.dft.magnetic_constraints import (
+            magnetic_abs_ranges,
+            check_magnetic_constraints,
+        )
+
+        system = (manager.data.get("system_config") or {}) if manager is not None else {}
+        # Without project context, retain the saved manual policy rather than silently dropping it.
+        overrides = (
+            system.get("dft_magnetic_abs_ranges", {})
+            if manager is not None
+            else {
+                element: prior["expected_abs_ranges"][element]
+                for element in prior.get("explicit_elements") or []
+            }
+        )
+        ranges = magnetic_abs_ranges(manager, overrides=overrides)
+        explicit_elements = sorted(overrides)
         evidence = {
+            "expected_abs_ranges": ranges,
+            "explicit_elements": explicit_elements,
             "structure_sha256": digest,
             "elements": elements,
             "moments": values,
@@ -74,11 +93,11 @@ def diagnose_result_magnetism(result, manager=None):
         key = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
         if prior.get("evidence_sha256") == key and "reasonable_atoms" in prior:
             return current
-        from Process_Vasp import check_layered_oxide_moments
-
-        report = check_layered_oxide_moments(
+        report = check_magnetic_constraints(
             elements,
             values,
+            ranges=ranges,
+            explicit_elements=explicit_elements,
             is_layered_oxide=layered,
             noncollinear=raw.get("noncollinear", False),
             total_moment=raw.get("total_local_moment"),
@@ -93,7 +112,7 @@ def diagnose_result_magnetism(result, manager=None):
         )
         report["evidence_sha256"] = key
         outputs["magnetic_check"] = report
-    except (ImportError, OSError, ValueError, TypeError, KeyError) as error:
+    except (ImportError, OSError, ValueError, TypeError, KeyError, OverflowError) as error:
         outputs["magnetic_check"] = {
             **prior,
             "status": "unknown",

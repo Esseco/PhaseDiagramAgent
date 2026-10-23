@@ -126,7 +126,7 @@ def _apply_execution_result(current, action, execution, *, record_id, formal, _o
     task_id = payload.get("task_id") or f"{record_id}:task"
     if payload_status in {"pending", "running", "completed", "failed", "timeout", "cancelled"}:
         task_result = {
-            **payload,
+            **compact_action_history(payload),
             "task_id": task_id,
             "task_key": task_key,
             "status": payload_status,

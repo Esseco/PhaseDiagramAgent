@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from phase_agent.persistence.sqlite_paths import readonly_uri
 
 DFT_STAGES = {"dft_single_point", "dft_relax"}
 LOCAL_OUTPUTS = {
@@ -208,7 +209,7 @@ def select(state, config, *, available=False):
     path = Path(options["directory"]) / "records.sqlite3"
     if not path.is_file():
         return []
-    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+    with sqlite3.connect(readonly_uri(path), uri=True) as db:
         rows = db.execute(
             "SELECT id,payload FROM records WHERE system=? AND protocol=? ORDER BY id",
             (identity(config), protocol(config)),

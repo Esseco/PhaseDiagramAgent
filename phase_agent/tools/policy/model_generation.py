@@ -46,7 +46,12 @@ def new_model_generation_facts(state):
         "generated_branch_ids": ids,
         "first_search_completed": searched,
         "instruction": (
-            "新模型完成已有结构与相图刷新后，必须先生成当前模型的新branch。"
+            (
+                f"当前模型已有{len(ids)}个有效新增branch，首次生成前置已满足；首次搜索是否完成是另一事实，不撤销登记。"
+                if post_refresh and ids
+                else ""
+            )
+            + "仅在当前模型尚无有效新增记录时，新模型刷新后必须先生成当前模型的新branch。"
             "先展示生成方案并审批；生成后展示实际数量、分布与结构清单，再单独审批Relax/MC输入方案。"
             "生成方案不得捆绑后续输入准备；暂缓或空批次不满足本步骤，不设固定最低数量。"
             "完成本步骤后，再由Agent按需选择旧branch续搜、新增branch或DFT。"

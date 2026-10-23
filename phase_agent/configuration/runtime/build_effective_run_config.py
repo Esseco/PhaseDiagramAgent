@@ -17,6 +17,7 @@ RUNTIME_KEYS = {
     "approval_directory",
     "local_action_directory",
     "upload_batches_directory",
+    "python_environments",
 }
 
 
@@ -32,6 +33,12 @@ def build_effective_run_config(config_session: dict, runtime_config: dict | None
         if key in RUNTIME_KEYS:
             if key == "shared_dft" and isinstance(value, dict):
                 effective[key] = {**value, **(confirmed.get("shared_dft") or {})}
+            elif key == "python_environments":
+                from phase_agent.configuration.schema.python_environments import (
+                    merge_python_environments,
+                )
+
+                effective[key] = merge_python_environments(confirmed.get(key), value)
             elif key == "mlip" and isinstance(value, dict):
                 # Runtime defaults contain empty model paths. Do not let those
                 # defaults erase the confirmed remote model path or parameters.

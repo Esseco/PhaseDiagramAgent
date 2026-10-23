@@ -44,7 +44,7 @@ def test_migration_keeps_science_and_frozen_configuration(tmp_path):
     assert state["confirmed_config"] == old["confirmed_config"]
     assert state["confirmed_config_version"] == "v1" and state["confirmed_config_hash"] == "same"
     assert (tmp_path / "config/snapshots/v1.json").read_bytes() == snapshot
-    phase = tmp_path / "outputs/epoch0_m1/phase_diagrams/mlip/phase_diagram.csv"
+    phase = tmp_path / "outputs/epoch0/phase_diagrams/mlip/phase_diagram.csv"
     assert phase.read_bytes() == b"energy\n-12.3\n"
     assert state["phase_diagrams"]["mlip"]["csv_path"] == str(phase)
     ledger = json.loads((tmp_path / "runtime/ledgers/phase_data.json").read_text(encoding="utf-8"))

@@ -50,12 +50,15 @@ def pending_plan_reply(state):
         card = row["review_card"]
         import os
 
-        approval = (
-            "请在本机审批页核对并批准："
-            + f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
-            if card.get("sensitive") and row.get("review_kind") != "model_activation"
-            else "核对后可回复‘同意’或‘拒绝’。"
-        )
+        approval = "核对后可回复‘同意’或‘拒绝’。"
+        if card.get("sensitive"):
+            page = (
+                "请在本机审批页核对并批准："
+                + f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
+            )
+            approval = (
+                approval + "\n" + page if row.get("review_kind") == "model_activation" else page
+            )
         return (
             "已保存方案：\n"
             f"{card['title']}：{card['scope']}\n依据：{row['reason']}\n"
@@ -108,7 +111,9 @@ def pending_plan_reply(state):
         "state.json",
     )
     if proposal.get("recommended_action") == "update_mlip":
-        details = details.replace("建议：update_mlip", "建议：生成超算微调训练输入")
+        details = details.replace("建议：update_mlip", "建议：生成超算微调训练输入").replace(
+            "待确认：准备模型微调。", "待确认：生成超算微调训练输入。"
+        )
     from phase_agent.tools.state.execution_receipts import recovery_report
 
     stored = (state.get("confirmed_config") or {}).get("storage") or {}

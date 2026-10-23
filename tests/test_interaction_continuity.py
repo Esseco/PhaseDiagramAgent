@@ -22,7 +22,8 @@ def test_return_notification_reaches_analysis_and_saved_proposal_in_one_turn(
             assert payload["decision_context"]["conversation_controls"]
             return {"kind": "advance", "answer": "核对回传并分析下一步"}
         assert not payload["decision_context"].get("conversation_controls")
-        assert payload["state"]["short_term_memory"]["task_status"]["completed"] == 1
+        # Summary-first transport exposes counts before loading full scientific evidence.
+        assert payload["state"]["task_counts"]["completed"] == 1
         return {
             "tool": "check_convergence",
             "parameters": {},
@@ -54,9 +55,9 @@ def test_return_notification_reaches_analysis_and_saved_proposal_in_one_turn(
     )
     assert "本次已核对回传" in reply
     assert read_json(handler.state_path, {}).get("pending_execution_policies")
-    assert len(calls) == 2 and not executed
+    assert len(calls) == 3 and not executed
     handler([{"role": "user", "content": "同意"}], conversation_id="t")
-    assert len(executed) == 1 and len(calls) == 2
+    assert len(executed) == 1 and len(calls) == 3
 
 
 def test_natural_approval_reuses_frozen_plan_and_survives_restart(tmp_path):
@@ -232,13 +233,26 @@ def test_pending_external_results_do_not_trigger_new_followup():
     assert propose_after_generation(frame, result, event_loop=forbidden) == result
 
 
-def test_presentation_does_not_add_an_extra_continue_round():
+def test_presentation_does_not_add_an_extra_continue_round(tmp_path):
     reply = format_turn_reply("已核对当前数据。", {})
     assert "回复‘继续’" not in reply and "是否现在" not in reply
-    waiting = format_turn_reply(
-        "MC 输入已准备。", {"tasks": [{"status": "pending", "stage": "deep_search"}]}
-    )
-    assert "告知已回传即可" in waiting and "回复‘继续’" not in waiting
+    state = {"tasks": [{"task_id": "mc", "status": "pending", "stage": "deep_search"}]}
+    incomplete = format_turn_reply("MC 输入已准备。", state)
+    assert "尚不能提交" in incomplete
+    for name in ("inputs.zip", "submit_all.sh", "dispatch_tasks.py"):
+        (tmp_path / name).write_text("synthetic handoff")
+    state["slurm_batches"] = [
+        {
+            "task_ids": ["mc"],
+            "handoff": {
+                "folder": str(tmp_path),
+                "upload_archive": str(tmp_path / "inputs.zip"),
+                "return_directory": str(tmp_path / "results"),
+            },
+        }
+    ]
+    waiting = format_turn_reply("MC 输入已准备。", state)
+    assert "回传后说“已回传”" in waiting and "回复‘继续’" not in waiting
 
 
 def test_mc_plan_simple_approval_survives_restart_and_updates_changed_input_plan(

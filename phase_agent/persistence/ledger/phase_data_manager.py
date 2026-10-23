@@ -188,6 +188,11 @@ class PhaseDataManager:
             _fill_if_missing(structure, "composition", composition)
             _fill_if_missing(structure, "source_path", source_path)
             _fill_if_missing(structure, "metadata", metadata)
+        # A human review can remove active branch membership while preserving
+        # history. A subsequently rediscovered structure may register again.
+        if structure_id not in branch["structure_ids"]:
+            branch["structure_ids"].append(structure_id)
+            branch["structure_ids"].sort()
         return structure_id
 
     def record_result(

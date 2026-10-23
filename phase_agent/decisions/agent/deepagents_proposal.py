@@ -126,6 +126,11 @@ def proposal_material(payload):
             "ehull_per_atom",
             "qbc",
             "uncertainty",
+            "max_tasks_per_round",
+            "round_task_scope",
+            "batch_size_instruction",
+            "independent_audit_candidate_ids",
+            "error",
             "single_point_max_per_round",
             "single_point_cost_per_round",
             "max_relax_fraction",
@@ -316,8 +321,70 @@ def proposal_material(payload):
         }
     )
 
+    # Preserve bound DFT evidence and guidance, including units and conditional scope.
+    fields.update(
+        {
+            "reference_framework",
+            "role",
+            "primary_goal",
+            "D_definition",
+            "D_unit",
+            "H_unit",
+            "Ehull_unit",
+            "reference_steps",
+            "evidence_patterns",
+            "when",
+            "consider",
+            "purpose",
+            "representative_selection",
+            "adaptation",
+            "cautions",
+            "review_requirements",
+            "dft_sampling_evidence",
+            "decision_made",
+            "geometry_key",
+            "structure_sha256",
+            "hull_version",
+            "snapshot_evidence_digest",
+            "D_rule",
+            "composition_per_O2",
+            "D_score",
+            "D_status",
+            "D_gap_meV_per_O2",
+            "D_candidate_id",
+            "D_candidate_size",
+            "D_candidate_geometry_keys",
+            "D_candidate_structure_paths",
+            "D_reference_structure_paths",
+            "H_layers",
+            "H_single_sequence",
+            "H_single_max",
+            "H_D_candidate_union_sequence",
+            "H_D_candidate_union_max",
+            "distance_to_layer_hull_meV_per_O2",
+            "H_path_reference",
+            "H_path_scope",
+            "formal_Ehull_reference",
+            "quality_priority_eligible",
+            "sampling_evidence_scope",
+            "endpoint_protected",
+            "structure_review",
+            "structure_file_status",
+            "predicted_Ehull",
+            "ehull_unit",
+            "energy_std",
+            "energy_per_atom_std",
+            "f_std_max",
+            "f_std_p95",
+            "force_max_atom_disagreement",
+            "force_rms_disagreement",
+            "qbc_status",
+            "qbc_interpretation",
+        }
+    )
+
     def summary(value, parent=None):
-        if parent == "TM_ratio" and isinstance(value, dict):
+        if parent in {"TM_ratio", "composition_per_O2"} and isinstance(value, dict):
             import re
 
             return {
@@ -373,6 +440,8 @@ def proposal_material(payload):
                 "available_branches",
                 "available_budget",
                 "dft_selection_policy",
+                "independent_audit_candidate_ids",
+                "dft_validation_feedback",
                 "training_result_reports",
                 "round_budget_evidence",
                 "candidate_validation",
@@ -401,6 +470,12 @@ def proposal_material(payload):
             if key in context
         },
     }
+    if "human_comment" in payload:
+        material["human_comment"] = deepcopy(payload["human_comment"])
+    if "current_proposal" in payload:
+        from phase_agent.decisions.agent.prepare_llm_request import compact_current_proposal
+
+        material["current_proposal"] = compact_current_proposal(payload["current_proposal"])
     # Schemas are program-owned contracts, not scientific/raw filesystem data.
     material["output_contracts"] = deepcopy(payload.get("output_contracts") or {})
     if payload.get("invalid_branch_proposal"):

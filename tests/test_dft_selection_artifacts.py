@@ -92,3 +92,20 @@ def test_failed_preparation_is_not_reported_as_prepared(tmp_path):
         raw_record(json.loads(Path(artifacts["json"]).read_text(encoding="utf-8")))["status"]
         == "input_preparation_failed"
     )
+
+
+def test_migrated_ledger_binding_enriches_H_without_using_frozen_old_path(tmp_path):
+    state, action = fixture(tmp_path)
+    state["workspace_layout"]["state_path"] = str(tmp_path / "workflow_state/state.json")
+    state["confirmed_config"] = {"storage": {"paths": {"ledger": "current/phase_data.json"}}}
+    (tmp_path / "agent_runtime.json").write_text(json.dumps({"state_path": "workflow_state/state.json", "ledger_path": "workflow_state/ledgers/phase_data.json"}))
+    ledger = tmp_path / "workflow_state/ledgers/phase_data.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(json.dumps({"branches": {"b1": {"H": [[2, 0, 0], [0, 1, 0], [0, 0, 1]]}}}))
+    before = deepcopy(state)
+    artifacts = proposal_artifacts({"raw_action": action}, state)
+    row = raw_record(json.loads(Path(artifacts["json"]).read_text(encoding="utf-8")))["decisions"][0]
+    assert row["supercell_det"] == 2 and state == before
+    (tmp_path / "agent_runtime.json").write_text(json.dumps({"state_path": "other/state.json", "ledger_path": "workflow_state/ledgers/phase_data.json"}))
+    artifacts = proposal_artifacts({"raw_action": action}, state)
+    assert raw_record(json.loads(Path(artifacts["json"]).read_text(encoding="utf-8")))["decisions"][0]["H"] is None

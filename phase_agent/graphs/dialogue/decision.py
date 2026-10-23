@@ -50,11 +50,15 @@ def decide_from_saved_facts(
     manager = handler.workflow_kwargs.get("manager")
     from phase_agent.graphs.dialogue.evidence import conversation_facts
 
-    summary = conversation_facts(facts, handler_project_context(handler, facts))
+    project_card = handler_project_context(handler, facts)
+    summary = conversation_facts(facts, project_card)
     from phase_agent.decisions.agent.summary_request import project_summary
+
     summary["current_project"] = project_summary(summary["current_project"])
     refresh = summary.get("refresh_result_facts") or {}
-    summary["refresh_result_facts"] = {k: deepcopy(v) for k,v in refresh.items() if not isinstance(v, (dict,list))}
+    summary["refresh_result_facts"] = {
+        k: deepcopy(v) for k, v in refresh.items() if not isinstance(v, (dict, list))
+    }
     summary["refresh_result_facts"]["details_available"] = bool(refresh)
     summary["decision_context"] = {
         **(evidence or {}),
@@ -97,9 +101,11 @@ def decide_from_saved_facts(
             )
             if key in turn
         }
-        settings = (summary["current_project"].get("configuration") or {}).get(
-            "effective_settings"
-        ) or {}
+        # Send the most recent answer once, including transport history after a restart.
+        conversation["previous_reply"] = turn.get("previous_reply", "")
+        if conversation.get("recent_turns"):
+            conversation["recent_turns"][-1].pop("assistant", None)
+        settings = (project_card.get("configuration") or {}).get("effective_settings") or {}
         conversation["project_settings"] = {
             "calculation": deepcopy(settings.get("calculation") or {})
         }
@@ -133,7 +139,7 @@ def decide_from_saved_facts(
         "unified_dialogue": True,
         "allowed_tools": allowed,
         "output_contracts": {"dialogue_outcome": dialogue_output_contract(allow_controls=True)},
-        "instruction": "Understand the current conversation. Return answer, inspect_evidence, inspect_configuration, configure, advance or review. Answer the question first; read only needed evidence for detailed questions. Advance is for a requested scientific next step, never an ordinary question. Use recent_turns to resolve follow-ups. A known blocker requires cause, concrete remedy and what happens after repair; do not repeat approval/continue questions that cannot fix it. Reading and planning need no separate permission. Historical tool outcomes remain compatible but are rechecked by the original scientific workflow. Conversation memory confers no authority.",
+        "instruction": "Understand the current conversation. Return answer, inspect_evidence, inspect_configuration, configure, advance, review or cancel_waits, or phase_diagram (plot/locate/export_csv existing current diagram files), phase_quality_policy (audited H/D cutoff changes only; manual fixed values take precedence; no deletion or science in this turn), or phase_quality_review (explicit human retain/remove/restore of bound review IDs). Answer the question first; read only needed evidence for detailed questions. Advance is for a requested scientific next step, never an ordinary question. Use recent_turns to resolve follow-ups. A known blocker requires cause, concrete remedy and what happens after repair; do not repeat approval/continue questions that cannot fix it. Reading and planning need no separate permission. Historical tool outcomes remain compatible but are rechecked by the original scientific workflow. Conversation memory confers no authority.",
     }
     try:
         action = request_decision_action(request, payload)
@@ -156,7 +162,119 @@ def decide_from_saved_facts(
             "submitted": False,
             "steps_executed": 0,
         }
+    if action.get("kind") == "phase_diagram":
+        from phase_agent.runtime.phase_diagram_chat import phase_diagram_reply
+
+        before = deepcopy(facts.get("phase_diagrams") or {})
+        answer = phase_diagram_reply(
+            facts,
+            operation=action["operation"],
+            method=action.get("method", "mlip"),
+            formats=action.get("formats", ["png"]),
+            directory=handler.workflow_kwargs.get("phase_diagram_directory"),
+        )
+        if facts.get("phase_diagrams", {}) != before:
+            from phase_agent.tools.step_runner.file_protocol import write_json
+
+            write_json(handler.state_path, facts)
+        return {
+            "status": "answered",
+            "answer": answer,
+            "state": facts,
+            "submitted": False,
+            "steps_executed": 0,
+        }
+    if action.get("kind") == "phase_quality_policy":
+        from pathlib import Path
+        from phase_agent.analysis.phase.phase_quality_policy import commit_quality_policy
+
+        try:
+            changed = commit_quality_policy(
+                handler.state_path,
+                facts,
+                manager,
+                ledger_path=config.get("ledger_path")
+                or handler.workflow_kwargs.get("ledger_path")
+                or Path(handler.state_path).parent / "ledgers" / "phase_data.json",
+                cutoffs=action["cutoffs"],
+                source=action["source"],
+                reason=action["reason"],
+                expected_revision=(facts.get("phase_quality_policy") or {}).get("revision", 0),
+                release_manual=action.get("release_manual", []),
+            )
+        except (OSError, ValueError, KeyError) as error:
+            return {
+                "status": "answered",
+                "state": facts,
+                "answer": "阈值未调整：" + str(error),
+                "submitted": False,
+                "steps_executed": 0,
+            }
+        policy = changed["policy"]
+        return {
+            "status": "answered",
+            "state": changed["state"],
+            "submitted": False,
+            "steps_executed": 0,
+            "answer": f"已记录相图核查阈值：H审查>{policy['hull_shift_mev_per_O2']:g}、D离群>{policy['outlier_gap_mev_per_O2']:g}、H直接移除>{policy['direct_removal_mev_per_O2']:g} meV/O₂。原因：{action['reason']}。本轮仅调整参数，未删除结构或提交计算。",
+        }
+    if action.get("kind") == "phase_quality_review":
+        from pathlib import Path
+        from phase_agent.analysis.phase.phase_quality_persistence import commit_human_quality_review
+
+        try:
+            reviewed = commit_human_quality_review(
+                handler.state_path,
+                facts,
+                manager,
+                review_ids=action["review_ids"],
+                decision=action["decision"],
+                user_message=message,
+                ledger_path=config.get("ledger_path")
+                or handler.workflow_kwargs.get("ledger_path")
+                or Path(handler.state_path).parent / "ledgers" / "phase_data.json",
+                directory=handler.workflow_kwargs.get("phase_diagram_directory"),
+            )
+            facts = reviewed["state"]
+        except (OSError, ValueError, KeyError) as error:
+            return {
+                "status": "answered",
+                "state": facts,
+                "answer": "此次审核未应用：" + str(error),
+                "submitted": False,
+                "steps_executed": 0,
+            }
+        process_event(
+            "相图人工核查已记录",
+            {"decision": action["decision"], "review_ids": action["review_ids"]},
+        )
+        return (defer_scientific or run_scientific)()
     if action.get("kind") == "advance":
+        return (defer_scientific or run_scientific)()
+    if action.get("kind") == "cancel_waits":
+        from phase_agent.tools.state.task_wait_cancellation import commit_task_wait_cancellation
+
+        try:
+            facts = commit_task_wait_cancellation(
+                handler.state_path, facts, action["scope_id"], user_message=message
+            )
+        except ValueError as error:
+            return {
+                "status": "answered",
+                "answer": "待处理MC的范围已变化，本次未取消；请按最新批次明确范围。原因："
+                + str(error),
+                "state": facts,
+                "submitted": False,
+                "steps_executed": 0,
+            }
+        process_event(
+            "停止本地MC等待",
+            {
+                "scope_id": action["scope_id"],
+                "remote_cancel_sent": False,
+                "unknown_costs_settled": False,
+            },
+        )
         return (defer_scientific or run_scientific)()
     if action.get("kind") == "review":
         return {"status": "proposal_review_requested", "review": deepcopy(action)}
@@ -204,6 +322,7 @@ def decide_from_saved_facts(
         process_event("重新分析最新事实", {"原因": "回收事实变化或原流程要求修正"})
         reuse_or_refresh.last_call_reused = False
         from phase_agent.decisions.agent.summary_request import request_summary_first
+
         response = request_summary_first(client, payload)
         used = True
         return response

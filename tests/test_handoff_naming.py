@@ -20,10 +20,10 @@ def test_english_label_describes_refresh(tmp_path):
     first = prepare_handoff(root, scripts)
     second = prepare_handoff(root, scripts)
     assert first["folder"] == second["folder"]
-    assert Path(first["folder"]).name == "epoch1_ModelRefresh_Batch01_input"
+    assert Path(first["folder"]).name == "ModelRefresh_Batch01_input"
     (scripts[0].parent / "extra.json").write_text("{}")
     third = prepare_handoff(root, scripts)
-    assert Path(third["folder"]).name == "epoch1_ModelRefresh_Batch02_input"
+    assert Path(third["folder"]).name == "ModelRefresh_Batch02_input"
     assert Path(first["upload_archive"]).is_file()
 
 

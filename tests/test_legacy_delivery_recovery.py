@@ -168,6 +168,7 @@ def frozen(root):
 
 
 @pytest.mark.parametrize("project,count", [("O3-1ele-NaCoO2", 35), ("O3-1ele-NaCrO2", 15)])
+@pytest.mark.real_project
 def test_original_full_batch_collection_analysis_idempotence(tmp_path, monkeypatch, project, count):
     from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
     from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
@@ -229,6 +230,7 @@ def test_original_full_batch_collection_analysis_idempotence(tmp_path, monkeypat
     assert frozen(old) == source_before
 
 
+@pytest.mark.real_project
 def test_partial_running_retry_and_unknown_submission_never_dispatch(tmp_path, monkeypatch):
     state, h = setup_original(tmp_path)
     d = prepare_recovery_handoff(state, h, CPU)
@@ -256,6 +258,7 @@ def test_partial_running_retry_and_unknown_submission_never_dispatch(tmp_path, m
     assert not has_registered_return(state)
 
 
+@pytest.mark.real_project
 def test_tampering_and_outside_scope_are_rejected(tmp_path, monkeypatch):
     state, h = setup_original(tmp_path)
     d = prepare_recovery_handoff(state, h, CPU)
@@ -298,6 +301,7 @@ def test_login_node_refuses_before_any_write(tmp_path, monkeypatch):
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.real_project
 def test_recovery_presentation_with_unrelated_pending_task(tmp_path):
     from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
 
@@ -315,6 +319,7 @@ def test_recovery_presentation_with_unrelated_pending_task(tmp_path):
     assert derived["folder"] in text and "仅回收" in text
 
 
+@pytest.mark.real_project
 def test_changed_plan_cannot_be_discovered_as_registered_delivery(tmp_path):
     from phase_agent.tools.remote.legacy_recovery import recovery_handoffs
 
@@ -334,6 +339,7 @@ def test_changed_plan_cannot_be_discovered_as_registered_delivery(tmp_path):
         list(recovery_handoffs(state))
 
 
+@pytest.mark.real_project
 def test_missing_completion_and_conflicting_results_do_not_trigger_recomputation(
     tmp_path, monkeypatch
 ):
@@ -353,6 +359,7 @@ def test_missing_completion_and_conflicting_results_do_not_trigger_recomputation
     assert not (remote.with_name(remote.name[:-6] + "_output") / "recovered.results.zip").exists()
 
 
+@pytest.mark.real_project
 def test_shipped_entry_runs_in_isolated_python_without_installed_agent(tmp_path):
     import os
     import sys
@@ -381,6 +388,7 @@ def test_shipped_entry_runs_in_isolated_python_without_installed_agent(tmp_path)
         assert any(n.endswith("/training.json") for n in z.namelist())
 
 
+@pytest.mark.real_project
 def test_original_archive_and_identity_are_immutable_when_deriving_input(tmp_path):
     state, h = setup_original(tmp_path)
     before = deepcopy(state)
@@ -395,6 +403,7 @@ def test_original_archive_and_identity_are_immutable_when_deriving_input(tmp_pat
     assert state == before and frozen(Path(h["folder"])) == old
 
 
+@pytest.mark.real_project
 def test_explicit_renamed_original_directory_remains_bound_to_old_archive(tmp_path, monkeypatch):
     state, h = setup_original(tmp_path)
     d = prepare_recovery_handoff(state, h, CPU)

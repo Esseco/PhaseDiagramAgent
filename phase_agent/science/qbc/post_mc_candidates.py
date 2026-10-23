@@ -57,9 +57,12 @@ def post_mc_candidates(state, model_version):
         )
     # Candidate IDs must be unique for the existing selection contract.
     ids = [row["candidate_id"] for row in candidates]
-    return [
-        row for row in candidates if row["candidate_id"] and ids.count(row["candidate_id"]) == 1
-    ]
+    from phase_agent.analysis.phase.phase_dft_candidates import phase_review_candidates
+
+    return phase_review_candidates(
+        state,
+        [row for row in candidates if row["candidate_id"] and ids.count(row["candidate_id"]) == 1],
+    )
 
 
 def _geometry_evidence(state, candidate):

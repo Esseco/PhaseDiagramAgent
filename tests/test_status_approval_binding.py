@@ -52,6 +52,7 @@ def test_ambiguous_or_no_plan_never_binds(tmp_path, monkeypatch, count):
 
 
 @pytest.mark.parametrize('project', ['O3-1ele-NaCoO2', 'O3-1ele-NaCrO2', 'O3-2ele-NaFeMn'])
+@pytest.mark.real_project
 def test_existing_project_copy_binds_without_mutating_project(tmp_path, project, monkeypatch):
     # The existing renderer writes a display artifact to configured project paths.
     # Stub only that artifact writer; retain real formatting and approval binding.

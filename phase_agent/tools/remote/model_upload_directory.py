@@ -1,7 +1,6 @@
 """One model epoch naming authority for uploads."""
 
 from pathlib import Path
-from phase_agent.tools.remote.build_upload_batch_directory import _safe
 
 
 def model_upload_directory(root, state, model_version):
@@ -9,4 +8,8 @@ def model_upload_directory(root, state, model_version):
     rounds = state.setdefault("upload_layout", {}).setdefault("model_rounds", {})
     if label not in rounds:
         rounds[label] = max((int(v) for v in rounds.values()), default=0) + 1
-    return Path(root) / f"epoch{int(rounds[label]) - 1}_{_safe(label)}"
+    if int(rounds[label]) < 1 or any(
+        other != label and int(number) == int(rounds[label]) for other, number in rounds.items()
+    ):
+        raise ValueError("Model epoch registration is ambiguous")
+    return Path(root) / f"epoch{int(rounds[label]) - 1}"

@@ -1,4 +1,5 @@
 """Versioned transfer capacity shared by producers and both receivers."""
+
 MAX_ARCHIVE_FILES = 100000  # Includes the transfer manifest itself.
 MAX_MANIFEST_BYTES = 64 * 1024**2
 MAX_ARCHIVE_BYTES = 8 * 1024**3
@@ -6,11 +7,17 @@ MAX_ARCHIVE_BYTES = 8 * 1024**3
 
 def validate_capacity(file_count, manifest_bytes, total_bytes, *, max_bytes=MAX_ARCHIVE_BYTES):
     if file_count > MAX_ARCHIVE_FILES:
-        raise ValueError(f"Transfer file count exceeds limit ({file_count}/{MAX_ARCHIVE_FILES}); split the package before transfer")
+        raise ValueError(
+            f"Transfer file count exceeds limit ({file_count}/{MAX_ARCHIVE_FILES}); split the package before transfer"
+        )
     if manifest_bytes > MAX_MANIFEST_BYTES:
-        raise ValueError(f"Transfer manifest exceeds size limit ({manifest_bytes}/{MAX_MANIFEST_BYTES}); split the package before transfer")
+        raise ValueError(
+            f"Transfer manifest exceeds size limit ({manifest_bytes}/{MAX_MANIFEST_BYTES}); split the package before transfer"
+        )
     if total_bytes > max_bytes:
-        raise ValueError(f"Result archive exceeds size limit ({total_bytes}/{max_bytes}); split the package before transfer")
+        raise ValueError(
+            f"Result archive exceeds size limit ({total_bytes}/{max_bytes}); split the package before transfer"
+        )
 
 
 def bootstrap_limits():

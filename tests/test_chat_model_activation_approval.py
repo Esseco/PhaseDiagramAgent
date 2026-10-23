@@ -81,7 +81,7 @@ def test_first_approval_without_display_only_presents_saved_switch(approval):
     state, handler, execute = approval
     reply = review_presented_proposal(handler, state, "同意")
     assert "已保存方案" in reply and "核对" in reply
-    assert "/phase/approval" not in reply
+    assert "/phase/approval" in reply
     handler.review_pending.assert_not_called()
     execute.assert_not_called()
 
@@ -159,7 +159,10 @@ def test_multiple_plans_cannot_be_approved_as_one(approval):
 def test_switch_prompts_offer_chat_approval_and_explain_scope(approval):
     state, _, _ = approval
     handoff = state["remote_finetune_jobs"]["job"]["training_handoff"]
-    for reply in (pending_plan_reply(state), concise_training_reply(handoff, state)):
-        assert "同意" in reply
-        assert "/phase/approval" not in reply
+    saved_reply = pending_plan_reply(state)
+    training_reply = concise_training_reply(handoff, state)
+    for reply in (saved_reply, training_reply):
+        assert "同意" in reply and "拒绝" in reply
         assert "刷新" in reply
+    assert "/phase/approval" in saved_reply
+    assert "/phase/approval" not in training_reply

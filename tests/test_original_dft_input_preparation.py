@@ -19,6 +19,7 @@ def tmp_path(tmp_path_factory):
 
 
 @pytest.mark.parametrize("project,count", [("O3-1ele-NaCoO2", 35), ("O3-1ele-NaCrO2", 15)])
+@pytest.mark.real_project
 def test_original_selected_tasks_approval_to_current_input_without_new_decision(
     tmp_path, monkeypatch, project, count
 ):

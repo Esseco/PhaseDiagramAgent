@@ -46,7 +46,7 @@ def test_relax_101_tasks_use_two_jobs(tmp_path):
     assert set(first["batch"]["task_ids"]).isdisjoint(second["batch"]["task_ids"])
     first_directory = Path(first["batch"]["upload_directory"])
     second_directory = Path(second["batch"]["upload_directory"])
-    assert first_directory.relative_to(tmp_path / "upload").parts[0] == "epoch0_mh-1"
+    assert first_directory.relative_to(tmp_path / "upload").parts[0] == "epoch0"
     assert first["batch"]["search_group_index"] == 1
     assert first_directory.parent.parent == Path(first["batch"]["operation_directory"])
     assert first_directory.parent.parent.name.endswith("Relax-0001")
@@ -70,6 +70,7 @@ def test_mc_21_tasks_use_three_jobs_without_splitting_branches(tmp_path):
         tmp_path / "upload",
         worker_command=["python3", "--executor", "x:y"],
         task_preparer=_prepared_task,
+        stage_batch_sizes={"deep_search": 10},
     )
     state = _make_tasks(tmp_path, 21, "deep_search")
     first = runner.prepare(state)
@@ -124,7 +125,7 @@ def test_new_model_version_starts_a_new_mlip_round(tmp_path):
     second = runner.prepare(state)
     assert second["batch"]["mlip_round"] == 2
     assert second["batch"]["submission_index"] == 1
-    assert "epoch1_mh-2" in Path(second["batch"]["upload_directory"]).parts
+    assert "epoch1" in Path(second["batch"]["upload_directory"]).parts
 
 
 def test_batch_continues_after_one_failed_task(tmp_path):

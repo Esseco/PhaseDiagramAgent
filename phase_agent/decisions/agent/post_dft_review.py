@@ -245,6 +245,9 @@ def request_validated_action(agent_client, payload):
             action = dict(envelope["action"])
             if envelope.get("_llm_usage"):
                 action["_llm_usage"] = envelope["_llm_usage"]
+        from phase_agent.decisions.agent.proposal_schema_repair import repair_proposal_schema
+
+        action = repair_proposal_schema(tracked_client, payload, action)
         from phase_agent.decisions.agent.generation_plan import derive_generation_totals
 
         action = derive_generation_totals(action)
@@ -258,9 +261,13 @@ def request_validated_action(agent_client, payload):
         )
 
         if is_dialogue(action):
-            from phase_agent.decisions.agent.dialogue_contract import normalize_dialogue
+            from phase_agent.decisions.agent.dialogue_contract import (
+                normalize_dialogue,
+                repair_read_only_dialogue,
+            )
 
             action = normalize_dialogue(action)
+            action = repair_read_only_dialogue(tracked_client, payload, action)
             errors = dialogue_errors(action, payload.get("unified_dialogue") is True)
             if errors:
                 error = ValueError("; ".join(errors))

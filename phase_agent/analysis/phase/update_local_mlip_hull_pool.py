@@ -16,6 +16,17 @@ def update_local_mlip_hull_pool(state, *, config, path, _owned=False):
     version = (config.get("mlip") or {}).get("version") or (config.get("mlip") or {}).get("name")
     if not system_id or not version:
         return current
+    from phase_agent.analysis.phase.phase_boundary import (
+        phase_boundary_rule,
+        outside_phase_boundary,
+    )
+
+    rule = phase_boundary_rule(current)
+    excluded = [
+        r
+        for r in current.get("phase_records") or []
+        if str(r.get("status", "")).startswith("excluded_")
+    ]
     by_version = {}
     for task in current.get("tasks") or []:
         if (
@@ -50,6 +61,23 @@ def update_local_mlip_hull_pool(state, *, config, path, _owned=False):
             or not path_value
             or not Path(path_value).is_file()
             or not output.get("composition")
+        ):
+            continue
+        digest = output.get("structure_checksum") or (output.get("phase_identification") or {}).get(
+            "structure_sha256"
+        )
+        if outside_phase_boundary(
+            {"composition": output["composition"], "phase": output["actual_phase"]}, rule
+        ):
+            continue
+        if any(
+            (r.get("model_version") or r.get("source_version")) == task_version
+            and r.get("source_task_id") == task.get("task_id")
+            and (
+                (digest and digest == r.get("structure_sha256"))
+                or path_value == r.get("structure_path")
+            )
+            for r in excluded
         ):
             continue
         by_version.setdefault(task_version, []).append(

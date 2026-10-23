@@ -28,9 +28,7 @@ def export_batch_result(task_directory, results_directory, *, create_archive=Tru
     ):
         raise ValueError(f"任务身份不一致：{task_dir}")
 
-    destination = Path(results_directory) / result_directory_name(
-        task_dir, result.get("stage")
-    )
+    destination = Path(results_directory) / result_directory_name(task_dir, result.get("stage"))
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "task.finished.json").unlink(missing_ok=True)
     outputs = result.get("outputs") or {}
@@ -48,12 +46,8 @@ def export_batch_result(task_directory, results_directory, *, create_archive=Tru
     if training_file:
         source = (task_dir / training_file).resolve()
         if task_dir not in source.parents or source.name != "training.json":
-            raise ValueError(
-                "Training file must be training.json within task directory"
-            )
-        if not source.is_file() or outputs.get("training_checksum") != file_checksum(
-            source
-        ):
+            raise ValueError("Training file must be training.json within task directory")
+        if not source.is_file() or outputs.get("training_checksum") != file_checksum(source):
             raise ValueError("Training file missing or checksum mismatch")
         _copy(source, destination / "training.json")
     structure = outputs.get("structure_path") or outputs.get("final_structure_path")
@@ -67,9 +61,7 @@ def export_batch_result(task_directory, results_directory, *, create_archive=Tru
         if not source.is_absolute():
             source = task_dir / source
         source = source.resolve()
-        valid_name = (
-            source.suffix.lower() in {".vasp", ".poscar"} or source.name == "CONTCAR"
-        )
+        valid_name = source.suffix.lower() in {".vasp", ".poscar"} or source.name == "CONTCAR"
         if task_dir not in source.parents or not valid_name:
             if result.get("status") == "completed":
                 raise ValueError(f"最终结构不在任务目录内：{structure}")
@@ -85,11 +77,7 @@ def export_batch_result(task_directory, results_directory, *, create_archive=Tru
     checkpoint = result.get("checkpoint")
     if checkpoint:
         checkpoint_path = Path(str(checkpoint).replace("\\", "/"))
-        source = (
-            checkpoint_path
-            if checkpoint_path.is_absolute()
-            else task_dir / checkpoint_path
-        )
+        source = checkpoint_path if checkpoint_path.is_absolute() else task_dir / checkpoint_path
         if source.is_file() and task_dir in source.resolve().parents:
             _copy(source, destination / source.name)
     # Checkpoints still participate in the existing resume contract; do not

@@ -57,7 +57,7 @@ def test_layout_reuses_model_and_upload_round_labels(tmp_path):
     original = phase.stat().st_mtime_ns
     export_dft_products(state, tmp_path)
     root = product_root(state)
-    assert root == tmp_path / "epoch0_m1/Search-group-0001/DFT-round-0001_abcdef"
+    assert root == tmp_path / "epoch0/Search-group-0001/DFT-round-0001_abcdef"
     assert set(p.name for p in root.rglob("*") if p.is_file()) == {
         "training.json", "dft_records.json", "mlip_dft_metrics.json",
         "energy_comparison.csv", "force_comparison.csv", "magnetic_moments.csv", "metrics.csv",
@@ -65,7 +65,7 @@ def test_layout_reuses_model_and_upload_round_labels(tmp_path):
         "force_parity.png", "force_parity.pdf", "force_parity.svg", "parity_metrics.json"}
     assert not (tmp_path / "dft_results").exists()
     assert phase.stat().st_mtime_ns == original
-    assert len(read_csv(tmp_path / "epoch0_m1/round_metrics.csv")) == 3
+    assert len(read_csv(tmp_path / "epoch0/round_metrics.csv")) == 3
 
 
 def test_parity_rows_units_sign_species_and_final_frame(tmp_path):
@@ -186,9 +186,9 @@ def test_new_round_does_not_rewrite_previous_round_and_summary_is_version_scoped
     export_dft_products(state, tmp_path)
     assert {p: p.stat().st_mtime_ns for p in old.iterdir()} == stamps
     assert len(state["dft_result_exports"]) == 3
-    assert len(read_csv(tmp_path / "epoch0_m1/round_metrics.csv")) == 6
-    assert len(read_csv(tmp_path / "epoch1_m2/round_metrics.csv")) == 3
-    assert {r["model_version"] for r in read_csv(tmp_path / "epoch0_m1/round_metrics.csv")} == {"m1"}
+    assert len(read_csv(tmp_path / "epoch0/round_metrics.csv")) == 6
+    assert len(read_csv(tmp_path / "epoch1/round_metrics.csv")) == 3
+    assert {r["model_version"] for r in read_csv(tmp_path / "epoch0/round_metrics.csv")} == {"m1"}
 
 
 @pytest.mark.parametrize("mutate", [
@@ -267,4 +267,4 @@ def test_same_numbered_rounds_in_different_search_groups_stay_separate(tmp_path)
     assert len(state["dft_result_exports"]) == 2
     assert {Path(row["directory"]).parent.name for row in state["dft_result_exports"].values()} == {
         "Search-group-0001", "Search-group-0002"}
-    assert len(read_csv(tmp_path / "epoch0_m1/round_metrics.csv")) == 6
+    assert len(read_csv(tmp_path / "epoch0/round_metrics.csv")) == 6

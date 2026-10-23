@@ -5,6 +5,7 @@
 | 目的 | 阅读入口 |
 | --- | --- |
 | 启动项目、对话、定位报错 | [启动与调试](guides/start.md) |
+| 服务未启动时诊断、修复后继续运行 | [检查与恢复](guides/recovery.md) |
 | 设置体系、环境、边界和预算 | [配置](guides/configuration.md) |
 | 找输入、回传结果和备份 | [项目目录](guides/workspace.md) |
 | 理解搜索、DFT选择和模型刷新 | [搜索](guides/search.md) |

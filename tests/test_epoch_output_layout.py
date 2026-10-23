@@ -8,8 +8,8 @@ def test_shared_epoch_paths(tmp_path):
     state = {"active_model_version": "m1", "upload_layout": {"model_rounds": {"m1": 1, "m2": 2}}}
     for method in ("mlip", "dft", "combined"):
         path = phase_snapshot_directory(tmp_path, method, "m1", state=state)
-        assert path == tmp_path / "epoch0_m1" / "phase_diagrams" / method / "history"
-    assert "epoch1_m2" in phase_snapshot_directory(tmp_path, "mlip", "m2", state=state).parts
+        assert path == tmp_path / "epoch0" / "phase_diagrams" / method / "history"
+    assert "epoch1" in phase_snapshot_directory(tmp_path, "mlip", "m2", state=state).parts
 
 
 def test_phase_csv_epoch_and_unchanged_reuse(tmp_path):
@@ -21,7 +21,7 @@ def test_phase_csv_epoch_and_unchanged_reuse(tmp_path):
     first = update_phase_diagram(records, active_model_version="m1", output_directory=tmp_path,
                                 output_state=state)["diagrams"]["mlip"]
     path = Path(first["csv_path"])
-    assert path == tmp_path / "epoch0_m1/phase_diagrams/mlip/phase_diagram.csv"
+    assert path == tmp_path / "epoch0/phase_diagrams/mlip/phase_diagram.csv"
     with path.open(encoding="utf-8-sig") as stream:
         assert list(csv.DictReader(stream))[0]["epoch"] == "epoch0"
     stamp = path.stat().st_mtime_ns
@@ -37,7 +37,7 @@ def test_comparison_csv_has_epoch_and_round(tmp_path):
     add_result(state)
     export_dft_products(state, tmp_path)
     product = next(iter(state["dft_result_exports"].values()))
-    assert "epoch0_m1" in Path(product["directory"]).parts
+    assert "epoch0" in Path(product["directory"]).parts
     for key in ("energy_csv_path", "force_csv_path", "metrics_csv_path"):
         with open(product[key], encoding="utf-8-sig") as stream:
             rows = list(csv.DictReader(stream))

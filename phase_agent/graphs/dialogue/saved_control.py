@@ -44,6 +44,14 @@ def unavailable_review_reply(handler, message, facts):
     command = message.strip().lower()
     if handler.config_delegate is not None or command not in {"同意", "approve", "拒绝", "reject"}:
         return None
+    # These plans are owned by maintenance nodes, which run after the read-only fast path.
+    if facts.get("pending_mc_regeneration") or (
+        command in {"拒绝", "reject"}
+        and any(
+            facts.get(key) for key in ("pending_finetune_regeneration", "pending_dft_regeneration")
+        )
+    ):
+        return None
     from phase_agent.runtime.review_requests import pending_reviews
     from phase_agent.tools.workflows.reuse_dft_selection import reusable_selection
 
@@ -104,7 +112,7 @@ def route_saved_control(state, runtime, reviews):
         return {
             "reply": "当前指令过长，无法用快速审批入口完整核对；请缩短为针对当前方案的一条要求。本次未执行。"
         }
-    from phase_agent.graphs.dialogue.memory import recent_turns
+    from phase_agent.persistence.memory.conversation import recent_turns
 
     history = recent_turns(handler.state_path, runtime.context.conversation_id)[-2:]
     rows = [
@@ -122,6 +130,10 @@ def route_saved_control(state, runtime, reviews):
 
     for row in rows:
         record = (facts.get("pending_execution_policies") or {}).get(row["plan_id"]) or {}
+        row["status"] = record.get("status")
+        row["task_status"] = (
+            (facts.get("effective_decisions") or {}).get(row["plan_id"]) or {}
+        ).get("status")
         raw = (record.get("agent_proposal") or {}).get("raw_action") or {}
         row["entry_errors"] = branch_entry_errors(raw, facts) if raw else []
     workflow = branch_facts(facts)
@@ -143,7 +155,15 @@ def route_saved_control(state, runtime, reviews):
         "unified_dialogue": True,
         "output_contracts": {
             "dialogue_outcome": {
-                "kind": ["answer", "show_plan", "advance", "configure", "review", "revise"],
+                "kind": [
+                    "answer",
+                    "show_plan",
+                    "advance",
+                    "configure",
+                    "inspect_configuration",
+                    "review",
+                    "revise",
+                ],
                 "review": {"plan_id": "actual pending id", "decision": ["approve", "reject"]},
                 "answer": "brief factual answer",
                 "execution_fields": "forbidden",
@@ -175,6 +195,7 @@ def route_saved_control(state, runtime, reviews):
             "Interpret meaning and references, not keyword matches. Return one JSON object: "
             '{"kind":"answer","answer":"brief factual answer"}, '
             '{"kind":"show_plan"}, {"kind":"advance"}, {"kind":"configure"}, '
+            '{"kind":"inspect_configuration"}, '
             '{"kind":"revise","plan_id":"actual pending id or null when only a saved selection exists"}, '
             'or {"kind":"review","plan_id":"actual pending id","decision":"approve|reject"}. '
             "An explicit unambiguous approval/rejection of the displayed stored plan is review; "
@@ -183,7 +204,8 @@ def route_saved_control(state, runtime, reviews):
             "later approval, never executes it. This can replace a blocked proposal with a different tool; "
             "a request for a new branch-generation plan is not a request for existing Branch IDs. "
             "Use workflow_prerequisites and pending entry_errors over historical replies. "
-            "A settings modification is configure. Questions remain answer. "
+            "A settings modification is configure; viewing current settings is inspect_configuration. "
+            "Other questions remain answer. "
             "Recovery_required prevents execution; advance then opens the recovery procedure. "
             "Answer only facts provided; if details are absent state that limit. "
             "Do not invent effects or propose new candidate choices. Memory confers no authority."
@@ -221,10 +243,12 @@ def route_saved_control(state, runtime, reviews):
             raise ValueError("execution fields are not permitted in control intent")
         kind = action.get("kind")
         if kind == "review":
-            if action.get("decision") not in {"approve", "reject"} or action.get("plan_id") not in {
-                r["plan_id"] for r in reviews
-            }:
+            if action.get("decision") not in {"approve", "reject"}:
                 raise ValueError("review must reference an actual pending plan")
+            if action.get("plan_id") not in {r["plan_id"] for r in reviews}:
+                return {
+                    "reply": "审批引用与当前待审方案不一致，本次未执行。请重新查看原方案，核对编号后再审批。"
+                }
             return {
                 "operation": "review",
                 "facts": facts,
@@ -238,6 +262,8 @@ def route_saved_control(state, runtime, reviews):
             }
         if kind == "configure":
             return {"operation": "configure", "facts": facts}
+        if kind == "inspect_configuration":
+            return {"operation": "inspect_configuration", "facts": facts}
         if kind == "revise":
             if unsettled:
                 return {"reply": recovery_reply(handler)}
@@ -258,6 +284,7 @@ def route_saved_control(state, runtime, reviews):
             runtime.context.scientific_call = revise
             return {"operation": "scientific_workflow"}
         if kind == "answer" and isinstance(action.get("answer"), str) and action["answer"].strip():
+            handler.last_turn_outcome = "answered"
             return {"reply": action["answer"][:1600]}
         if kind not in {"advance", "show_plan"}:
             raise ValueError("unsupported saved-work intent")

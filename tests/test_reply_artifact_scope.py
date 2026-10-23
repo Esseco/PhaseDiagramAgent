@@ -103,6 +103,7 @@ def test_activation_handoff_keeps_current_approval_and_hides_old_dft(tmp_path):
 
 
 @pytest.mark.parametrize("project", ["O3-1ele-NaCoO2", "O3-1ele-NaCrO2", "O3-2ele-NaFeMn"])
+@pytest.mark.real_project
 def test_actual_project_history_does_not_leak_into_training_reply(tmp_path, project):
     path = Path("E:/0-PhaseDiagram") / project / "workflow_state/state.json"
     raw = path.read_bytes()

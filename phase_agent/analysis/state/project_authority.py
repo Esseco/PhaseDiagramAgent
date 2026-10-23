@@ -55,9 +55,7 @@ def current_project(state, session=None, *, state_path=None):
         # workflow_state can be a junction to diagrams/<name>/workflow_state.
         # Its lexical project path remains the workspace identity shown to users.
         path = Path(state_path).absolute()
-        root = str(
-            path.parent.parent if path.parent.name == "workflow_state" else path.parent
-        )
+        root = str(path.parent.parent if path.parent.name == "workflow_state" else path.parent)
     initial = (config.get("calculation") or {}).get("mlip_version")
     active = deepcopy(state.get("active_model") or {})
     active_version = state.get("active_model_version") or active.get("version")
@@ -92,9 +90,7 @@ def current_project(state, session=None, *, state_path=None):
             or state.get("confirmed_config") != snapshot.get("config")
         )
     ):
-        issues.append(
-            "运行绑定配置与配置会话快照不同；本轮以运行绑定配置为准，不能混用。"
-        )
+        issues.append("运行绑定配置与配置会话快照不同；本轮以运行绑定配置为准，不能混用。")
     draft_config = (
         (snapshot.get("config") or {})
         if session.get("status") == "confirmed"
@@ -131,8 +127,7 @@ def current_project(state, session=None, *, state_path=None):
         "H_generation": {
             key: deepcopy(value)
             for key, value in (system.get("H_generation") or {}).items()
-            if key
-            in {"enabled", "size_min", "size_max", "size_step", "first_round_max_det_H"}
+            if key in {"enabled", "size_min", "size_max", "size_step", "first_round_max_det_H"}
         },
     }
     if active_version:
@@ -141,6 +136,7 @@ def current_project(state, session=None, *, state_path=None):
     if isinstance((settings.get("bohb") or {}).get("scope"), dict):
         settings["bohb"]["scope"].pop("H", None)
     from phase_agent.runtime.project_display_name import display_name
+
     return {
         "project": Path(root).name if root else None,
         "display_name": display_name(Path(root).resolve()) if root else None,
@@ -151,8 +147,7 @@ def current_project(state, session=None, *, state_path=None):
         "candidate_models": [
             {"version": key, "status": row.get("status"), "activated": False}
             for key, row in (state.get("candidate_models") or {}).items()
-            if key != active_version
-            and row.get("status") not in {"activated", "rejected"}
+            if key != active_version and row.get("status") not in {"activated", "rejected"}
         ],
         "configuration": {
             "version": version,

@@ -206,7 +206,10 @@ def test_response_presentation_reads_final_state_once(tmp_path, monkeypatch):
         "phase_agent.runtime.chat_state_presentation.format_epoch_reply",
         lambda reply, *a, **kw: reply,
     )
-    assert studio_runtime.send_project_message("status", "fake") == "saved facts"
+    reply = studio_runtime.send_project_message("status", "fake")
+    body, marker, record_path = reply.partition("\n交互记录地址：")
+    assert body.rstrip() == "saved facts"
+    assert marker and record_path.startswith(str(tmp_path))
     assert calls == [handler.state_path]
 
 
@@ -229,7 +232,7 @@ def test_completed_namespace_retention_preserves_old_interrupt_and_parent():
     )
 
 
-def test_dev_direct_mutations_keep_store_identity_and_mark_dirty():
+def test_dev_direct_mutations_keep_store_identity_and_mark_dirty(monkeypatch):
     from collections import defaultdict
     from types import SimpleNamespace
     from phase_agent.persistence.studio_storage import install_mutation_adapters
@@ -250,9 +253,15 @@ def test_dev_direct_mutations_keep_store_identity_and_mark_dirty():
         Threads=type("Threads", (), {"copy": staticmethod(copy)}),
         _delete_checkpoints_for_thread=delete,
     )
+    import sys
+    import langgraph_api
+
+    config = SimpleNamespace(USE_CUSTOM_CHECKPOINTER=False)
+    monkeypatch.setitem(sys.modules, "langgraph_api.config", config)
+    monkeypatch.setattr(langgraph_api, "config", config, raising=False)
     install_mutation_adapters(SimpleNamespace(MEMORY=mem), ops)
     asyncio.run(ops.Threads.copy())
-    asyncio.run(ops._delete_checkpoints_for_thread())
+    asyncio.run(ops._delete_checkpoints_for_thread("old", None))
     assert mem.writes is original_writes and not mem.writes
     assert "copied" in mem.storage
     assert manager.revision == 2 and manager.readers == 0

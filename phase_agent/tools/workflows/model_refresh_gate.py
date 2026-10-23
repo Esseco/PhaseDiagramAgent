@@ -365,7 +365,7 @@ def run_model_refresh_gate(
         action["parameters"]["supplemental_relax_parameters"] = relax_parameters
         if relax_parameters:
             action["reason"] += (
-                f"本批弛豫最多 {relax_parameters.get('relax_steps', 300)} 步，"
+                f"本批弛豫最多 {relax_parameters.get('relax_steps', 500)} 步，"
                 f"优化器 {relax_parameters.get('optimizer', 'LBFGS')}。"
             )
         action["task_key"] += (

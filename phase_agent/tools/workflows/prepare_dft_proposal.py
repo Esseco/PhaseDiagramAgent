@@ -24,14 +24,45 @@ class DFTProposalPreparation:
         return "rejected" if self.error is not None else "ready"
 
 
+def _preview_with_complete_feedback(action, state, config):
+    from phase_agent.tools.workflows.dft_coverage_review import coverage_errors
+
+    rows = (action.get("parameters") or {}).get("decisions") or []
+    candidates = state.get("qbc_candidates") or []
+    known = {row.get("candidate_id") for row in candidates}
+    errors = []
+    if isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
+        errors.extend(
+            "unknown_candidate:" + str(row.get("candidate_id"))
+            for row in rows
+            if row.get("candidate_id") not in known
+        )
+        errors.extend(coverage_errors(action, candidates))
+    prepared, preview_error = attach_dft_preview(action, state, config)
+    if errors:
+        detail = "DFT 身份或D/H审阅未通过：" + "; ".join(errors)
+        return None, detail + ("；" + preview_error if preview_error else "")
+    return prepared, preview_error
+
+
 def prepare_dft_proposal(action, state, decision_state, config, *, agent_client=None, revise):
-    prepared, error = attach_dft_preview(action, state, config)
+    from phase_agent.configuration.schema.python_environments import dft_environment_error
+
+    environment_error = dft_environment_error(action, config)
+    if environment_error:
+        return DFTProposalPreparation(deepcopy(action), state, environment_error)
+    prepared, error = _preview_with_complete_feedback(action, state, config)
     if not error or agent_client is None:
         return DFTProposalPreparation(prepared if not error else deepcopy(action), state, error)
+    from phase_agent.tools.workflows.dft_coverage_review import coverage_evidence
+
     revision_state = deepcopy(decision_state)
     revision_state.setdefault("decision_context", {})["dft_validation_feedback"] = {
         "error": error,
-        "instruction": "保留记忆与当前证据，修订原方案；不要由代码替选。仍需人工重新批准。",
+        "prior_decisions": deepcopy((action.get("parameters") or {}).get("decisions") or []),
+        "allowed_candidate_ids": [row["candidate_id"] for row in state.get("qbc_candidates") or []],
+        "coverage_review": coverage_evidence(state.get("qbc_candidates") or []),
+        "instruction": "返回完整决策表而非差量；逐条保留或明确修订原选择及暂缓，不因补一项漏掉另一项。candidate_id须逐字复制合法目录，不截断或猜测；程序不会模糊匹配。先同时修复所有身份和D/H缺口，再核对整批。对独立簇暂缓须权衡其联合H及条件依赖，同相代表不是替代证据。不要由代码替选；仍需人工重新批准。",
     }
     revision = revise(
         build_agent_proposal(action, decision_state),
@@ -65,7 +96,7 @@ def prepare_dft_proposal(action, state, decision_state, config, *, agent_client=
         return DFTProposalPreparation(
             deepcopy(action), state, error + "；LLM修订未返回有效DFT方案，原方案保留，未执行任务。"
         )
-    prepared, error = attach_dft_preview(revised_action, state, config)
+    prepared, error = _preview_with_complete_feedback(revised_action, state, config)
     if error:
         return DFTProposalPreparation(deepcopy(action), state, error)
     if prepared:

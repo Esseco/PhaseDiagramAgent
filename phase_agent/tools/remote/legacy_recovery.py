@@ -23,6 +23,38 @@ IDENTITY = (
 )
 
 
+def _original_source_folder(state, handoff):
+    """A local rename must not change the remote label in a bound recovery plan."""
+    source = Path(handoff["folder"])
+    storage = (state.get("confirmed_config") or {}).get("storage") or {}
+    layout = state.get("workspace_layout") or {}
+    root = layout.get("workspace_root") or storage.get("workspace_root")
+    if not root or not source.resolve().is_relative_to(Path(root).resolve()):
+        return source.name
+    from phase_agent.tools.state.workflow_control import read_control
+
+    state_path = (
+        Path(layout["state_path"])
+        if layout.get("state_path")
+        else Path(root) / (storage.get("paths") or {}).get("state", "workflow_state/state.json")
+    )
+    control = read_control(state_path)
+    if (
+        not control
+        or not state.get("path_relocation_revision")
+        or state["path_relocation_revision"] != control.get("path_relocation_revision")
+    ):
+        return source.name
+    names = {
+        Path(row["from"]).name
+        for row in control.get("path_relocations") or []
+        if Path(row["to"]).resolve() == source.resolve()
+    }
+    if len(names) > 1:
+        raise ValueError("ambiguous_original_delivery_folder")
+    return next(iter(names), source.name)
+
+
 def recovery_plan(state, handoff):
     """Derive identity and destinations from original inputs and registered tasks."""
     archive = Path(handoff["upload_archive"])
@@ -31,8 +63,7 @@ def recovery_plan(state, handoff):
     with zipfile.ZipFile(archive) as zipped:
         scripts = json.loads(zipped.read("submission_plan.json"))["scripts"]
         inventory = {
-            r["path"]: r
-            for r in json.loads(zipped.read("transfer_manifest.json"))["files"]
+            r["path"]: r for r in json.loads(zipped.read("transfer_manifest.json"))["files"]
         }
         for script in scripts:
             directory = Path(script).parent
@@ -46,15 +77,12 @@ def recovery_plan(state, handoff):
             expected = {key: task.get(key) for key in IDENTITY}
             current = registered.get(task["task_id"])
             if not current or any(
-                current.get(k) is not None and current.get(k) != v
-                for k, v in expected.items()
+                current.get(k) is not None and current.get(k) != v for k, v in expected.items()
             ):
                 raise ValueError("original_task_registration_mismatch")
             inputs = next(p for p in directory.parents if p.name == "inputs")
             operation = inputs.parent
-            destination = (
-                operation / "results" / result_directory_name(directory, task["stage"])
-            )
+            destination = operation / "results" / result_directory_name(directory, task["stage"])
             tasks.append(
                 {
                     "input_directory": directory.as_posix(),
@@ -67,7 +95,7 @@ def recovery_plan(state, handoff):
     return {
         "schema": 1,
         "mode": "collect_only",
-        "source_folder": Path(handoff["folder"]).name,
+        "source_folder": _original_source_folder(state, handoff),
         "source_archive_sha256": file_checksum(archive),
         "tasks": tasks,
     }
@@ -80,10 +108,7 @@ def _read_plan(archive):
         payload = zipped.read("recovery_plan.json")
         manifest = json.loads(zipped.read("transfer_manifest.json"))
         row = next(r for r in manifest["files"] if r["path"] == "recovery_plan.json")
-        if (
-            manifest.get("kind") != "inputs"
-            or hashlib.sha256(payload).hexdigest() != row["sha256"]
-        ):
+        if manifest.get("kind") != "inputs" or hashlib.sha256(payload).hexdigest() != row["sha256"]:
             raise ValueError("recovery_plan_checksum_mismatch")
         return json.loads(payload)
 
@@ -95,16 +120,12 @@ def prepare_recovery_handoff(state, handoff, cpu_profile):
 
     plan = recovery_plan(state, handoff)
     command = ': "${SLURM_JOB_ID:?Use sbatch submit_all.sh}"\ncd -- "${SLURM_SUBMIT_DIR:?}"\npython3 recover_results.py'
-    content = shell_script(cpu_profile, command, name="phase-collect-only").replace(
-        "\r\n", "\n"
-    )
+    content = shell_script(cpu_profile, command, name="phase-collect-only").replace("\r\n", "\n")
     source = Path(handoff["folder"])
     runner = Path(__file__).with_name("legacy_recovery_runner.py").read_bytes()
     with tempfile.TemporaryDirectory(prefix="collection-input-") as temporary:
         root = Path(temporary)
-        (root / "recovery_plan.json").write_text(
-            json.dumps(plan, sort_keys=True), encoding="utf-8"
-        )
+        (root / "recovery_plan.json").write_text(json.dumps(plan, sort_keys=True), encoding="utf-8")
         (root / "_transfer.py").write_text(portable_transfer_source(), encoding="utf-8")
         for sequence in range(1, 100):
             folder = source.with_name(
@@ -116,10 +137,7 @@ def prepare_recovery_handoff(state, handoff, cpu_profile):
                 if not archive.is_file() or _read_plan(archive) != plan:
                     continue
                 with zipfile.ZipFile(archive) as zipped:
-                    if (
-                        zipped.read("_transfer.py")
-                        != (root / "_transfer.py").read_bytes()
-                    ):
+                    if zipped.read("_transfer.py") != (root / "_transfer.py").read_bytes():
                         continue
                 if (
                     not (folder / "recover_results.py").is_file()
@@ -134,10 +152,7 @@ def prepare_recovery_handoff(state, handoff, cpu_profile):
                     continue
                 return _descriptor(handoff, folder, plan)
             options = cpu_profile.get("slurm_options") or {}
-            if any(
-                options.get(k)
-                for k in ("gres", "gpus", "gpus-per-node", "gpus-per-task")
-            ):
+            if any(options.get(k) for k in ("gres", "gpus", "gpus-per-node", "gpus-per-task")):
                 raise ValueError("collection_recovery_requires_CPU_profile")
             create_bundle(root, list(root.iterdir()), archive, kind="inputs")
             (folder / "recover_results.py").write_bytes(runner)
@@ -150,9 +165,7 @@ def prepare_recovery_handoff(state, handoff, cpu_profile):
 def portable_transfer_source():
     """Reuse the standard transfer implementation without an installed app package."""
     limits = Path(__file__).with_name("transfer_limits.py").read_text(encoding="utf-8")
-    transfer = (
-        Path(__file__).with_name("transfer_bundle.py").read_text(encoding="utf-8")
-    )
+    transfer = Path(__file__).with_name("transfer_bundle.py").read_text(encoding="utf-8")
     transfer, count = re.subn(
         r"from phase_agent.tools.remote.transfer_limits import \([\s\S]*?\)\n",
         "",
@@ -164,14 +177,34 @@ def portable_transfer_source():
     return limits + "\n" + transfer
 
 
-def _descriptor(original, folder, plan):
+def _recovery_import_directory(original, recovery_key):
+    directory = Path(original["import_directory"])
+    legacy = directory.parent / "_recovery" / recovery_key
+    if legacy.exists():
+        return legacy
+    parents = [directory, *directory.parents]
+    submission = next((p for p in parents if p.name == "submissions"), None)
+    epoch = next(
+        (
+            re.match(r"^(epoch\d+)(?:_.+)?$", p.name)
+            for p in parents
+            if re.match(r"^(epoch\d+)(?:_.+)?$", p.name)
+        ),
+        None,
+    )
+    if submission is not None and epoch is not None:
+        return submission / epoch[1] / "recovery" / recovery_key
+    return legacy
+
+
+def _descriptor(original, folder, plan, *, remote_folder=None):
     with zipfile.ZipFile(folder / "inputs.zip") as archive:
         reassessment = "repair_options.json" in archive.namelist()
     recovery_key = hashlib.sha256(
-        (folder.name + plan["source_archive_sha256"]).encode()
+        ((remote_folder or folder.name) + plan["source_archive_sha256"]).encode()
     ).hexdigest()[:12]
     import_directory = (
-        Path(original["import_directory"]).parent / "_recovery" / recovery_key
+        _recovery_import_directory(original, recovery_key)
         if reassessment
         else Path(original["import_directory"])
     )
@@ -183,11 +216,7 @@ def _descriptor(original, folder, plan):
         "return_directory": str(folder.with_name(folder.name[:-6] + "_output")),
         "import_directory": str(import_directory),
         "collect_only": not reassessment,
-        **(
-            {"dft_recompute": False, "same_frame_prediction": True}
-            if reassessment
-            else {}
-        ),
+        **({"dft_recompute": False, "same_frame_prediction": True} if reassessment else {}),
         "task_ids": [t["expected"]["task_id"] for t in plan["tasks"]],
         "allowed_prefixes": [t["result_directory"] + "/" for t in plan["tasks"]],
         "runtime_roots": sorted(
@@ -208,9 +237,7 @@ def recovery_handoffs(state):
             continue
         seen.add(str(source))
         candidates = sorted(
-            source.parent.glob(
-                source.name.removesuffix("_input") + "_Recovery[0-9][0-9]_input"
-            ),
+            source.parent.glob(source.name.removesuffix("_input") + "_Recovery[0-9][0-9]_input"),
             reverse=True,
         )
         if not candidates:
@@ -219,7 +246,12 @@ def recovery_handoffs(state):
         for folder in candidates:
             if _read_plan(folder / "inputs.zip") != expected:
                 raise ValueError("recovery_delivery_outside_original_scope")
-            yield _descriptor(original, folder, expected)
+            yield _descriptor(
+                original,
+                folder,
+                expected,
+                remote_folder=_original_source_folder(state, {"folder": str(folder)}),
+            )
             # Older versions remain importable, but presentation shows the newest.
 
 
@@ -231,11 +263,7 @@ def reassessment_result_paths(state):
             continue
         plan = _read_plan(handoff["upload_archive"])
         for task in plan["tasks"]:
-            result = (
-                Path(handoff["import_directory"])
-                / task["result_directory"]
-                / "result.json"
-            )
+            result = Path(handoff["import_directory"]) / task["result_directory"] / "result.json"
             if result.is_file():
                 paths.setdefault(task["expected"]["task_id"], result)
     return paths

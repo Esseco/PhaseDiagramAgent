@@ -57,6 +57,10 @@ def coverage(
     groups: dict[tuple[str, str, str, str], dict[str, set[str]]] = {}
     for structure in data["structures"].values():
         branch = data["branches"][structure["branch_id"]]
+        if (structure.get("metadata") or {}).get("phase_quality_exclusion") and structure[
+            "structure_id"
+        ] not in branch["structure_ids"]:
+            continue
         for stage in stages:
             if not structure["stage_history"].get(stage):
                 continue

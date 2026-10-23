@@ -220,6 +220,13 @@ def _state_candidates(state, manager, action):
                 }
             )
     requested = set(action.get("target_ids") or [])
+    if requested:
+        # Review the full decision table without adding extra calculation targets.
+        requested.update(
+            row.get("candidate_id")
+            for row in (action.get("parameters") or {}).get("decisions") or []
+            if isinstance(row, dict) and row.get("action") in {"DEFER", "REJECT"}
+        )
     return [
         row
         for row in available

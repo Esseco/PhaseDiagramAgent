@@ -3,29 +3,18 @@
 from copy import deepcopy
 from phase_agent.decisions.qbc_selection.select_dft_candidates import select_dft_candidates
 from phase_agent.tools.budget.estimate_stage_cost import estimate_dft_cost
+from phase_agent.decisions.qbc_selection.dft_round_policy import dft_task_limit, round_dft_tasks
 
 
 def recommend_post_mc_dft(candidates, config, state=None):
-    selection = (config.get("dft") or {}).get("selection") or {}
     pool = deepcopy(candidates)
     state = state or {}
-    model = config.get("mlip") or {}
-    version = model.get("version") or model.get("name") or state.get("active_model_version")
-    prior = [
-        row
-        for row in state.get("tasks") or []
-        if row.get("stage") == "dft_single_point"
-        and row.get("model_version") == version
-        and row.get("generation_cycle") == len(state.get("generation_history") or [])
-        and row.get("status") != "cancelled"
-    ]
+    prior = round_dft_tasks(state, config)
     from phase_agent.tools.budget.check_budget import budget_is_hard
 
     hard = budget_is_hard(config.get("budgets"))
-    remaining_count = int(selection.get("single_point_max_per_round", 100)) - len(prior)
-    remaining_cost = float(selection.get("single_point_cost_per_round", 5000)) - sum(
-        float(row.get("planned_relative_cost") or 0) for row in prior
-    )
+    remaining_count = dft_task_limit(config) - len(prior)
+    remaining_cost = float("inf")
     done = {row.get("structure_id") for row in prior}
     pool = [row for row in pool if row.get("candidate_id") not in done]
     budgets = config.get("budgets") or {}
@@ -37,7 +26,7 @@ def recommend_post_mc_dft(candidates, config, state=None):
         if row.get("status") in {"reserved", "submitted", "running"}
     ]
     stage_reserved = [row for row in reservations if row.get("stage") == "dft_single_point"]
-    if limit.get("max_tasks") is not None:
+    if hard and limit.get("max_tasks") is not None:
         remaining_count = min(
             remaining_count,
             int(limit["max_tasks"]) - int(used.get("tasks") or 0) - len(stage_reserved),
@@ -57,7 +46,6 @@ def recommend_post_mc_dft(candidates, config, state=None):
             - sum(float(row.get("reserved_cost") or 0) for row in reservations),
         )
     if not hard:
-        remaining_count = len(pool)
         remaining_cost = None
     if remaining_count <= 0 or (remaining_cost is not None and remaining_cost <= 0):
         return {"selected_candidates": [], "summary": {"selected": 0, "relative_cost": 0}}

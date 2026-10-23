@@ -23,6 +23,7 @@ def tmp_path(tmp_path_factory):
 
 
 @pytest.mark.parametrize("project", ["O3-1ele-NaCoO2", "O3-1ele-NaCrO2", "O3-2ele-NaFeMn"])
+@pytest.mark.real_project
 def test_actual_project_geometries_approval_input_output_analysis(tmp_path, monkeypatch, project):
     source = Path("E:/0-PhaseDiagram") / project / "workflow_state/ledgers/phase_data.json"
     if not source.is_file():

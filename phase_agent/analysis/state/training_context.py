@@ -27,6 +27,14 @@ def post_refresh_search_context(state):
         and not t.get("model_refresh_id")
     ]
     counts = Counter((t.get("stage"), t.get("status")) for t in tasks)
+    from phase_agent.tools.policy.model_generation import new_model_generation_facts
+
+    generation = new_model_generation_facts(state)
+    generation_progress = (
+        f"当前模型已登记{generation['new_branch_count']}个有效新增branch，首次生成前置已满足；不因首次搜索未完成重复要求首次生成。"
+        if generation["ready"] and generation["new_branch_count"] > 0
+        else "尚无当前模型有效新增记录时，刷新后必须先生成当前模型的新branch。"
+    )
     return {
         "status": "refresh_completed",
         "model_version": version,
@@ -38,8 +46,9 @@ def post_refresh_search_context(state):
         ),
         "relax_completed": counts[("relax_and_feature", "completed")],
         "instruction": (
-            "当前模型已激活且结构与相图刷新完成。旧微调审阅和验证计划不是新轮次的执行指令。"
-            "刷新后必须先生成当前模型的新branch：先审批生成方案，生成后展示实际数量和分布，"
+            generation_progress
+            + "当前模型已激活且结构与相图刷新完成。旧微调审阅和验证计划不是新轮次的执行指令。"
+            "仅首次生成前置未满足时，先审批生成方案，生成后展示实际数量和分布，"
             "再单独审批Relax/MC方案；不得直接复用旧branch跳过生成，也不得把后续输入捆绑进首次生成。"
             "完成首次生成后，按需比较旧branch在新模型下续搜、新增branch及DFT。"
             "旧branch的新模型基态、近简并、收益及续搜规则均应纳入判断；复用不冒充新增。"

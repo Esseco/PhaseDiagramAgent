@@ -21,6 +21,9 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
     if handler.conversation_id not in {None, context.conversation_id}:
         raise OpenWebUIRequestError("此运行时已绑定另一个会话。")
     missing = object()
+    from phase_agent.runtime.turn_process import presentation_signature, remember_presentation_state
+
+    signature = presentation_signature(handler.state_path)
     facts = read_json(handler.state_path, missing)
     if facts is missing:
         from pathlib import Path
@@ -43,6 +46,7 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
     )
     if answer is not None:
         handler.last_turn_outcome = "answered"
+        remember_presentation_state(handler.state_path, facts, signature)
         return {"reply": answer, "operation": "done"}
     statuses = {row.get("task_id"): row.get("status") for row in facts.get("tasks") or []}
     if handler.config_delegate is None:

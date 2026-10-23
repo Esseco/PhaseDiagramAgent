@@ -26,6 +26,70 @@ def display_cost(value):
     )
 
 
+def markdown_rationale(record):
+    """Detailed report only; keep compact inventories and chat receipts unchanged."""
+    from phase_agent.tools.workflows.compact_review import value
+
+    review = record.get("branch_pool_review") or {}
+    params = record.get("parameters") or {}
+    plan = record.get("plan") or {}
+    lines = [
+        "### 本轮 branch 选点理由",
+        "",
+        "本轮目标与依据：" + value(record.get("reason") or record.get("quantity_reason")),
+        "复用或补充判断：" + value(review.get("rationale")),
+        "其他方案的取舍：" + value(review.get("alternative_reason")),
+        "判断引用：" + value(review.get("evidence_refs")),
+    ]
+    notes = record.get("branch_region_review_notes")
+    if notes:
+        lines.append("本轮背景与复用说明：" + value(notes))
+    if params.get("regions") == []:
+        lines.append("暂不新增的理由：" + value(params.get("defer_reason")))
+    regions = params.get("regions") or plan.get("allocations") or []
+    if regions:
+        lines.extend(
+            [
+                "",
+                "| 区域或分配 | 相 | 选择策略 | 选点理由 | 证据引用 |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for index, row in enumerate(regions, 1):
+            cells = [
+                row.get("region_id", index),
+                row.get("phase"),
+                STRATEGIES.get(row.get("strategy"), row.get("strategy")),
+                row.get("reason"),
+                row.get("evidence_refs"),
+            ]
+            lines.append("| " + " | ".join(value(item) for item in cells) + " |")
+    groups = review.get("existing_branch_groups") or []
+    if groups:
+        lines.extend(
+            [
+                "",
+                "已有 branch 分组判断：",
+                "",
+                "| branch 分组 | 建议 | 理由 | 证据引用 |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for row in groups:
+            cells = [
+                row.get("branch_ids") or row.get("branch_indices"),
+                row.get("decision"),
+                row.get("reason"),
+                row.get("evidence_refs"),
+            ]
+            lines.append("| " + " | ".join(value(item) for item in cells) + " |")
+    for key, label in (("missing_evidence", "尚缺证据"), ("revisit_conditions", "重新评估条件")):
+        if review.get(key):
+            lines.extend(["", label + "：" + value(review[key])])
+    lines.extend(["", "以上仅展示本轮保存的判断；未记录的理由或引用不会自动补造。", ""])
+    return "\n\n".join(lines[:6]) + "\n" + "\n".join(lines[6:])
+
+
 def phase_rules(plan):
     rules = plan.get("phases")
     if isinstance(rules, list):

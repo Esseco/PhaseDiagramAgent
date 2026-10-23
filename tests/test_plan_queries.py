@@ -73,3 +73,50 @@ def test_blocked_branch_plan_shows_scope_without_inviting_approval():
     assert "暂不可批准" in reply and "reserved" in reply
     assert "回复‘同意’批准" not in reply
     assert json.dumps(state, sort_keys=True) == before
+
+
+@pytest.mark.parametrize("port", [None, "8767"])
+@pytest.mark.parametrize(
+    "kind,sensitive,chat_approval",
+    [
+        ("model_activation", True, True),
+        ("execution_recovery", True, False),
+        ("training_direction", False, True),
+    ],
+)
+def test_additional_review_links_preserve_approval_boundary(
+    monkeypatch, port, kind, sensitive, chat_approval
+):
+    from copy import deepcopy
+
+    if port is None:
+        monkeypatch.delenv("PHASE_CONTROL_PORT", raising=False)
+    else:
+        monkeypatch.setenv("PHASE_CONTROL_PORT", port)
+    row = {
+        "review_kind": kind,
+        "reason": "已保存依据",
+        "review_card": {
+            "title": "保存方案",
+            "scope": "原有范围",
+            "approval_boundary": "仅原方案，后续计算另行审批",
+            "sensitive": sensitive,
+        },
+    }
+    state = {"active_model_version": "old"}
+    before_state, before_row = deepcopy(state), deepcopy(row)
+    monkeypatch.setattr(
+        "phase_agent.runtime.review_requests.additional_reviews", lambda state: [row]
+    )
+
+    reply = pending_plan_reply(state)
+
+    if sensitive:
+        assert f"http://127.0.0.1:{port or '8765'}/phase/approval" in reply
+    else:
+        assert "/phase/approval" not in reply
+    assert ("同意" in reply and "拒绝" in reply) == chat_approval
+    assert row["review_card"]["approval_boundary"] in reply
+    assert "本次仅查看，未批准或执行。" in reply
+    assert state == before_state
+    assert row == before_row

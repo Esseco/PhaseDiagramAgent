@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+from phase_agent.persistence.sqlite_paths import readonly_uri
 from phase_agent.graphs.contracts import ExecutionIdentity
 
 
@@ -96,7 +97,7 @@ def recovery_report(state_path, state):
             "unsettled": unsettled,
         }
     owner = os.path.normcase(str(Path(state_path).resolve()))
-    connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(readonly_uri(path), uri=True)
     try:
         rows = connection.execute(
             "SELECT action_id, identity, phase, outcome FROM receipts"
@@ -162,7 +163,7 @@ def execution_events(state_path, invocation_id):
     key = json.dumps(
         [os.path.normcase(str(Path(state_path).resolve())), invocation_id], ensure_ascii=False
     )
-    connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(readonly_uri(path), uri=True)
     try:
         exists = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_events'"

@@ -70,6 +70,7 @@ def prepare_mc_upload_batches(*, action, context):
         row["structure_id"] = structure_id
     runner = ManualUploadBatchRunner(
         root,
+        task_ids={row["task_id"] for row in pending},
         worker_command=command,
         stage_batch_sizes=((config.get("supercomputer") or {}).get("batch_sizes") or {}),
         stage_profiles=default_slurm_cluster_config(),

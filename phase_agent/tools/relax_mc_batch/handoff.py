@@ -6,8 +6,14 @@ import shutil
 
 from phase_agent.tools.remote.transfer_limits import bootstrap_limits
 
-BOOTSTRAP = bootstrap_limits() + Path(__file__).with_name("upload_driver.py").read_text(
-    encoding="utf-8"
+BOOTSTRAP = (
+    bootstrap_limits()
+    + Path(__file__)
+    .parents[1]
+    .joinpath("remote/environment_preflight.py")
+    .read_text(encoding="utf-8")
+    + "\n"
+    + Path(__file__).with_name("upload_driver.py").read_text(encoding="utf-8")
 )
 
 
@@ -22,6 +28,11 @@ def output_directory(directory):
 
 
 def result_archive(record):
+    from phase_agent.tools.relax_mc_batch.recovery_receipt import selected_recovery
+
+    recovery = selected_recovery(record)
+    if recovery is not None:
+        return recovery
     if not record.get("directory"):
         return Path(record["expected_results_archive"])
     named = output_directory(record["directory"]) / "results.zip"
@@ -64,4 +75,7 @@ def compact_handoff(directory):
     )
     (folder / "run_upload.py").write_text(BOOTSTRAP, encoding="utf-8", newline="\n")
     (folder / "submit_all.sh").write_text(header + command, encoding="utf-8", newline="\n")
+    from phase_agent.tools.remote.input_validation import validate_handoff
+
+    validate_handoff(folder, kind="relax_mc")
     return folder

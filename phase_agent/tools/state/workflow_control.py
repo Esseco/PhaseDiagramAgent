@@ -14,6 +14,7 @@ APPEND_FIELDS = {
     "reconciled_proposals",
     "recovery_review_history",
     "action_records",
+    "task_wait_cancellations",
 }
 
 
@@ -39,6 +40,22 @@ def current_revision(state_path):
 
 def restore_control(state_path, state):
     record = read_control(state_path)
+    if (
+        record
+        and record.get("path_relocations")
+        and state.get("path_relocation_revision") != record.get("path_relocation_revision")
+    ):
+        from phase_agent.configuration.session.relocate_workspace_paths import (
+            relocate_workspace_paths,
+        )
+
+        state = relocate_workspace_paths(
+            state,
+            record["path_relocations"],
+            Path(state_path).resolve().parent.parent,
+            preserve_snapshots=True,
+        )
+        state["path_relocation_revision"] = record.get("path_relocation_revision")
     if not record or state.get(FIELD) == record["revision"]:
         return state
     if not record.get("restore_allowed", True):
@@ -57,6 +74,9 @@ def restore_control(state_path, state):
     if set(values) - VALUE_FIELDS or set(patch.get("append") or {}) - APPEND_FIELDS:
         raise ValueError("unsupported_workflow_control_field")
     updated.update(deepcopy(values))
+    from phase_agent.tools.state.task_wait_cancellation import restore_cancelled_waits
+
+    restore_cancelled_waits(updated, patch.get("cancelled_waits") or {})
     for name in ("execution_reconciliations", "invocations"):
         updated.setdefault(name, {}).update(deepcopy(patch.get(name) or {}))
     pending = updated.setdefault("pending_execution_policies", {})
@@ -184,6 +204,14 @@ def commit_control(
         if previous:
             patch = _merge_patch(previous["patch"], patch, state)
         record = {
+            **(
+                {
+                    "path_relocations": previous["path_relocations"],
+                    "path_relocation_revision": previous.get("path_relocation_revision"),
+                }
+                if previous and previous.get("path_relocations")
+                else {}
+            ),
             "schema_version": 1,
             "state_path": str(path.resolve()),
             "revision": uuid4().hex,
@@ -201,6 +229,17 @@ def commit_control(
             or set(patch.get("append") or {}) - APPEND_FIELDS
         ):
             raise ValueError("unsupported_workflow_control_field")
+        from phase_agent.tools.state.task_wait_cancellation import restore_cancelled_waits
+
+        cancelled = patch.get("cancelled_waits") or {}
+        restore_cancelled_waits(
+            {
+                "tasks": [
+                    deepcopy(t) for t in state.get("tasks") or [] if t.get("task_id") in cancelled
+                ]
+            },
+            cancelled,
+        )
         write_json(control_path(path), record)
     if desired_state is not None:
         updated = deepcopy(desired_state)
@@ -219,6 +258,7 @@ def _merge_patch(previous, incoming, state):
         "invocations",
         "record_statuses",
         "decision_statuses",
+        "cancelled_waits",
     ):
         merged.setdefault(key, {}).update(deepcopy(incoming.get(key) or {}))
     merged["values"] = {

@@ -67,6 +67,28 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
     if any(key in action for key in ("energy", "ehull", "score", "converged")):
         errors.append("agent_supplied_numeric_result")
     parameters = action.get("parameters") or {}
+    requested_dft_tasks = 0
+    if tool == "select_dft_candidates" and isinstance(parameters.get("decisions"), list):
+        requested_dft_tasks = sum(
+            isinstance(row, dict) and row.get("action") in {"DFT_SINGLE_POINT", "DFT_RELAX"}
+            for row in parameters["decisions"]
+        )
+    elif tool == "run_calculation_stage" and (action.get("stage") or parameters.get("stage")) in {
+        "dft_single_point",
+        "dft_relax",
+    }:
+        requested_dft_tasks = 1
+    if requested_dft_tasks:
+        from phase_agent.decisions.qbc_selection.dft_round_policy import (
+            dft_task_limit,
+            round_dft_tasks,
+        )
+
+        try:
+            if len(round_dft_tasks(state, config)) + requested_dft_tasks > dft_task_limit(config):
+                errors.append("dft_round_task_limit")
+        except ValueError as error:
+            errors.append(f"invalid_dft_round_task_limit:{error}")
     from phase_agent.tools.policy.branch_conditions import branch_entry_errors
 
     errors.extend(branch_entry_errors(action, state))

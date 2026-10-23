@@ -9,6 +9,18 @@ from phase_agent.runtime.chat_approval_rules import (
 )
 
 
+def _metadata_refresh_warnings(collection):
+    historical = collection.get("metadata_refresh_report") or {}
+    count = int(historical.get("invalid_count", 0)) + int(
+        historical.get("missing_structure_count", 0)
+    )
+    return (
+        [f"历史 DFT 元数据补充校验未通过 {count} 项；已保留原入账结果，详情见回收记录。"]
+        if count
+        else []
+    )
+
+
 def _is_model_failure_proposal(proposal):
     from phase_agent.tools.workflows.run_tool_step import _model_failure_action
 
@@ -36,6 +48,19 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         if brief_reply is not None
         else _format_workflow_reply(result, state_path, verbose=verbose)
     )
+    recovered = result.get("verified_recovery") or {}
+    if recovered:
+        names = {
+            "relax_and_feature": "Relax",
+            "deep_search": "MC",
+            "dft_single_point": "DFT 单点",
+            "dft_relax": "DFT 弛豫",
+        }
+        summary = "；".join(
+            f"{names.get(stage, stage)} 完成 {counts['completed']}、失败/中止 {counts['failed']}"
+            for stage, counts in recovered.items()
+        )
+        reply = "本次已核对回传并更新记录：" + summary + "。\n" + reply
     # Brief approval cards and special status replies must pass through the same
     # recovered-round presentation as detailed replies.
     reply = _with_post_dft_reply(
@@ -223,26 +248,6 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             )
             + "\n应基于已有结果提出可行的下一步方案；重复“同意”或检查同一批数据不会补齐证据。"
         )
-    recovered = result.get("verified_recovery") or {}
-    if recovered:
-        names = {
-            "relax_and_feature": "Relax",
-            "deep_search": "MC",
-            "dft_single_point": "DFT 单点",
-            "dft_relax": "DFT 弛豫",
-        }
-        summary = "；".join(
-            f"{names.get(stage, stage)} 完成 {counts['completed']}、失败/中止 {counts['failed']}"
-            for stage, counts in recovered.items()
-        )
-        return (
-            "本次已核对回传并更新记录："
-            + summary
-            + "。\n"
-            + _format_workflow_reply(
-                {**result, "verified_recovery": None}, state_path, verbose=verbose
-            )
-        )
     if result.get("status") == "awaiting_approval" and not result.get("_review_card_rendered"):
         pending = (result.get("state") or {}).get("pending_execution_policies") or {}
         proposal = result.get("agent_proposal") or {}
@@ -346,7 +351,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             return (
                 "当前：首批刷新已回收，补充弛豫方案待审批。\n"
                 f"本次：拟为 {len(raw_action.get('target_ids') or [])} 个单点候选准备补充弛豫输入。\n"
-                f"设置：最多 {settings.get('relax_steps', 300)} 步，{settings.get('optimizer', 'LBFGS')}；"
+                f"设置：最多 {settings.get('relax_steps', 500)} 步，{settings.get('optimizer', 'LBFGS')}；"
                 "未收敛结果排除，不自动延长或重试。\n"
                 f"预计相对成本 {raw_action.get('budget', 0):.1f}；耗时暂无可靠估计。\n"
                 "下一步：查看具体目标后批准、修改或拒绝；本次未创建任务或输入。"
@@ -617,6 +622,7 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
         markers = int(collection.get("missing_marker_count", 0))
         if issues or markers:
             lines.append(f"需检查：校验/结构问题 {issues} 个，缺完成标记 {markers} 个。")
+        lines.extend(_metadata_refresh_warnings(collection))
         interception = (result.get("state") or {}).get("mc_budget_interception") or {}
         if interception.get("rejected_count"):
             verbose_text = _format_workflow_reply_verbose(result, state_path)
@@ -1043,6 +1049,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 f"缺完成标记 {collection.get('missing_marker_count', 0)} 个，"
                 f"校验/结构问题 {int(collection.get('invalid_count', 0)) + int(collection.get('missing_structure_count', 0))} 个。"
             )
+        lines.extend(_metadata_refresh_warnings(collection))
         if recovered_count:
             lines.append(f"当前有 {waiting_count} 个 {stage_label} 任务待提交或回传。")
         else:

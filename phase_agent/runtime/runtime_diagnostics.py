@@ -318,7 +318,15 @@ def observe_completed(config, record):
             "status": record.get("status"),
             "duration_seconds": record.get("duration_seconds"),
             "slowest_step": {k: slowest.get(k) for k in ("name", "category", "seconds")},
-            "failure": record.get("failure_summary"),
+            "failure": (
+                {
+                    k: v
+                    for k, v in record["failure_summary"].items()
+                    if k in {"type", "stage", "http_status"}
+                }
+                if record.get("failure_summary") is not None
+                else None
+            ),
         }
 
 

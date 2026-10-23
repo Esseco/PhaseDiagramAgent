@@ -3,8 +3,9 @@
 from pathlib import Path
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
-from phase_agent.runtime.turn_process import clean
+from phase_agent.text_safety import clean
 
 MAX_TURNS = 6
 MAX_CONTEXT_CHARS = 10000
@@ -17,7 +18,7 @@ def memory_path(state_path, thread_id):
 
 def recent_turns(state_path, thread_id):
     try:
-        rows = json.loads(memory_path(state_path, thread_id).read_text(encoding="utf-8"))
+        rows = json.loads(memory_path(state_path, thread_id).read_text(encoding="utf-8-sig"))
         selected = (
             [
                 {
@@ -30,6 +31,9 @@ def recent_turns(state_path, thread_id):
                     ),
                 }
                 for row in rows[-MAX_TURNS:]
+                if isinstance(row, dict)
+                and isinstance(row.get("user"), str)
+                and isinstance(row.get("assistant"), str)
             ]
             if isinstance(rows, list)
             else []
@@ -56,10 +60,11 @@ def remember_turn(state_path, thread_id, user, assistant, *, facts_signature=Non
     )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(rows[-MAX_TURNS:], ensure_ascii=False, indent=2), encoding="utf-8"
+        from phase_agent.tools.step_runner.file_protocol import _write_json
+
+        _write_json(path, rows[-MAX_TURNS:])
+    except OSError as error:
+        logging.getLogger(__name__).warning(
+            "Conversation memory unavailable (%s); scientific state is unchanged",
+            type(error).__name__,
         )
-        temporary.replace(path)
-    except OSError:
-        pass

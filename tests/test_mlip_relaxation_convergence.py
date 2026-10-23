@@ -277,7 +277,7 @@ def test_hull_rejects_mlip_quality_failure_even_when_status_says_completed():
     assert any(r["record_id"] == "bad" for r in diagram["rejected"])
 
 
-def test_relax_worker_defaults_to_300_lbfgs_without_loading_a_model(tmp_path, monkeypatch):
+def test_relax_worker_defaults_to_500_lbfgs_without_loading_a_model(tmp_path, monkeypatch):
     from pymatgen.core import Lattice, Structure
     from phase_agent.science.mlip.mace_worker import run_mace_worker
 
@@ -302,7 +302,7 @@ def test_relax_worker_defaults_to_300_lbfgs_without_loading_a_model(tmp_path, mo
             "parameters": {"optimizer": "LBFGS"},
         }
     )
-    assert seen["steps"] == 300 and result["optimizer"] == "LBFGS"
+    assert seen["steps"] == 500 and result["optimizer"] == "LBFGS"
 
 
 def test_unconverged_refresh_does_not_spend_more_committee_predictions(tmp_path, monkeypatch):

@@ -7,6 +7,14 @@ import pytest
 from phase_agent.runtime import studio_runtime
 
 
+@pytest.fixture(autouse=True)
+def isolate_local_dev_payload_adapter(monkeypatch):
+    # The unit tests own a fake runtime, not a configured Agent Server/Redis service.
+    monkeypatch.setattr(
+        "phase_agent.runtime.studio_payloads.install_studio_payload_views", lambda: None
+    )
+
+
 def test_direct_message_requires_started_runtime():
     with pytest.raises(RuntimeError, match="not started"):
         studio_runtime.send_project_message("继续", "t")
@@ -32,10 +40,13 @@ def test_lifespan_shares_handler_and_closes_control(tmp_path, monkeypatch):
 
     async def run():
         async with studio_runtime.lifespan(None):
-            assert (
-                studio_runtime.send_project_message("继续", "t")
-                == "当前项目 · epoch0 · 配置修订中，等待确认\n本次：已检查当前项目状态。\nok\n预算：本次未提供新的计算预算。"
+            reply = studio_runtime.send_project_message("继续", "t")
+            assert reply.replace("  \n", "\n").startswith(
+                "当前项目 · epoch0 · 配置修订中，等待确认\nok\n"
             )
+            report = Path(reply.split("交互记录地址：", 1)[1])
+            assert report.is_file() and "ok" in report.read_text(encoding="utf-8")
+            assert "本次未提供新的计算预算" not in reply
             handler.assert_called_once_with(
                 [{"role": "user", "content": "继续"}], conversation_id="t"
             )
@@ -81,10 +92,13 @@ def test_configured_app_and_graph_share_the_same_runtime(tmp_path, monkeypatch):
                 {"messages": [{"role": "user", "content": "现在是什么进度", "id": "m"}]},
                 {"configurable": {"thread_id": "synthetic"}},
             )
-            assert (
-                result["messages"][-1].content
-                == "当前项目 · epoch0 · 配置修订中，等待确认\n本次：已检查当前项目状态。\nsynthetic status\n预算：本次未提供新的计算预算。"
+            reply = result["messages"][-1].content
+            assert reply.replace("  \n", "\n").startswith(
+                "当前项目 · epoch0 · 配置修订中，等待确认\nsynthetic status\n"
             )
+            report = Path(reply.split("交互记录地址：", 1)[1])
+            assert report.is_file() and "synthetic status" in report.read_text(encoding="utf-8")
+            assert "本次未提供新的计算预算" not in reply
         assert studio_runtime._handler is None
 
     asyncio.run(run())

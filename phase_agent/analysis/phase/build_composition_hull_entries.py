@@ -5,6 +5,7 @@ from math import isclose
 from pymatgen.core import Composition
 
 from phase_agent.analysis.phase.check_na_layer_uniformity import check_na_layer_uniformity
+from phase_agent.analysis.phase.endpoint_reference import endpoint_relative_energies
 
 
 def build_composition_hull_entries(records):
@@ -37,11 +38,15 @@ def build_composition_hull_entries(records):
     e_left = min(item[4] for item in grouped[left])
     e_right = min(item[4] for item in grouped[right])
 
-    def eform(x, energy):
-        ratio = (x - left) / (right - left)
-        return energy - (1 - ratio) * e_left - ratio * e_right
-
-    lowest = {x: min(eform(x, item[4]) for item in grouped[x]) for x in xs}
+    formed_values, _ = endpoint_relative_energies(
+        [item[3] for item in prepared],
+        [item[4] for item in prepared],
+        reference={"x": [left, right], "energy": [e_left, e_right]},
+    )
+    lowest = {}
+    for (_, _, _, x, _), formed in zip(prepared, formed_values):
+        key = round(x, 9)
+        lowest[key] = min(formed, lowest.get(key, formed))
     # Lower convex envelope of the lowest-energy structure at each Na content.
     hull = []
     for x in xs:
@@ -54,8 +59,7 @@ def build_composition_hull_entries(records):
             hull.pop()
         hull.append(point)
     entries = []
-    for row, composition, units, x, energy_per_o2 in prepared:
-        formed = eform(x, energy_per_o2)
+    for (row, composition, units, x, energy_per_o2), formed in zip(prepared, formed_values):
         segment = next(
             ((a, b) for a, b in zip(hull, hull[1:]) if a[0] - 1e-9 <= x <= b[0] + 1e-9), None
         )

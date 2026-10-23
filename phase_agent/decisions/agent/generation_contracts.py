@@ -54,7 +54,7 @@ class GenerationRegion(BaseModel):
     region_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     priority: Annotated[int, Field(strict=True, ge=1, le=12)]
     strategy: GenerationStrategy
-    phase: Literal["O1", "O3", "P3", "OP2"]
+    phase: Literal["O1", "O3", "P2", "P3", "OP2"]
     min_det_H: PositiveInteger
     max_det_H: PositiveInteger
     na_min: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]

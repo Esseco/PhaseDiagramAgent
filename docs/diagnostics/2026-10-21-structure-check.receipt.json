@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-21",
+  "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check",
+  "files": [
+    {
+      "target": "E:\\Py-Code\\Process_AL_MC\\MC_sample.py",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\Py-Code\\Process_AL_MC\\MC_sample.py",
+      "before": "f757da157e4385cc4c3697f140f1cbb0d8f2068fbc254369529f1d6ca34d3458",
+      "after": "a712f24dd4d4949fc7a3b77bd105328b1bc4bf27fd5f8ad7426233c6a5d6dd24"
+    },
+    {
+      "target": "E:\\Py-Code\\Process_AL_MC\\__init__.py",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\Py-Code\\Process_AL_MC\\__init__.py",
+      "before": "8ed427549b80c040f3e262e607de07b842726deefdc9dbe0231b057aa10fcf11",
+      "after": "a9bdad2edb5f74f7998d0930b28771611ff5cbcb0e72dadb35ddaefe517bfa68"
+    },
+    {
+      "target": "E:\\Py-Code\\Process_AL_MC\\structure_check.py",
+      "backup": null,
+      "before": null,
+      "after": "0f095afebb34fb2d0c3b6e1750bcc12030f7d120da50b400519aaf50e109e77b"
+    },
+    {
+      "target": "E:\\Py-Code\\Process_AL_MC\\ordering\\search.py",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\Py-Code\\Process_AL_MC\\ordering\\search.py",
+      "before": "b30391eed11bb16febb9c7b2c7db4959fbc4d1409401dca3fa0ed6bb53b57a47",
+      "after": "120393a02307b8534fa375829b0ec99de9d0e9ac0ba999d04a45c356d2d96c2e"
+    },
+    {
+      "target": "E:\\Py-Code\\Process_AL_MC\\ordering\\export.py",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\Py-Code\\Process_AL_MC\\ordering\\export.py",
+      "before": "53a13806de2532f6ed96d1c3a74d1638047a307244d16863a8948703b24b6870",
+      "after": "5ba1e78be54ca03e0c351ba028167830cf38549f6d67c70f52a71d804baed31a"
+    },
+    {
+      "target": "E:\\Py-Code\\Process_AL_MC\\STRUCTURE_CHECK.md",
+      "backup": null,
+      "before": null,
+      "after": "ce803b9c2a48d0c6dfd45ac652617d82a2a6ac39c4078eeea07651b2e13ea32d"
+    },
+    {
+      "target": "E:\\Py-Code\\Process_AL_MC\\README.md",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\Py-Code\\Process_AL_MC\\README.md",
+      "before": "105c5e8870212499d126d051975abff912d0853477faf2b4f0a931d6ef2e3f1b",
+      "after": "2201b48b7c204dd25cdd0906c2176a7559f6ea4927b597ca5cdb4a5e75b9eb0c"
+    },
+    {
+      "target": "E:\\Py-Code\\Process_AL_MC\\API.md",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\Py-Code\\Process_AL_MC\\API.md",
+      "before": "5ceca2c9aab97291bc897d66ffece8b22ceeda50a209c26482ec16620f74785d",
+      "after": "a16f3146e89f2607f14af161fd7e228ff39b0d620018daa8d61837679a22d6fc"
+    },
+    {
+      "target": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\phase_agent\\analysis\\phase\\phase_framework.py",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\app\\phase_agent\\analysis\\phase\\phase_framework.py",
+      "before": "fdda0e5515ec9a54b6d68586deaedfa936c2d4e40cac4d3e7614b9c7dcd8a1c9",
+      "after": "37c68f34b91de2a0d6dd85d22b2c187583648c0b72950294d09045bd500400fe"
+    },
+    {
+      "target": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\phase_agent\\science\\structures\\run_structure_check.py",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\app\\phase_agent\\science\\structures\\run_structure_check.py",
+      "before": "44c5975b0a7026e66838b0117adfb3129af95bdff4db823d84086b3377039a43",
+      "after": "e5d9fe0d832737e99fe2fae0d81691987ca08256957f2e9dece913e22bb1d77e"
+    },
+    {
+      "target": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\phase_agent\\tools\\remote\\manual_upload_runner.py",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\app\\phase_agent\\tools\\remote\\manual_upload_runner.py",
+      "before": "f381fa644b20bc9a9bd98ef0d44a72af652980c33cb7fe5cd913c2c2316a2c95",
+      "after": "bf076e3200a593ef736a91c964351a264fcd4386695f66d85f569d45c32fe32c"
+    },
+    {
+      "target": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\phase_agent\\science\\mlip\\mace_worker.py",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\app\\phase_agent\\science\\mlip\\mace_worker.py",
+      "before": "f87756fb2b415a3fdde2f7a793e1b7ea99fa85267219dcf81cd01a6304e49ca7",
+      "after": "a368069c7bfebec266b05febf1ab5db45dbfbd19e8c8b487e52db9b7340c056d"
+    },
+    {
+      "target": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\tests\\test_shared_structure_check.py",
+      "backup": null,
+      "before": null,
+      "after": "3a250b56a19d38ad6be0290d4119841a3174f109bf4c615aecd30e0b16b516dd"
+    },
+    {
+      "target": "E:\\Py-Code\\docs\\project_catalog.json",
+      "backup": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\_Process_PhaseDiagram_source_backups\\20261021_111235_structure_check\\Py-Code\\docs\\project_catalog.json",
+      "before": "a4b6536085034af5d901e728a13b99f98b0838d21d6443181d8314b040df7c0f",
+      "after": "49ada897e0f9b02b3f19bc7509c0291c9da48ccada732fdf1bc17ceb42c3d7fd"
+    },
+    {
+      "target": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\docs\\diagnostics\\2026-10-21-structure-check.md",
+      "backup": null,
+      "before": null,
+      "after": "ebd019597bcdf97451903b45f51f8a18922df231940b221bdb67212e79f5fca5"
+    }
+  ],
+  "validation": {
+    "combined_staged": "164 passed, 1 deselected",
+    "installed_targeted": "66 passed",
+    "existing_failure": "test_prepared_mc_payload_omits_inherited_threshold_and_is_not_submitted: also fails on original source; input_admission_failed:structure_format:.../full_na_structure.vasp",
+    "ruff_library_and_application": "passed",
+    "installed_import_and_all_15_hashes": "passed",
+    "real_models_hpc_services": "not run or changed"
+  },
+  "energy_trigger_eV_per_atom": 0.05,
+  "uncertain_policy": "retain_with_evidence"
+}

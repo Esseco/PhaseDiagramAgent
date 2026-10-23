@@ -23,6 +23,15 @@ def authorize_budget_extension(state, confirmed_snapshot, *, user_approved=False
         current = state if _owned else deepcopy(state)
         current.setdefault("confirmed_config", deepcopy(confirmed_snapshot["config"]))
         return {"status": "unchanged", "state": current}
+    from phase_agent.configuration.runtime.authorize_dft_selection_revision import (
+        authorize_dft_selection_revision,
+    )
+
+    selection = authorize_dft_selection_revision(
+        state, confirmed_snapshot, user_approved=user_approved
+    )
+    if selection is not None:
+        return selection
     from phase_agent.configuration.runtime.authorize_generation_policy_revision import (
         authorize_second_mc_segment_revision,
         authorize_generation_policy_revision,

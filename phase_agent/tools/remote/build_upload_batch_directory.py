@@ -53,7 +53,9 @@ def _build_legacy_upload_batch_directory(
         if int(row.get("mlip_round") or 0) == mlip_round and row.get("calculation_group") == group
     ]
     submission_index = max((int(row.get("submission_index") or 0) for row in prior), default=0) + 1
-    round_directory = f"epoch{mlip_round - 1}_{_safe(model_label)}"
+    from phase_agent.tools.remote.model_upload_directory import model_upload_directory
+
+    round_directory = model_upload_directory(root, state, model_label).name
     batch_directory = f"{prefix}-{submission_index:04d}_{batch_id}"
     stage_directory = Path(root) / round_directory / group
     if search_group_index is not None:

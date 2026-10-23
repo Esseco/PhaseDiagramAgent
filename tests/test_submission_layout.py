@@ -38,7 +38,7 @@ def test_flat_builder_preserves_batch_and_sibling_results(
         search_group_index=1,
         **extra,
     )
-    assert directory.parent.parent == tmp_path / "epoch0_m1" / label
+    assert directory.parent.parent == tmp_path / "epoch0" / label
     assert directory.parent.name == "inputs"
     assert directory.name.endswith("remote-000001")
     assert metadata["submission_layout_version"] == 2
@@ -154,5 +154,5 @@ def test_locked_directory_fails_without_creating_links(tmp_path, monkeypatch):
     with pytest.raises(PermissionError, match="directory locked"):
         migrate_submission_layout(project, tmp_path / "backup")
     assert old.is_dir() and not old.is_junction() and not old.is_symlink()
-    assert not (project / "submissions/epoch0_m1/G0001_Relax-0001").exists()
+    assert not (project / "submissions/epoch0/G0001_Relax-0001").exists()
     assert (batch / "task.json").read_text() == '{"immutable": true}'

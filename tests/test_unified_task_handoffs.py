@@ -29,7 +29,12 @@ def test_dft_preparation_finishes_with_one_unified_package(tmp_path, monkeypatch
     def inputs(task, **kwargs):
         folder = Path(task["work_directory"])
         for name in ("POSCAR", "INCAR", "KPOINTS", "POTCAR", "workflow.py"):
-            (folder / name).write_text("fake input")
+            text = (
+                "Na\n1\n1 0 0\n0 1 0\n0 0 1\nNa\n1\nDirect\n0 0 0\n"
+                if name == "POSCAR" else "print('fake workflow')\n" if name == "workflow.py"
+                else "fake input"
+            )
+            (folder / name).write_text(text)
         return {"outputs": {"generator": "atomate"}}
 
     monkeypatch.setattr(
@@ -65,6 +70,7 @@ def test_dft_preparation_finishes_with_one_unified_package(tmp_path, monkeypatch
     assert len(result["handoffs"]) == 1
     assert result["handoffs"][0]["job_count"] == 1
     folder = Path(result["handoffs"][0]["folder"])
+    assert folder.parent == tmp_path / "submissions/epoch0/transfers"
     assert all((folder / n).is_file() for n in ("inputs.zip", "submit_all.sh", "dispatch_tasks.py"))
     assert result["state"]["tasks"][0]["task_id"] == "D1"
     assert state["tasks"][0].get("slurm_batch_id") is None

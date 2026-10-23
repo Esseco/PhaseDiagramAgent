@@ -70,6 +70,15 @@ def index_operation_path(root, directory):
     raise ValueError(f"Submission record belongs outside this project/diagram: {directory}")
 
 
+def _index_link(path, root, label=None, *, missing="当前无目录"):
+    path = Path(path).resolve()
+    relative = Path(os.path.relpath(path, root)).as_posix()
+    if not path.exists():
+        return f"`{relative}/`（{missing}）"
+    ending = "/" if path.is_dir() else ""
+    return f"[{label or path.name}]({relative}{ending})"
+
+
 def write_submission_index(root, state):
     root = Path(root).resolve()
     rows = {}
@@ -84,7 +93,7 @@ def write_submission_index(root, state):
     lines = [
         "# 提交与回收",
         "",
-        "压缩包统一放在 archives：01-upload 是上传输入，02-results 是已回收结果。每轮使用一个交互文件夹，内含少量压缩包与总提交脚本。历史完整包保留用于归档。",
+        "按 epoch0、epoch1 分轮保存；transfers 是普通上传/回传，relax_mc 是弛豫与蒙特卡洛批次，verified_results 是已校验结果，recovery 是恢复资料，storage_archives 是完整归档。每个 epoch 的 README 说明模型与各目录用途。",
         "",
         "无需手动解压：总提交脚本自动解压输入，本地 Agent 自动校验、解压回传包并读取。",
         "",
@@ -92,7 +101,7 @@ def write_submission_index(root, state):
         "",
         "回收：把远端对应批次的 _output 文件夹整体传回下方本地回传目录（旧包仍为 return-results），保留压缩包即可，再说“继续”。旧提交仍支持原 results/transfer 路径。",
         "",
-        "Agent 读取已有归档时自动恢复所需文件；工作目录和旧路径兼容入口隐藏，平时只需使用 archives 和本索引。工作目录链接可直接打开。",
+        "Agent 读取已有归档时自动恢复所需文件；工作目录和旧路径兼容入口隐藏，平时只需使用各 epoch 的配对上传/回传目录和本索引。工作目录链接可直接打开。",
         "",
         "G0001 表示搜索组；Relax=结构弛豫，MC=蒙特卡洛搜索，DFT=第一性原理计算，MLIP-finetune=模型微调。",
         "",
@@ -107,15 +116,16 @@ def write_submission_index(root, state):
         returned = (
             f"[{archive.name}]({Path(os.path.relpath(archive, root)).as_posix()})"
             if archive.is_file()
-            else f"[results]({relative}/results/)"
+            else _index_link(operation / "results", root, "results", missing="暂无结果目录")
         )
         inputs = storage_archive(operation / "inputs", "inputs")
         uploaded = (
             f"[{inputs.name}]({Path(os.path.relpath(inputs, root)).as_posix()})"
             if inputs.is_file()
-            else f"[inputs]({relative}/inputs/)"
+            else _index_link(operation / "inputs", root, "inputs", missing="暂无输入目录")
         )
-        lines.append(f"| [{relative}]({relative}/) | {len(batches)} | {uploaded} | {returned} |")
+        operation_link = _index_link(operation, root, relative)
+        lines.append(f"| {operation_link} | {len(batches)} | {uploaded} | {returned} |")
     handoffs = {
         r["handoff"]["folder"]: r["handoff"]
         for r in state.get("slurm_batches", [])
@@ -141,10 +151,12 @@ def write_submission_index(root, state):
             "| --- | ---: | --- |",
         ]
         for row in handoffs.values():
-            relative = os.path.relpath(Path(row["folder"]), root).replace("\\", "/")
-            guide.append(
-                f"| [{relative}]({relative}/) | {row['job_count']} | {row.get('return_directory') or row['results_directory']} |"
+            relative = os.path.relpath(Path(row["folder"]).resolve(), root).replace("\\", "/")
+            returned = Path(row.get("return_directory") or row["results_directory"]).resolve()
+            folder_link = _index_link(
+                row["folder"], root, relative, missing="上传包目录缺失，先核对归档"
             )
+            guide.append(f"| {folder_link} | {row['job_count']} | {returned} |")
         guide.extend(
             [
                 "",
@@ -153,6 +165,51 @@ def write_submission_index(root, state):
             ]
         )
         lines[2:2] = guide
+    bundles = list((state.get("relax_mc_batches") or {}).values())
+    if bundles:
+        guide = [
+            "## Relax / MC 批次",
+            "",
+            "只使用 _input 文件夹上传，回传放入对应 _output；内部运行代码已封存在 inputs.zip。历史批次勿重复提交。verified 保留已校验结果，_recovery 保留恢复绑定，不作为上传入口。",
+            "",
+            "| 批次 | 范围 | 状态 | 上传目录 | 回传目录 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        from phase_agent.tools.relax_mc_batch.handoff import input_directory, output_directory
+
+        cancelled = {}
+        for task in state.get("tasks") or []:
+            if task.get("recovery_cancelled") is True:
+                bid = task.get("relax_mc_bundle_id")
+                cancelled[bid] = cancelled.get(bid, 0) + 1
+        for row in sorted(bundles, key=lambda row: row.get("package_label") or row["bundle_id"]):
+            directory = index_operation_path(root, row["directory"])
+            uploaded = _index_link(input_directory(directory), root, missing="无上传目录")
+            returned = _index_link(output_directory(directory), root)
+            scope = (
+                "当前模型"
+                if row.get("model_version") == state.get("active_model_version")
+                else "历史"
+            )
+            count = cancelled.get(row["bundle_id"], 0)
+            status = (
+                f"停止等待 {count} 个 MC；已有结果保留"
+                if count
+                else {
+                    "completed": "已回收",
+                    "prepared": "输入已准备",
+                    "failed": "回传待核对",
+                    "cancelled": "已取消",
+                    "superseded": "已替代",
+                }.get(row.get("status"), "待核对")
+            )
+            guide.append(
+                f"| {row.get('package_label') or directory.name} | {scope} | {status} | {uploaded} | {returned} |"
+            )
+        lines[2:2] = [*guide, ""]
     path = root / "README.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    from phase_agent.analysis.feedback.workspace_guide import publish_epoch_guides
+
+    publish_epoch_guides(root, state)
     return path

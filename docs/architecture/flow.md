@@ -29,26 +29,33 @@ flowchart TD
   n4["处理人工审批"]
   n5["Agent理解与决策"]
   n6["整理答复"]
-  n7["科研流程"]
-  n8["准备上下文与控制请求"]
-  n9["返回本次结果"]
+  n7["read_evidence"]
+  n8["科研流程"]
+  n9["准备上下文与控制请求"]
+  n10["返回本次结果"]
   n0 --> n1
-  n5 -.-> n9
+  n5 -.-> n10
   n5 -.-> n2
   n5 -.-> n3
   n5 -.-> n6
   n5 -.-> n7
-  n8 -.-> n9
-  n8 -.-> n2
-  n8 -.-> n5
-  n8 -.-> n4
+  n5 -.-> n4
+  n5 -.-> n8
+  n9 -.-> n10
+  n9 -.-> n2
+  n9 -.-> n5
+  n9 -.-> n3
+  n9 -.-> n4
+  n9 -.-> n8
+  n7 -.-> n5
+  n7 -.-> n6
+  n1 -.-> n10
   n1 -.-> n9
-  n1 -.-> n8
-  n7 --> n6
-  n2 --> n9
-  n3 --> n9
-  n6 --> n9
-  n4 --> n9
+  n8 --> n6
+  n2 --> n10
+  n3 --> n10
+  n6 --> n10
+  n4 --> n10
 ```
 
 ## 1. 本轮生命周期
@@ -70,6 +77,7 @@ flowchart TD
   n6 -.-> n7
   n1 -.-> n8
   n1 -.-> n2
+  n1 -.-> n5
   n2 --> n3
   n5 --> n6
   n3 -.-> n8
@@ -83,26 +91,12 @@ flowchart TD
 ```mermaid
 flowchart TD
   n0["开始"]
-  n1["reconcile_latest_task_status"]
-  n2["relax_and_feature"]
-  n3["deep_search"]
-  n4["dft_single_point"]
-  n5["dft_relax"]
-  n6["join_stage_recovery"]
-  n7["wait_for_partial_or_remaining_results"]
-  n8["返回本次结果"]
+  n1["recover_registered_tasks"]
+  n2["audit_interrupted_execution"]
+  n3["返回本次结果"]
   n0 --> n1
-  n3 --> n6
-  n5 --> n6
-  n4 --> n6
-  n6 -.-> n8
-  n6 -.-> n7
-  n1 --> n3
-  n1 --> n5
-  n1 --> n4
   n1 --> n2
-  n2 --> n6
-  n7 --> n1
+  n2 --> n3
 ```
 
 各阶段并行检查已登记任务状态并汇合；部分回传暂停保存检查点，失败由现有审批重试入口处理。
