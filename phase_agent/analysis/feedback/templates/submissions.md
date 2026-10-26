@@ -1,15 +1,22 @@
 # 提交与回传
 
-按 `epoch0/`、`epoch1/` 分轮。只上传本次交付的完整 `_input` 文件夹，执行 `sbatch submit_all.sh`；远端配对 `_output` 文件夹回传原登记位置后告诉 Agent“已回传”。
+## 先读这里
 
-| 目录 | 内容与用途 |
-| --- | --- |
-| transfers/ | 普通计算和训练的配对上传 `_input`、回传 `_output` |
-| relax_mc/ | Relax/MC 批次，配对 `_input` 上传、`_output` 回传 |
-| verified_results/ | 已校验读取的原始结果、结构和凭据；无需再次上传 |
-| recovery/ | 仅回收、错误证据和恢复绑定；无需重新计算 |
-| storage_archives/ | 完整归档包，程序需要时读取与恢复 |
-| G0001_*/ | 按搜索组及计算类型登记的工作目录，inputs 是输入，results 是结果 |
-| MLIP-finetune-*/ | 原模型轮次下的训练工作目录 |
+1. 先看本页 `README.md`：只决定当前要交付/回传的目录。
+2. 再读 `submission_index.json`：读取精确路径、命令、状态和存在性；使用前重新核对文件。
+3. 最后看 `epochN/README.md` 与 `layout_manifest.json`：确认模型版本和该轮每个直接子目录的职责。
 
-完整模型版本在各轮 README 和机器记录中。历史已提交任务不重投；运行记录直接使用新路径，不保留目录链接。缺少 epoch 的历史资料放 unassigned，不能据名称猜测完成状态。
+| 层 | 入口 | 用途 |
+| --- | --- | --- |
+| 交付层 | `epochN/delivery/transfers/`、`epochN/delivery/relax_mc/` | 只处理登记的 `_input` 上传和 `_output` 回传；无后缀旧包由 manifest 标记为隔离历史 |
+| 计算层 | `epochN/calculations/<operation>/inputs/`、`epochN/calculations/<operation>/results/` | 保留本地计算工作目录，不作为上传入口 |
+| 证据层 | `epochN/evidence/verified_results/`、`epochN/evidence/recovery/`、`epochN/evidence/storage_archives/` | 保存已校验结果、回收凭据和完整归档 |
+| 隔离层 | `previously_used/` | 历史/未登记材料，只读追溯，禁止提交或回收 |
+
+本轮只在 `epochN/` 下保留 `calculations/`、`delivery/`、`evidence/` 三个物理层；Agent 先读 `layout_manifest.json` 后才进入登记计算目录。无后缀旧交付包即使因历史登记暂留在 `delivery/`，也只能按隔离历史读取，不能作为当前提交入口；其他旧目录和未登记材料放到 `../previously_used/<epoch>/`。
+
+本地未回收不代表尚未提交或远端未运行；先核对原提交记录，勿重复提交。以下路径与命令仅供核对，不构成提交授权。回传放入对应目录后说“已回传”，无需手动解压。
+
+## 当前待回传/核对
+
+当前没有登记的本模型未完交付。

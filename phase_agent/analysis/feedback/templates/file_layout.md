@@ -24,6 +24,14 @@ analysis_outputs/epoch…/Search-group…/DFT-round…：
 当前版本不因重复请求重新分析；有新有效数据时由Agent更新。
 母结构在structures/reference_structures，候选池在structures/candidate_structures。
 参数经Agent复核确认后生效，记忆视图不直接反向导入state。
+
+## 数据读取与对话信息
+
+- `shared_dft/records.sqlite3`：共享 DFT 数据库，由配置指定读取，不手动拆分或移动。
+- `workflow_state/dialogue_memory/`：按哈希文件保存的对话记忆摘要。
+- `workflow_state/dialogue_process/`：按哈希文件保存的对话处理记录。
+- `interaction_records/`：面向人阅读的交互 Markdown，文件名统一使用英文 ASCII。
+
 完整文件位置见[文件索引](../analysis_outputs/output_index.md)。
 
 ## 每轮目录速查
@@ -31,14 +39,16 @@ analysis_outputs/epoch…/Search-group…/DFT-round…：
 | 路径 | 用途 |
 | --- | --- |
 | interaction_records/epochN/ | 本轮用户消息、完整答复和维护说明 |
-| submissions/epochN/transfers/ | 普通计算与训练的上传 `_input` / 回传 `_output` |
-| submissions/epochN/relax_mc/ | Relax/MC 配对批次及其上传、回传入口 |
-| submissions/epochN/verified_results/ | 已校验入账的原始结果和凭据 |
-| submissions/epochN/recovery/ | 仅回收与故障核对资料 |
-| submissions/epochN/storage_archives/ | 完整归档包，程序按需恢复 |
+| submissions/epochN/calculations/ | 本地计算工作目录，按操作名分组 |
+| submissions/epochN/delivery/transfers/ | 普通计算与训练的上传 `_input` / 回传 `_output` |
+| submissions/epochN/delivery/relax_mc/ | Relax/MC 配对批次及其上传、回传入口 |
+| submissions/epochN/evidence/verified_results/ | 已校验入账的原始结果和凭据 |
+| submissions/epochN/evidence/recovery/ | 仅回收与故障核对资料 |
+| submissions/epochN/evidence/storage_archives/ | 完整归档包，程序按需恢复 |
+| submissions/previously_used/ | 未登记或旧式材料，仅供追溯 |
 | analysis_outputs/epochN/phase_diagrams/ | mlip、dft、combined 相图；history 保存历史快照 |
 | analysis_outputs/epochN/Search-group-*/DFT-round-*/ | 每次 DFT 的 comparisons、training、diagnostics |
 
 submissions 中其余 G0001_* 为按搜索组编号的计算工作目录，inputs 是原始输入，results 是计算结果。
-目录直接保存真实文件，不保留旧目录链接；verified_results/recovery 的有效结果与恢复凭据保留。
+目录直接保存真实文件，不保留旧目录链接；verified_results/recovery 的有效结果与恢复凭据保留。未登记任务和旧式回传包移入 submissions/previously_used/。
 跨轮汇总 round_summary.csv、gpu_usage.csv 保留在结果目录根部，避免每轮重复。尚无 epoch 的记录放 unassigned，项目级维护说明放 project。

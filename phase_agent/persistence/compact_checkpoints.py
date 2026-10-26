@@ -26,10 +26,12 @@ class CompressedSerde:
         return self.delegate.loads_typed(value)
 
 
-def prune_history(conn, keep=8, *, limit_namespaces=False):
+def prune_history(conn, keep=8, *, limit_namespaces=False, namespace_keep=32):
     """Keep each thread/namespace's current recovery and recent pending writes."""
     if keep < 2:
         raise ValueError("At least two recovery checkpoints must be retained")
+    if type(namespace_keep) is not int or namespace_keep < 1:
+        raise ValueError("namespace_keep must be a positive integer")
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {"checkpoints", "writes"}.issubset(tables):
         return 0
@@ -46,13 +48,13 @@ def prune_history(conn, keep=8, *, limit_namespaces=False):
                             ORDER BY max(checkpoint_id) DESC) AS rank
                         FROM checkpoints WHERE checkpoint_ns <> ''
                         GROUP BY thread_id, checkpoint_ns
-                    ) n WHERE rank > 32 AND NOT EXISTS (
+                    ) n WHERE rank > ? AND NOT EXISTS (
                         SELECT 1 FROM writes w WHERE w.thread_id=n.thread_id
                         AND w.checkpoint_ns=n.checkpoint_ns AND w.checkpoint_id=n.latest
                         AND (w.channel='__interrupt__' OR w.channel='__pregel_tasks'
                              OR w.channel LIKE 'branch:to:%')
                     )
-                )""")
+                )""", (namespace_keep,))
         conn.execute(
             """DELETE FROM checkpoints WHERE rowid IN (
             SELECT rowid FROM (SELECT rowid, row_number() OVER (
@@ -189,8 +191,19 @@ class CompactSqliteSaver(SqliteSaver):
 
     @classmethod
     @contextmanager
-    def from_conn_string(cls, conn_string, *, maintain_history=True):
-        """Open all supported encodings; optionally retain the caller's full history."""
+    def from_conn_string(
+        cls,
+        conn_string,
+        *,
+        maintain_history=True,
+        history_keep=8,
+        namespace_keep=32,
+    ):
+        """Open all supported encodings with bounded, role-specific retention."""
+        if type(history_keep) is not int or history_keep < 2:
+            raise ValueError("history_keep must be an integer >= 2")
+        if type(namespace_keep) is not int or namespace_keep < 1:
+            raise ValueError("namespace_keep must be a positive integer")
         with closing(sqlite3.connect(conn_string, check_same_thread=False)) as conn:
             saver = cls(conn)
             try:
@@ -198,7 +211,12 @@ class CompactSqliteSaver(SqliteSaver):
             finally:
                 # Called while the caller still owns the project's existing DB lock.
                 if maintain_history:
-                    prune_history(conn, limit_namespaces=True)
+                    prune_history(
+                        conn,
+                        keep=history_keep,
+                        limit_namespaces=True,
+                        namespace_keep=namespace_keep,
+                    )
                     collect_payloads(conn, saver.serde.delegate)
                 # Do not copy a multi-GB database on the user-facing request path.
                 # Existing free pages are reused; offline storage maintenance is separate.

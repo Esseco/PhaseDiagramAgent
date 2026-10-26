@@ -31,7 +31,7 @@ def test_remote_batch_sizes_versions_and_portable_paths(tmp_path):
         sizes.append(len(manifest)); assert all(not Path(row["input_path"]).is_absolute() for row in manifest)
         assert all(row["config_version"] == "cfg-1" and row["model_version"] == "m1" for row in manifest)
         assert output["batch"]["checksum"]
-    assert sizes == [100, 1, 10, 10, 1]
+    assert sizes == [100, 1, 20, 1]
 
 
 def test_sync_submit_query_worker_recovery_and_repeat_are_safe(tmp_path):

@@ -44,9 +44,9 @@ documentation/                        工作区说明
 
 epoch表示激活的模型代际，不等于MC、DFT或微调子轮次。实际模型版本、任务ID、远端路径不因本地整理而改变。未执行且已明确废弃的微调草稿不占轮次；真实提交、完成或激活的历史不重编号。
 
-各阶段results随提交目录回传，不拆到analysis_outputs。Relax/MC提交批次GPU.sh，DFT提交单任务GPU.sh，微调提交训练轮GPU.sh一次。训练方案以training_plan.json为准，不重复发布finetune_report.json。
+当前交付统一为登记的完整 `_input` 文件夹及配对 `_output`。上传整个 `_input`，在其中执行 `sbatch submit_all.sh` 一次；结果整体回传登记的 `_output`，再由 Agent 校验和导入。内部 GPU.sh 由交付脚本派发，不另行提交。历史任务沿原登记脚本与路径回收，已提交任务不重复提交。训练方案以 training_plan.json 为准。
 
-新生成Relax/MC/DFT批次使用阶段轮目录下的inputs/批次与results/任务分离；微调也采用inputs和results同级，GPU.sh在inputs。上方旧树中批次实际置于inputs。详细目录与上传层级见 [每轮传输布局](workspace.md#doc-round_transfer_layout)。旧目录仅通过显式离线迁移整理。
+阶段轮下的 inputs/results 是机器索引和历史任务的内部布局，不是当前人工上传入口。上方树用于定位原始科学记录；实际上传与回传以 [机器索引](project-files.md) 和下方 [每轮传输布局](workspace.md#doc-round_transfer_layout) 为准。
 
 记忆通过Agent审阅/批准修改，阅读视图不反向导入，state是唯一事实源。冻结配置内容、版本与哈希保留；本地移动通过runtime_storage_override和local_path_relocations解析。相图、误差、训练数值不重新计算，CSV只更新路径。当前相图和历史快照用途不同，即使相同也不删除。
 
@@ -66,38 +66,26 @@ epoch表示激活的模型代际，不等于MC、DFT或微调子轮次。实际�
 
 ## 每轮提交、回传与处理结果分离
 
-新生成的Relax、MC、DFT批次采用以下布局，旧任务按已有登记路径继续回收；本次不移动现有文件。
+人工交付层与内部科学记录分开。不要按旧目录名推断当前提交命令；先读 submissions/submission_index.json 的已登记路径。
 
 ```text
-submissions/epoch0_模型版本/Search-group-0001/
-  Relax-0001/
-    inputs/Relax-submission-0001_remote-000001/  上传、提交及远端工作目录
-    results/任务目录/                           只放本地回收必需结果
-  Relax-0001_MC-round-0001/
-    inputs/MC-sampling-0001_remote-000002/
-    results/任务目录/
-  DFT-round-0001_方案标识/DFT-single-point/
-    inputs/DFT-single-point-submission-0001_remote-000003/
-    results/任务目录/
-analysis_outputs/epoch0_模型版本/
-  Search-group-0001/DFT-round-0001_方案标识/
-    comparisons/                              本地处理的误差与图
-    training/                                 本地整合的训练数据
-    diagnostics/                              本地磁矩等诊断
-  phase_diagrams/                              本地相图
+submissions/epochN/
+  transfers/
+    批次_input/                     上传整个目录
+      inputs.zip
+      submit_all.sh                 在此执行一次
+      dispatch_tasks.py             普通任务/训练包
+      run_upload.py                 Relax/MC 配对包使用此入口
+    批次_output/                    整体回传至登记位置
+  阶段轮/inputs、results/            内部与历史科学记录，保持登记路径
+analysis_outputs/epochN/             本地相图、误差、训练数据和诊断
 ```
 
-上传整个阶段轮目录，保留inputs与results的相对层级；无需上传analysis_outputs。Relax/MC只提交inputs下每个批次根GPU.sh一次；DFT提交对应单任务GPU.sh。下载同一轮results，放回本地对应results目录。Agent依照state/manifest登记路径读取，不要求下载远端工作目录。
+普通任务/训练包与 Relax/MC 包的派发入口不同，不要求同时存在两个 Python 入口。交付包自行检查环境并派发内部任务，用户不再逐一提交内部 GPU.sh。模型、大轨迹和原始大日志按协议留在超算；只回传本地所需的小型产物与完成凭据。
 
-inputs在超算运行后会产生原始大文件，不能理解为不可变目录；这些文件留在超算，不回传。results只含必需科学结果、校验标记和必要远端路径清单，清单见LIGHTWEIGHT_RESULT_TRANSFER.md。模型刷新任务也使用inputs/results分离。
+旧任务继续从原登记 results 路径回收；已提交作业不得重新提交。旧迁移工具仅供显式离线维护，不是运行或回收的必经步骤。冻结 manifest、任务身份、审批和科学结果保持原样。目录职责与当前入口见 [项目文件管理](project-files.md)。
 
-分析输出始终在analysis_outputs，不混入results。本次仅调整新批次生成规则；任务ID、epoch含义、审批与科学执行逻辑不变。
-
-微调也已统一为MLIP-finetune-round-0001/inputs（GPU.sh、训练数据、成员配置、收集脚本）和同级results（指标与远端模型清单）。完整上传该轮目录，在inputs内sbatch GPU.sh一次。原轮重生成保留轮根登记及编号，结果存在时仍阻止自动替换。
-
-现有工作区可通过phase_agent.tools.local.migrate_round_inputs预览并显式应用迁移；要求服务关闭，备份state和修改脚本，可回滚。已完成计算的task.json/manifest内容保持不变，不将它们改为新的科学任务。新生成任务使用新的相对结果路径；历史输入仅用于记录，不建议把旧manifest重新提交。原始回传results不移动、不重算；analysis_outputs仍为独立处理产品。
-
-[phase_agent/tools/remote/build_upload_batch_directory.py](../../phase_agent/tools/remote/build_upload_batch_directory.py)。
+[phase_agent/tools/remote/submission_handoff.py](../../phase_agent/tools/remote/submission_handoff.py) 与 [Relax/MC 交付](../../phase_agent/tools/relax_mc_batch/handoff.py)。
 
 <a id="doc-epoch_output_layout"></a>
 
@@ -109,8 +97,6 @@ submissions 与 analysis_outputs 共用 state.upload_layout.model_rounds 的模�
 
     analysis_outputs/epoch0_mace-mh-1/
       phase_diagrams/mlip/phase_diagram.csv
-      phase_diagrams/dft/phase_diagram.csv
-      phase_diagrams/combined/phase_diagram.csv
       Search-group-0001/DFT-round-0001_<operation>/
         comparisons/{energy_comparison,force_comparison,metrics}.csv
         comparisons/plots/
@@ -122,7 +108,7 @@ submissions 与 analysis_outputs 共用 state.upload_layout.model_rounds 的模�
 
 output_index.md 是查找入口：列出已登记的相图、误差、磁矩、绘图、训练输入路径及文件是否存在；不扫描原始计算数据、不计算新结果。round_summary.csv 用于跨 epoch 总览，round_metrics.csv 用于单 epoch 多 DFT 轮误差比较。索引在 Agent 发布 DFT 分析产品时更新，内容相同不重写。
 
-三个相图各自保留 history。DFT 相图是该 epoch 时刻累计的合格 DFT 凸包，不表示只含该 epoch 的 DFT 数据；具体来源仍由记录列追踪。综合相图明确保留能量来源和校正状态，不与纯 DFT/MLIP 相图混同。
+正式相图仅使用当前模型的 MLIP 能量并保留 history。历史纯 DFT 与综合相图保留为有来源标注的诊断文件；默认回收不重建它们，也不把 DFT 能量混入正式 MLIP 凸包。DFT 同帧比较、相竞争证据和训练数据继续按轮次保存。
 
 CSV 内增加 epoch；误差与磁矩表同时保留模型版本、search group 和 DFT 轮次。超算训练结果 CSV 保留 epoch、原模型版本、training_round 和 fold，不混同本轮原模型同帧误差。
 

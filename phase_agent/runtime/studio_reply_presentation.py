@@ -6,6 +6,10 @@ from phase_agent.runtime.review_file_presentation import inventory_location_line
 
 def format_turn_reply(reply, state, *, configuring=False):
     text = str(reply or "").strip()
+    # Recovery approval is a hard dialogue boundary.  Do not append a saved
+    # scientific proposal while the user is deciding whether to read returns.
+    if "请明确回复‘同意回收’" in text:
+        return text
     pending_cache = None
 
     def saved_plan_details():
@@ -81,6 +85,7 @@ def format_turn_reply(reply, state, *, configuring=False):
                 for marker in (
                     "prepare_local_batch_files",
                     "本轮提交文件夹：",
+                    "提交路径：",
                     "Relax+MC 上传包：",
                     "上传 inputs 包",
                 )
@@ -158,6 +163,18 @@ def format_turn_reply(reply, state, *, configuring=False):
         if line.startswith(("下一步：", "下一步方案：", "Agent建议：")):
             line = "建议：" + line.split("：", 1)[1]
         body.append(line)
+    if not configuring and state.get("pending_execution_policies"):
+        approval = next(
+            (line for line in body if line.startswith(("回复“同意”", "回复‘同意’", "回复同意"))),
+            None,
+        )
+        if approval:
+            action_advice = next((line for line in body if line.startswith("建议：")), None)
+            body.remove(approval)
+            if action_advice:
+                body[body.index(action_advice)] = action_advice.rstrip("。") + "；" + approval
+            else:
+                body.insert(0, "建议：" + approval)
     if not any(line.startswith("建议：") for line in body):
         if "本轮未执行：" in text or "本轮失败：" in text:
             body.append("建议：先处理上述问题。")

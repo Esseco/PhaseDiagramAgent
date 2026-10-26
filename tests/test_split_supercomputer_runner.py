@@ -1,6 +1,7 @@
 import json
 
 from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
+from phase_agent.tools.slurm.run_slurm_array_task import run_slurm_array_task
 from phase_agent.tools.step_runner.advise_next_actions import advise_next_actions
 from phase_agent.tools.step_runner.confirm_action_plan import confirm_action_plan
 from phase_agent.tools.step_runner.file_protocol import write_json
@@ -52,7 +53,7 @@ def test_stage_batch_sizes_and_compatibility(tmp_path):
         if result["status"] == "no_tasks":
             break
         sizes.append(len(result["batch"]["task_ids"]))
-    assert sizes == [100, 100, 5, 1, 10, 10, 10, 10, 1, 1, 1, 1]
+    assert sizes == [100, 100, 5, 1, 20, 20, 1, 1, 1, 1]
 
 
 def test_plan_prepare_submit_are_idempotent(tmp_path):
@@ -92,11 +93,10 @@ def test_partial_and_duplicate_recovery_settle_once(tmp_path):
                               stage_batch_sizes={"deep_search": 20})
     state = runner.prepare(_state([_task(1, "deep_search"), _task(2, "deep_search")]))["state"]
     write_json(state_path, state)
-    task = state["tasks"][0]
-    write_json(task["result_path"], {"task_id": task["task_id"], "task_key": task["task_key"],
-                                     "status": "completed", "actual_cost": 0.7})
-    write_json((tmp_path / "jobs/slurm-000001/00000-T0001/task.finished.json"),
-               {"status": "completed"})
+    run_slurm_array_task(
+        state["slurm_batches"][0]["manifest_path"], 0,
+        executor=lambda task: {"status": "completed", "actual_cost": 0.7},
+    )
     first = recover_results(state_path, summary_path, result_collector=runner,
                             config_version="config-1", node_role="compute")
     second = recover_results(state_path, summary_path, result_collector=runner,

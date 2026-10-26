@@ -77,9 +77,9 @@ def read_only_reply(handler, message, facts, conversation_id=None):
             )
         lines = []
         if uploads:
-            lines.append("已登记提交目录：\n" + "\n".join("- `" + p + "`" for p in uploads))
+            lines.append("已登记提交路径：\n" + "\n".join("- `" + p + "`" for p in uploads))
         if folders:
-            lines.append("已登记回传目录：\n" + "\n".join("- `" + p + "`" for p in folders))
+            lines.append("已登记回收路径：\n" + "\n".join("- `" + p + "`" for p in folders))
         return (
             "\n".join(lines) + "\n以上为已登记目录，本次未生成或提交任务。"
             if lines

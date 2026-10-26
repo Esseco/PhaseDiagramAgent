@@ -54,8 +54,9 @@ def test_action_is_not_a_read_only_query(tmp_path):
     from phase_agent.runtime.read_only_queries import read_only_reply
     from types import SimpleNamespace
     handler=SimpleNamespace(config_delegate=None,state_path=tmp_path/'state.json')
-    for message in ['继续','同意','重新生成上传目录','上传完成，继续分析']:
+    for message in ['继续','重新生成上传目录','上传完成，继续分析']:
         assert read_only_reply(handler,message,{},'t') is None
+    assert '当前没有可批准' in read_only_reply(handler, '同意', {}, 't')
 
 
 def test_cancelled_inputs_are_not_offered(tmp_path):

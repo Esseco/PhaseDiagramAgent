@@ -32,7 +32,7 @@ def test_stalled_body_has_wall_deadline_and_no_retry():
     finally: release.set()
 
 
-def test_retry_shares_deadline():
+def test_transport_timeout_stops_without_retry():
     release = threading.Event()
     client = create_deepseek_client(api_key='test', total_timeout=.12)
     def open_response(*args, **kwargs):
@@ -45,9 +45,9 @@ def test_retry_shares_deadline():
     try:
         with patch('urllib.request.urlopen', side_effect=open_response) as request:
             try: client({})
-            except DeepSeekResponseError as error: assert error.code == 'total_timeout'
+            except DeepSeekResponseError as error: assert error.code == 'timeout'
             else: assert False
-            assert request.call_count == 2
+            assert request.call_count == 1
             assert time.monotonic()-started < .3
     finally: release.set()
 

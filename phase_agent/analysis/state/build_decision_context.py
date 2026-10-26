@@ -16,16 +16,31 @@ from phase_agent.analysis.state.summarize_task_stages import (
 from phase_agent.analysis.state.summarize_task_rounds import summarize_task_rounds
 
 
+def _magnetic_diagnostic(row):
+    magnetic = row.get("magnetic_check")
+    magnetic = magnetic if isinstance(magnetic, dict) else {}
+    spin = row.get("spin_state_check")
+    spin = spin if isinstance(spin, dict) else {}
+
+    def count_items(value):
+        return len(value) if isinstance(value, (list, tuple, set)) else 0
+
+    return {
+        "task_id": row.get("task_id"),
+        "model_version": row.get("model_version"),
+        "status": magnetic.get("status") or "unknown",
+        "reason": magnetic.get("reason") or spin.get("reason"),
+        "reasonable_atom_count": count_items(magnetic.get("reasonable_atoms")),
+        "anomalous_atom_count": count_items(magnetic.get("anomalous_atoms")),
+    }
+
+
 def build_decision_context(state, *, recent_limit=5):
     from phase_agent.analysis.state.scientific_decision_brief import decision_brief
     from phase_agent.tools.relax_mc_batch.plan import batch_facts
+    from phase_agent.runtime.partial_recovery import partial_recovery_facts
 
     saved_candidates = state.get("qbc_candidates") or []
-    current_snapshot = (state.get("phase_diagrams") or {}).get("mlip") or {}
-    if saved_candidates and current_snapshot.get("entries"):
-        from phase_agent.analysis.phase.phase_quality_reports import candidate_quality_evidence
-
-        saved_candidates = candidate_quality_evidence(state, saved_candidates)
     memory = state.get("decision_memory") or {}
     long_term = memory.get("long_term") or {}
     diagrams = state.get("phase_diagrams") or state.get("phase_diagram_state") or {}
@@ -38,10 +53,26 @@ def build_decision_context(state, *, recent_limit=5):
             summarize_phase_coverage,
         )
 
-        from phase_agent.analysis.phase.phase_quality_reports import quality_summary
+        from phase_agent.analysis.phase.phase_quality_reports import (
+            get_phase_quality_report,
+            quality_summary,
+        )
+
+        quality_report = None
+        if entries:
+            try:
+                quality_report = get_phase_quality_report(
+                    state, method=method, snapshot=snapshot
+                )
+            except (OSError, ValueError, TypeError, KeyError, OverflowError):
+                # quality_summary retains the existing diagnostic_unavailable
+                # contract when a snapshot is incomplete or malformed.
+                quality_report = None
 
         phase_summary[method] = {
-            "quality_diagnostics": quality_summary(state, method=method, snapshot=snapshot),
+            "quality_diagnostics": quality_summary(
+                state, method=method, snapshot=snapshot, report=quality_report
+            ),
             **{k: deepcopy(snapshot.get(k)) for k in ("status", "version", "energy_basis_id")},
             "entry_count": len(entries),
             "phase_coverage": summarize_phase_coverage(entries),
@@ -54,6 +85,12 @@ def build_decision_context(state, *, recent_limit=5):
                 )[:10]
             ],
         }
+        if method == "mlip" and saved_candidates and snapshot.get("entries"):
+            from phase_agent.analysis.phase.phase_quality_reports import candidate_quality_evidence
+
+            saved_candidates = candidate_quality_evidence(
+                state, saved_candidates, report=quality_report
+            )
     rewards = []
     current_basis = (diagrams.get("mlip") or {}).get("energy_basis_id")
     official_rewards = [
@@ -244,16 +281,13 @@ def build_decision_context(state, *, recent_limit=5):
         "task_round_evidence": summarize_task_rounds(state),
         "model_round_summary": deepcopy((state.get("model_round_summary") or [])[-recent_limit:]),
         "dft_magnetic_diagnostics": [
-            {
-                "task_id": row.get("task_id"),
-                "model_version": row.get("model_version"),
-                "status": row["magnetic_check"].get("status"),
-                "reason": row["magnetic_check"].get("reason"),
-                "reasonable_atom_count": len(row["magnetic_check"].get("reasonable_atoms") or []),
-                "anomalous_atom_count": len(row["magnetic_check"].get("anomalous_atoms") or []),
-            }
+            _magnetic_diagnostic(row)
             for row in (state.get("dft_dataset_records") or [])
-            if (row.get("spin_state_check") or {}).get("applies")
+            if (
+                isinstance(row, dict)
+                and isinstance(row.get("spin_state_check"), dict)
+                and row["spin_state_check"].get("applies") is True
+            )
         ][-recent_limit:],
         "magnetic_diagnostic_instruction": "层状氧化物Fe/Mn自旋经验标准是DFT回收质量门槛：只有passed才用于相图、训练和误差；异常/缺失保留原结果并暂不纳入。局域磁矩通过不是严格磁性基态证明。不得自动改INCAR、删原始帧、改能量或重提DFT；结合已有数据提出建议并正常审批。其他元素/非层状体系不检查。",
         "dft_recovery_cancellations": deepcopy(
@@ -313,6 +347,12 @@ def build_decision_context(state, *, recent_limit=5):
         "qbc_candidates": candidate_evidence(saved_candidates),
         "independent_audit_candidate_ids": deepcopy(state.get("dft_audit_candidate_ids") or []),
         "relax_mc_batches": batch_facts(state),
+        "partial_recovery": partial_recovery_facts(state),
+        "partial_recovery_instruction": (
+            "已核验的部分回收必须先明确选择：用户说‘继续’时，后续分析必须标注有效覆盖不足；"
+            "用户说‘补全’时，只能针对 partial_recovery 中的 retryable_task_ids 提出 restart_failed_task，"
+            "保留原失败记录，不得重跑整批、重建整批输入或把失败项当作完成。"
+        ),
         "recent_experience": {
             "limit": recent_limit,
             "rewards": rewards,

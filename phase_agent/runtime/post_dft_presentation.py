@@ -43,7 +43,7 @@ def post_dft_lines(state, *, assessment=None):
     label = model_epoch_label(state, assessment["scope"].get("model_version"))
     lines = [
         f"结果回收与分析：{label}",
-        f"本轮 DFT：回收 {assessment['recovered_tasks']}/{assessment['expected_tasks']}，合格配对 {assessment['paired_structures']}。",
+        f"本轮 DFT：有效回收 {assessment.get('successful_tasks', assessment['recovered_tasks'])}/{assessment['expected_tasks']}，合格配对 {assessment['paired_structures']}。",
         f"成功 {assessment['successful_tasks']}、失败 {assessment['failed_tasks']}、已取消 {assessment.get('cancelled_tasks', 0)}；取消项不计DFT验证，不再回收。",
         f"原模型 {assessment['scope'].get('model_version')}：能量 MAE/RMSE {_metric_pair(energy, 'meV/atom')}；受力 MAE/RMSE {_metric_pair(forces, 'meV/Å')}。"
         + (
@@ -52,6 +52,10 @@ def post_dft_lines(state, *, assessment=None):
             else ""
         ),
     ]
+    if assessment.get("failed_tasks"):
+        lines.append(
+            "选择：回复‘继续’使用已回收子集并标记部分覆盖，或回复‘补全’只为失败任务生成重试方案；不会重跑整批。"
+        )
     export = next(
         (
             row

@@ -1,11 +1,21 @@
 """Offline checkpoint conversion. Call only while owning the project service lock."""
 
+import argparse
 from hashlib import sha256
+import json
 from pathlib import Path
 import pickle
 import sqlite3
 from phase_agent.persistence.sqlite_paths import readonly_uri
 import zlib
+
+
+def _distinct_paths(source, destination):
+    source = Path(source).resolve()
+    destination = Path(destination).resolve()
+    if source == destination:
+        raise ValueError("Source and destination must be different files")
+    return source, destination
 
 
 def compress_typed(value):
@@ -22,6 +32,7 @@ def compress_typed(value):
 
 def compact_pickle(source, destination, role):
     """Preserve all records and typed bytes, process one large file at a time."""
+    source, destination = _distinct_paths(source, destination)
     with open(source, "rb") as stream:
         value = pickle.load(stream)
     count = 0
@@ -69,8 +80,16 @@ def compact_pickle(source, destination, role):
     }
 
 
-def compact_sqlite(source, destination, *, preserve_all=False):
+def compact_sqlite(
+    source,
+    destination,
+    *,
+    preserve_all=False,
+    history_keep=8,
+    namespace_keep=32,
+):
     """Migrate retained envelopes to compressed CAS, collect garbage, then vacuum."""
+    source, destination = _distinct_paths(source, destination)
     from phase_agent.persistence.compact_checkpoints import (
         CompactSqliteSaver,
         collect_payloads,
@@ -89,13 +108,7 @@ def compact_sqlite(source, destination, *, preserve_all=False):
         if not {"checkpoints", "writes"}.issubset(tables):
             raise ValueError("Unknown checkpoint database schema")
         saver = CompactSqliteSaver(conn)
-        latest = list(
-            conn.execute(
-                "SELECT thread_id,checkpoint_ns,max(checkpoint_id) FROM checkpoints GROUP BY thread_id,checkpoint_ns"
-            )
-        )
-
-        def evidence():
+        def evidence(latest):
             result = {}
             for thread, ns, cid in latest:
                 item = saver.get_tuple(
@@ -115,8 +128,25 @@ def compact_sqlite(source, destination, *, preserve_all=False):
                 result[(thread, ns, cid)] = sha256(kind.encode() + raw).hexdigest()
             return result
 
-        before = evidence()
-        removed = 0 if preserve_all else prune_history(conn, limit_namespaces=False)
+        removed = (
+            0
+            if preserve_all
+            else prune_history(
+                conn,
+                keep=history_keep,
+                limit_namespaces=True,
+                namespace_keep=namespace_keep,
+            )
+        )
+        # Namespace retention may intentionally retire completed observation
+        # namespaces.  Verify every recovery point that remains publishable;
+        # deleted historical namespaces are no longer recovery obligations.
+        latest = list(
+            conn.execute(
+                "SELECT thread_id,checkpoint_ns,max(checkpoint_id) FROM checkpoints GROUP BY thread_id,checkpoint_ns"
+            )
+        )
+        before = evidence(latest)
         for table, column in (("checkpoints", "checkpoint"), ("writes", "value")):
             # Fetch only identifiers first, never materialize all multi-GB blobs.
             for (rowid,) in list(conn.execute(f"SELECT rowid FROM {table}")):
@@ -133,7 +163,7 @@ def compact_sqlite(source, destination, *, preserve_all=False):
                 )
         conn.commit()
         payloads_removed = collect_payloads(conn, saver.serde.delegate)
-        if before != evidence():
+        if before != evidence(latest):
             raise ValueError("Recovery values or pending writes changed during compaction")
         conn.execute("VACUUM")
         if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
@@ -148,3 +178,37 @@ def compact_sqlite(source, destination, *, preserve_all=False):
         "unreachable_payloads_removed": payloads_removed,
         "verified": True,
     }
+
+
+def main(argv=None):
+    """Run an offline conversion and print its verification receipt as JSON."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--sqlite-source", type=Path, help="source LangGraph SQLite checkpoint")
+    source.add_argument("--pickle-source", type=Path, help="source PersistentDict pickle")
+    parser.add_argument("--destination", required=True, type=Path)
+    parser.add_argument(
+        "--role", choices=("storage", "writes", "blobs"), help="pickle store role"
+    )
+    parser.add_argument("--preserve-all", action="store_true")
+    parser.add_argument("--history-keep", type=int, default=8)
+    parser.add_argument("--namespace-keep", type=int, default=32)
+    args = parser.parse_args(argv)
+    if args.pickle_source is not None:
+        if args.role is None:
+            parser.error("--role is required with --pickle-source")
+        result = compact_pickle(args.pickle_source, args.destination, args.role)
+    else:
+        result = compact_sqlite(
+            args.sqlite_source,
+            args.destination,
+            preserve_all=args.preserve_all,
+            history_keep=args.history_keep,
+            namespace_keep=args.namespace_keep,
+        )
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

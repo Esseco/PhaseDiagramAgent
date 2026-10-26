@@ -38,6 +38,8 @@ def _load_binding(handler):
             summary = build_status_summary(
                 facts, config_version=facts.get("confirmed_config_version")
             )
+            if binding["state_version"] == summary["summary_id"]:
+                return binding
             legacy = content_id(
                 {key: value for key, value in summary.items() if key != "summary_id"}, "summary"
             )
@@ -116,11 +118,37 @@ def review_presented_proposal(handler, state, message, *, requested_review=None)
         decision = requested_review["decision"]
     else:
         decision = "approve" if message.strip().lower() in {"approve", "同意"} else "reject"
+    stored_proposal = (
+        ((state.get("pending_execution_policies") or {}).get(plan_id) or {}).get("agent_proposal")
+        or {}
+    )
     binding = _load_binding(handler)
     if binding is None or binding.get("plan_id") != plan_id:
         bind_presented_proposal(handler, state)
-        if decision == "approve":
-            return pending_plan_reply(state) + "\n请核对以上方案后再批准或拒绝。"
+        binding = handler.presented_plan_binding
+        # Recovery creates a new approval boundary that may be displayed in a
+        # fresh conversation.  If the current unique proposal is the guarded
+        # DFT decision, refresh its binding and honor the explicit approval in
+        # this turn instead of forcing an identical second approval.
+        current_hash = proposal_hash(stored_proposal)
+        post_recovery_dft = (
+            state.get("post_recovery_next_step_pending")
+            and stored_proposal.get("recommended_action") == "select_dft_candidates"
+            and (stored_proposal.get("raw_action") or {})
+            .get("parameters", {})
+            .get("prepare_inputs_after_approval")
+        )
+        if not (decision == "approve" and post_recovery_dft and binding):
+            if decision == "approve":
+                return pending_plan_reply(state) + "\n请核对以上方案后再批准或拒绝。"
+    elif (
+        decision == "approve"
+        and state.get("post_recovery_next_step_pending")
+        and binding.get("proposal_hash") == proposal_hash(stored_proposal)
+    ):
+        # The state summary can change during read-only refreshes; rebind the
+        # same immutable proposal to the current summary before approval.
+        bind_presented_proposal(handler, state)
         binding = handler.presented_plan_binding
     sensitive = (row.get("review_card") or {}).get("sensitive") or is_sensitive_proposal(
         row.get("agent_proposal") or {}
@@ -145,11 +173,33 @@ def review_presented_proposal(handler, state, message, *, requested_review=None)
             expected_proposal_hash=binding["proposal_hash"],
             comment=message,
         )
-    except ValueError:
+    except ValueError as error:
         _save_binding(handler, None)
-        return "方案或项目状态已变化，请重新查看方案后审核；未执行任务。"
+        detail = str(error).strip()
+        if any(
+            marker in detail
+            for marker in (
+                "state_version_stale",
+                "proposal_hash_mismatch",
+                "proposal_context_changed",
+                "review_changed",
+                "plan is not pending",
+            )
+        ):
+            return "方案或项目状态已变化，请重新查看方案后审核；未执行任务。"
+        return "批准后的 DFT 输入准备失败：" + (detail or "未提供具体原因") + "；未执行任务。"
     _save_binding(handler, None)
     result = outcome.get("result") or {}
+    if decision == "approve" and state.get("post_recovery_next_step_pending"):
+        # The post-recovery choice has now crossed its separate approval gate.
+        # Clear the durable marker only after the version/hash guarded review
+        # succeeds; rejection keeps the choice gate active for the next turn.
+        from phase_agent.tools.step_runner.file_protocol import read_json, write_json
+
+        persisted = read_json(handler.state_path, {}) or {}
+        if persisted.get("post_recovery_next_step_pending"):
+            persisted["post_recovery_next_step_pending"] = False
+            write_json(handler.state_path, persisted)
     if result.get("status") == "awaiting_approval":
         from phase_agent.tools.step_runner.file_protocol import read_json
 

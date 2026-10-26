@@ -26,6 +26,7 @@ WATCHED_MODULES = (
     "phase_agent.tools.workflows.apply_scientific_feedback",
     "phase_agent.analysis.state.summarize_agent_state",
     "phase_agent.runtime.result_recovery_status",
+    "phase_agent.runtime.partial_recovery",
     "phase_agent.runtime.scientific_progress",
     "phase_agent.runtime.local_agent_control",
     "phase_agent.runtime.local_http_server",

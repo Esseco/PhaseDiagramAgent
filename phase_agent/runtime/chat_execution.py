@@ -3,6 +3,46 @@
 from phase_agent.tools.step_runner.file_protocol import read_json
 
 
+_STALE_LIFECYCLE_ERRORS = {
+    "Cannot replay a new invocation after an execution or approval stage",
+    "Lifecycle configuration changed; cannot replay old invocation",
+}
+
+
+def _stale_lifecycle_reconciliation(handler, invocation_id, error):
+    """Return a read-only result for a stale lifecycle checkpoint.
+
+    The durable runner deliberately refuses to replay an unsafe checkpoint.
+    Chat must expose that boundary as a normal reconciliation result instead
+    of surfacing an uncaught exception (or attempting a second invocation).
+    """
+    state = read_json(handler.state_path, {}) or {}
+    identity = {
+        "invocation_id": invocation_id,
+        "tool": "scientific_lifecycle",
+    }
+    return {
+        "status": "execution_reconciliation_required",
+        "state": state,
+        "recovery_report": {
+            "unsettled": [
+                {
+                    "identity": identity,
+                    "reason": "stale_lifecycle_checkpoint",
+                    "next_action": (
+                        "核对旧生命周期检查点、动作审批及执行回执后再提出新方案；"
+                        "本轮未重放原动作。"
+                    ),
+                }
+            ],
+            "checks": [],
+        },
+        "reason": str(error),
+        "submitted": False,
+        "steps_executed": 0,
+    }
+
+
 def run_workflow_turn(
     handler,
     invocation_id,
@@ -184,11 +224,16 @@ def run_workflow_turn(
 
         kwargs["agent_client"] = user_contextualized_agent
         user_contextualized_agent.decision_backend = handler.decision_backend
-    return workflow(
-        **kwargs,
-        execution_mode="interactive",
-        human_feedback=human_feedback,
-        max_steps=1,
-        invocation_id=invocation_id,
-        state_path=str(handler.state_path),
-    )
+    try:
+        return workflow(
+            **kwargs,
+            execution_mode="interactive",
+            human_feedback=human_feedback,
+            max_steps=1,
+            invocation_id=invocation_id,
+            state_path=str(handler.state_path),
+        )
+    except ValueError as error:
+        if str(error) not in _STALE_LIFECYCLE_ERRORS:
+            raise
+        return _stale_lifecycle_reconciliation(handler, invocation_id, error)

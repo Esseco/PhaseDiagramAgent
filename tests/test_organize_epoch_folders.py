@@ -5,7 +5,12 @@ from copy import deepcopy
 
 import pytest
 
-from phase_agent.tools.local.organize_epoch_folders import folder_plan, migrate_folders
+from phase_agent.tools.local.organize_epoch_folders import (
+    _english_interaction_stem,
+    folder_plan,
+    migrate_folders,
+    relocate_archive_index,
+)
 from phase_agent.runtime.interaction_report_paths import report_directory
 from phase_agent.tools.remote.model_upload_directory import model_upload_directory
 from phase_agent.tools.remote.submission_handoff import handoff_root
@@ -16,6 +21,20 @@ def state():
         "active_model_version": "model-long-id",
         "upload_layout": {"model_rounds": {"model-long-id": 2}},
     }
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("MC回收_20261022_01", "mc_recovery_20261022_01"),
+        ("无运行中任务_20261022_01", "workflow_check_20261022_01"),
+        ("本轮新branch已登记_20261020_01", "branch_registered_20261020_01"),
+        ("输入准备方案待确认_20261023_01", "input_preparation_review_20261023_01"),
+        ("MC取消_20261020_01", "mc_cancelled_20261020_01"),
+    ],
+)
+def test_legacy_interaction_stems_use_english_names(old, new):
+    assert _english_interaction_stem(old) == new
 
 
 def test_new_directories_use_recorded_epoch_and_keep_identity(tmp_path):
@@ -35,7 +54,8 @@ def test_new_reassessment_results_use_epoch_and_keep_existing_recovery(tmp_path)
 
     original = {"import_directory": str(tmp_path / "submissions/epoch1/G0001_DFT-0001")}
     assert (
-        _recovery_import_directory(original, "key") == tmp_path / "submissions/epoch1/recovery/key"
+        _recovery_import_directory(original, "key")
+        == tmp_path / "submissions/epoch1/evidence/recovery/key"
     )
     legacy = Path(original["import_directory"]).parent / "_recovery/key"
     legacy.mkdir(parents=True)
@@ -48,7 +68,7 @@ def test_collect_only_index_has_no_dead_upload_link(tmp_path):
     from phase_agent.tools.remote.submission_layout import write_submission_index
 
     root = tmp_path / "submissions"
-    directory = root / "epoch1/recovery/collect_only"
+    directory = root / "epoch1/evidence/recovery/collect_only"
     directory.with_name("collect_only_output").mkdir(parents=True)
     saved = state()
     saved["relax_mc_batches"] = {
@@ -60,9 +80,9 @@ def test_collect_only_index_has_no_dead_upload_link(tmp_path):
         }
     }
     text = write_submission_index(root, saved).read_text(encoding="utf-8")
-    assert "无上传目录" in text
+    assert "上传包目录缺失，先核对归档" in text
     assert "collect_only_input](" not in text
-    assert "](epoch1/recovery/collect_only_output/)" in text
+    assert "](epoch1/evidence/recovery/collect_only_output/)" in text
 
 
 def test_missing_historical_handoff_is_marked_without_dead_link(tmp_path):
@@ -76,7 +96,7 @@ def test_missing_historical_handoff_is_marked_without_dead_link(tmp_path):
         {
             "upload_directory": str(operation / "inputs/batch"),
             "handoff": {
-                "folder": str(root / "epoch1/transfers/missing_input"),
+                "folder": str(root / "epoch1/delivery/transfers/missing_input"),
                 "results_directory": str(operation / "results"),
                 "job_count": 1,
             },
@@ -87,6 +107,40 @@ def test_missing_historical_handoff_is_marked_without_dead_link(tmp_path):
     assert "missing_input](" not in text
 
 
+def test_archive_index_relocation_accepts_submission_root_and_repairs_old_buckets(tmp_path):
+    import json
+
+    root = tmp_path / "submissions"
+    operation = root / "epoch0/calculations/G0001_DFT-0001_DFT-single-point/inputs"
+    operation.mkdir(parents=True)
+    archive = root / "epoch0/evidence/storage_archives/G0001_DFT-0001_DFT-single-point.inputs.zip"
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"archive")
+    (root / ".archive_index.json").write_text(
+        json.dumps(
+            {
+                "epoch0/G0001_DFT-0001_DFT-single-point/inputs":
+                "epoch0/storage_archives/G0001_DFT-0001_DFT-single-point.inputs.zip"
+            }
+        ),
+        encoding="utf-8",
+    )
+    relocate_archive_index(
+        root,
+        [
+            {
+                "from": str(tmp_path / "submissions/epoch0/G0001_DFT-0001_DFT-single-point"),
+                "to": str(tmp_path / "submissions/epoch0/calculations/G0001_DFT-0001_DFT-single-point"),
+            }
+        ],
+    )
+    index = json.loads((root / ".archive_index.json").read_text(encoding="utf-8"))
+    assert index == {
+        "epoch0/calculations/G0001_DFT-0001_DFT-single-point/inputs":
+        "epoch0/evidence/storage_archives/G0001_DFT-0001_DFT-single-point.inputs.zip"
+    }
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows junction migration")
 def test_direct_migration_preserves_bytes_removes_old_paths_and_is_repeatable(tmp_path):
     old = tmp_path / "analysis_outputs/epoch1_model-long-id"
@@ -95,7 +149,7 @@ def test_direct_migration_preserves_bytes_removes_old_paths_and_is_repeatable(tm
     (old / "result.json").write_bytes(payload)
     reports = tmp_path / "交互记录"
     reports.mkdir()
-    (reports / "epoch1_DFT选点_20261020_01.md").write_text("saved reply", encoding="utf-8")
+    (reports / "epoch1_dft_selection_20261020_01.md").write_text("saved reply", encoding="utf-8")
     before = state()
     result = migrate_folders(tmp_path, before, apply=True)
     new = tmp_path / "analysis_outputs/epoch1"
@@ -104,7 +158,7 @@ def test_direct_migration_preserves_bytes_removes_old_paths_and_is_repeatable(tm
     assert not new.is_junction()
     assert not new.stat().st_file_attributes & 2
     assert (
-        tmp_path / "interaction_records/epoch1/DFT选点_20261020_01.md"
+        tmp_path / "interaction_records/epoch1/dft_selection_20261020_01.md"
     ).read_text() == "saved reply"
     assert folder_plan(tmp_path, before) == []
     assert result["verified_files"] == 2
@@ -136,10 +190,12 @@ def test_storage_index_survives_epoch_migration(tmp_path):
     migrate_folders(tmp_path, state(), apply=True)
     assert (
         storage_archive(root / "epoch1/G0001/inputs", "inputs")
-        == root / "epoch1/storage_archives/G0001.inputs.zip"
+        == root / "epoch1/evidence/storage_archives/G0001.inputs.zip"
     )
     assert not archive.exists()
-    assert (root / "epoch1/storage_archives/G0001.inputs.zip").read_bytes() == b"frozen zip content"
+    assert (
+        root / "epoch1/evidence/storage_archives/G0001.inputs.zip"
+    ).read_bytes() == b"frozen zip content"
     assert (root / ".archive_index.json").stat().st_file_attributes & 2
 
 
@@ -169,7 +225,7 @@ def test_cleanup_removes_only_identical_archived_runtime(tmp_path):
     import zipfile
     from phase_agent.tools.local.organize_epoch_folders import prune_archived_runtime
 
-    batch = tmp_path / "submissions/epoch0/relax_mc/RelaxMC_Batch01"
+    batch = tmp_path / "submissions/epoch0/delivery/relax_mc/RelaxMC_Batch01"
     (batch / "runtime").mkdir(parents=True)
     (batch / "runtime/shared.py").write_bytes(b"same source")
     (batch / "runtime/changed.py").write_bytes(b"unique source")
@@ -196,7 +252,7 @@ def test_legacy_package_epoch_comes_from_frozen_tasks(tmp_path):
     with zipfile.ZipFile(old / "inputs.zip", "w") as zipped:
         zipped.writestr("inputs/D1/task.json", json.dumps({"model_version": "model-long-id"}))
     assert folder_plan(tmp_path, state()) == [
-        (old, tmp_path / "submissions/epoch1/transfers/G0001_DFT_legacy_package")
+        (old, tmp_path / "submissions/epoch1/delivery/transfers/G0001_DFT_legacy_package")
     ]
 
 

@@ -41,7 +41,7 @@ const query=selector=>{
  };
  for(const node of elements.values())walk(node);return found;
 };
-const context={URL,console,setTimeout,confirm:text=>{confirmations.push(text);return scenario.startsWith('batch_')&&scenario!=='batch_cancel';},location:{origin,assign:url=>opened.push(url)},
+const context={URL,console,setTimeout,AbortSignal,confirm:text=>{confirmations.push(text);return scenario.startsWith('batch_')&&scenario!=='batch_cancel';},location:{origin,assign:url=>opened.push(url)},
  document:{getElementById:id=>elements.get(id),createElement:tag=>new Element(tag),querySelectorAll:query},
  localStorage:{getItem:k=>{if(scenario==='storage_denied')throw Error('denied');return memory.get(k)||null;},setItem:(k,v)=>memory.set(k,v),removeItem:k=>memory.delete(k)},
  fetch:async(path,options={})=>{

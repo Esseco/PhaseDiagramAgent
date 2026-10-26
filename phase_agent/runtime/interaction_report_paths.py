@@ -19,25 +19,26 @@ def report_stem(state, record, now):
 
     _, stage = epoch_stage_line(state).split(" · ", 1)
     if (record or {}).get("failure_summary"):
-        stage = "交互异常"
+        stage = "interaction_error"
     else:
-        # Shorten factual presentation labels only; never route a user request.
+        # Keep report paths ASCII so they are portable across shells and tools.
         for prefix, label in (
-            ("DFT 输入方案", "DFT选点"),
-            ("branch 生成方案", "结构生成"),
-            ("MC 分配方案", "MC分配"),
-            ("新模型", "模型刷新"),
-            ("微调", "模型训练"),
-            ("MC ", "MC回收"),
-            ("Relax ", "Relax回收"),
-            ("DFT ", "DFT回收"),
-            ("无待运行任务", "流程检查"),
+            ("补充 DFT 决策", "dft_selection"),
+            ("DFT 输入方案", "dft_selection"),
+            ("branch 生成方案", "structure_generation"),
+            ("MC 分配方案", "mc_allocation"),
+            ("新模型", "model_refresh"),
+            ("微调", "model_training"),
+            ("MC ", "mc_recovery"),
+            ("Relax ", "relax_recovery"),
+            ("DFT ", "dft_recovery"),
+            ("无待运行任务", "workflow_check"),
         ):
             if stage.startswith(prefix):
                 stage = label
                 break
     stage = re.split(r"[，；。]", stage, maxsplit=1)[0]
-    stage = re.sub(r"[^\w\u3400-\u9fff-]+", "", stage)[:12] or "交互记录"
+    stage = re.sub(r"[^A-Za-z0-9_-]+", "_", stage).strip("_").lower()[:32] or "interaction"
     return f"{stage}_{now.astimezone().strftime('%Y%m%d')}"
 
 

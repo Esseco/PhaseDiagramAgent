@@ -185,6 +185,11 @@ def gate_template(proposal, state, stored, feedback, config, manager, agent_clie
         or (feedback or {}).get("decision") == "reject"
     ):
         return proposal, False
+    if (action.get("parameters") or {}).get("prepare_inputs_after_approval"):
+        # The scientific DFT decision is the current approval boundary.  The
+        # confirmed project DFT parameters are used after approval; the
+        # representative template remains an optional preview only.
+        return proposal, False
     old = action.get("dft_template_review")
     decision = (feedback or {}).get("decision")
     if old and feedback is None and digest(old) == old.get("digest"):

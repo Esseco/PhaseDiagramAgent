@@ -10,6 +10,7 @@ from __future__ import annotations
 from copy import deepcopy
 from phase_agent.tools.state.task_waiting import active_pending_tasks, awaiting_task_result
 import json
+import logging
 from pathlib import Path
 import shlex
 import shutil
@@ -66,6 +67,7 @@ class SlurmBatchRunner:
         self.stage_profiles = deepcopy(stage_profiles or {})
         self.task_preparer = task_preparer
         self.command_runner = command_runner
+        self.last_collection_report = {}
 
     def prepare(self, state: dict[str, Any]) -> dict[str, Any]:
         """Prepare one deterministic batch from valid reserved pending tasks."""
@@ -138,7 +140,11 @@ class SlurmBatchRunner:
     def collect_results(self, state: dict[str, Any]) -> list[dict[str, Any]]:
         """Read terminal result files not yet reconciled by the main loop."""
         processed = set((state or {}).get("processed_task_ids") or [])
+        from phase_agent.tools.remote.integrity import verify_result
+
         recovered = []
+        report = {"invalid_count": 0, "details_preview": []}
+        self.last_collection_report = report
         for task in (state or {}).get("tasks") or []:
             if task.get("task_id") in processed or not task.get("result_path"):
                 continue
@@ -148,9 +154,18 @@ class SlurmBatchRunner:
             marker = path.with_name("task.finished.json")
             if not marker.is_file():
                 continue
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            payload.setdefault("task_id", task["task_id"])
-            payload.setdefault("task_key", task["task_key"])
+            checked = verify_result(path, marker, task)
+            if not checked["valid"]:
+                report["invalid_count"] += 1
+                if len(report["details_preview"]) < 20:
+                    report["details_preview"].append(
+                        {"task_id": task["task_id"], "reason": checked["reason"]}
+                    )
+                logging.getLogger(__name__).warning(
+                    "Invalid Slurm result %s: %s", task["task_id"], checked["reason"]
+                )
+                continue
+            payload = checked["result"]
             if payload.get("status") in {"completed", "failed", "timeout", "cancelled"}:
                 recovered.append(payload)
         return recovered
@@ -240,6 +255,18 @@ class SlurmBatchRunner:
             "task_key": task["task_key"],
             "stage": task.get("stage"),
             "planned_cost": planned_cost,
+            **{
+                key: normalized[key]
+                for key in (
+                    "batch_id",
+                    "config_version",
+                    "model_version",
+                    "task_checksum",
+                    "protocol_version",
+                    "input_file_version",
+                )
+                if key in normalized
+            },
             "input_path": str(input_path),
             "result_path": str(result_path),
         }

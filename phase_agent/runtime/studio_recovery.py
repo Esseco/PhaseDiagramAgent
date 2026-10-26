@@ -47,8 +47,10 @@ def can_resume_message(config_path, message_identity):
         snapshot = graph.get_state(
             {"configurable": {"thread_id": "project-scientific-lifecycle-v2"}}, subgraphs=True
         )
-        return snapshot.values.get(
-            "request_id"
-        ) == "webui-" + message_identity and safe_read_checkpoint(snapshot)
+        # The receipt identity proves this gateway message already started.
+        # A safe checkpoint may still carry the previous request ID after an
+        # interrupted read-only node; the durable runner rebinds it before
+        # continuing. Unsafe action/approval checkpoints remain rejected.
+        return safe_read_checkpoint(snapshot)
     finally:
         connection.close()

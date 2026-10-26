@@ -1,5 +1,6 @@
 import json
 import tkinter as tk
+from pathlib import Path
 
 import pytest
 from phase_agent.runtime import project_dashboard
@@ -25,10 +26,10 @@ def test_ui_builds_folder_project_controls(tmp_path, monkeypatch):
                     label = str(widget.cget("text"))
                     labels.append(label)
                     if label in {
-                        "选择文件夹",
-                        "启动服务",
+                        "新建项目",
+                        "添加已有项目",
+                        "打开／继续对话",
                         "重启服务",
-                        "选择／继续对话",
                         "查看本轮过程",
                         "停止服务",
                     }:
@@ -51,10 +52,10 @@ def test_ui_builds_folder_project_controls(tmp_path, monkeypatch):
     monkeypatch.setattr(tk, "Tk", window)
     project_dashboard.main()
     for name in (
-        "选择文件夹",
-        "启动服务",
+        "新建项目",
+        "添加已有项目",
+        "打开／继续对话",
         "重启服务",
-        "选择／继续对话",
         "查看本轮过程",
         "停止服务",
     ):
@@ -86,3 +87,28 @@ def test_mode_switch_preserves_other_project_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(project_dashboard, "read_service", lambda _: {"status": "ready"})
     with pytest.raises(ValueError, match="先停止"):
         project_dashboard.set_project_mode(config, "debug")
+
+
+def test_close_discovers_all_registered_running_projects(tmp_path, monkeypatch):
+    first = tmp_path / "first" / "agent_runtime.json"
+    second = tmp_path / "second" / "agent_runtime.json"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("{}")
+    second.write_text("{}")
+    registry = tmp_path / "projects.json"
+    registry.write_text(json.dumps([str(first), str(second)]))
+    monkeypatch.setattr(
+        project_dashboard,
+        "read_project_registry",
+        lambda _: [str(first), str(second)],
+    )
+    monkeypatch.setattr(
+        project_dashboard,
+        "read_service",
+        lambda path, require_ready=False: {"pid": 1} if Path(path) == first else None,
+    )
+
+    assert project_dashboard._running_registered_projects(registry) == [first]
+
+

@@ -16,6 +16,11 @@ def test_409_structures_produce_five_python_scripts(tmp_path):
         counts.append(len(result["batch"]["task_ids"]))
         state = result["state"]
     assert counts == [100, 100, 100, 100, 9]
-    assert len(list(tmp_path.rglob("*.py"))) == 5
+    launchers = list(tmp_path.rglob("run_mlip_batch.py"))
+    assert len(launchers) == 5
+    for launcher in launchers:
+        assert (launcher.parent / "_handoff_mlip_batch.py").is_file()
+        assert (launcher.parent / "_handoff_export_batch_result.py").is_file()
+        assert (launcher.parent / "transfer_bundle.py").is_file()
     assert len(list(tmp_path.rglob("GPU.sh"))) == 5
     assert runner.prepare(state)["status"] == "no_tasks"

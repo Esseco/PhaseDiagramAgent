@@ -147,6 +147,22 @@ def test_offline_sqlite_compaction_preserves_recovery(tmp_path):
         assert saver.get_tuple(cfg).pending_writes[0][2] == "review"
 
 
+def test_offline_sqlite_compaction_accepts_lifecycle_retention_window(tmp_path):
+    from phase_agent.persistence.checkpoint_maintenance import compact_sqlite
+
+    original, target = tmp_path / "old.sqlite", tmp_path / "new.sqlite"
+    cfg = {"configurable": {"thread_id": "t", "checkpoint_ns": ""}}
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    with SqliteSaver.from_conn_string(str(original)) as saver:
+        for i in range(9):
+            cfg = saver.put(cfg, checkpoint(i, {"loaded_state": {"facts": "x" * 10000}}), {}, {})
+    result = compact_sqlite(original, target, history_keep=3, namespace_keep=8)
+    assert result["verified"] and result["old_checkpoints_archived"] == 6
+    with CompactSqliteSaver.from_conn_string(str(target), maintain_history=False) as saver:
+        assert saver.get_tuple(cfg).checkpoint["id"] == "0008"
+
+
 def test_offline_pickle_compresses_without_losing_records(tmp_path):
     import pickle
     from phase_agent.persistence.checkpoint_maintenance import compact_pickle
@@ -181,8 +197,7 @@ def test_response_presentation_reads_final_state_once(tmp_path, monkeypatch):
         def __call__(self, *args, **kwargs):
             return "saved facts"
 
-    handler = Handler.__new__(Handler)
-    handler.state_path = tmp_path / "state.json"
+    handler = Handler({"state_path": str(tmp_path / "state.json")})
     handler.config_delegate = None
     config = tmp_path / "agent_runtime.json"
     config.write_text("{}")

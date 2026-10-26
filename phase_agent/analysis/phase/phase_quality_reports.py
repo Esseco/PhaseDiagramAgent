@@ -1,6 +1,7 @@
 """Reusable JSON evidence and compact human-readable phase review reports."""
 
 from copy import deepcopy
+from collections import OrderedDict
 from hashlib import sha256
 import json
 import os
@@ -25,6 +26,14 @@ __all__ = [
     "candidate_quality_evidence",
     "review_markdown",
 ]
+
+# Quality reports are read-only projections of a versioned snapshot.  Keep a
+# tiny process-local cache so repeated dialogue turns do not re-parse every
+# structure when the fingerprint is unchanged.  The fingerprint below still
+# includes rule, policy, snapshot, task and file metadata, so changed evidence
+# naturally gets a new entry.  This cache never writes project state.
+_REPORT_CACHE = OrderedDict()
+_REPORT_CACHE_LIMIT = 2
 
 
 def _digest(value):
@@ -88,6 +97,10 @@ def get_phase_quality_report(state, *, method="mlip", snapshot=None, policy=None
             "restorations": state.get("phase_quality_restorations") or [],
         }
     )
+    cached_memory = _REPORT_CACHE.get(fingerprint)
+    if cached_memory is not None and not write:
+        _REPORT_CACHE.move_to_end(fingerprint)
+        return deepcopy(cached_memory)
     stored = snapshot.get("csv_path") or snapshot.get("path")
     folder = Path(stored).resolve().parent if stored else None
     if folder and folder.name == "history":
@@ -99,6 +112,10 @@ def get_phase_quality_report(state, *, method="mlip", snapshot=None, policy=None
             checksum = cached.pop("report_checksum", None)
             if cached.get("input_fingerprint") == fingerprint and checksum == _digest(cached):
                 cached["report_checksum"] = checksum
+                _REPORT_CACHE[fingerprint] = deepcopy(cached)
+                _REPORT_CACHE.move_to_end(fingerprint)
+                while len(_REPORT_CACHE) > _REPORT_CACHE_LIMIT:
+                    _REPORT_CACHE.popitem(last=False)
                 return cached
         except (OSError, ValueError, TypeError, AttributeError):
             pass
@@ -107,12 +124,18 @@ def get_phase_quality_report(state, *, method="mlip", snapshot=None, policy=None
     report["report_checksum"] = _digest(report)
     if write and path:
         _atomic_text(path, json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False))
+    _REPORT_CACHE[fingerprint] = deepcopy(report)
+    _REPORT_CACHE.move_to_end(fingerprint)
+    while len(_REPORT_CACHE) > _REPORT_CACHE_LIMIT:
+        _REPORT_CACHE.popitem(last=False)
     return report
 
 
-def quality_summary(state, *, method="mlip", snapshot=None, write=False):
+def quality_summary(state, *, method="mlip", snapshot=None, report=None, write=False):
     try:
-        report = get_phase_quality_report(state, method=method, snapshot=snapshot, write=write)
+        report = report or get_phase_quality_report(
+            state, method=method, snapshot=snapshot, write=write
+        )
         groups = review_groups(report)
         number_by_id = {rid: g["number"] for g in groups for rid in g["review_ids"]}
         return {

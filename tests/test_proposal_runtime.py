@@ -25,7 +25,8 @@ def test_missing_sample_never_turns_cost_into_hours():
     assert report["serial_seconds"] is None
     proposal = build_agent_proposal(action, {})
     text = format_workflow_reply({"status": "awaiting_approval", "agent_proposal": proposal}, "state.json")
-    assert "暂无法估算" in text
+    assert "耗时暂无可靠估计" in text
+    assert "小时" not in text
 
 
 def test_partial_estimation_does_not_report_complete_batch_time():

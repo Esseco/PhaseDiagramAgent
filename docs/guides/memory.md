@@ -122,7 +122,7 @@ initial_long_term_advice=[
 ### Agent 每次参考的内容
 
 - `long_term_human_advice`：有效人工建议、版本和来源，持续保留。
-- `current_phase_diagram`：MLIP/DFT 分开的当前相图版本、稳定条目数及最低 Ehull 条目（最多十项）。
+- `current_phase_diagram`：当前模型 MLIP 相图版本、稳定条目数及最低 Ehull 条目（最多十项）；DFT 比较与训练证据单独保留。
 - `recent_experience`：最近五条收益观测、最近五条 action 的状态及人工意见。条数不等于轮数；一轮可能产生多条记录。
 - `coverage_gaps`：调用方当前提供的覆盖缺口。
 

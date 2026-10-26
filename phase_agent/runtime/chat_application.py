@@ -125,12 +125,14 @@ class RunWorkflowChatHandler:
                     while len(self.studio_dialogues) > 32:
                         self.studio_dialogues.pop(next(iter(self.studio_dialogues)))
                 from phase_agent.persistence.memory.conversation import remember_turn
+                from phase_agent.runtime.turn_process import current_turn_id
 
                 remember_turn(
                     self.state_path,
                     conversation_id,
                     _latest_user_message(messages),
                     reply,
+                    turn_id=current_turn_id(conversation_id),
                     facts_signature=(getattr(self, "turn_context", {}) or {}).get(
                         "facts_signature"
                     ),
@@ -147,6 +149,34 @@ class RunWorkflowChatHandler:
             + "\n"
             + str(reply)
         )
+
+    def remember_turn_reply(self, record, reply):
+        """Replace this identified turn with its final user-visible receipt."""
+        from phase_agent.persistence.memory.conversation import recent_turns, remember_turn
+
+        with self.lock:
+            thread_id, turn_id = record["thread_id"], record["id"]
+            if not remember_turn(
+                self.state_path,
+                thread_id,
+                record["message"],
+                reply,
+                turn_id=turn_id,
+                replace_only=True,
+            ):
+                return
+            rows = recent_turns(self.state_path, thread_id)
+            # A delayed receipt may update its own row, never a newer turn's cache.
+            if not rows or rows[-1].get("turn_id") != turn_id:
+                return
+            dialogue = [
+                {"role": role, "content": rows[-1][key]}
+                for role, key in (("user", "user"), ("assistant", "assistant"))
+            ]
+            if thread_id in self.studio_dialogues:
+                self.studio_dialogues[thread_id] = list(dialogue)
+            if self.conversation_id == thread_id:
+                self.recent_dialogue = dialogue
 
     def review_pending(
         self, plan_id, decision, *, expected_state_version, expected_proposal_hash, comment=""

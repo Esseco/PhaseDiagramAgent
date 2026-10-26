@@ -5,11 +5,11 @@ from phase_agent.graphs.dialogue.nodes import decide
 
 
 @pytest.mark.parametrize(
-    "present,status,expected",
-    [(True, "pending", True), (False, "pending", False), (True, "completed", False)],
+    "present,status",
+    [(True, "pending"), (False, "pending"), (True, "completed")],
 )
 def test_continue_enters_collector_before_dialogue_model(
-    tmp_path, monkeypatch, present, status, expected
+    tmp_path, monkeypatch, present, status
 ):
     path = tmp_path / "result.json"
     if present:
@@ -44,13 +44,10 @@ def test_continue_enters_collector_before_dialogue_model(
         },
         SimpleNamespace(context=context),
     )
-    if expected:
-        assert result["operation"] == "scientific_workflow"
-        model.assert_not_called()
-        context.scientific_call()
-        handler._run.assert_called_once()
-    else:
-        model.assert_called_once()
+    assert result["operation"] == "scientific_workflow"
+    model.assert_not_called()
+    context.scientific_call()
+    handler._run.assert_called_once()
 
 
 def test_question_with_returned_file_remains_dialogue(tmp_path, monkeypatch):

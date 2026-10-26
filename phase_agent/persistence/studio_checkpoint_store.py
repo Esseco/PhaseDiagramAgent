@@ -47,6 +47,30 @@ class _Database:
         self.cache = OrderedDict()
         self.cache_bytes = 0
         self.max_cache_bytes = cache_bytes
+        self.references = 0
+        self.closed = False
+
+    def acquire(self):
+        with self.lock:
+            if self.closed:
+                raise RuntimeError("Studio checkpoint store is closed")
+            self.references += 1
+
+    def release(self):
+        with self.lock:
+            if self.references <= 0:
+                return
+            self.references -= 1
+            if self.references:
+                return
+            self.conn.commit()
+            self.invalidate()
+            self.conn.close()
+            self.closed = True
+        database = str(self.path)
+        with _registry_lock:
+            if _databases.get(database) is self:
+                _databases.pop(database, None)
 
     def invalidate(self):
         self.cache.clear()
@@ -83,10 +107,13 @@ class StudioCheckpointDict(MutableMapping):
         _backend=None,
         _path=(),
         allow_legacy=False,
+        _pending_default=False,
+        _owns_backend_ref=None,
     ):
         self.filename = str(filename)
         self.default_factory = default_factory
         self._path = _path
+        self._pending_default = _pending_default
         if _backend is None:
             database = str(Path(filename).resolve()) + ".sqlite"
             with _registry_lock:
@@ -95,6 +122,10 @@ class StudioCheckpointDict(MutableMapping):
                     _backend = _Database(database)
                     _databases[database] = _backend
         self.backend = _backend
+        self._owns_backend_ref = (not _path) if _owns_backend_ref is None else _owns_backend_ref
+        self._closed = False
+        if self._owns_backend_ref:
+            self.backend.acquire()
         if not _path and Path(filename).is_file() and not allow_legacy:
             with self.backend.lock:
                 ready = self.backend.conn.execute(
@@ -116,8 +147,14 @@ class StudioCheckpointDict(MutableMapping):
             if row is None:
                 if self.default_factory is None:
                     raise KeyError(key)
-                self[key] = self.default_factory()
-                row = self._row(key)
+                return type(self)(
+                    self.default_factory,
+                    filename=self.filename,
+                    _backend=self.backend,
+                    _path=(*self._path, key),
+                    _pending_default=True,
+                    _owns_backend_ref=False,
+                )
             path = (*self._path, key)
             if row[0] != "value":
                 if row[0] == "value_ref":
@@ -132,7 +169,11 @@ class StudioCheckpointDict(MutableMapping):
                     return self.backend.value(identity, payload[0])
                 factory = pickle.loads(row[1]) if row[0] == "defaultdict" else None
                 return type(self)(
-                    factory, filename=self.filename, _backend=self.backend, _path=path
+                    factory,
+                    filename=self.filename,
+                    _backend=self.backend,
+                    _path=path,
+                    _owns_backend_ref=False,
                 )
             return self.backend.value(_encode(path), row[1])
 
@@ -176,8 +217,24 @@ class StudioCheckpointDict(MutableMapping):
             for key, item in value.items():
                 self._put((*path, key), item)
 
+    def _materialize_pending_path(self):
+        if not self._pending_default:
+            return
+        for depth in range(1, len(self._path) + 1):
+            path = self._path[:depth]
+            if (
+                self.backend.conn.execute(
+                    "SELECT 1 FROM nodes WHERE path=?", (_encode(path),)
+                ).fetchone()
+                is None
+            ):
+                factory_value = self.default_factory() if self.default_factory else {}
+                self._put(path, factory_value)
+        self._pending_default = False
+
     def __setitem__(self, key, value):
         with self.backend.lock, self.backend.conn:
+            self._materialize_pending_path()
             self.backend.invalidate()
             path = (*self._path, key)
             self._delete(path)
@@ -243,6 +300,8 @@ class StudioCheckpointDict(MutableMapping):
                 self[key] = value
 
     def materialize(self):
+        if self._pending_default:
+            return self.default_factory() if self.default_factory else {}
         result = defaultdict(self.default_factory) if self.default_factory else {}
         for key in self:
             value = self[key]
@@ -266,9 +325,33 @@ class StudioCheckpointDict(MutableMapping):
         with self.backend.lock:
             self.backend.conn.commit()
 
+    def collect_unreferenced_payloads(self):
+        """Delete CAS leaves no longer referenced by any live node."""
+        if self._path:
+            return 0
+        with self.backend.lock, self.backend.conn:
+            before = self.backend.conn.execute("SELECT count(*) FROM payloads").fetchone()[0]
+            self.backend.conn.execute(
+                """DELETE FROM payloads WHERE id NOT IN (
+                    SELECT CAST(value AS TEXT) FROM nodes WHERE kind='value_ref'
+                )"""
+            )
+            self.backend.invalidate()
+            after = self.backend.conn.execute("SELECT count(*) FROM payloads").fetchone()[0]
+        return before - after
+
     def close(self):
-        self.sync()
-        self.backend.invalidate()
+        if self._closed:
+            return
+        self._closed = True
+        if self._owns_backend_ref:
+            self.backend.release()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def __enter__(self):
         return self

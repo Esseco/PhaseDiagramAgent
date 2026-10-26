@@ -12,6 +12,13 @@ from phase_agent.persistence.compact_checkpoints import CompressedSerde
 
 
 class StudioStorage:
+    # Native PersistentDict checkpoints can take tens of seconds to walk when
+    # the legacy Studio database is multi-gigabyte.  Delay the age-based sweep
+    # while still flushing every revision; recovery data is retained until the
+    # next bounded sweep and explicit prune() remains available to callers.
+    PRUNE_INTERVAL = 8
+    INCREMENTAL_PRUNE_INTERVAL = 32
+
     def __init__(self, memory):
         self.memory = memory
         self.lock = RLock()
@@ -31,10 +38,21 @@ class StudioStorage:
                         if self.readers:
                             return
                         if self.saved[name] != self.revision:
-                            if self.pruned != self.revision and not getattr(
-                                store, "incremental", False
-                            ):
+                            interval = (
+                                self.INCREMENTAL_PRUNE_INTERVAL
+                                if getattr(store, "incremental", False)
+                                else self.PRUNE_INTERVAL
+                            )
+                            if self.revision - self.pruned >= interval:
                                 self.prune()
+                                for candidate in (
+                                    getattr(self.memory, "storage", None),
+                                    getattr(self.memory, "writes", None),
+                                    getattr(self.memory, "blobs", None),
+                                ):
+                                    collect = getattr(candidate, "collect_unreferenced_payloads", None)
+                                    if collect is not None:
+                                        collect()
                                 self.pruned = self.revision
                             original()
                             self.saved[name] = self.revision

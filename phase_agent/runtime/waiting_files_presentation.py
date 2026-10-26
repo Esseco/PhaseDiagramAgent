@@ -34,9 +34,9 @@ def waiting_file_lines(state):
                 [
                     "仅回收旧任务：上传整个文件夹 `"
                     + handoff["folder"]
-                    + "`，放在超算原批次文件夹旁。",
+                    + "`（提交路径），放在超算原批次文件夹旁。",
                     "执行 `sbatch submit_all.sh`，只运行 CPU 回收打包，不提交 DFT/MLIP 子任务；缺结果也不会补交或重算。",
-                    "回传配对 `_output` 文件夹至 `"
+                    "回收路径：配对 `_output` 文件夹 `"
                     + handoff["return_directory"]
                     + "`，再说“已回传”；原选点、任务与审批不变。",
                 ]
@@ -114,9 +114,11 @@ def _ordinary_waiting_file_lines(state):
                     + str(batch.get("package_label") or folder.name)
                     + " · 模型 "
                     + str(batch.get("model_version") or "未登记"),
-                    "上传整个文件夹：`" + str(folder) + "`",
-                    "提交：上传 submit_all.sh、run_upload.py 和 inputs.zip，执行 `sbatch submit_all.sh`；Python 仅在计算节点自动解压并运行。",
-                    "回传：将超算自动生成的同名 `_output` 文件夹整体下载至本地 `"
+                    "提交路径：`" + str(folder) + "`（本地上传文件夹）",
+                    "提交脚本：`"
+                    + str(folder / "submit_all.sh")
+                    + "`；提交命令：`sbatch submit_all.sh`。上传 run_upload.py 和 inputs.zip；Python 仅在计算节点自动解压并运行。",
+                    "回收路径：将超算自动生成的同名 `_output` 文件夹整体下载至本地 `"
                     + str(destination)
                     + "`。回传后说“已回传”。",
                 ]
@@ -194,7 +196,7 @@ def _brief_waiting_file_lines(state):
         ]
     # Do not broaden unrelated rounds into an arbitrary common disk directory.
     links = [str(folder) for folder in folders]
-    lines = ["本轮提交文件夹：" + "、".join(f"`{path}`" for path in links)]
+    lines = ["提交路径：" + "、".join(f"`{path}`" for path in links)]
     models = list(
         dict.fromkeys(
             row.get("model_version") for row in [*batches, *tasks] if row.get("model_version")
@@ -202,9 +204,8 @@ def _brief_waiting_file_lines(state):
     )
     if models:
         lines[0] += " · 模型 " + "、".join(models)
-    lines.append(
-        "提交：将该文件夹完整上传到超算新建的独立目录，进入该目录执行 `sbatch submit_all.sh`。"
-    )
+    scripts = "、".join(f"`{folder / 'submit_all.sh'}`" for folder in folders)
+    lines.append(f"提交脚本：{scripts}；在各自超算上传目录执行 `sbatch submit_all.sh`。")
     returns = list(
         dict.fromkeys(
             (row.get("handoff") or {}).get("return_directory")
@@ -213,10 +214,22 @@ def _brief_waiting_file_lines(state):
         )
     )
     if returns:
+        remote_outputs = list(
+            dict.fromkeys(
+                "对应批次的 `_output` 文件夹"
+                if handoff.get("layout_version", 0) >= 4
+                else "`return-results` 文件夹"
+                if handoff.get("layout_version", 0) >= 2
+                else "`results/transfer/all.results.zip`"
+                for handoff in handoffs
+            )
+        )
         lines.append(
-            "结果回传文件夹："
+            "回收路径："
             + "、".join(f"`{path}`" for path in returns)
-            + "。将远端 `return-results` 放到这里，回传后说“已回传”，Agent 继续核对。"
+            + "；超算端结果目录："
+            + "、".join(remote_outputs)
+            + "。整体回传后说“已回传”，Agent 继续核对。"
         )
     else:
         lines.append(
@@ -253,8 +266,8 @@ def _detailed_waiting_file_lines(state):
                 str(Path(row["result_path"]).parent) for row in tasks if row.get("result_path")
             )
         )
-        lines = [f"输入文件：`{path}`" for path in inputs]
-        lines += [f"结果回传目录：`{path}`" for path in results]
+        lines = [f"任务输入文件（提交内容）：`{path}`" for path in inputs]
+        lines += [f"回收路径（本地结果目录）：`{path}`" for path in results]
         if not inputs:
             lines.append("输入位置未记录；需先核对任务文件，不能直接提交。")
         if not results:
@@ -289,28 +302,29 @@ def _detailed_waiting_file_lines(state):
             key = (handoff["upload_archive"], handoff["submit_script"])
             if key not in shown_handoffs:
                 shown_handoffs.add(key)
+                folder = handoff.get("folder") or str(Path(key[0]).parent)
                 lines.append(
-                    f"上传文件：`{key[0]}` 和 `{key[1]}`；上传到超算同一新目录，在该目录执行 `sbatch submit_all.sh`。"
+                    f"提交路径：`{folder}`（本地上传文件夹）；提交脚本：`{key[1]}`；提交命令：`sbatch {Path(key[1]).name}`。"
                 )
                 lines.append(
-                    "完成后下载该目录的 `return-results` 文件夹，无需手动解压。"
+                    "超算端结果目录：对应批次的 `_output` 文件夹；整体下载至下方回收路径，无需手动解压。"
+                    if handoff.get("layout_version", 0) >= 4
+                    else "超算端结果目录：`return-results`；整体下载至下方回收路径，无需手动解压。"
                     if handoff.get("layout_version", 0) >= 2
-                    else "完成后下载该目录的 `results/transfer/all.results.zip`。"
+                    else "超算端结果目录：`results/transfer/all.results.zip`；下载后放入下方回收路径。"
                 )
         else:
             directory = batch.get("upload_directory")
             script = batch.get("script_path")
             archive = Path(str(directory) + ".upload.zip") if directory else None
             if archive is not None and archive.is_file():
-                lines.append(f"上传包：`{archive}`")
+                lines.append(f"提交路径（上传包）：`{archive}`")
             elif directory:
-                lines.append(f"上传输入目录：`{directory}`")
+                lines.append(f"提交路径（任务输入目录）：`{directory}`")
             else:
                 lines.append("输入位置未记录；需先核对任务文件。")
             if script:
-                lines.append(
-                    f"提交脚本：`{script}`；在超算解压后的对应目录执行 `sbatch {Path(script).name}`。"
-                )
+                lines.append(f"提交脚本：`{script}`；提交命令：`sbatch {Path(script).name}`。")
             else:
                 lines.append("提交脚本未记录；先核对，不猜测命令。")
         destination = (
@@ -320,7 +334,7 @@ def _detailed_waiting_file_lines(state):
         )
         if destination and destination not in destinations:
             destinations.append(destination)
-    lines += [f"结果回传目录：`{path}`" for path in destinations]
+    lines += [f"回收路径（本地结果目录）：`{path}`" for path in destinations]
     if not destinations:
         lines.append("结果回传位置未记录；需先核对批次记录。")
     lines.append(

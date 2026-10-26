@@ -9,6 +9,94 @@ from phase_agent.runtime.chat_approval_rules import (
 )
 
 
+def _current_completed_mc_recovery_line(state):
+    """Describe an already imported current-model Relax+MC batch."""
+    model = state.get("active_model_version")
+    candidates = []
+    for bundle_id, batch in (state.get("relax_mc_batches") or {}).items():
+        if (
+            batch.get("model_version") != model
+            or batch.get("status") != "completed"
+            or not batch.get("import_checksum")
+        ):
+            continue
+        members = [
+            row
+            for row in state.get("tasks") or []
+            if row.get("relax_mc_bundle_id") == bundle_id
+        ]
+        if not members or any(
+            row.get("status") in {"pending", "running", "submitted", "unknown"}
+            for row in members
+        ):
+            continue
+        summary = batch.get("result_summary") or {}
+        total = int(summary.get("task_count") or len(members))
+        failed = len(summary.get("failed_task_ids") or []) + sum(
+            row.get("status") in {"failed", "timeout"} for row in members
+        )
+        candidates.append((total, failed))
+    if not candidates:
+        return None
+    total, failed = candidates[-1]
+    return (
+        f"上一批 Relax+MC 已回收并核验 {total - failed}/{total} 个任务，"
+        f"失败 {failed} 个；以下方案属于下一批输入准备，不是上一批回收。"
+    )
+
+
+def _relax_mc_approval_context(state, proposal):
+    raw = proposal.get("raw_action") or {}
+    params = raw.get("parameters") or proposal.get("action_parameters") or {}
+    if raw.get("tool") != "prepare_local_batch_files" or params.get("mode") != "relax_mc_inputs":
+        return []
+    lines = []
+    previous = _current_completed_mc_recovery_line(state)
+    if previous:
+        lines.append(previous)
+    lines.append(
+        "本方案只准备已登记 branch 的 Relax+MC 输入，不生成新 branch；如需生成 branch，须另行提出方案并经你明确批准。"
+    )
+    summary = proposal.get("decision_summary") or {}
+    scientific = summary.get("scientific_decision") or {}
+    rationale = scientific.get("rationale") or summary.get("rationale") or proposal.get("reason")
+    if rationale:
+        lines.append("本批选用这些新增 branch 的原因：" + str(rationale))
+    expected = scientific.get("expected_outcome") or summary.get("expected_outcome")
+    if expected:
+        lines.append("本批预期：" + str(expected))
+    target_ids = set(raw.get("target_ids") or [])
+    previous_ids = set()
+    for batch in (state.get("relax_mc_batches") or {}).values():
+        if (
+            batch.get("model_version") == state.get("active_model_version")
+            and batch.get("status") == "completed"
+            and batch.get("import_checksum")
+        ):
+            previous_ids.update(batch.get("branch_ids") or [])
+    new_ids = target_ids - previous_ids
+    if target_ids and previous_ids:
+        lines.append(
+            f"批次差异：本批 {len(target_ids)} 个 branch 中，{len(new_ids)} 个未进入上一批已回收 branch；"
+            "只有这些新 branch 需要当前模型重新做 Relax/MC，避免把旧结果当作新模型证据。"
+        )
+    return lines
+
+
+def _before_next_step(reply, lines):
+    parts = reply.splitlines()
+    position = next(
+        (
+            index
+            for index, line in enumerate(parts)
+            if line.startswith(("下一步：", "回复“同意”", "回复‘同意’"))
+        ),
+        len(parts),
+    )
+    parts[position:position] = lines
+    return "\n".join(parts)
+
+
 def _metadata_refresh_warnings(collection):
     historical = collection.get("metadata_refresh_report") or {}
     count = int(historical.get("invalid_count", 0)) + int(
@@ -31,23 +119,39 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
     from phase_agent.runtime.response_preferences import detailed_response
 
     proposal = result.get("agent_proposal") or {}
+    if result.get("status") == "awaiting_approval" and _is_model_failure_proposal(proposal):
+        return "旧建议由模型回复失败产生，不是暂停决策。请说“继续”重新获取有效方案；未执行任务。"
+    proposed_tool = proposal.get("recommended_action") or (proposal.get("raw_action") or {}).get(
+        "tool"
+    )
     brief_reply = None
     if (
         not (detailed_response() if verbose is None else verbose)
         and result.get("status") == "awaiting_approval"
         and not _is_sensitive_proposal(proposal)
+        and isinstance(proposed_tool, str)
+        and bool(proposed_tool.strip())
     ):
         from phase_agent.tools.workflows.mc_coverage_choice import needs_choice
 
         if not needs_choice(proposal):
             from phase_agent.runtime.concise_dialogue import approval_reply
 
-            brief_reply = approval_reply(proposal, result.get("state") or {})
+            brief_reply = approval_reply(
+                proposal,
+                result.get("state") or {},
+                state_path=state_path,
+                config=result.get("effective_config"),
+            )
     reply = (
         brief_reply
         if brief_reply is not None
         else _format_workflow_reply(result, state_path, verbose=verbose)
     )
+    if brief_reply is not None:
+        context_lines = _relax_mc_approval_context(result.get("state") or {}, proposal)
+        if context_lines:
+            reply = "\n".join(context_lines) + "\n" + reply
     recovered = result.get("verified_recovery") or {}
     if recovered:
         names = {
@@ -78,17 +182,39 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         from phase_agent.tools.workflows.generation_artifacts import proposal_artifacts
 
         plan_artifacts = proposal_artifacts(proposal, result.get("state") or {})
-        if plan_artifacts:
-            reply += "\n" + "\n".join(
-                file_location_lines("Branch 分布与构成文件", plan_artifacts["text"])
+        if plan_artifacts.get("text"):
+            reply = _before_next_step(
+                reply, file_location_lines("Branch 分布与构成文件", plan_artifacts["text"])
             )
+        if plan_artifacts.get("scope_mismatch") or plan_artifacts.get("scope_review_unavailable"):
+            instruction = (
+                "下一步：先修正 branch 范围后再审批。"
+                if plan_artifacts.get("scope_mismatch")
+                else "下一步：先补齐 branch 生成概况和范围核对，再审批。"
+            )
+            reply = "\n".join(
+                instruction if line.startswith(("下一步：", "回复“同意”", "回复‘同意’")) else line
+                for line in reply.splitlines()
+            )
+            if instruction not in reply:
+                reply += "\n" + instruction
         from phase_agent.tools.workflows.dft_selection_artifacts import (
             proposal_artifacts as dft_artifacts,
         )
 
         dft_details = dft_artifacts(proposal, result.get("state") or {})
         if dft_details:
-            reply += "\n" + "\n".join(file_location_lines("DFT 选点文件", dft_details["text"]))
+            reply = _before_next_step(
+                reply, file_location_lines("DFT 选点文件", dft_details["text"])
+            )
+    if result.get("status") == "awaiting_approval" and brief_reply is None:
+        from phase_agent.runtime.handoff_presentation import planned_handoff_lines
+
+        path_lines = planned_handoff_lines(
+            proposal, result.get("state") or {}, state_path, config=result.get("effective_config")
+        )
+        if path_lines:
+            reply = _before_next_step(reply, path_lines)
     # State retains all past artifacts. Link one only when this turn actually
     # identifies the matching final action; a training return is not a DFT selection.
     current_actions = [
@@ -280,6 +406,30 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
     if result.get("status") in DIALOGUE_STATUSES:
         return str(result.get("answer") or "未取得有效答复。")
     if result.get("status") == "execution_reconciliation_required":
+        # A stale lifecycle checkpoint can carry an old reconciliation block
+        # after the authoritative state has already settled it.  For a project
+        # with a clear current receipt report and active tasks, show the
+        # current wait state instead of replaying that historical block.
+        current_state = result.get("state") or {}
+        if current_state:
+            from phase_agent.tools.state.execution_receipts import recovery_report
+            from phase_agent.tools.state.task_waiting import active_pending_tasks
+
+            try:
+                current_report = recovery_report(state_path, current_state)
+            except (OSError, ValueError, TypeError):
+                current_report = {"status": "reconciliation_required", "unsettled": [True]}
+            if (
+                current_report.get("status") == "clear"
+                and not current_report.get("unsettled")
+                and not current_state.get("pending_execution_recoveries")
+                and active_pending_tasks(current_state.get("tasks") or [])
+            ):
+                from phase_agent.graphs.dialogue.saved_control import active_task_wait_reply
+
+                waiting = active_task_wait_reply(current_state)
+                if waiting:
+                    return waiting
         report = result.get("recovery_report") or {}
         checks = report.get("checks") or []
         if checks:
@@ -522,8 +672,6 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
     )
     status = result.get("status")
     if status == "awaiting_approval" and proposal:
-        if _is_model_failure_proposal(proposal):
-            return "旧建议由模型回复失败产生，不是暂停决策。请重启 Agent 服务后说“继续”刷新；未执行任务。"
         # Preserve all approval limits, budget interceptions and sensitive warnings.
         text = _format_workflow_reply_verbose(result, state_path)
         from phase_agent.runtime.evidence_reference_presentation import (
@@ -544,15 +692,16 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             )
             if review and review.get("status") == "pending":
                 return (
-                    "当前：DFT 公共参数示例待确认。\n"
+                    "当前：根据本轮 branch 搜索结果，建议补充 DFT；决策方案待确认。\n"
+                    "本轮决策意见、路线比较和入选结构已写入交互记录 MD；模板目录仅用于查看一组代表输入示例。\n"
                     f"代表结构：{review['candidate_id']}；模板版本：{review['revision']}。\n"
                     f"检查目录：{review['directory']}\n"
                     "请检查 INCAR、KPOINTS、GPU.sh 和 settings.json。K 点与元素相关参数按各结构生成。\n"
-                    "可提出修改；或编辑 settings.json 后回复‘刷新模板’。回复‘同意’确认本版本并生成所选批次；‘拒绝’取消。\n"
-                    "目前只生成一组示例，未生成批量 DFT 输入或提交任务。"
+                    "可提出修改；或编辑 settings.json 后回复‘刷新模板’。回复‘同意’确认补充 DFT 决策并生成所选批量输入；‘拒绝’取消。\n"
+                    "目前只生成一组示例，未生成批量 DFT 输入，也未提交超算。"
                 )
             params = proposal.get("action_parameters") or {}
-            preview = params.get("dft_input_preview") or {}
+            preview = params.get("dft_selection_preview") or params.get("dft_input_preview") or {}
             if not preview.get("task_count"):
                 return "DFT 旧方案缺少结构数量与成本预览，暂不可批准。请说“继续”刷新方案。"
             if not preview.get("selected_structures"):
@@ -560,9 +709,9 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             text = text.replace(
                 "建议：`select_dft_candidates`",
                 (
-                    f"建议：生成 {preview['task_count']} 个 DFT 输入（单点 {preview.get('single_point_count', 0)}、优化 {preview.get('relax_count', preview['task_count'])}）"
+                    f"建议：确认补充 DFT 决策并生成 {preview['task_count']} 个 DFT 输入（单点 {preview.get('single_point_count', 0)}、优化 {preview.get('relax_count', preview['task_count'])}）"
                     if "single_point_count" in preview
-                    else f"建议：生成 {preview['task_count']} 个 DFT 结构优化输入"
+                    else f"建议：确认补充 DFT 决策并生成 {preview['task_count']} 个 DFT 结构优化输入"
                 ),
             )
             selected = preview.get("selected_structures") or []
@@ -582,7 +731,15 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             text += f"\nQBC：{preview.get('qbc_available_count', 0)}/{preview['task_count']} 个有数据；缺失值不参与评分。"
             for warning in preview.get("warnings") or []:
                 text += "\n提醒：" + warning
-            text += "\n批准后生成输入文件，不提交超算。"
+            if params.get("prepare_inputs_after_approval"):
+                text = (
+                    "当前：根据本轮 branch 搜索结果，建议补充 DFT；决策方案待确认。\n"
+                    "决策意见已写入本轮交互记录 MD；本轮只展示选点与成本预览，尚未生成批量 DFT 输入。\n"
+                    + text
+                )
+                text += "\n回复‘同意’确认补充 DFT 决策并生成批量输入；回复‘拒绝’取消。\n批准后生成输入文件，不提交超算。"
+            else:
+                text += "\n批准后生成输入文件，不提交超算。"
         text = text.replace(f"建议：`{tool}`", f"建议：{labels.get(tool, tool)}")
         lines = [line for line in text.splitlines() if not line.startswith("完整参数与依据：")]
         lines = [
@@ -609,9 +766,12 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
         lines = [f"已回收 {recovered} 个结果。"] if recovered else []
         for row in wait.get("dft_recovery_rounds") or []:
             if row["pending_task_ids"]:
+                covered = row.get("successful_tasks", row.get("recovered_tasks", 0))
+                expected = row.get("expected_tasks", 0)
+                ratio = covered / expected if expected else 0
                 lines.append(
                     f"{row['scope'].get('model_version') or '未知模型'} 的 DFT："
-                    f"已回收 {row['recovered_tasks']}/{row['expected_tasks']}（{row['recovery_ratio']:.1%}），"
+                    f"有效回收 {covered}/{expected}（{ratio:.1%}），"
                     f"成功 {row['successful_tasks']}、失败 {row['failed_tasks']}。"
                 )
         lines.append(f"等待结果：{summary or str(wait.get('waiting_task_count', 0)) + ' 个任务'}。")
@@ -686,9 +846,12 @@ def _dft_recovery_question_reply(result):
     version = scope.get("model_version") or "未知模型"
     model_round = ((state.get("upload_layout") or {}).get("model_rounds") or {}).get(version)
     label = f"第 {model_round} 轮（{version}）" if model_round is not None else f"模型 {version}"
+    recovered = question.get("successful_tasks", question.get("recovered_tasks", 0))
+    expected = question.get("expected_tasks", 0)
+    ratio = recovered / expected if expected else 0
     lines = [
-        f"{label}：DFT 已回收 {question.get('recovered_tasks', 0)}/{question.get('expected_tasks', 0)}"
-        f"（{question.get('recovery_ratio', 0):.1%}）。",
+        f"{label}：DFT 有效回收 {recovered}/{expected}"
+        f"（{ratio:.1%}）。",
         f"成功 {question.get('successful_tasks', 0)}、失败 {question.get('failed_tasks', 0)}；"
         f"未回传 {len(question.get('pending_task_ids') or [])} 个。",
     ]
@@ -716,7 +879,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
         proposed_tool = proposal.get("recommended_action") or (
             proposal.get("raw_action") or {}
         ).get("tool")
-        if not isinstance(proposed_tool, str) or not proposed_tool:
+        if not isinstance(proposed_tool, str) or not proposed_tool.strip():
             return (
                 "Agent 返回了无效动作，本轮没有可批准的建议。"
                 "请拒绝旧建议后重新提出；不会执行空动作。"
@@ -770,6 +933,14 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 "训练耗时：尚无训练实测，待估算；输入生成成本不代表超算训练成本。",
                 "批准后仅生成输入与GPU.sh，由你上传提交；不本机训练、不自动激活模型。",
             ]
+        if (
+            proposed_tool == "prepare_local_batch_files"
+            and (params := (proposal.get("raw_action") or {}).get("parameters") or {}).get(
+                "mode"
+            )
+            == "relax_mc_inputs"
+        ):
+            lines = _relax_mc_approval_context(result.get("state") or {}, proposal) + lines
         recovered_count = int(result.get("recovered_count") or 0)
         runtime = cost.get("runtime_budget") or {}
         if runtime.get("serial_seconds") is not None:
@@ -1085,17 +1256,18 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             )
         directories = wait.get("batch_directories") or wait.get("task_directories") or []
         if directories:
-            lines.append("待提交的批次目录：")
+            lines.append("提交路径（批次目录）：")
             lines.extend(f"- `{path}`" for path in directories[:5])
             if len(directories) > 5:
                 lines.append(f"- 其余 {len(directories) - 5} 个批次见任务清单和 state 文件。")
         results_directories = wait.get("results_directories") or []
         if results_directories:
             lines.append(
-                "本阶段统一结果目录：" + "、".join(f"`{path}`" for path in results_directories)
+                "回收路径（本地结果目录）："
+                + "、".join(f"`{path}`" for path in results_directories)
             )
         lines.append(
-            "本阶段任务完成后，只需下载 `results/transfer/all.results.zip`，放到登记的本地 `results/` 目录，"
+            "本阶段任务完成后，从超算对应任务目录下载 `results/transfer/all.results.zip`，放到上方登记的本地回收路径，"
             "其中含所有任务的 `result.json`、`task.finished.json` 和最终结构；再对 Agent 说“继续”。"
             "Agent 会按任务校验并回收；未回传任务继续等待，不会重复准备或提交。"
             "旧批次仍按原任务目录回收。"

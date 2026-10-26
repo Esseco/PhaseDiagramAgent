@@ -61,8 +61,10 @@ def project_progress(state, state_path, *, session=None):
         else "project_input_or_results"
     )
     from phase_agent.runtime.result_recovery_status import result_recovery_facts
+    from phase_agent.runtime.partial_recovery import partial_recovery_facts
 
     progress["result_recoveries"] = result_recovery_facts(state)
+    progress["partial_recoveries"] = partial_recovery_facts(state)
     tasks = state.get("tasks") or []
     if isinstance(tasks, dict):
         tasks = list(tasks.values())
@@ -119,6 +121,12 @@ def project_progress(state, state_path, *, session=None):
             "result_verification",
             "已有结果待核验",
             "核对原作业和结果，继续回收；不要整批重投",
+        )
+    elif progress["partial_recoveries"]:
+        status, label, action = (
+            "partial_recovery",
+            "结果部分回收",
+            "可继续使用已回收成功结果，或只补全失败任务；不会整批重跑",
         )
     elif any(row.get("status") == "running" for row in tasks):
         status, label, action = (

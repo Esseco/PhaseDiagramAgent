@@ -21,6 +21,7 @@ def _audit_record(
 
 
 def _upsert_record(state, record):
+    record = compact_action_history(record)
     records = state.setdefault("action_records", [])
     for index, existing in enumerate(records):
         if existing.get("record_id") == record["record_id"]:

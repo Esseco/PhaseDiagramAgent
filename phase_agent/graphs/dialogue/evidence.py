@@ -31,6 +31,7 @@ def progress_signature(facts):
 
 def conversation_facts(facts, project):
     from phase_agent.analysis.state.batch_return_facts import batch_return_facts
+    from phase_agent.runtime.partial_recovery import partial_recovery_facts
 
     from phase_agent.analysis.state.task_failure_facts import task_failure_facts
 
@@ -60,6 +61,11 @@ def conversation_facts(facts, project):
             for row in (facts.get("task_wait_cancellations") or [])[-6:]
         ],
         "batch_return_facts": batch_return_facts(facts),
+        "partial_recovery": partial_recovery_facts(facts),
+        "partial_recovery_instruction": (
+            "部分回收只能二选一：继续时使用成功子集并明确标注覆盖不足；补全时只针对失败任务提出单项重试，"
+            "保留原失败记录，不得重跑或重建整批。"
+        ),
         "current_status": facts.get("status"),
         "human_constraints": deepcopy(
             (facts.get("decision_memory") or {}).get("long_term_advice")

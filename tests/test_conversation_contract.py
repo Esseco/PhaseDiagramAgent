@@ -148,6 +148,29 @@ def test_scientific_proposal_reuse_or_refresh_preserves_usage(tmp_path, changed)
     assert handler.workflow_kwargs["agent_client"] is model
 
 
+def test_recovery_transition_requests_one_dft_or_branch_proposal(tmp_path):
+    from phase_agent.graphs.dialogue.decision import decide_from_saved_facts
+
+    calls = []
+
+    def model(payload):
+        calls.append(payload)
+        return {"kind": "answer", "answer": "已根据回收证据完成下一步判断。"}
+
+    handler = make_handler(tmp_path, model)
+    result = decide_from_saved_facts(
+        handler,
+        {"_recovery_just_approved": True},
+        "继续",
+        lambda: None,
+    )
+    assert result["status"] == "answered"
+    choice = calls[0]["decision_context"]["post_recovery_choice"]
+    assert "select_dft_candidates" in choice
+    assert "generate_branches" in choice
+    assert "不得执行" in choice
+
+
 def test_current_message_is_separate_from_historical_context():
     from unittest.mock import patch
     from tests.test_deepseek_client import FakeResponse, completion

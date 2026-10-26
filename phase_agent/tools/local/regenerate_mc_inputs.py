@@ -501,6 +501,9 @@ def _prepare_with_input_backup(
             raise ValueError("不能替换整个 MC 轮次目录")
     backup = operation.parent / ".mc_input_history" / operation.name / uuid.uuid4().hex
     backup.resolve().relative_to(root)
+    from phase_agent.tools.remote.transfer_bundle import local_path
+
+    backup = local_path(backup)
     parents = {source.parent for source in sources}
     previous_children = {path for parent in parents if parent.is_dir() for path in parent.iterdir()}
     backup.mkdir(parents=True)

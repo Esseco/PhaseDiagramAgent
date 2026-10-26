@@ -12,10 +12,7 @@ def run(payload, **kwargs):
     client = create_deepseek_client(api_key="fake-no-network", thinking="disabled", **kwargs)
     with patch(
         "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
-        side_effect=[
-            FakeResponse(completion('{"tool":', finish_reason="length")),
-            FakeResponse(completion('{"tool":"generate_branches"}')),
-        ],
+        return_value=FakeResponse(completion('{"tool":"generate_branches"}')),
     ) as request:
         result = client(payload)
     limits = [json.loads(call.args[0].data)["max_tokens"] for call in request.call_args_list]
@@ -25,15 +22,15 @@ def run(payload, **kwargs):
 def test_configured_limit_not_silently_capped_at_1600():
     _, limits = run({}, max_tokens=2400)
     assert limits[0] >= 2400
-    assert limits[1] > limits[0]
+    assert len(limits) == 1
 
 
-def test_scientific_contract_has_room_and_true_length_retry():
+def test_scientific_contract_has_room_on_first_request():
     _, limits = run(
         {"output_contracts": {"scientific_decision": {"type": "object"}}}, max_tokens=2400
     )
     assert limits[0] >= 4096
-    assert limits[1] >= 8192
+    assert len(limits) == 1
 
 
 def test_dft_decisions_and_purpose_pairs_share_output_budget():
@@ -45,7 +42,7 @@ def test_dft_decisions_and_purpose_pairs_share_output_budget():
         }
     )
     assert limits[0] >= 16000
-    assert limits[1] >= limits[0]
+    assert len(limits) == 1
 
 
 def test_small_dialogue_keeps_small_initial_output():
@@ -53,15 +50,18 @@ def test_small_dialogue_keeps_small_initial_output():
     assert limits[0] == 800
 
 
-def test_twice_truncated_never_returns_partial_action_or_loops():
+@pytest.mark.parametrize("content", ["{}", '{"tool":'])
+def test_nonreasoning_truncation_never_returns_partial_action_or_retries(content):
     client = create_deepseek_client(api_key="fake-no-network", thinking="disabled")
     with patch(
         "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
-        return_value=FakeResponse(completion("{}", finish_reason="length")),
+        return_value=FakeResponse(completion(content, finish_reason="length")),
     ) as request:
-        with pytest.raises(DeepSeekResponseError):
+        with pytest.raises(DeepSeekResponseError) as caught:
             client({"output_contracts": {"scientific_decision": {}}})
-    assert request.call_count == 2
+    assert request.call_count == 1
+    assert caught.value.code == "invalid_json"
+    assert caught.value.llm_usage["calls"] == 1
 
 
 def test_scientific_request_does_not_ask_for_duplicate_explanation():

@@ -17,9 +17,11 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
 
     def handler(*, action, context):
         state = _input_working_state(context)
+        parameters = action.get("parameters") or {}
+        prepare_after_approval = bool(parameters.get("prepare_inputs_after_approval"))
         if context.get("execution_mode") == "interactive" and not (
-            action.get("parameters") or {}
-        ).get("dft_input_preview"):
+            parameters.get("dft_input_preview") or prepare_after_approval
+        ):
             return {
                 "status": "rejected",
                 "state": state,
@@ -38,7 +40,7 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
         )
         config["budget_limits"] = deepcopy(context["effective_config"]["budgets"])
         remaining = _remaining_dft_budget(state, config)
-        parameters = deepcopy(action.get("parameters") or {})
+        parameters = deepcopy(parameters)
         proposal = {
             "status": "completed",
             "decisions": deepcopy(parameters.get("decisions") or []),
@@ -72,7 +74,7 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             }
         reviewed_settings = None
         review = action.get("dft_template_review")
-        if context.get("execution_mode") == "interactive":
+        if context.get("execution_mode") == "interactive" and not prepare_after_approval:
             from phase_agent.tools.workflows.dft_template_review import validate_review
 
             try:
@@ -161,7 +163,7 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 "rejected": deepcopy(validation["rejected"]),
             }
         )
-        if parameters.get("dft_input_preview") and tasks:
+        if (parameters.get("dft_input_preview") or prepare_after_approval) and tasks:
             from phase_agent.tools.local.prepare_dft_upload_batches import (
                 prepare_dft_upload_batches,
             )

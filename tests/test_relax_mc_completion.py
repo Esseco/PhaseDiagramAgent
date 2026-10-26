@@ -10,6 +10,11 @@ from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunne
 from tests.test_relax_mc_phase_dependencies import setup, run_batch
 
 
+@pytest.fixture
+def tmp_path(tmp_path_factory):
+    return tmp_path_factory.mktemp("c")
+
+
 @pytest.mark.parametrize("error_key", ["result_validation_errors", "scientific_feedback_errors"])
 def test_phase_requires_feedback_acceptance_before_marking_done(tmp_path, monkeypatch, error_key):
     state = {
@@ -129,7 +134,8 @@ def test_rejected_mc_stops_before_next_wave_and_returns_diagnostic(tmp_path, mon
     if driver == "dependencies":
         root, io, calls = setup(tmp_path, monkeypatch)
         run_batch(root, submit=True, io=io)
-        assert run_batch(root, submit=True, io=io, phase=0)["status"] == "queued"
+        first = run_batch(root, submit=True, io=io, phase=0)
+        assert first["status"] == "queued", first
         submissions = len(io.rows)
         outcome = run_batch(root, submit=True, io=io, phase=1)
         assert len(io.rows) == submissions
@@ -138,7 +144,7 @@ def test_rejected_mc_stops_before_next_wave_and_returns_diagnostic(tmp_path, mon
         execute, calls = fake_executor(monkeypatch)
         root = Path(prepared["directory"])
         outcome = run.run_batch(root, submit=True, batch_executor=execute)
-    assert outcome["status"] == "paused"
+    assert outcome["status"] == "paused", outcome
     current = read(root / "workflow_state.json")
     assert current["relax_mc_remote"]["phase"] == 1
     assert current["relax_mc_remote"]["completed_mc_waves"] == []
@@ -266,7 +272,7 @@ def test_failed_mc_is_not_recorded_as_completed_wave(tmp_path, monkeypatch):
     *_, prepared = package(tmp_path)
     execute, calls = fake_executor(monkeypatch, fail_mc=True)
     outcome = run_synchronous(prepared["directory"], submit=True, batch_executor=execute)
-    assert outcome["status"] == "paused"
+    assert outcome["status"] == "paused", outcome
     state = read(Path(prepared["directory"]) / "workflow_state.json")
     assert state["relax_mc_remote"]["completed_mc_waves"] == []
     assert state["relax_mc_remote"]["phase"] == 1

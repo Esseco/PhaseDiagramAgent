@@ -1,29 +1,17 @@
-"""Versioned transfer capacity shared by producers and both receivers."""
+"""Compatibility imports; capacity policy lives in the portable transfer module."""
 
-MAX_ARCHIVE_FILES = 100000  # Includes the transfer manifest itself.
-MAX_MANIFEST_BYTES = 64 * 1024**2
-MAX_ARCHIVE_BYTES = 8 * 1024**3
+from phase_agent.tools.remote.transfer_bundle import (
+    MAX_ARCHIVE_FILES,
+    MAX_MANIFEST_BYTES,
+    MAX_ARCHIVE_BYTES,
+    bootstrap_limits,
+    validate_capacity,
+)
 
-
-def validate_capacity(file_count, manifest_bytes, total_bytes, *, max_bytes=MAX_ARCHIVE_BYTES):
-    if file_count > MAX_ARCHIVE_FILES:
-        raise ValueError(
-            f"Transfer file count exceeds limit ({file_count}/{MAX_ARCHIVE_FILES}); split the package before transfer"
-        )
-    if manifest_bytes > MAX_MANIFEST_BYTES:
-        raise ValueError(
-            f"Transfer manifest exceeds size limit ({manifest_bytes}/{MAX_MANIFEST_BYTES}); split the package before transfer"
-        )
-    if total_bytes > max_bytes:
-        raise ValueError(
-            f"Result archive exceeds size limit ({total_bytes}/{max_bytes}); split the package before transfer"
-        )
-
-
-def bootstrap_limits():
-    # The compute node must verify inputs before it can import the bundled package.
-    return (
-        f"MAX_ARCHIVE_FILES = {MAX_ARCHIVE_FILES}\n"
-        f"MAX_MANIFEST_BYTES = {MAX_MANIFEST_BYTES}\n"
-        f"MAX_ARCHIVE_BYTES = {MAX_ARCHIVE_BYTES}\n"
-    )
+__all__ = [
+    "MAX_ARCHIVE_FILES",
+    "MAX_MANIFEST_BYTES",
+    "MAX_ARCHIVE_BYTES",
+    "bootstrap_limits",
+    "validate_capacity",
+]

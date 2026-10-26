@@ -43,6 +43,18 @@ def thread_view(row):
     return {**row, "values": projected} if projected is not values else row
 
 
+def is_agent_reply_update(event):
+    """Identify the internal agent text that ``respond`` emits again.
+
+    Keep other agent updates (interrupts, diagnostics and child events)
+    visible.  Only the exact top-level reply update is transport noise.
+    """
+    if not isinstance(event, dict) or set(event) != {"agent"}:
+        return False
+    value = event.get("agent")
+    return isinstance(value, dict) and isinstance(value.get("reply"), str)
+
+
 async def guarded_studio_stream(original, run=None, *args, **kwargs):
     """Do not present a completed, empty Chat resume as a processed new message."""
     options = (run or {}).get("kwargs") or {}
@@ -51,6 +63,12 @@ async def guarded_studio_stream(original, run=None, *args, **kwargs):
         graph == "phase_chat" and options.get("input") is None and options.get("command") is None
     )
     requested = options.get("stream_mode") or []
+    # The phase_chat graph keeps the short reply on the internal ``agent``
+    # update and emits the same text as a single AIMessage from ``respond``.
+    # When callers explicitly request updates, forwarding both makes Studio
+    # render the answer twice.  Keep the internal update for checkpoints and
+    # expose only the final message at the transport boundary.
+    suppress_agent_reply = graph == "phase_chat" and "updates" in requested
     prepared = run
     if guard:
         prepared = {
@@ -61,9 +79,17 @@ async def guarded_studio_stream(original, run=None, *args, **kwargs):
     stream = original(prepared, *args, **kwargs) if run is not None else original(*args, **kwargs)
     async with aclosing(stream) as events:
         async for name, event in events:
+            if (
+                suppress_agent_reply
+                and name.split("|", 1)[0] == "updates"
+                and is_agent_reply_update(event)
+            ):
+                continue
             if guard and name.split("|", 1)[0] == "updates":
                 executed = True
                 if "updates" not in requested:
+                    continue
+                if is_agent_reply_update(event):
                     continue
             yield name, event
     if guard and not executed:

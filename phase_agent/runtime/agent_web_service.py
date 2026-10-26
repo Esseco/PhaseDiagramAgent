@@ -78,7 +78,7 @@ def create_control_server(handler, runtime_config, *, port):
                 owner = project_handler(handler)
                 state = read_presentation_state(owner.state_path) if owner else {}
                 try:
-                    return save_interaction(
+                    reply = save_interaction(
                         Path(runtime_config).resolve().parent,
                         message,
                         reply,
@@ -87,7 +87,10 @@ def create_control_server(handler, runtime_config, *, port):
                         record=record,
                     )
                 except (OSError, ValueError, TypeError):
-                    return reply + "\n交互 Markdown 保存失败；保留本轮答复，未重放操作。"
+                    reply += "\n交互 Markdown 保存失败；保留本轮答复，未重放操作。"
+                if owner is not None:
+                    owner.remember_turn_reply(record, reply)
+                return reply
 
     return create_server(
         chat,

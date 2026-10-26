@@ -11,7 +11,13 @@ import shutil
 from phase_agent.configuration.session.relocate_workspace_paths import (
     relocate_workspace_paths,
 )
+from phase_agent.tools.local.organize_epoch_folders import (
+    repair_archive_index,
+    relocate_archive_index,
+)
 from phase_agent.tools.remote.submission_layout import (
+    submission_bucket_moves,
+    submission_cleanup_moves,
     submission_moves,
     write_submission_index,
 )
@@ -23,6 +29,10 @@ OPERATIONAL_KEYS = {
     "phase_identification_cache",
     "branch_candidates",
     "remote_finetune_jobs",
+    "relax_mc_batches",
+    "result_collection",
+    "result_recoveries",
+    "filesystem_migrations",
     "model_registry",
     "candidate_models",
     "dft_dataset_records",
@@ -64,7 +74,10 @@ def migrate_submission_layout(project, backup_directory):
     state_path = project / "workflow_state/state.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
     moves = submission_moves(root, state)
+    moves.extend(submission_bucket_moves(root, state))
+    moves.extend(submission_cleanup_moves(root, state))
     if not moves:
+        repair_archive_index(project)
         write_submission_index(root, state)
         return {"project": project.name, "status": "already_compact", "moves": []}
     backup = Path(backup_directory) / project.name
@@ -80,6 +93,8 @@ def migrate_submission_layout(project, backup_directory):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, destination)
         saved[path] = destination
+    archive_index = root / ".archive_index.json"
+    original_archive_index = archive_index.read_bytes() if archive_index.is_file() else None
     digests = {row["from"]: inventory(row["from"]) for row in moves}
     moved, links, aliases = [], [], []
     try:
@@ -90,6 +105,9 @@ def migrate_submission_layout(project, backup_directory):
             old.rename(new)
             moved.append((old, new))
             assert inventory(new) == digests[str(old)], str(new)
+        # `root` is the submissions directory; the archive helper accepts either
+        # that path or the project root and rewrites both moved and stale entries.
+        relocate_archive_index(root, moves)
         for key in OPERATIONAL_KEYS:
             if key in state:
                 state[key] = relocate_workspace_paths(state[key], moves, project)
@@ -103,12 +121,14 @@ def migrate_submission_layout(project, backup_directory):
         write_submission_index(root, state)
         # Hide only obsolete wrapper directories, never a canonical calculation.
         if os.name == "nt":
-            for wrapper in {
-                root
-                / Path(row["from"]).relative_to(root).parts[0]
-                / Path(row["from"]).relative_to(root).parts[1]
-                for row in moves
-            }:
+            wrappers = set()
+            for row in moves:
+                parts = Path(row["from"]).relative_to(root).parts
+                if len(parts) >= 2:
+                    wrapper = root / parts[0] / parts[1]
+                    if wrapper.is_dir():
+                        wrappers.add(wrapper)
+            for wrapper in wrappers:
                 attrs = ctypes.windll.kernel32.GetFileAttributesW(str(wrapper))
                 if attrs == 0xFFFFFFFF or not ctypes.windll.kernel32.SetFileAttributesW(
                     str(wrapper), attrs | 2
@@ -126,6 +146,8 @@ def migrate_submission_layout(project, backup_directory):
         atomic_json(root / ".layout-migration.json", report)
         return report
     except Exception:
+        if original_archive_index is not None:
+            archive_index.write_bytes(original_archive_index)
         for link in reversed(links):
             if os.name == "nt":
                 os.rmdir(link)  # Remove this verified junction only; never its target.

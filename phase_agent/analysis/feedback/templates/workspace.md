@@ -10,9 +10,11 @@
 | 修改预算、MC、DFT和训练设置 | [运行配置](parameters/run_config.project.json) |
 | 查看产物 | [结果索引](analysis_outputs/output_index.md) |
 | 查状态与审批 | workflow_state/ |
-| 查母结构与候选 | structures/reference_structures/、candidate_structures/ |
-| 查提交与回传 | submissions/epochN/，见 [提交索引](submissions/README.md) |
+| 查母结构与候选 | [母结构](structures/reference_structures/) · [候选结构](structures/candidate_structures/) |
+| 查提交与回传 | Agent 先读 [机器索引](submissions/submission_index.json)，目录说明见 [提交索引](submissions/README.md) |
 | 查交互记录 | interaction_records/epochN/，见 [交互索引](interaction_records/README.md) |
+| 查共享数据 | shared_dft/records.sqlite3（共享 DFT 数据库，按配置读取） |
+| 查对话信息 | workflow_state/dialogue_memory/ 与 dialogue_process/（哈希 JSON，按会话和处理批次保存） |
 | 查记忆 | agent_memory/，阅读视图不授予审批 |
 | 查恢复资料 | history_backups/ |
 
@@ -25,3 +27,5 @@
 计算、输入准备、提交与激活按审批规则进行。优先使用 Agent 交付且通过输入验收的完整 `_input` 文件夹，执行其中 `sbatch submit_all.sh`；远端环境通过预检后才提交子作业。将配对 `_output` 文件夹整体回传原登记位置后继续。历史任务沿用其登记脚本、目录和回执，已提交任务不重复提交。模型和大轨迹按项目协议留在超算，独立验证不能用训练数据或K折成绩代替。
 
 文件对应关系见 [目录说明](documentation/FILE_LAYOUT.md)。项目服务由源码中的 Studio 入口管理；状态、账本与检查点保持原登记，不手动改任务编号或完成标记。
+
+根目录 agent_runtime.json 是日常入口。diagrams/diagram_default/agent_runtime.json 仅作历史兼容配置入口，科学状态和结果仍归项目根。候选结构和记忆在初始化后建立，未开始的项目可能尚无这些目录。

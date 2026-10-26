@@ -49,9 +49,22 @@ def review_pending(
         current_version = build_status_summary(
             state, config_version=state.get("confirmed_config_version")
         )["summary_id"]
-        if expected_state_version != current_version:
-            raise request_error("state_version_stale; refresh the approval page")
         from phase_agent.analysis.state.project_authority import project_identity
+
+        proposal = pending.get("agent_proposal") or {}
+        current_hash = proposal_hash(proposal)
+        if expected_state_version != current_version:
+            # summary_id includes read-only facts, token accounting and
+            # presentation metadata. Those may change while the immutable
+            # pending proposal remains identical. Refresh the UI version in
+            # that case; a changed proposal or bound project still fails
+            # closed below.
+            if expected_proposal_hash != current_hash:
+                raise request_error("proposal_hash_mismatch; refresh the approval page")
+            bound_identity = pending.get("project_identity")
+            if bound_identity and bound_identity != project_identity(state):
+                raise request_error("proposal_context_changed; 模型或生效设置已改变，需更新具体方案")
+            expected_state_version = current_version
 
         if (
             decision in {"approve", "confirm_sensitive"}
@@ -59,8 +72,7 @@ def review_pending(
             and (pending["project_identity"] != project_identity(state))
         ):
             raise request_error("proposal_context_changed; 模型或生效设置已改变，需更新具体方案")
-        proposal = pending.get("agent_proposal") or {}
-        if expected_proposal_hash != proposal_hash(proposal):
+        if expected_proposal_hash != current_hash:
             raise request_error("proposal_hash_mismatch; refresh the approval page")
         if decision not in {"approve", "reject", "confirm_sensitive", "modify"}:
             raise request_error("invalid approval-page decision")

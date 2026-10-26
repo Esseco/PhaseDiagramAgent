@@ -159,7 +159,7 @@ def prepare_wave(root, state, manager, manifest):
         task_preparer=create_mlip_task_preparer(manager, manifest["phase_references"], config),
     )
     while True:
-        prepared = runner.prepare(state)
+        prepared = runner.prepare(state, _defer_archive=True)
         state = prepared["state"]
         if prepared["status"] == "no_tasks":
             break

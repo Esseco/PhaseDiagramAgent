@@ -6,6 +6,7 @@ from phase_agent.tools.remote.build_upload_batch_directory import (
 )
 from phase_agent.tools.remote.submission_layout import (
     compact_calculation_directory,
+    submission_cleanup_moves,
     submission_moves,
 )
 from phase_agent.tools.remote.migrate_submission_layout import migrate_submission_layout
@@ -25,9 +26,7 @@ from phase_agent.tools.remote.batch_runner import _task_result_path
         ("dft_relax", {}, "G0001_DFT-0001_DFT-relax"),
     ],
 )
-def test_flat_builder_preserves_batch_and_sibling_results(
-    tmp_path, stage, extra, label
-):
+def test_flat_builder_preserves_batch_and_sibling_results(tmp_path, stage, extra, label):
     directory, metadata = build_upload_batch_directory(
         tmp_path,
         {},
@@ -38,22 +37,21 @@ def test_flat_builder_preserves_batch_and_sibling_results(
         search_group_index=1,
         **extra,
     )
-    assert directory.parent.parent == tmp_path / "epoch0" / label
+    assert directory.parent.parent == tmp_path / "epoch0" / "calculations" / label
     assert directory.parent.name == "inputs"
     assert directory.name.endswith("remote-000001")
     assert metadata["submission_layout_version"] == 2
     assert (
-        compact_calculation_directory(tmp_path, directory.parent.parent)
-        == directory.parent.parent
+        compact_calculation_directory(tmp_path, directory.parent.parent) == directory.parent.parent
     )
 
 
 def test_groups_and_refresh_do_not_collide(tmp_path):
     first = tmp_path / "epoch0_m1/Search-group-0001/Relax-0001"
     second = tmp_path / "epoch0_m1/Search-group-0002/Relax-0001"
-    assert compact_calculation_directory(
-        tmp_path, first
-    ) != compact_calculation_directory(tmp_path, second)
+    assert compact_calculation_directory(tmp_path, first) != compact_calculation_directory(
+        tmp_path, second
+    )
     directory, _ = build_upload_batch_directory(
         tmp_path,
         {},
@@ -94,22 +92,17 @@ def test_migration_preserves_payload_and_historical_approval(tmp_path):
     assert not old.exists()
     assert not old.is_junction() and not old.is_symlink()
     assert updated["pending_execution_policies"] == approval
-    assert (
-        updated["confirmed_config_version"] == updated["active_model_version"] == "same"
-    )
+    assert updated["confirmed_config_version"] == updated["active_model_version"] == "same"
     assert result["immutable_files_verified"] == 1
     assert submission_moves(project / "submissions", updated) == []
-    assert (
-        migrate_submission_layout(project, tmp_path / "backup")["status"]
-        == "already_compact"
-    )
+    assert migrate_submission_layout(project, tmp_path / "backup")["status"] == "already_compact"
 
 
 def test_rejects_outside_or_collision_before_mutation(tmp_path):
     old = tmp_path / "epoch0_m1/Search-group-0001/Relax-0001"
     old.mkdir(parents=True)
-    target = tmp_path / "epoch0_m1/G0001_Relax-0001"
-    target.mkdir()
+    target = tmp_path / "epoch0_m1/calculations/G0001_Relax-0001"
+    target.mkdir(parents=True)
     with pytest.raises(FileExistsError):
         submission_moves(
             tmp_path,
@@ -140,9 +133,7 @@ def test_locked_directory_fails_without_creating_links(tmp_path, monkeypatch):
     (batch / "task.json").write_text('{"immutable": true}')
     state_path = project / "workflow_state/state.json"
     state_path.parent.mkdir()
-    state_path.write_text(
-        json.dumps({"slurm_batches": [{"upload_directory": str(batch)}]})
-    )
+    state_path.write_text(json.dumps({"slurm_batches": [{"upload_directory": str(batch)}]}))
     original_rename = Path.rename
 
     def locked_rename(self, target):
@@ -156,3 +147,55 @@ def test_locked_directory_fails_without_creating_links(tmp_path, monkeypatch):
     assert old.is_dir() and not old.is_junction() and not old.is_symlink()
     assert not (project / "submissions/epoch0/G0001_Relax-0001").exists()
     assert (batch / "task.json").read_text() == '{"immutable": true}'
+
+
+def test_submission_cleanup_moves_unregistered_epoch_material_to_previously_used(tmp_path):
+    project = tmp_path / "project"
+    root = project / "submissions"
+    operation = root / "epoch1/G0001_DFT-0001_DFT-single-point"
+    batch = operation / "inputs/batch"
+    batch.mkdir(parents=True)
+    (batch / "task.json").write_text('{"task": true}', encoding="utf-8")
+    (operation / "results").mkdir()
+    (operation / "results/result.json").write_text('{"result": true}', encoding="utf-8")
+    stale = root / "epoch1/Search-group-0002"
+    stale.mkdir(parents=True)
+    (stale / "old.txt").write_text("legacy", encoding="utf-8")
+    legacy_return = root / "epoch1/return-results"
+    legacy_return.mkdir()
+    (legacy_return / "old.results.zip").write_bytes(b"legacy-return")
+    legacy_archive = root / "曾用/20261024_cleanup/manifest.json"
+    legacy_archive.parent.mkdir(parents=True)
+    legacy_archive.write_text("{}", encoding="utf-8")
+    state_path = project / "workflow_state/state.json"
+    state_path.parent.mkdir(parents=True)
+    state = {
+        "slurm_batches": [
+            {
+                "upload_directory": str(batch),
+                "results_directory": str(operation / "results"),
+            }
+        ],
+        "tasks": [],
+        "active_model_version": "m1",
+    }
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    moves = submission_cleanup_moves(root, state)
+    assert {Path(row["from"]).name for row in moves} == {
+        "Search-group-0002",
+        "return-results",
+        "曾用",
+    }
+    result = migrate_submission_layout(project, tmp_path / "backup")
+    assert result["status"] == "migrated"
+    assert (root / "epoch1/calculations/G0001_DFT-0001_DFT-single-point").is_dir()
+    assert (root / "previously_used/epoch1/Search-group-0002/old.txt").read_text() == "legacy"
+    assert (
+        root / "previously_used/epoch1/return-results/old.results.zip"
+    ).read_bytes() == b"legacy-return"
+    assert (root / "previously_used/20261024_cleanup/manifest.json").is_file()
+    assert not stale.exists() and not legacy_return.exists() and not (root / "曾用").exists()
+    index = json.loads((root / "submission_index.json").read_text(encoding="utf-8"))
+    assert index["layout"]["previously_used"].startswith("previously_used/")
+    assert migrate_submission_layout(project, tmp_path / "backup")["status"] == "already_compact"

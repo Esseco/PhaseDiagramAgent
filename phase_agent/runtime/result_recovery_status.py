@@ -2,10 +2,15 @@
 
 from phase_agent.tools.state.task_waiting import awaiting_task_result
 from phase_agent.tools.relax_mc_batch.handoff import result_archive
+from phase_agent.runtime.partial_recovery import partial_recovery_facts
 
 
 def result_recovery_facts(state):
     tasks = state.get("tasks") or []
+    partial_rows = {
+        (row.get("kind"), row.get("identity")): row
+        for row in partial_recovery_facts(state)
+    }
     rows = []
     for identity, batch in (state.get("relax_mc_batches") or {}).items():
         if batch.get("status") in {"cancelled", "superseded"} or batch.get("model_version") not in (
@@ -26,6 +31,7 @@ def result_recovery_facts(state):
         recovery = (
             summary.get("recovery") or (state.get("result_recoveries") or {}).get(identity) or {}
         )
+        partial = partial_rows.get(("mc", identity))
         try:
             returned = result_archive(batch).is_file()
         except (KeyError, ValueError, OSError):
@@ -49,7 +55,14 @@ def result_recovery_facts(state):
         elif batch.get("import_checksum") and unverified_failures:
             kind, label = "needs_review", "历史失败记录缺少核验凭据；先核对原作业，不能据此重算"
         elif batch.get("import_checksum") and not pending and verified_failed:
-            kind, label = "needs_review", "已核验入账，存在失败任务待审阅；未重投计算"
+            if partial:
+                label = (
+                    f"已回收成功 {partial['coverage']}；失败 {partial['failed_count']} 个；"
+                    "可继续使用已回收结果，或只补全失败项；不会整批重跑"
+                )
+            else:
+                label = "已核验入账，存在失败任务待审阅；未重投计算"
+            kind = "needs_review"
         elif batch.get("import_checksum") and not pending:
             kind, label = "completed", "本批已核验入账；计算完成不代表科学收敛"
         elif batch.get("import_checksum"):
@@ -75,6 +88,7 @@ def result_recovery_facts(state):
                 "driver_diagnostic": batch.get("driver_diagnostic"),
                 "historical_controller_diagnostic": summary.get("reason"),
                 "recovered_task_count": len(recovery.get("recovered_task_ids") or []),
+                "partial_recovery": partial,
                 "job_evidence": recovery.get("job_evidence"),
                 "submitted": False,
             }

@@ -8,6 +8,7 @@ import hashlib
 import json
 
 import re
+import threading
 
 from copy import deepcopy
 
@@ -311,6 +312,7 @@ class ConfigurationChatHandler:
     ):
 
         self.workflow_kwargs = dict(workflow_kwargs)
+        self.lock = threading.RLock()
 
         self.state_path = Path(workflow_kwargs["state_path"])
 
@@ -433,6 +435,10 @@ class ConfigurationChatHandler:
         }
 
     def __call__(self, messages, *, conversation_id=None):
+        with self.lock:
+            return self._call(messages, conversation_id=conversation_id)
+
+    def _call(self, messages, *, conversation_id=None):
 
         metadata_reply = _open_webui_metadata_reply(_latest_user_message(messages))
 

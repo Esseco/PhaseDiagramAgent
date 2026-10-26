@@ -222,7 +222,61 @@ def _approval_page():
 <p id="message" class="warn"></p><section id="diagnostics"></section><section id="operations"></section><section id="recovery"></section><section id="plans"></section><h2>项目生成图表</h2><section id="charts" class="charts"></section>
 <script>
 const el=id=>document.getElementById(id); const auth=()=>({'Authorization':'Bearer '+el('token').value,'Content-Type':'application/json'});
-async function api(path, options={}){const headers=auth();if(options.method==='POST'){headers.Prefer='respond-async';headers['Idempotency-Key']=crypto.randomUUID()}const r=await fetch(path,{...options,headers,...(options.method==='POST'?{}:{signal:AbortSignal.timeout(30000)})});let j=await r.json();if(!r.ok)throw Error((j.error?.message||r.status)+(j.diagnostic?.incident_id?"；故障编号 "+j.diagnostic.incident_id:""));if(r.status===202){document.querySelectorAll('#plans button').forEach(b=>b.disabled=true);try{while(['pending','running'].includes(j.status)){el('message').textContent=(j.message||'后台处理中')+'；可查看过程页，请勿重复批准';await new Promise(resolve=>setTimeout(resolve,1200));const p=await fetch(j.status_url,{headers:auth(),signal:AbortSignal.timeout(15000)});if(!p.ok)throw Error('状态读取失败，后台请求可能仍在运行；请查看过程页，不要重复批准');j=await p.json()}if(j.status!=='completed')throw Error(j.message||'请求受阻，先核对已有结果');return j.result}finally{document.querySelectorAll('#plans button').forEach(b=>b.disabled=true)}}return j}
+function idempotencyFallback(seed){
+ let hash=2166136261;
+ for(let i=0;i<seed.length;i++) hash=Math.imul(hash^seed.charCodeAt(i),16777619);
+ return 'ui-fallback-'+(hash>>>0).toString(16);
+}
+function idempotencyRecord(path, options={}){
+ if(options.method!=='POST')return null;
+ const slot='phase-idempotency:'+path+'\\n'+(options.body||'');
+ let key;
+ try{
+  key=sessionStorage.getItem(slot);
+  if(!key){key=crypto.randomUUID();sessionStorage.setItem(slot,key);}
+ }catch(_error){key=idempotencyFallback(slot)}
+ return {key,clear:()=>{try{sessionStorage.removeItem(slot)}catch(_error){}}};
+}
+async function api(path, options={}){
+ const headers=auth();
+ const idempotency=idempotencyRecord(path, options);
+ if(idempotency){
+  headers.Prefer='respond-async';headers['Idempotency-Key']=idempotency.key;
+  document.querySelectorAll('#plans button').forEach(b=>b.disabled=true);
+ }
+ const waiting='请求等待超时；后台结果待核对。请点“读取”查看进度，不要重复批准。';
+ const fetchJson=async(url,request,timeoutMs=15000)=>{
+  try{
+   const response=await fetch(url,{...request,signal:AbortSignal.timeout(Math.max(1,timeoutMs))});
+   return {response,value:await response.json()};
+  }catch(error){
+   if(['TimeoutError','AbortError'].includes(error.name))throw Error(waiting);
+   throw error;
+  }
+ };
+ const {response:r,value:first}=await fetchJson(path,{...options,headers});let j=first;
+ if(!r.ok)throw Error((j.error?.message||r.status)+(j.diagnostic?.incident_id?"；故障编号 "+j.diagnostic.incident_id:""));
+ if(r.status===202){
+  const deadline=Date.now()+120000;
+  document.querySelectorAll('#plans button').forEach(b=>b.disabled=true);
+  try{
+   while(['pending','running'].includes(j.status)){
+    if(Date.now()>=deadline)throw Error(waiting);
+    el('message').textContent=(j.message||'后台处理中')+'；可查看过程页，请勿重复批准';
+    await new Promise(resolve=>setTimeout(resolve,Math.min(1200,deadline-Date.now())));
+    const remaining=deadline-Date.now();if(remaining<=0)throw Error(waiting);
+    const {response:p,value:next}=await fetchJson(j.status_url,{headers:auth()},Math.min(15000,remaining));
+    if(!p.ok)throw Error('状态读取失败，后台请求可能仍在运行；请点“读取”核对，不要重复批准');
+    j=next;
+   }
+   if(j.status!=='completed')throw Error(j.message||'请求受阻，先核对已有结果');
+   idempotency?.clear();
+   return j.result;
+  }finally{document.querySelectorAll('#plans button').forEach(b=>b.disabled=true)}
+ }
+ idempotency?.clear();
+ return j;
+}
 function pretty(x){return JSON.stringify(x,null,2)}
 async function loadAll(){
  const epoch=++loadEpoch;currentStateVersion=null;el('message').textContent='';['plans','charts','recovery','operations','diagnostics'].forEach(id=>el(id).replaceChildren());

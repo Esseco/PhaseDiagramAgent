@@ -391,6 +391,7 @@ def inspect_runtime(runtime_path):
         or bool(recovery.get("unsettled"))
         or bool(state_facts.get("result_validation_errors"))
         or bool(state_facts.get("scientific_feedback_errors"))
+        or bool((sections.get("python_environments", {}).get("data") or {}).get("missing"))
     )
     report["status"] = (
         "needs_attention"

@@ -11,12 +11,9 @@ from contextlib import contextmanager
 import time
 
 MANIFEST = "transfer_manifest.json"
-from phase_agent.tools.remote.transfer_limits import (
-    MAX_ARCHIVE_FILES,
-    MAX_MANIFEST_BYTES,
-    MAX_ARCHIVE_BYTES,
-    validate_capacity,
-)
+MAX_ARCHIVE_FILES = 100000
+MAX_MANIFEST_BYTES = 64 * 1024**2
+MAX_ARCHIVE_BYTES = 8 * 1024**3
 
 RESULT_NAMES = {
     "mc_occupations.bin",
@@ -40,6 +37,30 @@ RESULT_NAMES = {
     "cv_baseline_review.json",
     "remote_context.json",
 }
+
+
+def validate_capacity(file_count, manifest_bytes, total_bytes, *, max_bytes=MAX_ARCHIVE_BYTES):
+    if file_count > MAX_ARCHIVE_FILES:
+        raise ValueError(
+            f"Transfer file count exceeds limit ({file_count}/{MAX_ARCHIVE_FILES}); split the package before transfer"
+        )
+    if manifest_bytes > MAX_MANIFEST_BYTES:
+        raise ValueError(
+            f"Transfer manifest exceeds size limit ({manifest_bytes}/{MAX_MANIFEST_BYTES}); split the package before transfer"
+        )
+    if total_bytes > max_bytes:
+        raise ValueError(
+            f"Result archive exceeds size limit ({total_bytes}/{max_bytes}); split the package before transfer"
+        )
+
+
+def bootstrap_limits():
+    # The compute node must verify inputs before it can import the bundled package.
+    return (
+        f"MAX_ARCHIVE_FILES = {MAX_ARCHIVE_FILES}\n"
+        f"MAX_MANIFEST_BYTES = {MAX_MANIFEST_BYTES}\n"
+        f"MAX_ARCHIVE_BYTES = {MAX_ARCHIVE_BYTES}\n"
+    )
 
 
 def local_path(path):
@@ -254,6 +275,17 @@ def _safe_name(name):
     return path
 
 
+def _read_manifest(archive):
+    if archive.getinfo(MANIFEST).file_size > MAX_MANIFEST_BYTES:
+        raise ValueError("Transfer manifest exceeds size limit")
+    manifest = json.loads(archive.read(MANIFEST))
+    if not isinstance(manifest, dict):
+        raise ValueError("Transfer manifest must be a JSON object")
+    if "kind" in manifest and not isinstance(manifest["kind"], str):
+        raise ValueError("Transfer manifest kind must be a string")
+    return manifest
+
+
 def _validated_inventory(archive, max_bytes, storage_kind):
     infos = archive.infolist()
     if len({i.filename.casefold() for i in infos}) != len(infos):
@@ -270,13 +302,17 @@ def _validated_inventory(archive, max_bytes, storage_kind):
             raise ValueError("Archive directories/symlinks are not supported")
     if archive.getinfo(MANIFEST).file_size > MAX_MANIFEST_BYTES:
         raise ValueError("Transfer manifest exceeds size limit")
-    manifest = json.loads(archive.read(MANIFEST))
+    manifest = _read_manifest(archive)
     allowed = {"results"} if storage_kind is None else {storage_kind}
     if storage_kind not in {None, "storage_inputs", "storage_results"}:
         raise ValueError("Unsupported local storage kind")
     if manifest.get("schema") != 1 or manifest.get("kind") not in allowed:
         raise ValueError("Not a supported result archive")
-    rows = manifest["files"]
+    rows = manifest.get("files")
+    if not isinstance(rows, list) or any(
+        not isinstance(row, dict) or not isinstance(row.get("path"), str) for row in rows
+    ):
+        raise ValueError("Invalid transfer manifest file list")
     names = [r["path"] for r in rows]
     if len(names) != len(set(names)) or set(names) | {MANIFEST} != {i.filename for i in infos}:
         raise ValueError("Transfer manifest file list mismatch")
@@ -438,7 +474,7 @@ def import_registered_bundles(directories, *, locations=None):
                 if isinstance(target, dict):
                     destination = target["directory"]
                     with zipfile.ZipFile(archive) as zipped:
-                        binding = json.loads(zipped.read(MANIFEST)).get("batch_binding")
+                        binding = _read_manifest(zipped).get("batch_binding")
                     expected = {
                         "batch": target["batch"],
                         "input_sha256": checksum(target["input_archive"]),
@@ -447,7 +483,7 @@ def import_registered_bundles(directories, *, locations=None):
                         raise ValueError("returned_package_binding_mismatch")
                     if target.get("allowed_prefixes"):
                         with zipfile.ZipFile(archive) as zipped:
-                            rows = json.loads(zipped.read(MANIFEST))["files"]
+                            rows = _validated_inventory(zipped, MAX_ARCHIVE_BYTES, None)
                         for row in rows:
                             path = _safe_name(row["path"])
                             scoped = any(

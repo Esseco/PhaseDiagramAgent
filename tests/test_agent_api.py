@@ -56,15 +56,18 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertEqual(handler.presented_plan_binding["plan_id"], "old-branch")
 
     def test_invalid_action_is_not_presented_for_approval(self):
-        reply = format_workflow_reply(
-            {
-                "status": "awaiting_approval",
-                "agent_proposal": {"recommended_action": None, "raw_action": {"tool": None}},
-            },
-            "state.json",
-        )
-        self.assertIn("无效动作", reply)
-        self.assertNotIn("回复“同意”", reply)
+        for tool in (None, "", "  ", 7):
+            for verbose in (False, True):
+                with self.subTest(tool=tool, verbose=verbose):
+                    reply = format_workflow_reply(
+                        {
+                            "status": "awaiting_approval",
+                            "agent_proposal": {"recommended_action": tool, "raw_action": {"tool": tool}},
+                        },
+                        "state.json", verbose=verbose,
+                    )
+                    self.assertIn("无效动作", reply)
+                    self.assertNotIn("同意", reply)
 
     def _runtime_files(self, root, *, history=False, session=True):
         from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
@@ -123,7 +126,9 @@ class OpenWebUIAPITest(unittest.TestCase):
         self.assertFalse(_is_config_migration_approval("为什么批准迁移会失败"))
         self.assertFalse(_is_config_migration_approval("不批准迁移"))
         calls = []
-        state_path = Path.cwd() / "migration-test-state-does-not-exist.json"
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        state_path = Path(temporary.name) / "migration-test-state-does-not-exist.json"
 
         def workflow(**kwargs):
             calls.append(kwargs)
@@ -322,7 +327,8 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertEqual(state_path.read_bytes(), before)
             self.assertIsNone(handler.history_decision)
-            self.assertIsNone(handler.conversation_id)
+            self.assertEqual(handler.conversation_id, "t")
+            self.assertEqual(handler.presented_plan_binding["plan_id"], "pending")
 
     def test_builtin_factory_composes_runtime_and_adapter(self):
         with (
@@ -1206,7 +1212,7 @@ class OpenWebUIAPITest(unittest.TestCase):
             self.assertEqual(result["status"], "prepared")
             self.assertTrue((root / "manifest.json").is_file())
             self.assertTrue((root / "SHA256SUMS").is_file())
-            self.assertIn("Nothing has been submitted", (root / "UPLOAD_AND_SUBMIT.md").read_text())
+            self.assertIn("Nothing has been submitted", (root / "UPLOAD_AND_SUBMIT.md").read_text(encoding="utf-8"))
             self.assertNotIn("scheduler_job_id", batch)
 
 

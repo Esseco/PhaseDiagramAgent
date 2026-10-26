@@ -23,18 +23,16 @@ def new_invocation(prefix="webui"):
 
 def lifecycle_request_id(action_id, human_feedback=None):
     """Message identity differs from the immutable action being approved."""
+    # An approval/revision is bound to the durable action id.  A Studio
+    # message id is intentionally used for ordinary turns, but using it here
+    # would make the approval look like an unrelated lifecycle request and
+    # could route it into the wrong checkpoint.
+    if human_feedback is not None:
+        return action_id
     identity = _message_identity.get()
     if identity:
         return "webui-" + identity
-    if human_feedback is None:
-        return action_id
-    import hashlib
-    import json
-
-    digest = hashlib.sha256(
-        json.dumps(human_feedback, sort_keys=True, ensure_ascii=False).encode()
-    ).hexdigest()[:20]
-    return f"{action_id}:review:{digest}"
+    return action_id
 
 
 @contextmanager

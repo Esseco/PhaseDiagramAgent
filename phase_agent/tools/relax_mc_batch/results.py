@@ -152,11 +152,12 @@ def import_results(*, action, context, _owned=False):
     # not only ZIP staging: HPC member names can exceed Windows' legacy limit.
     from phase_agent.tools.remote.model_upload_directory import model_upload_directory
 
-    destination = local_path(
-        model_upload_directory(config["upload_batches_directory"], state, record["model_version"])
-        / "verified_results"
-        / digest[:16]
+    from phase_agent.tools.remote.submission_architecture import epoch_evidence_directory
+
+    epoch = model_upload_directory(
+        config["upload_batches_directory"], state, record["model_version"]
     )
+    destination = local_path(epoch_evidence_directory(epoch, "verified_results") / digest[:16])
     path_report = check_return_paths(archive, destination)
     import_bundle(archive, destination, extra_result_suffixes=(".csv", ".bin"))
     summary = read(destination / "result_summary.json")
@@ -461,4 +462,9 @@ def recover_available(state, context, *, _owned=False):
                 "error": detail[:4096],
                 "evidence_path": str(result_archive(record)),
             }
+    root = (context.get("effective_config") or {}).get("upload_batches_directory")
+    if root and current.get("relax_mc_batches"):
+        from phase_agent.tools.remote.submission_layout import write_submission_index
+
+        write_submission_index(root, current)
     return current

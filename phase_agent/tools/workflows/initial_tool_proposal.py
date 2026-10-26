@@ -6,6 +6,26 @@ from phase_agent.tools.policy.execution_policy import build_agent_proposal
 from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
 
 
+def _post_mc_allowed_tools(allowed, generation, *, post_mc):
+    """Apply the post-MC route gate without hiding a new model's first search."""
+    tools = list(allowed)
+    if not post_mc:
+        return tools
+    pending_post_refresh_search = (
+        generation.get("post_refresh")
+        and generation.get("new_branch_count", 0) > 0
+        and not generation.get("first_search_completed")
+    )
+    blocked = {"allocate_mc_bohb", "generate_branches", "run_calculation_stage"}
+    if not pending_post_refresh_search:
+        blocked.add("prepare_local_batch_files")
+    return [
+        tool
+        for tool in tools
+        if tool not in blocked
+    ]
+
+
 def select_initial_proposal(
     *,
     current,
@@ -29,6 +49,26 @@ def select_initial_proposal(
         for name in (config.get("agent") or {}).get("allowed_tools") or []
         if callable((registry.get(name) or {}).get("handler"))
     ]
+    post_recovery_only = bool(
+        current.get("post_recovery_next_step_pending")
+        or current.get("_recovery_just_approved")
+    )
+    if post_recovery_only:
+        # This is the final proposal boundary after result recovery.  The
+        # dialogue layer may enter the scientific workflow with `advance`, so
+        # enforce the phase transition again where the action is actually
+        # selected.  Relax/MC preparation must wait for a separate DFT/branch
+        # proposal approval.
+        allowed = [
+            tool for tool in allowed if tool in {"select_dft_candidates", "generate_branches"}
+        ]
+        if not allowed:
+            return {
+                "status": "not_configured",
+                "state": current,
+                "reason": "回收后缺少可用的 DFT 或 branch 动作；未生成 Relax/MC 方案。",
+                "submitted": False,
+            }
     if (
         mode == "interactive"
         and "select_dft_candidates" in allowed
@@ -237,19 +277,13 @@ def select_initial_proposal(
                 "adjust_strategy",
             }
         ]
-    if post_mc:
+    # A completed MC round normally moves the next proposal to DFT/convergence
+    # review.  Keep Relax preparation available while a refreshed model still
+    # has an unsearched first-generation branch set.
+    gated_tools = _post_mc_allowed_tools(allowed, generation, post_mc=post_mc)
+    if gated_tools != allowed:
         safe_next = None
-        allowed = [
-            tool
-            for tool in allowed
-            if tool
-            not in {
-                "allocate_mc_bohb",
-                "generate_branches",
-                "run_calculation_stage",
-                "prepare_local_batch_files",
-            }
-        ]
+        allowed = gated_tools
     from phase_agent.tools.state.approved_direction import (
         action_direction,
         direction_hash,

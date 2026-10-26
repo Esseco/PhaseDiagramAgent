@@ -93,6 +93,7 @@ class SearchFeedbackTest(unittest.TestCase):
                 "tasks": [],
                 "hull_changes": [1.0],
                 "budget_remaining": 0,
+                "budget_limits": {"enforcement": "hard"},
                 "dft_validation_fraction": 0,
                 "coverage_fraction": 0,
                 "open_branches": 2,

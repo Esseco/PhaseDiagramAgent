@@ -79,7 +79,7 @@ def test_saved_plan_without_link_has_concrete_inventory_and_no_plan_writes(tmp_p
     path = report(receipt)
     assert path.parent == tmp_path / "interaction_records/epoch1"
     text = path.read_text(encoding="utf-8")
-    assert "DFT选点_" in path.name and "方案待确认" not in path.name
+    assert "dft_selection_" in path.name and "方案待确认" not in path.name
     assert "| s1 | OP2 | 0 | 12 | 未记录 | DFT单点 | 0 eV/atom | 近凸包核对 |" in text
     assert "| s2 | P3 | 0.5 | 未记录 | 未记录 | DFT结构优化 |" in text
     assert "results/mc/rank_000.vasp" in text and "不是 DFT 结果" in text
@@ -126,7 +126,7 @@ def test_bad_optional_artifact_does_not_drop_answer_or_saved_dft_inventory(tmp_p
 def test_names_are_factual_short_collision_safe_and_record_retry_reuses_path(tmp_path):
     now = datetime(2026, 10, 20, 8, 0, tzinfo=timezone.utc)
     stem = report_stem(saved_dft(), {}, now)
-    assert stem == "DFT选点_" + now.astimezone().strftime("%Y%m%d")
+    assert stem == "dft_selection_" + now.astimezone().strftime("%Y%m%d")
     with ThreadPoolExecutor(max_workers=4) as pool:
         paths = list(pool.map(lambda _: reserve_report(tmp_path, stem, {})[0], range(12)))
     assert len(set(paths)) == 12 and all(path.is_file() for path in paths)

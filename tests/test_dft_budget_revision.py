@@ -19,6 +19,11 @@ def test_budget_failure_does_not_convert_original_action():
                 "x_Na_per_O2": 0.5,
                 "predicted_Ehull": 0.01,
                 "hull_impact": 1,
+                "geometry_optimization_evidence": {
+                    "source_task_id": "prior-dft-s",
+                    "residual_force_ev_per_angstrom": 0.2,
+                    "force_tolerance_ev_per_angstrom": 0.05,
+                },
             }
         ],
     }
@@ -34,8 +39,9 @@ def test_budget_failure_does_not_convert_original_action():
     assert action["parameters"]["decisions"][0]["action"] == "DFT_RELAX"
 
 
-def test_exhausted_budget_does_not_offer_zero_cost_plan():
+def test_exhausted_hard_budget_does_not_offer_zero_cost_plan():
     config = default_layered_search_config()
+    config["budgets"]["enforcement"] = "hard"
     state = {
         "budget_usage": {"total_relative_cost": config["budgets"]["total_relative_cost"]},
         "qbc_candidates": [{"candidate_id": "s", "atom_count": 40}],

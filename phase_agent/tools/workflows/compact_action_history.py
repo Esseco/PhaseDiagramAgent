@@ -15,6 +15,17 @@ def compact_action_history(record, *, _owned=False):
 def _audit_without_state(record, *, owned):
     current = record if owned else {k: v for k, v in record.items() if k != "state"}
     current.pop("state", None)
+    # Candidate pools and evidence catalogs belong to the current decision
+    # context, not an immutable audit receipt.  Keep the signed raw action and
+    # rationale, while dropping the repeated multi-megabyte context copy from
+    # historical rows.  Pending approvals retain their complete proposal in
+    # pending_execution_policies.
+    for key in ("agent_proposal", "prior_proposal"):
+        proposal = current.get(key)
+        if isinstance(proposal, dict) and "decision_context" in proposal:
+            proposal = dict(proposal)
+            proposal.pop("decision_context", None)
+            current[key] = proposal
     for key in ("result", "execution", "execution_result"):
         if isinstance(current.get(key), dict):
             current[key] = _audit_without_state(current[key], owned=owned)

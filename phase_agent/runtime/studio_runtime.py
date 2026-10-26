@@ -139,6 +139,8 @@ def send_project_message(text, thread_id):
                     "交互记录保存失败", {"type": type(error).__name__, "message": str(error)}
                 )
                 reply += "\n交互 Markdown 保存失败；保留本轮答复，未重放操作。"
+            if current_handler is not None:
+                current_handler.remember_turn_reply(record, reply)
             process_event("本轮答复", {"reply": reply})
             return reply
 

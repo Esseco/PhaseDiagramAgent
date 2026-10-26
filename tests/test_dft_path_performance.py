@@ -178,10 +178,12 @@ def test_dft_batch_builds_only_shared_upload_package(tmp_path, monkeypatch, pack
 
     def inputs(task, **kwargs):
         folder = Path(task["work_directory"])
-        (folder / "initial_structure.vasp").write_text("test structure")
+        (folder / "initial_structure.vasp").write_text(
+            "H\n1\n1 0 0\n0 1 0\n0 0 1\nH\n1\nDirect\n0 0 0\n"
+        )
         (folder / "workflow.py").write_text("print('input only')")
         (folder / "submit_gpu.sh").write_text(
-            "#!/bin/bash\n#SBATCH --job-name=test\npython3 workflow.py\n"
+            "#!/bin/bash\n#SBATCH --job-name=test\npython3 workflow.py\n", newline="\n"
         )
         return {"generator": "atomate", "backend": "pycode_atomate2_static"}
 

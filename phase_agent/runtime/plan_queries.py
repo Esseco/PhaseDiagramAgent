@@ -141,4 +141,4 @@ def pending_plan_reply(state):
             )
             + "需先核对原任务与执行回执；本次仅展示方案，未批准或执行。"
         )
-    return f"已保存方案：\n{details}\n本次仅查看，未批准或执行。"
+    return f"已复用已保存方案（未重新生成）：\n{details}\n本次仅查看，未批准或执行。"

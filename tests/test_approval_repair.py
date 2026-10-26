@@ -96,7 +96,7 @@ def test_financial_reconciliation_refuses_to_guess_from_an_older_overwrite(tmp_p
     )
     assert read_json(path)["reserved_relative_cost"] == 0
     path.write_text(json.dumps(old), encoding="utf-8")
-    with pytest.raises(ValueError, match="stale_business_state_after_financial_reconciliation"):
+    with pytest.raises(ValueError, match="stale_business_state_after_result_or_financial_reconciliation"):
         read_json(path)
 
 

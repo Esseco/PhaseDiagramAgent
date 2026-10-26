@@ -42,12 +42,14 @@ def test_explicit_generation_request_preserves_selected_branch_limit():
     assert action["parameters"] == {"max_det_H": 12, "batch_size": 200}
 
 
-def test_over_limit_feedback_cancels_old_approvable_proposal():
+def test_over_confirmed_legacy_limit_feedback_cancels_old_approvable_proposal():
     from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
     from phase_agent.tools.policy.execution_policy import build_agent_proposal
     from phase_agent.tools.workflows.run_tool_step import run_tool_step
 
     config = default_layered_search_config()
+    config["run"]["total_quota"] = 300
+    config["round_strategy"]["generation_quota_total"] = 300
     state = {"confirmed_config_version": "test-v1", "confirmed_config": config,
              "pending_execution_policies": {}, "action_records": []}
     action = {"tool": "generate_branches", "task_key": "old", "target_ids": [],

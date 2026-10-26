@@ -196,7 +196,10 @@ def main():
         encoding="utf-8",
     )
 
-    from transfer_bundle import result_bundle
+    if __package__:
+        from phase_agent.tools.remote.transfer_bundle import result_bundle
+    else:
+        from transfer_bundle import result_bundle
 
     result_bundle(output, [output], "training")
 

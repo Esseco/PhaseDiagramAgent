@@ -69,3 +69,76 @@ def test_scope_is_visible_without_verbose_generation_details(tmp_path):
     assert "准备 Relax+MC 输入" in text and "不提交超算" in text
     assert "Branch 分布与构成文件：" in text and ".txt`" in text
     assert "审批范围记录不完整" in text
+
+
+def test_relax_mc_approval_shows_generation_scope_before_approval(tmp_path):
+    generation_json = tmp_path / "generation.json"
+    generation_text = tmp_path / "generation.txt"
+    generation_json.write_text(json.dumps({"actual": {"branches": []}}), encoding="utf-8")
+    generation_text.write_text("新增 branch：2\nO3 | 1/2 | 4 | 2\n", encoding="utf-8")
+    state = {
+        "active_model_version": "m1",
+        "generation_history": [
+            {
+                "task_key": "g1",
+                "model_version": "m1",
+                "new_branch_ids": ["new-1", "new-2"],
+                "registered_ids": ["s1", "s2", "s3"],
+                "summary": {
+                    "proposed_branches": 2,
+                    "registered_branches": 2,
+                    "registered_structures": 3,
+                    "phase_counts": {"O3": 2},
+                    "det_H_range": [4, 8],
+                    "sampling_report": {
+                        "status": "paused_for_review",
+                        "stop_reason": "paused_time_guard",
+                        "attempts": 4,
+                        "regions": [
+                            {
+                                "region_id": "r1",
+                                "attempts": 4,
+                                "accepted": 2,
+                                "duplicates": 2,
+                            }
+                        ],
+                    },
+                },
+                "artifacts": {"json": str(generation_json), "text": str(generation_text)},
+            }
+        ],
+        "confirmed_config": {},
+    }
+    proposal = {
+        "recommended_action": "prepare_local_batch_files",
+        "expected_purpose": "准备本轮 Relax+MC 输入",
+        "raw_action": {
+            "tool": "prepare_local_batch_files",
+            "task_key": "relax1",
+            "reason": "为本轮新branch准备 Relax+MC",
+            "target_ids": ["old-1"],
+            "parameters": {
+                "mode": "relax_mc_inputs",
+                "relax_mc_preview": {
+                    "model_version": "m1",
+                    "checksum": "sha256:preview",
+                    "branch_ids": ["old-1"],
+                    "structures": [{"structure_id": "s1"}, {"structure_id": "s2"}],
+                    "workload": {
+                        "relax_structure_tasks": 2,
+                        "gpu_jobs_upper_by_wave": [1],
+                        "mc_task_upper": [1],
+                    },
+                },
+            },
+        },
+        "estimated_cost": {},
+    }
+    state["pending_execution_policies"] = {"p": {"agent_proposal": proposal}}
+    artifacts = proposal_artifacts(proposal, state)
+    assert artifacts.get("scope_mismatch") is True
+    report = Path(artifacts["text"]).read_text(encoding="utf-8")
+    assert "交集：0" in report
+    reply = approval_reply(proposal, state)
+    assert reply.index("Branch 分布与构成文件：") < reply.index("下一步：")
+    assert "先修正 branch 范围后再审批" in reply

@@ -20,9 +20,12 @@ def test_history_resume_refreshes_failed_proposal(tmp_path):
 
 def test_failed_proposal_has_no_approval_invitation():
     proposal = {"raw_action": {"decision_source": "rule", "fallback_reason": "llm_failed: length"}}
-    text = format_workflow_reply({"status": "awaiting_approval", "agent_proposal": proposal}, "state.json")
-    assert "不是暂停决策" in text
-    assert "同意" not in text
+    for verbose in (False, True):
+        text = format_workflow_reply(
+            {"status": "awaiting_approval", "agent_proposal": proposal}, "state.json", verbose=verbose
+        )
+        assert "不是暂停决策" in text
+        assert "同意" not in text
 
 
 def test_continue_discards_failed_pause_without_executing():

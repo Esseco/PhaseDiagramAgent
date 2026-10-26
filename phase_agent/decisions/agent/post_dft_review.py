@@ -104,6 +104,103 @@ def request_review_repair(agent_client, payload, action):
     raise error
 
 
+def _unwrap_action_response(response):
+    """Extract an action envelope without changing any model-selected fields."""
+    if (
+        isinstance(response, dict)
+        and isinstance(response.get("action"), dict)
+        and not (response.get("tool") or response.get("action_type"))
+    ):
+        action = dict(response["action"])
+        action.update({key: value for key, value in response.items() if key.startswith("_")})
+        return action
+    return response
+
+
+def _refresh_scientific_decision_brief(payload, fallback):
+    """Prefer complete current-state evidence when a request carries it."""
+    state = payload.get("state") if isinstance(payload, dict) else None
+    if not isinstance(state, dict):
+        return fallback
+    if not state.get("confirmed_config_version") or not state.get("active_model_version"):
+        return fallback
+
+    from phase_agent.analysis.state.scientific_decision_brief import decision_brief
+
+    refreshed = decision_brief(state)
+    policy = refreshed.get("policy") if isinstance(refreshed, dict) else None
+    if not (
+        isinstance(refreshed, dict)
+        and refreshed.get("config_version")
+        and refreshed.get("model_version")
+        and isinstance(policy, dict)
+        and policy.get("schema_version") == 1
+    ):
+        return fallback
+    return refreshed
+
+
+def _repair_stale_scientific_decision(tracked_client, payload, action, brief, context):
+    """Allow one model correction for a stale scientific version binding."""
+    from copy import deepcopy
+
+    from phase_agent.decisions.agent.proposal_validation import (
+        preserve_proposal_evidence,
+        proposal_schema_errors,
+    )
+    from phase_agent.decisions.agent.scientific_decisions import scientific_decision_errors
+
+    errors = scientific_decision_errors(action, brief, context)
+    stale_version_errors = {
+        "scientific_decision_stale_config_version",
+        "scientific_decision_stale_model_version",
+    }
+    stale_errors = [error for error in errors if error in stale_version_errors]
+    if not stale_errors:
+        return action
+
+    original_tool = action.get("tool") or action.get("action_type")
+    request = deepcopy(payload)
+    request.update(
+        mode="scientific_decision_repair",
+        current_proposal=deepcopy(action),
+        validation_errors=errors,
+        scientific_decision_current_versions={
+            "config_version": brief.get("config_version"),
+            "model_version": brief.get("model_version"),
+        },
+        instruction=payload.get("instruction", "")
+        + " Correct the stale scientific_decision version binding once. Use the exact current "
+        "config_version and model_version supplied in scientific_decision_current_versions; "
+        "re-evaluate the decision against the current brief instead of copying historical "
+        "versions. Return one complete action, keep the selected tool unchanged, and do not "
+        "execute or request approval.",
+    )
+    corrected = _unwrap_action_response(tracked_client(request))
+    corrected_tool = (
+        corrected.get("tool") or corrected.get("action_type")
+        if isinstance(corrected, dict)
+        else None
+    )
+    if corrected_tool != original_tool:
+        raise ValueError("scientific_decision_repair_must_preserve_tool")
+
+    schema_errors = proposal_schema_errors(corrected, context)
+    if schema_errors:
+        error = ValueError("Invalid scientific decision correction: " + "; ".join(schema_errors))
+        preserve_proposal_evidence(error, corrected)
+        raise error
+
+    remaining = scientific_decision_errors(corrected, brief, context)
+    if remaining:
+        error = ValueError(
+            "Invalid scientific decision after one correction: " + "; ".join(remaining)
+        )
+        preserve_proposal_evidence(error, corrected)
+        raise error
+    return corrected
+
+
 def request_validated_action(agent_client, payload):
     context = payload.get("decision_context") or {}
     contracts = dict(payload.get("output_contracts") or {})
@@ -236,15 +333,7 @@ def request_validated_action(agent_client, payload):
 
     try:
         action = tracked_client(payload)
-        if (
-            isinstance(action, dict)
-            and isinstance(action.get("action"), dict)
-            and not (action.get("tool") or action.get("action_type"))
-        ):
-            envelope = action
-            action = dict(envelope["action"])
-            if envelope.get("_llm_usage"):
-                action["_llm_usage"] = envelope["_llm_usage"]
+        action = _unwrap_action_response(action)
         from phase_agent.decisions.agent.proposal_schema_repair import repair_proposal_schema
 
         action = repair_proposal_schema(tracked_client, payload, action)
@@ -294,8 +383,42 @@ def request_validated_action(agent_client, payload):
         )
 
         brief = context.get("scientific_decision_brief") or {}
+        refreshed_brief = _refresh_scientific_decision_brief(payload, brief)
+        if refreshed_brief is not brief:
+            context = {**context, "scientific_decision_brief": refreshed_brief}
+            payload = {**payload, "decision_context": context}
+            brief = refreshed_brief
         if (brief.get("policy") or {}).get("schema_version") == 1:
             errors = scientific_decision_errors(action, brief, context)
+            if errors:
+                repaired = _repair_stale_scientific_decision(
+                    tracked_client, payload, action, brief, context
+                )
+                if repaired is not action:
+                    action = derive_generation_totals(repaired)
+                    from phase_agent.decisions.agent.proposal_validation import (
+                        proposal_schema_errors,
+                    )
+
+                    schema_errors = proposal_schema_errors(action, context)
+                    if schema_errors:
+                        raise ValueError(
+                            "Invalid scientific decision correction: " + "; ".join(schema_errors)
+                        )
+                    budget_errors = round_budget_review_errors(action, context)
+                    if budget_errors:
+                        raise ValueError(
+                            "Invalid budget trade-off after scientific correction: "
+                            + "; ".join(budget_errors)
+                        )
+                    if context.get("post_dft_assessment"):
+                        review_errors = post_dft_review_errors(action)
+                        if review_errors:
+                            raise ValueError(
+                                "Invalid post-DFT review after scientific correction: "
+                                + "; ".join(review_errors)
+                            )
+                    errors = scientific_decision_errors(action, brief, context)
             if errors:
                 raise ValueError("Invalid scientific decision: " + "; ".join(errors))
             if context.get("post_dft_assessment") and post_dft_review_errors(action):

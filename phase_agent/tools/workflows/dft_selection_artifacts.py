@@ -94,7 +94,7 @@ def selection_record(proposal, state, *, ledger=None):
                     == (state.get("phase_diagrams", {}).get("mlip") or {}).get("version")
                 ):
                     candidates[key] = {**saved, "dft_sampling_evidence": sampling}
-    preview = params.get("dft_input_preview") or {}
+    preview = params.get("dft_selection_preview") or params.get("dft_input_preview") or {}
     previews = {r.get("candidate_id"): r for r in preview.get("selected_structures") or []}
     branches = {
         r.get("branch_id"): r

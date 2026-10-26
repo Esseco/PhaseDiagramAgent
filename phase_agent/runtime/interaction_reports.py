@@ -93,15 +93,39 @@ def short_reply(reply):
         line = first(prefixes)
         if line and line not in selected:
             selected.append(line)
+    handoff_prefixes = (
+        "Relax+MC 输入地址：",
+        "Relax+MC 提交脚本：",
+        "Relax+MC 回收地址：",
+        "DFT 输入地址：",
+        "DFT 提交脚本：",
+        "DFT 回传地址：",
+        "DFT 回收地址：",
+        "提交脚本：",
+    )
+    handoff_lines = [
+        line
+        for line in lines
+        if any(line.startswith(prefix) for prefix in handoff_prefixes)
+        and line not in selected
+    ]
+    if handoff_lines:
+        next_index = next(
+            (
+                index
+                for index, line in enumerate(selected)
+                if line.startswith(("下一步：", "建议：", "需要你："))
+            ),
+            len(selected),
+        )
+        selected[next_index:next_index] = handoff_lines
     if not first(("下一步：", "建议：", "需要你：")):
         # Input handoffs must keep the real folder, command and return location.
         for prefix in ("上传整个文件夹：", "提交：", "回传："):
             line = first((prefix,))
             if line and line not in selected:
                 selected.append(line)
-    return "  \n".join(
-        line if len(line) <= 220 or "`" in line else line[:217] + "…" for line in selected
-    )
+    return "  \n".join(line if len(line) <= 220 else line[:217] + "…" for line in selected)
 
 
 def save_interaction(root, message, full_reply, display_reply, state, *, record=None):
@@ -117,13 +141,14 @@ def save_interaction(root, message, full_reply, display_reply, state, *, record=
     if not re.fullmatch(r"[a-f0-9]{8,64}", identity):
         raise ValueError("invalid_interaction_identity")
     now = datetime.now(timezone.utc)
+    summary = short_reply(display_reply)
     text = [
         f"# 本轮交互记录\n\n时间：{now.isoformat()}\n",
         f"记录标识：`{identity}`；项目：`{root}`。",
         "## 用户消息\n\n" + str(message),
-        "## 本轮结论\n\n" + str(display_reply),
+        "## 本轮结论\n\n" + summary,
     ]
-    if str(full_reply).strip() != str(display_reply).strip():
+    if str(full_reply).strip() != summary.strip():
         text.append("## 详细说明\n\n" + str(full_reply))
     # Only embed artifacts actually referenced by this turn, not old proposals.
     seen, dft_keys = set(), set()
@@ -293,4 +318,4 @@ def save_interaction(root, message, full_reply, display_reply, state, *, record=
         temporary.unlink(missing_ok=True)
     if record is not None:
         record["interaction_report"] = str(path)
-    return short_reply(display_reply) + f"  \n交互记录地址：{path}"
+    return summary + f"  \n交互记录地址：{path}"

@@ -10,6 +10,7 @@ import zipfile
 from phase_agent.tools.remote.transfer_bundle import (
     MANIFEST,
     _safe_name,
+    _read_manifest,
     checksum,
     create_bundle,
     import_bundle,
@@ -24,20 +25,59 @@ def storage_archive(root, kind):
             if index.is_file():
                 mappings = json.loads(index.read_text(encoding="utf-8"))
                 key = root.resolve().relative_to(base).as_posix()
-                if key in mappings:
-                    target = base / mappings[key]
-                    relative = target.resolve().relative_to(base.resolve())
-                    if not (
-                        relative.parts[0] == "archives"
-                        or (
-                            len(relative.parts) >= 3
-                            and re.fullmatch(r"epoch\d+", relative.parts[0])
-                            and relative.parts[1] == "storage_archives"
-                        )
+                keys = [key]
+                path = Path(key)
+                if (
+                    len(path.parts) >= 3
+                    and re.fullmatch(r"epoch\d+", path.parts[0])
+                    and path.parts[1]
+                    not in {"calculations", "delivery", "evidence", "previously_used"}
+                ):
+                    # Older indexes predate the calculations bucket.  Use this
+                    # alias only when the canonical operation still exists.
+                    candidate = "/".join((path.parts[0], "calculations", *path.parts[1:]))
+                    if (base / Path(candidate)).exists():
+                        keys.append(candidate)
+                for candidate_key in keys:
+                    if candidate_key not in mappings:
+                        continue
+                    relative = Path(str(mappings[candidate_key]).replace("\\", "/"))
+                    candidates = [relative]
+                    if (
+                        len(relative.parts) >= 3
+                        and re.fullmatch(r"epoch\d+", relative.parts[0])
+                        and relative.parts[1] == "storage_archives"
                     ):
-                        raise ValueError("Storage archive outside its registered epoch")
-                    if target.is_file():
-                        return target
+                        candidates.append(
+                            Path(
+                                "/".join(
+                                    (
+                                        relative.parts[0],
+                                        "evidence",
+                                        "storage_archives",
+                                        *relative.parts[2:],
+                                    )
+                                )
+                            )
+                        )
+                    for relative in candidates:
+                        if relative.is_absolute() or not relative.parts:
+                            raise ValueError("Storage archive outside its registered epoch")
+                        if not (
+                            relative.parts[0] == "archives"
+                            or (
+                                len(relative.parts) >= 3
+                                and re.fullmatch(r"epoch\d+", relative.parts[0])
+                                and (
+                                    relative.parts[1:3] == ("evidence", "storage_archives")
+                                    or relative.parts[1] == "storage_archives"
+                                )
+                            )
+                        ):
+                            raise ValueError("Storage archive outside its registered epoch")
+                        target = base.joinpath(*relative.parts)
+                        if target.is_file():
+                            return target
             break
     return root / f"all.{kind}.zip"
 
@@ -45,7 +85,7 @@ def storage_archive(root, kind):
 def is_storage_archive(archive):
     try:
         with zipfile.ZipFile(archive) as zipped:
-            return json.loads(zipped.read(MANIFEST)).get("kind") in {
+            return _read_manifest(zipped).get("kind") in {
                 "storage_inputs",
                 "storage_results",
             }

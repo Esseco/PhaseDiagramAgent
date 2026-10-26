@@ -9,6 +9,7 @@ from phase_agent.runtime.chat_state_presentation import (
     brief_chat_state,
     waiting_training_job,
 )
+from phase_agent.runtime.partial_recovery import partial_recovery_facts
 from phase_agent.runtime.response_preferences import detailed_response
 
 ACTION_NAMES = {
@@ -16,7 +17,7 @@ ACTION_NAMES = {
     "generate_branches": "生成 branch",
     "allocate_mc_bohb": "分配 MC",
     "prepare_local_batch_files": "准备计算输入",
-    "select_dft_candidates": "筛选并生成 DFT 输入",
+    "select_dft_candidates": "补充 DFT 决策",
     "reevaluate_candidates": "刷新结构能量",
     "check_convergence": "检查收敛",
     "pause_search": "暂停搜索",
@@ -207,6 +208,8 @@ def format_progress(state):
         ]
     elif state.get("pending_dft_recovery_question"):
         lines.append("下一步：回复“继续回收”或“不再回收”，确认是否等待剩余 DFT。")
+    elif partial_recovery_facts(state):
+        lines.append("下一步：回复“继续”使用已回收子集，或回复“补全”只生成失败任务的重试方案；不会重跑整批。")
     elif training:
         from phase_agent.runtime.training_reply import training_delivery_lines
 

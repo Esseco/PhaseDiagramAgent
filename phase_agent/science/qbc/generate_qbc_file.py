@@ -42,6 +42,8 @@ def generate_qbc_file(
         if len(committee.get("loaded_members", [])) >= settings["minimum_models"]
         else "insufficient_committee"
     )
+    if status == "completed" and any(row["qbc"].get("status") != "completed" for row in rows):
+        status = "failed"
     report = {
         "status": status,
         "committee_id": committee.get("committee_id"),

@@ -89,10 +89,12 @@ def test_dft_batch_requires_atomate_dispatcher(tmp_path):
 
 def test_collect_terminal_results_for_main_loop(tmp_path):
     runner = SlurmBatchRunner(tmp_path / "slurm", worker_command=["worker"])
-    prepared = runner.prepare(_state())["state"]
-    result_path = tmp_path / "slurm/slurm-000001/00000-T1/result.json"
-    result_path.write_text(json.dumps({"status": "completed", "actual_cost": 1.5}))
-    (result_path.parent / "task.finished.json").write_text(json.dumps({"status": "completed"}))
+    prepared = runner.prepare(_state())
+    run_slurm_array_task(
+        prepared["batch"]["manifest_path"], 0,
+        executor=lambda task: {"status": "completed", "actual_cost": 1.5},
+    )
+    prepared = prepared["state"]
 
     recovered = runner.collect_results(prepared)
     assert recovered == [

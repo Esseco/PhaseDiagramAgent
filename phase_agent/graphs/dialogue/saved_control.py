@@ -4,6 +4,109 @@ import json
 import os
 
 
+def active_task_wait_reply(facts):
+    """Answer a continuation while work is still running without model routing."""
+    from phase_agent.runtime.chat_state_presentation import brief_chat_state
+    from phase_agent.tools.state.task_waiting import active_pending_tasks
+
+    active = active_pending_tasks(facts.get("tasks") or [])
+    if not active:
+        return None
+    names = {
+        "dft_single_point": "DFT 单点",
+        "dft_relax": "DFT 优化",
+        "deep_search": "MC",
+        "relax_and_feature": "Relax",
+    }
+    counts = {}
+    for row in active:
+        name = names.get(row.get("stage"), "计算")
+        counts[name] = counts.get(name, 0) + 1
+    current = brief_chat_state(facts)
+    history = []
+    if any(
+        row.get("status") == "completed"
+        and row.get("model_version") == facts.get("active_model_version")
+        for row in (facts.get("relax_mc_batches") or {}).values()
+    ):
+        history.append("已完成流程：Relax+MC 结果已回收并入账。")
+    dft_prepared = any(
+        ((record.get("final_action") or {}).get("tool")
+         or ((record.get("agent_proposal") or {}).get("raw_action") or {}).get("tool"))
+        == "select_dft_candidates"
+        and (
+            record.get("status") in {"prepared", "completed"}
+            or (record.get("execution_result") or {}).get("status") == "completed"
+        )
+        for record in facts.get("action_records") or []
+    )
+    if dft_prepared and any(
+        row.get("stage") in {"dft_single_point", "dft_relax"} for row in active
+    ):
+        history.append("已完成流程：补充 DFT 方案已批准，输入文件已生成。")
+    if any(row.get("stage") in {"dft_single_point", "dft_relax"} for row in active):
+        next_step = "下一步：等待超算完成并回传 DFT 输出；回传后回复‘已回传’，本轮不重新生成方案。"
+        active_ids = {row.get("task_id") for row in active}
+        input_paths, submit_paths, return_paths = set(), set(), set()
+        for batch in facts.get("slurm_batches") or []:
+            if not active_ids.intersection(batch.get("task_ids") or []):
+                continue
+            handoff = batch.get("handoff") or {}
+            if handoff.get("folder"):
+                input_paths.add(str(handoff["folder"]))
+            if handoff.get("submit_script"):
+                submit_paths.add(str(handoff["submit_script"]))
+            if handoff.get("return_directory"):
+                return_paths.add(str(handoff["return_directory"]))
+        if input_paths:
+            history.append("DFT 输入地址：" + "、".join(f"`{path}`" for path in sorted(input_paths)))
+        if submit_paths:
+            history.append("提交脚本：" + "、".join(f"`{path}`" for path in sorted(submit_paths)))
+        if return_paths:
+            history.append("DFT 回传地址：" + "、".join(f"`{path}`" for path in sorted(return_paths)))
+    elif any(row.get("stage") in {"relax_and_feature", "deep_search"} for row in active):
+        next_step = "下一步：等待 Relax+MC 完成并回传结果；回传后回复‘已回传’，本轮不重新生成方案。"
+        active_ids = {row.get("task_id") for row in active}
+        active_bundle_ids = {row.get("relax_mc_bundle_id") for row in active}
+        input_paths, submit_paths, return_paths = set(), set(), set()
+        for batch in facts.get("slurm_batches") or []:
+            if not (
+                active_ids.intersection(batch.get("task_ids") or [])
+                or batch.get("batch_id") in active_bundle_ids
+                or batch.get("relax_mc_bundle_id") in active_bundle_ids
+            ):
+                continue
+            handoff = batch.get("handoff") or {}
+            if handoff.get("folder"):
+                input_paths.add(str(handoff["folder"]))
+            if handoff.get("submit_script"):
+                submit_paths.add(str(handoff["submit_script"]))
+            if handoff.get("return_directory"):
+                return_paths.add(str(handoff["return_directory"]))
+        for bundle_id in active_bundle_ids:
+            batch = (facts.get("relax_mc_batches") or {}).get(bundle_id) or {}
+            handoff = batch.get("handoff") or {}
+            input_path = batch.get("upload_folder") or handoff.get("folder")
+            submit_path = batch.get("script_path") or handoff.get("submit_script")
+            return_path = batch.get("return_directory") or handoff.get("return_directory")
+            if input_path:
+                input_paths.add(str(input_path))
+            if submit_path:
+                submit_paths.add(str(submit_path))
+            if return_path:
+                return_paths.add(str(return_path))
+        if input_paths:
+            history.append("Relax+MC 输入地址：" + "、".join(f"`{path}`" for path in sorted(input_paths)))
+        if submit_paths:
+            history.append("Relax+MC 提交脚本：" + "、".join(f"`{path}`" for path in sorted(submit_paths)))
+        if return_paths:
+            history.append("Relax+MC 回收地址：" + "、".join(f"`{path}`" for path in sorted(return_paths)))
+    else:
+        next_step = "下一步：等待当前任务完成并回传结果；收到结果后再进行回收核对。"
+    detail = "、".join(f"{name} {count} 个" for name, count in counts.items())
+    return "\n".join([*history, current, f"待完成：{detail}", next_step])
+
+
 def generation_blocked_review(facts, reviews):
     """A unique saved plan can need revision before it can be approved."""
     if len(reviews) != 1:
@@ -68,8 +171,15 @@ def unavailable_review_reply(handler, message, facts):
 
 
 def recovery_reply(handler):
+    from phase_agent.runtime.chat_state_presentation import brief_chat_state
+    from phase_agent.tools.step_runner.file_protocol import read_json
+
+    state = read_json(handler.state_path, {}) or {}
     url = f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
     return (
+        brief_chat_state(state)
+        + "\n检测到新的回传或待核对记录；本轮尚未回收、入账或分析。\n"
+        "下一步：先核对回传证据；回复‘同意回收’执行回收，或回复‘拒绝回收’保持当前状态。\n"
         "原选点与审批方案保留；上次失败尚需核对实际产物，单说同意不能解除。"
         f"请打开[执行恢复与审批]({url})，在执行恢复条目填写外部作业、产物及成本核对结果，"
         "点击“生成核对处理方案”，再确认该恢复方案。恢复后继续会复用原选点；本次未执行任务。"

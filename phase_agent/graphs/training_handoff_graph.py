@@ -368,5 +368,8 @@ def run_training_handoffs(state, config, *, state_path=None, graph=None, _owned=
     path = Path(state_path).resolve().parent / "langgraph_training.sqlite"
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + ".lock", timeout=10):
-        with SqliteSaver.from_conn_string(str(path)) as saver:
+        # Training handoff recovery needs the latest checkpoint and its parent;
+        # retaining the generic eight-entry window multiplied large business
+        # frames across every historical training thread.
+        with SqliteSaver.from_conn_string(str(path), history_keep=3, namespace_keep=4) as saver:
             return run(saver)

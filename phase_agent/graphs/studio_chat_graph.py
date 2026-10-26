@@ -43,7 +43,7 @@ def user_text(messages):
                 parts.append(block)
             elif (
                 isinstance(block, dict)
-                and block.get("type") == "text"
+                and block.get("type") in {"text", "input_text"}
                 and isinstance(block.get("text"), str)
             ):
                 parts.append(block["text"])

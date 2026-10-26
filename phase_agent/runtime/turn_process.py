@@ -24,6 +24,12 @@ from functools import wraps
 _current = ContextVar("turn_process", default=None)
 
 
+def current_turn_id(thread_id):
+    """Bind memory only to the active record for this exact conversation."""
+    record = _current.get()
+    return record.get("id") if record and record.get("thread_id") == thread_id else None
+
+
 def presentation_signature(path):
     """Include administrative revisions as well as the atomically replaced state."""
     from phase_agent.tools.state.workflow_control import control_path

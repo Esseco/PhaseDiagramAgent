@@ -37,6 +37,55 @@ def test_root_checkpoint_namespace():
     assert not module.root_checkpoint({"checkpoint": {"checkpoint_ns": "agent:child"}})
 
 
+def test_agent_reply_update_is_hidden_when_respond_emits_final_message():
+    assert module.is_agent_reply_update({"agent": {"reply": "same"}})
+    assert not module.is_agent_reply_update({"agent": {"diagnostic": "keep"}})
+    assert not module.is_agent_reply_update({"respond": {"messages": ["same"]}})
+
+    from phase_agent.runtime.studio_payloads import guarded_studio_stream
+
+    run = {
+        "kwargs": {
+            "input": None,
+            "command": None,
+            "stream_mode": ["updates", "messages"],
+            "config": {"configurable": {"graph_id": "phase_chat"}},
+        }
+    }
+
+    async def original(prepared, *args, **kwargs):
+        yield "updates", {"agent": {"reply": "same"}}
+        yield "updates", {"respond": {"messages": ["same"]}}
+        yield "messages", {"reply": "same"}
+
+    async def collect():
+        return [row async for row in guarded_studio_stream(original, run)]
+
+    assert asyncio.run(collect()) == [
+        ("updates", {"respond": {"messages": ["same"]}}),
+        ("messages", {"reply": "same"}),
+    ]
+
+
+def test_phase_chat_transport_deduplicates_agent_and_respond_reply():
+    run = {
+        "kwargs": {
+            "input": {"messages": ["hello"]},
+            "stream_mode": ["updates"],
+            "config": {"configurable": {"graph_id": "phase_chat"}},
+        }
+    }
+
+    async def original(prepared, *args, **kwargs):
+        yield "updates", {"agent": {"reply": "same answer"}}
+        yield "updates", {"respond": {"messages": ["same answer"]}}
+
+    async def collect():
+        return [row async for row in module.guarded_studio_stream(original, run)]
+
+    assert asyncio.run(collect()) == [("updates", {"respond": {"messages": ["same answer"]}})]
+
+
 def test_adapter_filters_child_cache_updates_and_projects_legacy_search(monkeypatch):
     from langgraph_api import stream
     from langgraph_api import worker_runtime

@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from phase_agent.tools.remote.transfer_bundle import local_path
 
 import pytest
 
@@ -476,7 +477,7 @@ def test_failed_regeneration_restores_old_inputs_and_keeps_returned_results(tmp_
     assert archive.read_bytes() == b"old upload archive"
     assert (root / "results/00000-RELAX-old/result.json").read_bytes() == b"returned Relax evidence"
     assert json.dumps(state, sort_keys=True) == before
-    assert list((root.parent / ".mc_input_history").rglob("partial.json"))
+    assert list(local_path(root.parent / ".mc_input_history").rglob("partial.json"))
 
 
 def test_actual_mc_result_archive_and_task_local_result_block_regeneration(tmp_path):

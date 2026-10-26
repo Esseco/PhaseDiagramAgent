@@ -68,6 +68,37 @@ def test_modify_request_validates_identity_and_is_never_approval(tmp_path):
     assert len(calls) == 1
 
 
+def test_read_only_summary_refresh_does_not_invalidate_unchanged_plan(tmp_path):
+    path = tmp_path / "state.json"
+    action = proposal()
+    state = {
+        "confirmed_config_version": "c1",
+        "active_model_version": "m1",
+        "pending_execution_policies": {"p1": {"agent_proposal": action}},
+    }
+    path.write_text(json.dumps(state), encoding="utf-8")
+    calls = []
+    handler = SimpleNamespace(
+        state_path=path,
+        lock=RLock(),
+        _run=lambda *args: calls.append(args) or {"status": "completed", "state": state},
+    )
+    before = build_status_summary(state, config_version="c1")["summary_id"]
+
+    result = review_pending(
+        handler,
+        "p1",
+        "approve",
+        expected_state_version="summary-from-before-read-only-refresh",
+        expected_proposal_hash=proposal_hash(action),
+        is_sensitive=lambda _: False,
+    )
+
+    assert result["status"] == "completed"
+    assert calls and calls[0][0] == "p1"
+    assert before != "summary-from-before-read-only-refresh"
+
+
 @pytest.mark.parametrize(
     "status,kind",
     [

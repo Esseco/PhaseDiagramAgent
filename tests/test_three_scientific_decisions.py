@@ -277,6 +277,69 @@ def test_valid_reasoning_requires_no_extra_model_call():
     assert len(calls) == 1
 
 
+def test_stale_scientific_decision_gets_one_current_version_correction():
+    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+
+    calls = []
+    stale = action()
+    stale["scientific_decision"]["config_version"] = "old"
+
+    def model(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return stale
+        assert request["mode"] == "scientific_decision_repair"
+        assert request["validation_errors"] == ["scientific_decision_stale_config_version"]
+        assert request["scientific_decision_current_versions"] == {
+            "config_version": "c1",
+            "model_version": "m1",
+        }
+        return action()
+
+    result = request_validated_action(
+        model,
+        {
+            "allowed_tools": ["generate_branches"],
+            "instruction": "choose",
+            "decision_context": {"scientific_decision_brief": decision_brief(state())},
+        },
+    )
+    assert result["scientific_decision"]["config_version"] == "c1"
+    assert len(calls) == 2
+
+
+def test_stale_correction_refreshes_the_brief_from_current_state():
+    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+
+    calls = []
+    current_state = state()
+    current_state["confirmed_config_version"] = "c2"
+    stale = action()
+    stale["scientific_decision"]["config_version"] = "old"
+    corrected = action()
+    corrected["scientific_decision"]["config_version"] = "c2"
+
+    def model(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return stale
+        assert request["scientific_decision_current_versions"]["config_version"] == "c2"
+        assert request["decision_context"]["scientific_decision_brief"]["config_version"] == "c2"
+        return corrected
+
+    result = request_validated_action(
+        model,
+        {
+            "allowed_tools": ["generate_branches"],
+            "instruction": "choose",
+            "state": current_state,
+            "decision_context": {"scientific_decision_brief": decision_brief(state())},
+        },
+    )
+    assert result["scientific_decision"]["config_version"] == "c2"
+    assert len(calls) == 2
+
+
 def test_explicit_stepwise_override_prevents_automatic_packaging():
     a = action()
     a["scientific_decision"]["module_execution"] = "stepwise"

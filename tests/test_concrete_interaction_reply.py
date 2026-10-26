@@ -67,6 +67,29 @@ def test_plain_answer_and_input_handoff_survive_shortening():
     assert "E:/input" in reply and "sbatch submit_all.sh" in reply and "E:/output" in reply
 
 
+def test_dft_and_relax_mc_paths_survive_when_next_step_is_present():
+    text = "\n".join(
+        [
+            "项目 · epoch1 · DFT 15 个待完成",
+            "已完成流程：Relax+MC 结果已回收并入账。",
+            "Relax+MC 输入地址：`E:/relax/input`",
+            "Relax+MC 回收地址：`E:/relax/return`",
+            "DFT 输入地址：`E:/dft/input`",
+            "提交脚本：`E:/dft/input/submit_all.sh`",
+            "DFT 回传地址：`E:/dft/return`",
+            "下一步：等待超算完成并回传 DFT 输出。",
+        ]
+    )
+
+    reply = short_reply(text)
+
+    assert "E:/relax/input" in reply
+    assert "E:/relax/return" in reply
+    assert "E:/dft/input" in reply
+    assert "E:/dft/input/submit_all.sh" in reply
+    assert "E:/dft/return" in reply
+
+
 def test_state_query_has_no_invented_action_or_budget():
     reply = concise_body("当前：等待回传。", {})
     assert reply == "当前：等待回传。"

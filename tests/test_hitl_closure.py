@@ -12,7 +12,7 @@ from tests.test_single_training_approval import setup_direction
 
 
 @pytest.mark.parametrize("unified", [True, False])
-def test_modify_saved_training_plan_then_approve_exact_revision(tmp_path, monkeypatch, unified):
+def test_unsupported_training_revision_preserves_exact_original_approval(tmp_path, monkeypatch, unified):
     from tests.test_execution_policy import ExecutionPolicyTest
     from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
     import phase_agent.tools.local.recover_remote_training as recovery
@@ -64,15 +64,14 @@ def test_modify_saved_training_plan_then_approve_exact_revision(tmp_path, monkey
         human_feedback={"decision": "comment", "comment": "增加覆盖"},
         agent_client=agent,
     )
-    assert revised["status"] == "awaiting_approval", revised
-    assert requests[0]["decision_context"]["user_feedback"] == "增加覆盖"
-    assert direction_hash(action_direction(revised["state"])) != old_hash
-    assert revised["agent_proposal"]["raw_action"]["parameters"] == {"coverage_note": "more"}
-    assert revised["state"]["pending_execution_policies"]["edit"]["revision"] == 1
+    assert revised["status"] == "rejected", revised
+    assert requests == []
+    assert direction_hash(action_direction(revised["state"])) == old_hash
+    saved = revised["state"]["pending_execution_policies"]["edit"]
+    assert saved["agent_proposal"] == old_proposal
+    assert saved.get("revision", 0) == 0
+    assert revised["state"]["active_model_version"] == "old"
     assert setup.calls == []
-    from phase_agent.tools.workflows.react_proposal import stale_proposal_error
-
-    assert stale_proposal_error(old_proposal, revised["state"], context, {})
     monkeypatch.setattr(
         recovery, "inspect_training_results", lambda job: {"fingerprint": "evidence"}
     )
@@ -158,18 +157,24 @@ def test_queue_lists_activation_config_and_rejects_changed_identity(tmp_path):
         )
 
 
-def test_new_conversation_cannot_blindly_approve_model_switch(tmp_path):
+def test_new_conversation_requires_display_before_bound_model_switch_approval(tmp_path):
     from phase_agent.graphs.dialogue.support import review_presented_proposal
 
     handler = SimpleNamespace(
-        state_path=tmp_path / "state.json", conversation_id="new", review_pending=Mock()
+        state_path=tmp_path / "state.json", conversation_id="new",
+        review_pending=Mock(return_value={"result": {"reason": "approved exact model switch"}}),
     )
     reply = review_presented_proposal(handler, activation_state(), "同意")
     assert "请核对" in reply
     handler.review_pending.assert_not_called()
+    binding = dict(handler.presented_plan_binding)
     reply = review_presented_proposal(handler, activation_state(), "同意")
-    assert "审批页" in reply
-    handler.review_pending.assert_not_called()
+    assert reply == "approved exact model switch"
+    handler.review_pending.assert_called_once_with(
+        binding["plan_id"], "confirm_sensitive",
+        expected_state_version=binding["state_version"],
+        expected_proposal_hash=binding["proposal_hash"], comment="同意",
+    )
 
 
 def test_service_record_mismatch_falls_back_and_unhealthy_can_be_stopped(tmp_path):
@@ -280,7 +285,7 @@ def test_invalid_direction_revision_preserves_original_plan():
     assert updated == state == before
 
 
-def test_modify_direction_to_activation_removes_old_action_without_execution():
+def test_legacy_direction_revision_cannot_become_model_activation():
     from phase_agent.tools.workflows.training_plan_revision import revise_training_plan
 
     direction_state = setup_direction()
@@ -298,8 +303,9 @@ def test_modify_direction_to_activation_removes_old_action_without_execution():
             "parameters": {"choice": "activate", "alternatives": "暂缓补DFT"},
         },
     )
-    assert response["status"] == "training_handoff"
-    assert not updated["pending_execution_policies"]
+    assert response["status"] == "rejected"
+    assert updated == direction_state
+    assert updated["pending_execution_policies"]["old"] == stored
     assert updated["active_model_version"] == "old"
 
 

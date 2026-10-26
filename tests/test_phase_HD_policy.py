@@ -198,7 +198,7 @@ def test_two_panel_preview_retains_formal_data_and_writes_all_formats(tmp_path):
     before = deepcopy(state)
     report = diagnose_phase_diagram(state)
     assert row_for(report)["tier"] == 2
-    result = publish_quality_comparison(state, report, directory=tmp_path)
+    result = publish_quality_comparison(state, report, directory=tmp_path, formats=("png", "pdf", "svg"))
     assert result["status"] == "completed" and len(result["plot_paths"]) == 3
     assert result["excluded_record_ids"] == ["r1"]
     assert state == before

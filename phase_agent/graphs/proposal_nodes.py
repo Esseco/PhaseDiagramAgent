@@ -45,6 +45,7 @@ def validate_proposal(state, runtime: Runtime[ProposalRuntime]):
         error = ValueError(
             "Invalid LLM action: LangGraph proposal validation failed: " + "; ".join(errors)
         )
+        error.validation_errors = list(errors)
         preserve_proposal_evidence(error, action)
         raise error
     return {}

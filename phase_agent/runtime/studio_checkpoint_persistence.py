@@ -62,4 +62,6 @@ def flush_checkpoint_persistence():
 
     if checkpoint.MEMORY is not None:
         for name in ("storage", "writes", "blobs"):
-            getattr(checkpoint.MEMORY, name).sync()
+            store = getattr(checkpoint.MEMORY, name)
+            store.sync()
+            store.close()

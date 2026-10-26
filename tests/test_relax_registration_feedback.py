@@ -269,6 +269,14 @@ def test_real_chat_entry_revises_conflict_and_waits_for_approval(tmp_path, monke
     assert "同意" in text or "审批" in text
     assert "already have Relax tasks" not in text
     forbidden.assert_not_called()
+    before_continuation_calls = len(calls)
+    repeated_text = studio_runtime.send_project_message("继续", "semantic-continuation")
+    repeated = json.loads(path.read_text(encoding="utf-8"))
+    assert len(calls) == before_continuation_calls, "continuation must reuse the saved approval"
+    assert repeated["pending_execution_policies"] == after["pending_execution_policies"]
+    assert repeated["tasks"] == after["tasks"]
+    assert "同意" in repeated_text or "审批" in repeated_text
+    forbidden.assert_not_called()
     if message == "继续":
         from pathlib import Path
         from phase_agent.tools.relax_mc_batch.prepare import prepare_batch

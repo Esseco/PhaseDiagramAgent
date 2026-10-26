@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,6 +11,11 @@ from phase_agent.runtime.agent_api import format_workflow_reply
 
 
 class BootstrapBranchGenerationTest(unittest.TestCase):
+    def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.structure_directory = str(Path(directory.name) / "structures")
+
     def test_empty_ledger_assigns_generation_to_coverage(self):
         manager = SimpleNamespace(data={"branches": {}}, boundary={"P": ["O1", "O3"]})
         result = {"registered": [], "coverage": [], "summary": {"registered_branches": 0}}
@@ -21,7 +28,7 @@ class BootstrapBranchGenerationTest(unittest.TestCase):
                 "batch_size": 8,
                 "initial_states_per_branch": 3,
                 "seed": 42,
-                "structure_directory": "unused",
+                "structure_directory": self.structure_directory,
             },
         }
         with patch(
@@ -48,7 +55,7 @@ class BootstrapBranchGenerationTest(unittest.TestCase):
                 "batch_size": 96,
                 "initial_states_per_branch": 3,
                 "seed": 42,
-                "structure_directory": "unused",
+                "structure_directory": self.structure_directory,
             },
         }
         params = {"quotas": quotas, "total_quota": 300, "batch_size": 96, "generation_plan": plan}
@@ -89,7 +96,7 @@ class BootstrapBranchGenerationTest(unittest.TestCase):
                 "batch_size": 8,
                 "initial_states_per_branch": 3,
                 "seed": 42,
-                "structure_directory": "unused",
+                "structure_directory": self.structure_directory,
             },
         }
         with patch(

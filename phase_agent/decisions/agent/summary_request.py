@@ -44,6 +44,7 @@ TOPICS = {
         "retryable_tasks",
         "task_wait_cancellation",
         "failure_attempt_facts",
+        "partial_recovery",
         "tasks",
         "short_term_memory",
     },
@@ -99,6 +100,7 @@ ESSENTIAL = {
     "recent_failures",
     "gpu_usage_summary",
     "batch_return_facts",
+    "partial_recovery",
 }
 
 PROGRESSIVE_READS = 4
@@ -153,37 +155,24 @@ def required_fields(action, sources):
     if (bound.get("tool") or bound.get("action_type")) == "prepare_local_batch_files" and (
         bound.get("parameters") or {}
     ).get("mode") in {"relax_mc_results", "ordering_search_results"}:
+        # Existing-result inspection only needs the bound batch, current task
+        # facts and approval identity. Do not reopen model/branch/DFT pools for
+        # a read-only recovery operation; a later scientific action loads them.
         names = {
             "current_project",
-            "confirmed_config",
-            "confirmed_configuration",
-            "config_version",
-            "confirmed_config_version",
             "active_model_version",
-            "mlip_status",
-            "model_refresh",
-            "new_model_generation",
-            "post_refresh_search",
-            "task_stage_evidence",
-            "task_round_evidence",
             "tasks",
-            "short_term_memory",
-            "task_wait_cancellation",
-            "refresh_result_facts",
-            "failure_attempt_facts",
-            "retryable_tasks",
-            "budget_usage",
             "available_budget",
+            "human_constraints",
             "relax_mc_batches",
             "ordering_searches",
             "batch_return_facts",
             "pending_plans",
             "pending_execution_policies",
-            "current_convex_hull",
-            "current_phase_diagram",
-            "human_constraints",
-            "current_settings_authority",
-            "decision_authority",
+            "task_wait_cancellation",
+            "refresh_result_facts",
+            "failure_attempt_facts",
+            "retryable_tasks",
         }
         return names.intersection(sources)
     return topic_fields(sources, required_topics(action))
@@ -615,6 +604,20 @@ def request_summary_first(client, payload):
         preflight_fields = set()
         if inspecting and next_plan is not None and view == "full":
             compared_actions = comparison_actions(next_plan, payload.get("allowed_tools") or [])
+            # Verification and established input preparation do not need every
+            # alternative's full evidence before the concrete action is known.
+            # The selected action still goes through required_fields below;
+            # scientific comparisons retain the comparison-wide preflight.
+            if (
+                next_plan.get("reasoning") != "scientific"
+                and next_plan.get("analysis_kind") != "scientific_comparison"
+            ):
+                # Keep explicit operation receipts needed for verification;
+                # comparison_tools are alternatives and can wait for the
+                # concrete action. comparison_actions preserves operations
+                # before the optional tool list.
+                operation_count = len(next_plan.get("comparison_operations") or [])
+                compared_actions = compared_actions[:operation_count]
             full_for = read.full_for if read.full_for is not None else [] if scoped_reads else None
             if full_for is not None:
                 compared_actions = [

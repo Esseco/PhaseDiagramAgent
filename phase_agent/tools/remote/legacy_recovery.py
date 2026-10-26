@@ -113,6 +113,36 @@ def _read_plan(archive):
         return json.loads(payload)
 
 
+def _recovery_plan_matches(actual, expected):
+    """Accept path-only changes made by a local submission layout migration."""
+    if actual == expected:
+        return True
+    for key in ("schema", "mode", "source_archive_sha256"):
+        if actual.get(key) != expected.get(key):
+            return False
+    actual_tasks = actual.get("tasks") or []
+    expected_tasks = expected.get("tasks") or []
+    if len(actual_tasks) != len(expected_tasks):
+        return False
+    for actual_task, expected_task in zip(actual_tasks, expected_tasks):
+        for key in set(actual_task) | set(expected_task):
+            if key in {"input_directory", "result_directory"}:
+                continue
+            if actual_task.get(key) != expected_task.get(key):
+                return False
+        if (
+            Path(actual_task.get("input_directory", "")).name
+            != Path(expected_task.get("input_directory", "")).name
+        ):
+            return False
+        if (
+            Path(actual_task.get("result_directory", "")).name
+            != Path(expected_task.get("result_directory", "")).name
+        ):
+            return False
+    return True
+
+
 def prepare_recovery_handoff(state, handoff, cpu_profile):
     """Only add a sibling delivery; never update the original handoff or State."""
     from phase_agent.tools.relax_mc_batch.files import script as shell_script
@@ -163,18 +193,8 @@ def prepare_recovery_handoff(state, handoff, cpu_profile):
 
 
 def portable_transfer_source():
-    """Reuse the standard transfer implementation without an installed app package."""
-    limits = Path(__file__).with_name("transfer_limits.py").read_text(encoding="utf-8")
-    transfer = Path(__file__).with_name("transfer_bundle.py").read_text(encoding="utf-8")
-    transfer, count = re.subn(
-        r"from phase_agent.tools.remote.transfer_limits import \([\s\S]*?\)\n",
-        "",
-        transfer,
-        count=1,
-    )
-    if count != 1:
-        raise ValueError("portable_transfer_import_contract_changed")
-    return limits + "\n" + transfer
+    """Reuse the standalone transfer module without rewriting its source."""
+    return Path(__file__).with_name("transfer_bundle.py").read_text(encoding="utf-8-sig")
 
 
 def _recovery_import_directory(original, recovery_key):
@@ -193,7 +213,9 @@ def _recovery_import_directory(original, recovery_key):
         None,
     )
     if submission is not None and epoch is not None:
-        return submission / epoch[1] / "recovery" / recovery_key
+        from phase_agent.tools.remote.submission_architecture import epoch_evidence_directory
+
+        return epoch_evidence_directory(submission / epoch[1], "recovery") / recovery_key
     return legacy
 
 
@@ -244,7 +266,7 @@ def recovery_handoffs(state):
             continue
         expected = recovery_plan(state, original)
         for folder in candidates:
-            if _read_plan(folder / "inputs.zip") != expected:
+            if not _recovery_plan_matches(_read_plan(folder / "inputs.zip"), expected):
                 raise ValueError("recovery_delivery_outside_original_scope")
             yield _descriptor(
                 original,

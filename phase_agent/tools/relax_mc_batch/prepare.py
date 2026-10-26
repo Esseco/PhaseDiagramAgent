@@ -16,6 +16,7 @@ from phase_agent.tools.relax_mc_batch.files import (
 )
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.integrity import file_checksum
+from phase_agent.tools.remote.submission_layout import write_submission_index
 from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
 from phase_agent.science.structures.boundary_utils import load_structure
 
@@ -104,6 +105,7 @@ def prepare_batch(*, action, context):
             script_path=str(upload / "submit_all.sh"),
             expected_results_archive=str(output_directory(existing["directory"]) / "results.zip"),
         )
+        write_submission_index(config["upload_batches_directory"], state)
         preparation_progress(
             "complete",
             {
@@ -148,6 +150,7 @@ def prepare_batch(*, action, context):
         model_upload_directory(
             Path(config["upload_batches_directory"]).resolve(), state, plan["model_version"]
         )
+        / "delivery"
         / "relax_mc"
     )
     from phase_agent.tools.remote.handoff_naming import batch_label
@@ -411,6 +414,7 @@ def prepare_batch(*, action, context):
     state.setdefault("tasks", []).extend(tasks)
     state.setdefault("pending_tasks", []).extend(deepcopy(tasks))
     state.setdefault("relax_mc_batches", {})[plan["bundle_id"]] = record
+    write_submission_index(config["upload_batches_directory"], state)
     if validation_error:
         return {
             "status": "not_configured",

@@ -48,6 +48,15 @@ def test_identical_historical_payloads_are_stored_once(tmp_path):
         assert root[key][1] == b"large unchanged facts" * 10000
 
 
+def test_deleted_nodes_release_unreferenced_payloads(tmp_path):
+    root = StudioCheckpointDict(filename=tmp_path / "garbage.pckl")
+    root["old"] = ("msgpack", b"old payload" * 1000)
+    root["current"] = ("msgpack", b"current payload" * 1000)
+    del root["old"]
+    assert root.collect_unreferenced_payloads() == 1
+    assert root.backend.conn.execute("select count(*) from payloads").fetchone()[0] == 1
+
+
 def test_legacy_migration_keeps_original_and_all_records(tmp_path):
     filename = tmp_path / "old.pckl"
     old = {

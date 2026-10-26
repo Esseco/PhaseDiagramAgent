@@ -5,7 +5,7 @@ from phase_agent.tools.policy.file_approval import proposal_hash
 LABELS = {
     "generate_branches": "生成候选结构",
     "prepare_local_batch_files": "准备计算输入",
-    "select_dft_candidates": "筛选并准备 DFT 输入",
+    "select_dft_candidates": "补充 DFT 决策",
     "allocate_mc_bohb": "分配 MC 采样",
     "update_mlip": "准备模型微调",
     "adjust_strategy": "调整搜索策略",

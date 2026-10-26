@@ -73,7 +73,7 @@ def test_missing_archive_uses_recorded_directory_and_missing_paths_are_explicit(
     from pathlib import Path
 
     Path(batch["upload_directory"] + ".upload.zip").unlink()
-    assert "上传输入目录" in "\n".join(waiting_file_lines(data))
+    assert "提交路径（任务输入目录）" in "\n".join(waiting_file_lines(data))
     batch.pop("script_path")
     batch.pop("results_directory")
     text = "\n".join(waiting_file_lines(data))
@@ -133,7 +133,7 @@ def test_brief_mode_has_one_round_folder_and_no_batch_paths(tmp_path):
             {"status": "tasks_in_progress", "state": data}, "synthetic-state.json"
         )
     for output in [text, reply]:
-        assert output.count("本轮提交文件夹：") == 1
+        assert output.count("提交路径：") == 1
         assert "[打开" not in output and "](" not in output
         assert "epoch1_remote-test" in output
         assert "batch-1" not in output and ".upload.zip" not in output
@@ -145,7 +145,7 @@ def test_brief_missing_handoff_does_not_advertise_internal_epoch(tmp_path):
     data = state(tmp_path)
     with response_detail("brief"):
         text = "\n".join(waiting_file_lines(data))
-    assert "本轮提交文件夹：" not in text
+    assert "提交路径：" not in text
     assert "epoch1_remote-test" not in text
     assert "尚未准备完整" in text
 
@@ -167,6 +167,6 @@ def test_failed_refresh_does_not_hide_other_packages_or_restore_waived_wait(tmp_
         "return_directory": str(tmp_path / "return-results"),
     }
     with response_detail("brief"):
-        assert "本轮提交文件夹：" in "\n".join(waiting_file_lines(data))
+        assert "提交路径：" in "\n".join(waiting_file_lines(data))
         data["tasks"][0]["recovery_wait_waived"] = True
         assert waiting_file_lines(data) == []

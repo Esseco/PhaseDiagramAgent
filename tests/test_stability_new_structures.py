@@ -156,6 +156,18 @@ def test_heldout_structure_closed_loop_without_mocking_recognition(
     def fake_physics(batch, state, manager):
         results = execute(batch, state, manager)
         for result in results:
+            if result["stage"] == "deep_search":
+                # A lower synthetic MC energy must describe a different exact geometry.
+                geometry_path = Path(result["outputs"]["structure_path"])
+                geometry = Structure.from_file(geometry_path)
+                sodium = next(i for i, site in enumerate(geometry) if site.specie.symbol == "Na")
+                geometry.translate_sites(
+                    [sodium],
+                    [0.0001 * (result.get("segment_index", 0) + 1), 0, 0],
+                    frac_coords=True,
+                    to_unit_cell=True,
+                )
+                geometry.to(filename=geometry_path, fmt="poscar")
             result["outputs"].update(
                 optimizer_converged=True,
                 force_max_ev_per_angstrom=0.01,

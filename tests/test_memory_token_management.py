@@ -69,7 +69,8 @@ def test_configured_trigger_rejects_instead_of_changing_action():
 
 
 def test_failed_validation_returns_to_llm_and_requires_approval():
-    config = {"agent": {"allowed_tools": ["select_dft_candidates"]}}
+    config = {"agent": {"allowed_tools": ["select_dft_candidates"]},
+              "qbc": default_dft_decision_config()}
     action = {"tool": "select_dft_candidates", "budget": 1,
               "parameters": {"decisions": [{"candidate_id": "a", "action": "DFT_RELAX"}]}}
     revised = deepcopy(action)
@@ -80,7 +81,9 @@ def test_failed_validation_returns_to_llm_and_requires_approval():
          patch("phase_agent.tools.workflows.attach_dft_preview.preview_dft_inputs", side_effect=[(None, "dft_budget"), (preview, None)]),\
          patch("phase_agent.tools.workflows.run_tool_step.revise_tool_proposal", return_value={"revision_status": "revised", "action": revised}) as revise,\
          patch("phase_agent.tools.workflows.dft_template_review.gate_template", side_effect=lambda proposal, *args, **kw: (proposal, False)):
-        result = run_tool_step({}, {"config": config},
+        result = run_tool_step(
+            {"qbc_candidates": [{"candidate_id": "a", "atom_count": 40}]},
+            {"config": config},
             registry={"select_dft_candidates": {"handler": lambda **kw: None}},
             agent_client=lambda p: {}, execution_mode="interactive")
     assert revise.call_count == 1

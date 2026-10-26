@@ -178,7 +178,9 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
                 raise ValueError("Invalid handoff operation label")
             label = label.split("_", 1)[0] + "_" + operation_label
         epoch = label.split("_", 1)[0]
-        transfer_root = base / epoch / "transfers"
+        from phase_agent.tools.remote.submission_architecture import epoch_delivery_directory
+
+        transfer_root = epoch_delivery_directory(base / epoch, "transfers")
         folder = package_folder(transfer_root, label.split("_", 1)[-1], key)
         archive = folder / "inputs.zip"
         if not archive.exists():

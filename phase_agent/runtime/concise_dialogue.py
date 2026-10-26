@@ -3,7 +3,7 @@
 import re
 
 
-def approval_reply(proposal, state):
+def approval_reply(proposal, state, *, state_path=None, config=None):
     if not proposal:
         from phase_agent.runtime.plan_queries import pending_plan_reply
 
@@ -72,6 +72,13 @@ def approval_reply(proposal, state):
         scope_lines = [
             f"设置：最多 {settings.get('relax_steps', 500)} 步，{settings.get('optimizer', 'LBFGS')}；未收敛结果排除，不自动延长或重试。"
         ]
+    from phase_agent.tools.policy.training_input_action import is_training_input_action
+
+    if is_training_input_action(proposal.get("raw_action") or {"tool": tool, "parameters": params}):
+        result = "待确认：微调模型，生成超算训练提交文件。"
+        scope_lines.append(
+            "批准后仅生成训练输入与提交脚本，由你上传提交；不本机训练、不自动激活模型。"
+        )
     jobs = workload.get("gpu_jobs_upper_by_wave")
     budget = (
         f"最多 {sum(jobs)} 个 GPU 计算作业，另 1 个控制作业" if jobs else "计算量待任务展开后估算"
@@ -115,7 +122,7 @@ def approval_reply(proposal, state):
     from phase_agent.runtime.review_file_presentation import file_location_lines
 
     artifact_lines = []
-    if artifacts:
+    if artifacts.get("text"):
         artifact_lines = file_location_lines("Branch 分布与构成文件", artifacts["text"])
     from phase_agent.tools.workflows.dft_selection_artifacts import (
         proposal_artifacts as dft_artifacts,
@@ -124,6 +131,19 @@ def approval_reply(proposal, state):
     dft_details = dft_artifacts(proposal, state)
     if dft_details:
         artifact_lines.extend(file_location_lines("DFT 选点文件", dft_details["text"]))
+    from phase_agent.runtime.handoff_presentation import planned_handoff_lines
+
+    path_lines = planned_handoff_lines(proposal, state, state_path, config=config)
+    scope_warning = []
+    next_step = "下一步：回复‘同意’、‘拒绝’或提出修改。确认范围：" + boundary
+    if artifacts.get("scope_mismatch"):
+        scope_warning.append(
+            "需注意：本批目标与该模型最近生成的 branch 完全无交集；请先核对概况文件中的范围。"
+        )
+        next_step = "下一步：先修正 branch 范围后再审批。"
+    elif artifacts.get("scope_review_unavailable"):
+        scope_warning.append("需注意：尚未生成可核对的 branch 概况文件。")
+        next_step = "下一步：先补齐 branch 生成概况和范围核对，再审批。"
     shared = (proposal.get("raw_action") or {}).get("_shared_dft_snapshot")
     if shared is not None:
         artifact_lines.append(
@@ -131,15 +151,25 @@ def approval_reply(proposal, state):
             + "、".join(shared["source_projects"])
             + f"；本方案固定 {len(shared['record_ids'])} 条记录，新增数据下次审批纳入。"
         )
+    from phase_agent.runtime.review_presentation import revision_lines
+
+    revisions = (
+        [f"方案修订 {card['revision']}", *revision_lines(match[1])]
+        if match and card["revision"]
+        else []
+    )
     return "\n".join(
         [
             "本次：" + purpose,
+            *revisions,
             "结果：" + result,
             *[line for line in scope_lines if line],
-            "下一步：回复‘同意’、‘拒绝’或提出修改。确认范围：" + boundary,
             "预算：" + budget,
             *evidence_lines,
             *artifact_lines,
+            *scope_warning,
+            *path_lines,
+            next_step,
         ]
     )
 

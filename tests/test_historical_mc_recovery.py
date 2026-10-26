@@ -142,7 +142,7 @@ def test_configuration_drift_imports_and_replay_does_not_settle_again(tmp_path, 
     monkeypatch.setattr(quality, "candidate_quality_evidence", lambda state, rows: rows)
     ctx = {
         "event_state": state,
-        "effective_config": {"upload_batches_directory": str(tmp_path / "uploads"), "mlip": {}},
+        "effective_config": {"upload_batches_directory": str(tmp_path), "mlip": {}},
         "config_version": "new",
         "manager": Manager(),
     }

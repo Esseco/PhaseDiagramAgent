@@ -14,6 +14,129 @@ def waiting_training_job(state):
     return jobs[-1] if jobs else None
 
 
+def _current_dft_review_line(state):
+    """Expose current-model DFT failures before older refresh summaries."""
+    model = state.get("active_model_version")
+    config = state.get("confirmed_config_version")
+    if not model or not config:
+        return None
+    rows = [
+        row
+        for row in state.get("tasks") or []
+        if row.get("stage") in {"dft_single_point", "dft_relax"}
+        and row.get("model_version") == model
+        and row.get("config_version") == config
+    ]
+    failed = [row for row in rows if row.get("status") in {"failed", "timeout"}]
+    if not failed:
+        return None
+    completed = sum(row.get("status") == "completed" for row in rows)
+    pending = sum(
+        row.get("status") in {"pending", "running", "submitted", "unknown", "submission_unknown"}
+        for row in rows
+    )
+    pending_text = f"，另有 {pending} 个仍待回收" if pending else ""
+    return (
+        f"当前：当前模型 DFT 本轮已回收 {completed}/{len(rows)} 个，"
+        f"{len(failed)} 个失败{pending_text}；可继续使用已回收结果，或只补全失败项；不会重跑整批。"
+    )
+
+
+def _current_mc_partial_review_line(state):
+    """Expose a verified current-model MC partial return as an explicit choice."""
+    model = state.get("active_model_version")
+    candidates = []
+    for bundle_id, batch in (state.get("relax_mc_batches") or {}).items():
+        if (
+            batch.get("model_version") != model
+            or batch.get("status") in {"cancelled", "superseded"}
+            or not batch.get("import_checksum")
+        ):
+            continue
+        members = [
+            row
+            for row in state.get("tasks") or []
+            if row.get("relax_mc_bundle_id") == bundle_id
+        ]
+        if not members:
+            continue
+        pending = [
+            row
+            for row in members
+            if row.get("status") in {"pending", "running", "submitted", "unknown"}
+        ]
+        failed = [
+            row
+            for row in members
+            if row.get("status") in {"failed", "timeout"}
+        ]
+        successful = [row for row in members if row.get("status") == "completed"]
+        summary = batch.get("result_summary") or {}
+        failed_ids = set(summary.get("failed_task_ids") or []) | {
+            row.get("task_id") for row in failed
+        }
+        expected = int(summary.get("task_count") or len(members))
+        resolved_ids = {row.get("task_id") for row in successful} | failed_ids
+        if pending or not failed_ids or not successful or len(resolved_ids) < expected:
+            continue
+        candidates.append((bundle_id, len(successful), expected, len(failed_ids)))
+    if not candidates:
+        return None
+    _, successful, expected, failed = candidates[-1]
+    return (
+        f"当前：Relax+MC 本轮已回收 {successful}/{expected} 个，{failed} 个失败；"
+        "可继续使用已回收结果，或只补全失败项；不会重跑整批。"
+    )
+
+
+def _current_imported_mc_identity_review(state):
+    """Report a completed current-model MC batch whose generation identity is unresolved."""
+    model = state.get("active_model_version")
+    candidates = []
+    for bundle_id, batch in (state.get("relax_mc_batches") or {}).items():
+        if (
+            batch.get("model_version") != model
+            or batch.get("status") != "completed"
+            or not batch.get("import_checksum")
+        ):
+            continue
+        members = [
+            row
+            for row in state.get("tasks") or []
+            if row.get("relax_mc_bundle_id") == bundle_id
+        ]
+        if not members or any(
+            row.get("status") in {"pending", "running", "submitted", "unknown"}
+            for row in members
+        ):
+            continue
+        batch_branch_ids = set(batch.get("branch_ids") or [])
+        registered_branch_ids = {
+            row.get("branch_id")
+            for row in state.get("branch_candidates") or []
+            if row.get("branch_id")
+        }
+        missing_branch_ids = batch_branch_ids - registered_branch_ids
+        if not missing_branch_ids:
+            continue
+        summary = batch.get("result_summary") or {}
+        total = summary.get("task_count") or len(members)
+        failed = summary.get("failed_task_ids") or [
+            row.get("task_id")
+            for row in members
+            if row.get("status") in {"failed", "timeout"}
+        ]
+        candidates.append((bundle_id, total, len(failed), len(missing_branch_ids)))
+    if not candidates:
+        return None
+    _, total, failed, missing = candidates[-1]
+    return (
+        f"当前：Relax+MC 本轮已回收并识别 {total}/{total} 个任务，失败 {failed} 个；"
+        + ("无需补全；" if not failed else "可只补全失败项；")
+        + f"仍有 {missing} 个 batch branch 未登记，先核对批次身份。"
+    )
+
+
 def brief_chat_state(state, *, configuring=False):
     """One factual state line, without re-listing files or scientific evidence."""
     if configuring:
@@ -27,6 +150,12 @@ def brief_chat_state(state, *, configuring=False):
         if any((row or {}).get("status") == "metadata_required" for row in returned):
             return "当前：微调结果已回收，模型清单待补齐；未激活。"
         return "当前：微调完成，仍在使用旧模型。"
+    dft_review = _current_dft_review_line(state)
+    if dft_review:
+        return dft_review
+    mc_partial = _current_mc_partial_review_line(state)
+    if mc_partial:
+        return mc_partial
     refresh = state.get("model_refresh") or {}
     if refresh and refresh.get("status") != "completed":
         if refresh.get("status") == "waiting_results":
@@ -81,6 +210,9 @@ def brief_chat_state(state, *, configuring=False):
         and not active
         and not state.get("pending_execution_policies")
     ):
+        mc_identity_review = _current_imported_mc_identity_review(state)
+        if mc_identity_review:
+            return mc_identity_review
         if generation["ready"]:
             return "当前：本轮新branch已登记，等待准备Relax+MC搜索输入。"
         return "当前：新模型刷新已完成，须先生成新branch并展示结果。"
@@ -108,7 +240,7 @@ def brief_chat_state(state, *, configuring=False):
     if pending:
         names = {
             "update_mlip": "微调训练输入方案",
-            "select_dft_candidates": "DFT 输入方案",
+            "select_dft_candidates": "补充 DFT 决策",
             "allocate_mc_bohb": "MC 分配方案",
             "prepare_local_batch_files": "输入准备方案",
             "generate_branches": "branch 生成方案",
@@ -206,6 +338,11 @@ def epoch_stage_line(state, *, configuring=False):
 
 def format_epoch_reply(reply, state, *, configuring=False, project_card=None):
     """Show the epoch once, removing only an identical repeated stage label."""
+    # A pending recovery decision must be shown verbatim.  The normal concise
+    # renderer derives a stage from pending plans and would otherwise prepend
+    # an old input-preparation card before this gate.
+    if "请明确回复‘同意回收’" in str(reply):
+        return str(reply).strip()
     header = epoch_stage_line(state, configuring=configuring)
     stage = header.split(" · ", 1)[-1].rstrip("。")
     lines = []

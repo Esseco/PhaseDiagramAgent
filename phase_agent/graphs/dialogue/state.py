@@ -8,6 +8,8 @@ class TurnState(TypedDict, total=False):
     operation: str
     facts: dict
     verified_recovery: dict
+    recovery_error: str
+    recovery_just_approved: bool
     result: dict
     reply: str
     evidence: dict

@@ -13,16 +13,46 @@ def test_mc_runtime_requires_positive_step_estimate(steps):
 
 
 def test_relax_stage_selects_mc_memory_scope():
-    result = build_decision_context({"tasks": [{"stage": "relax_and_feature", "status": "completed"}]})
+    result = build_decision_context(
+        {"tasks": [{"stage": "relax_and_feature", "status": "completed"}]}
+    )
     assert result["memory_retrieval"]["action"] == "allocate_mc_bohb"
+
+
+def test_magnetic_context_treats_malformed_report_as_unknown():
+    result = build_decision_context(
+        {
+            "dft_dataset_records": [
+                {
+                    "task_id": "failed-dft",
+                    "spin_state_check": {"applies": True, "reason": "missing output"},
+                    "magnetic_check": "malformed",
+                }
+            ]
+        }
+    )
+    assert result["dft_magnetic_diagnostics"] == [
+        {
+            "task_id": "failed-dft",
+            "model_version": None,
+            "status": "unknown",
+            "reason": "missing output",
+            "reasonable_atom_count": 0,
+            "anomalous_atom_count": 0,
+        }
+    ]
 
 
 def test_model_switch_replaces_the_single_decision_client(tmp_path):
     search = object()
-    handler = RunWorkflowChatHandler({"state_path": str(tmp_path / "state.json")},
-        deepseek_model_switcher=lambda model: (model, search))
-    with patch("phase_agent.runtime.resolve_deepseek_model_request.resolve_deepseek_model_request",
-               return_value="deepseek-flash"):
+    handler = RunWorkflowChatHandler(
+        {"state_path": str(tmp_path / "state.json")},
+        deepseek_model_switcher=lambda model: (model, search),
+    )
+    with patch(
+        "phase_agent.runtime.resolve_deepseek_model_request.resolve_deepseek_model_request",
+        return_value="deepseek-flash",
+    ):
         handler([{"role": "user", "content": "切换模型"}])
     assert handler.workflow_kwargs["agent_client"] is search
     assert not hasattr(handler, "config_intent_client")

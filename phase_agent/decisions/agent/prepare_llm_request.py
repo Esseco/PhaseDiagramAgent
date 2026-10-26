@@ -37,6 +37,41 @@ def _size(value):
     return len(json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":")))
 
 
+_PROTECTED_DUPLICATE_FIELDS = frozenset(
+    {
+        # Keep the user request and explicit constraints visible in the state
+        # view even when a context adapter repeats them.
+        "user_message",
+        "user_instruction",
+        "human_comment",
+        "human_constraints",
+        # These fields bind approvals and continuation to the exact proposal.
+        "current_project",
+        "pending_execution_policies",
+        "pending_plans",
+        "current_proposal",
+        "approval_record",
+        "proposal_hash",
+        "plan_id",
+        "invocation_id",
+        "revision",
+    }
+)
+
+
+def _drop_duplicate_state_fields(state, context):
+    """Drop exact context aliases while retaining user and approval facts."""
+    if not isinstance(state, dict) or not isinstance(context, dict):
+        return
+    for key in list(state):
+        if (
+            key not in _PROTECTED_DUPLICATE_FIELDS
+            and key in context
+            and state[key] == context[key]
+        ):
+            state.pop(key)
+
+
 def compact_current_proposal(proposal):
     """Keep the complete action; omit only recomputed previews and transport metadata."""
     raw = (
@@ -85,6 +120,7 @@ def prepare_llm_request(payload):
             **(result.get("decision_context") or {}),
         }
     context = result.get("decision_context") or {}
+    _drop_duplicate_state_fields(state, context)
     # API accounting history is available on disk; it is not decision evidence.
     usage = state.get("budget_usage") or {}
     if isinstance(usage, dict) and isinstance(usage.get("llm"), dict):

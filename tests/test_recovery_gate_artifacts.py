@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests import recovery_release_gate as gate
+from phase_agent.tools.remote.transfer_bundle import local_path
 
 
 @pytest.mark.parametrize("explicit, outcome", [(False, 0), (True, 1), (True, "error")])
@@ -25,7 +26,7 @@ def test_gate_cleans_its_own_run_and_keeps_reports(tmp_path, monkeypatch, explic
     def run(command, *, cwd, env):
         scratch = Path(env["TEMP"])
         assert scratch == Path(env["TMP"])
-        assert scratch.is_relative_to(parent)
+        assert scratch.is_relative_to(local_path(parent))
         assert scratch != parent
         assert scratch.is_dir()
         observed.append(scratch)

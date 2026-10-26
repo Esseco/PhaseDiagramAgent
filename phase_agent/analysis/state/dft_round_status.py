@@ -62,6 +62,12 @@ def dft_recovery_rounds(state):
                 "pending_task_ids": sorted(t["task_id"] for t in pending),
                 "waived_task_ids": sorted(t["task_id"] for t in waived),
                 "recovered_task_ids": sorted(t["task_id"] for t in returned),
+                "successful_task_ids": sorted(
+                    t["task_id"] for t in returned if t.get("status") == "completed"
+                ),
+                "failed_task_ids": sorted(
+                    t["task_id"] for t in returned if t.get("status") in {"failed", "timeout"}
+                ),
             }
         )
     return output

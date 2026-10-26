@@ -43,6 +43,31 @@ def _epoch_from_results(directory, rounds):
     return "unassigned"
 
 
+def _english_interaction_stem(stem):
+    mapping = (
+        ("交互异常", "interaction_error"),
+        ("已回收285个刷新结果", "model_refresh_results_collected"),
+        ("无运行中任务", "workflow_check"),
+        ("本轮新branch已登记", "branch_registered"),
+        ("输入准备方案待确认", "input_preparation_review"),
+        ("DFT恢复", "dft_recovery"),
+        ("DFT回收", "dft_results_collected"),
+        ("DFT选点", "dft_selection"),
+        ("结构生成", "structure_generation"),
+        ("MC分配", "mc_allocation"),
+        ("MC取消", "mc_cancelled"),
+        ("模型刷新", "model_refresh"),
+        ("模型训练", "model_training"),
+        ("MC回收", "mc_recovery"),
+        ("Relax回收", "relax_recovery"),
+        ("流程检查", "workflow_check"),
+    )
+    for old, new in mapping:
+        if stem == old or stem.startswith(old + "_"):
+            return new + stem[len(old) :]
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_").lower() or "interaction"
+
+
 def folder_plan(root, state):
     root = Path(root).resolve()
     rounds = (state.get("upload_layout") or {}).get("model_rounds") or {}
@@ -69,14 +94,19 @@ def folder_plan(root, state):
         for path in sorted((submission / category).glob("*")):
             match = re.match(r"(epoch\d+)_(.+)", path.name)
             if match:
-                add(path, submission / match[1] / target / match[2])
+                lane = "relax_mc" if target == "relax_mc" else "recovery"
+                bucket = "delivery" if lane == "relax_mc" else "evidence"
+                add(path, submission / match[1] / bucket / lane / match[2])
     for path in sorted((submission / "verified").glob("*")):
         summary = json.loads((path / "result_summary.json").read_text(encoding="utf-8"))
         number = rounds.get(summary.get("model_version"))
         epoch = f"epoch{int(number) - 1}" if number else "unassigned"
-        add(path, submission / epoch / "verified_results" / path.name)
+        add(path, submission / epoch / "evidence" / "verified_results" / path.name)
     for path in sorted((submission / "_recovery").glob("*")):
-        add(path, submission / _epoch_from_results(path, rounds) / "recovery" / path.name)
+        add(
+            path,
+            submission / _epoch_from_results(path, rounds) / "evidence" / "recovery" / path.name,
+        )
     for kind in ("01-upload", "02-results"):
         for path in sorted((submission / "archives" / kind).glob("*")):
             match = re.match(r"(epoch\d+)_(.+)", path.name)
@@ -91,8 +121,11 @@ def folder_plan(root, state):
                 if len(versions) == 1 and next(iter(versions)) in rounds:
                     epoch = f"epoch{int(rounds[next(iter(versions))]) - 1}"
                     name = path.name.split("__", 1)[0] + "_legacy_package"
-            category = "storage_archives" if path.is_file() else "transfers"
-            add(path, submission / epoch / category / name)
+            if path.is_file():
+                target = submission / epoch / "evidence" / "storage_archives" / name
+            else:
+                target = submission / epoch / "delivery" / "transfers" / name
+            add(path, target)
     legacy = root / "交互记录"
     sequences = {}
     for path in sorted(legacy.glob("*.md")):
@@ -147,22 +180,41 @@ def _write_index_bytes(index, data):
     _attributes(index, hidden)
 
 
-def relocate_archive_index(root, moves):
+def _submission_root(root):
     root = Path(root).resolve()
-    index = root / "submissions/.archive_index.json"
-    if not index.is_file():
-        return
-    pairs = sorted(
-        [
-            (
-                a.relative_to(root / "submissions").as_posix(),
-                b.relative_to(root / "submissions").as_posix(),
+    submission_root = root / "submissions"
+    if not submission_root.is_dir() and root.name == "submissions":
+        submission_root = root
+    return submission_root
+
+
+def _archive_move_pairs(moves, submission_root):
+    """Normalize tuple and dict move records to submission-relative pairs."""
+    pairs = []
+    for move in moves or ():
+        if isinstance(move, dict):
+            old, new = move.get("from"), move.get("to")
+        else:
+            try:
+                old, new = move
+            except (TypeError, ValueError):
+                continue
+        if not old or not new:
+            continue
+        old, new = Path(old).resolve(), Path(new).resolve()
+        if old.is_relative_to(submission_root) and new.is_relative_to(submission_root):
+            pairs.append(
+                (
+                    old.relative_to(submission_root).as_posix(),
+                    new.relative_to(submission_root).as_posix(),
+                )
             )
-            for a, b in moves
-            if a.is_relative_to(root / "submissions")
-        ],
-        key=lambda pair: -len(pair[0]),
-    )
+    return sorted(pairs, key=lambda pair: -len(pair[0]))
+
+
+def _normalize_archive_mapping(submission_root, mappings, moves=()):
+    """Return safe canonical archive keys and targets without guessing payloads."""
+    pairs = _archive_move_pairs(moves, submission_root)
 
     def relocated(value):
         for old, new in pairs:
@@ -170,9 +222,54 @@ def relocate_archive_index(root, moves):
                 return new + value[len(old) :]
         return value
 
-    mappings = json.loads(index.read_bytes())
-    mappings = {relocated(k): relocated(v) for k, v in mappings.items()}
+    def canonical_key(value):
+        path = Path(value)
+        if len(path.parts) >= 3 and re.fullmatch(r"epoch\d+", path.parts[0]):
+            if path.parts[1] not in {"calculations", "delivery", "evidence", "previously_used"}:
+                candidate = "/".join((path.parts[0], "calculations", *path.parts[1:]))
+                if (submission_root / Path(candidate)).exists():
+                    return candidate
+        return value
+
+    def canonical_target(value):
+        target = submission_root / Path(value)
+        if target.is_file():
+            return value
+        path = Path(value)
+        if (
+            len(path.parts) >= 3
+            and re.fullmatch(r"epoch\d+", path.parts[0])
+            and path.parts[1] == "storage_archives"
+        ):
+            candidate = "/".join((path.parts[0], "evidence", "storage_archives", *path.parts[2:]))
+            if (submission_root / Path(candidate)).is_file():
+                return candidate
+        return value
+
+    normalized = {}
+    for raw_key, raw_value in mappings.items():
+        key = canonical_key(relocated(str(raw_key)))
+        value = canonical_target(relocated(str(raw_value)))
+        prior = normalized.get(key)
+        if prior is not None and prior != value:
+            raise ValueError(f"Archive index collision after migration: {key}")
+        normalized[key] = value
+    return normalized
+
+
+def relocate_archive_index(root, moves):
+    submission_root = _submission_root(root)
+    index = submission_root / ".archive_index.json"
+    if not index.is_file():
+        return
+    original = json.loads(index.read_bytes())
+    mappings = _normalize_archive_mapping(submission_root, original, moves)
     _write_index_bytes(index, (json.dumps(mappings, indent=2) + "\n").encode("utf-8"))
+
+
+def repair_archive_index(root):
+    """Repair stale pre-bucket archive keys/targets when their files still exist."""
+    relocate_archive_index(root, ())
 
 
 def migrate_folders(root, state, *, apply=False):
@@ -226,8 +323,12 @@ def prune_archived_runtime(root, *, apply=False):
     """Remove only runtime source copies proven identical to their retained input ZIP."""
     root = Path(root).resolve()
     report = []
-    for archive in sorted(root.glob("submissions/epoch*/relax_mc/*/inputs.zip")):
-        if not re.fullmatch(r"epoch\d+", archive.parents[2].name):
+    candidates = {
+        *root.glob("submissions/epoch*/delivery/relax_mc/*/inputs.zip"),
+        *root.glob("submissions/epoch*/relax_mc/*/inputs.zip"),
+    }
+    for archive in sorted(candidates):
+        if not any(re.fullmatch(r"epoch\d+", parent.name) for parent in archive.parents):
             continue
         directory = archive.parent
         if directory.name.endswith(("_input", "_output")):

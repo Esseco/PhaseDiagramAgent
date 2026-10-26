@@ -4,7 +4,7 @@ TOOL_LABELS = {
     "generate_branches": "生成候选结构",
     "prepare_local_batch_files": "准备计算输入文件",
     "allocate_mc_bohb": "安排 MC 搜索",
-    "select_dft_candidates": "选择 DFT 验证结构",
+    "select_dft_candidates": "补充 DFT 决策",
     "run_calculation_stage": "运行本次计算",
     "restart_failed_task": "重试失败任务",
     "check_convergence": "检查搜索进展与收敛",

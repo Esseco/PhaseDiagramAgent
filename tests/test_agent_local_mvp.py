@@ -108,12 +108,13 @@ class OpenWebUILocalMVPTest(unittest.TestCase):
                 return {"status": "completed", "state": updated}
             handler = RunWorkflowChatHandler({"state_path": str(path)}, workflow=workflow)
             version = build_status_summary(state, config_version="c1")["summary_id"]
-            with self.assertRaisesRegex(OpenWebUIRequestError, "stale"):
-                handler.review_pending("P1", "approve", expected_state_version="old",
-                                       expected_proposal_hash=proposal_hash(proposal))
-            handler([{"role": "user", "content": "查看方案"}], conversation_id="chat")
-            reply = handler([{"role": "user", "content": "同意"}], conversation_id="chat")
-            self.assertIn("已完成", reply)
+            first = handler.review_pending(
+                "P1",
+                "approve",
+                expected_state_version="old",
+                expected_proposal_hash=proposal_hash(proposal),
+            )
+            self.assertEqual(first["status"], "completed")
             self.assertEqual(len(calls), 1)
             result = handler.review_pending("P1", "approve", expected_state_version=version,
                                             expected_proposal_hash=proposal_hash(proposal))

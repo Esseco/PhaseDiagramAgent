@@ -41,9 +41,9 @@ def test_legacy_bohb_request_without_phase_evidence_is_blocked(tmp_path):
         config_session=session, execution_mode="autonomous", max_steps=1,
     )
     first = run_workflow(**common, agent_client=lambda _: _bohb_action("round-1"))
-    assert first["status"] == "not_configured"
-    result = first["events"][0]["execution"]["result"]
-    assert result["reason"] == "mc_requires_current_phase_diagram_ehull_per_atom"
+    assert first["status"] == "rejected"
+    assert "MC候选或冻结Relax凸包缺失" in first["reason"]
+    assert "execution" not in first["events"][0]
     assert not first["state"].get("pending_tasks")
     assert not first["state"].get("budget_reservations")
 
@@ -72,8 +72,17 @@ def test_agent_cannot_take_over_bohb_branch_or_fidelity(tmp_path):
         manager, {}, {"state_path": str(tmp_path / "state.json")}, _session(boundary),
         agent_client=lambda _: action, execution_mode="autonomous", max_steps=1,
     )
-    assert result["events"][0]["final_action"]["tool"] == "pause_search"
-    assert "bohb_owned_fields_forbidden" in result["events"][0]["final_action"]["fallback_reason"]
+    assert result["status"] == "rejected"
+    assert "execution" not in result["events"][0]
+    assert not result["state"].get("pending_tasks")
+    assert not result["state"].get("budget_reservations")
+    from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+    checked = validate_tool_action(
+        action, {}, _session(boundary),
+        {"allocate_mc_bohb": {"handler": lambda **kwargs: None}},
+    )
+    assert not checked["valid"]
+    assert "bohb_owned_fields_forbidden:branch_ids" in checked["errors"]
     assert "round_scheduler" not in result["state"]
 
 
@@ -95,7 +104,9 @@ def test_public_entry_does_not_prepare_mc_without_phase_evidence(tmp_path):
         agent_client=lambda _: _bohb_action("round-slurm"), execution_mode="autonomous",
         max_steps=1, task_runner=runner,
     )
-    assert result["status"] == "not_configured"
+    assert result["status"] == "rejected"
+    assert "MC候选或冻结Relax凸包缺失" in result["reason"]
+    assert not result["state"].get("budget_reservations")
     assert runner.prepared == []
     assert not result["state"].get("pending_tasks")
 
@@ -162,11 +173,14 @@ def test_recovered_dft_without_final_structure_updates_ledger_but_not_hull(tmp_p
     )
     history = manager.data["structures"][structure]["stage_history"]["dft_single_point"]
     assert len(history) == 1
-    assert result["state"]["phase_diagrams"]["dft"]["status"] == "unknown"
-    assert result["state"]["phase_diagrams"]["dft"]["reason"] == "no_identified_energy_records"
-    assert not result["state"]["phase_diagrams"]["dft"]["entries"]
+    diagrams = result["state"]["phase_diagrams"]
+    assert "dft" not in diagrams
+    assert not diagrams["mlip"]["entries"]
+    assert not list((tmp_path / "hulls").rglob("phase_diagram_dft_*"))
     record = result["state"]["phase_records"][0]
     assert record["phase_identification_status"] == "unknown"
+    assert record["status"] == "pending_phase_identification"
+    assert result["state"]["dft_mlip_comparisons"][0]["status"] == "not_evaluated"
     assert record["phase_identification"]["reason"] == "final_structure_missing"
     assert result["state"]["coverage"]
     assert result["state"]["agent_state_summary"]["completed_task_keys"] == ["DK1"]

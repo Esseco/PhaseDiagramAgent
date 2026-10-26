@@ -7,7 +7,8 @@ def test_old_preview_requires_refresh():
         "dft_input_preview": {"task_count": 15, "candidate_ids": ["s"]}}}
     assert stale_dft_preview(proposal)
     text = format_workflow_reply({"status": "awaiting_approval", "agent_proposal": proposal}, "state.json")
-    assert "旧 DFT" in text and "继续" in text and "回复“同意”" not in text
+    assert "缺少可执行的选点决策明细" in text and "补齐方案" in text
+    assert "当前不可批准" in text and "同意" not in text
 
 
 def test_current_preview_is_not_stale():

@@ -42,6 +42,8 @@ def choose_initial_mode(parent):
     dialog.title("新项目 · 运行模式")
     dialog.transient(parent)
     dialog.resizable(False, False)
+    dialog.lift()
+    dialog.focus_force()
     mode = tk.StringVar(dialog, value="debug")
     result = []
     ttk.Label(dialog, text="选择运行模式，保存后用于此项目：").pack(
@@ -137,6 +139,19 @@ def open_project_conversations(config):
     return webbrowser.open(conversation_url(service["studio_port"]))
 
 
+def _running_registered_projects(registry):
+    """Return registered projects whose service owner is still present."""
+    running = []
+    for value in read_project_registry(registry):
+        path = Path(value)
+        try:
+            if read_service(path, require_ready=False):
+                running.append(path)
+        except (OSError, ValueError):
+            continue
+    return running
+
+
 def main(initial_project=None):
     registry = registry_path()
     if initial_project is not None:
@@ -152,7 +167,7 @@ def main(initial_project=None):
         anchor="w", padx=20, pady=(16, 4)
     )
     ttk.Label(
-        app, text="选择项目并启动服务，点击“选择／继续对话”打开历史会话。计算操作在 Studio 中完成。"
+        app, text="选择项目并启动服务，点击“打开／继续对话”打开历史会话。计算操作在 Studio 中完成。"
     ).pack(anchor="w", padx=20, pady=(0, 12))
     buttons = ttk.Frame(app)
     buttons.pack(fill="x", padx=20, pady=(0, 12))
@@ -172,6 +187,8 @@ def main(initial_project=None):
     text.pack(fill="both", expand=True, padx=20, pady=12)
     owned, busy, replies = {}, set(), queue.Queue()
     start_cancellations = {}
+    open_after_start = set()
+    project_creation_busy = False
 
     def display(value):
         text.configure(state="normal")
@@ -218,21 +235,56 @@ def main(initial_project=None):
             if str(chosen) not in tree.selection():
                 tree.selection_set(str(chosen))
 
-    def add():
-        folder = filedialog.askdirectory(title="选择项目文件夹（已有项目自动加载）")
-        if folder:
-            try:
-                mode = "debug"
-                if not (Path(folder) / PROJECT_CONFIG_NAME).is_file():
-                    mode = choose_initial_mode(app)
-                    if mode is None:
-                        return
-                path = select_folder(folder, registry, execution_mode=mode)
-                refresh()
-                tree.selection_set(str(path))
-                show()
-            except (OSError, ValueError) as error:
-                messagebox.showerror("无法加载项目", str(error))
+    def finish_registration(path):
+        refresh()
+        tree.selection_set(str(path))
+        show()
+
+    def new_project():
+        nonlocal project_creation_busy
+        if project_creation_busy:
+            return
+        folder = filedialog.askdirectory(title="选择新项目文件夹")
+        if not folder:
+            return
+        try:
+            config = Path(folder) / PROJECT_CONFIG_NAME
+            if config.exists():
+                raise FileExistsError("该文件夹已有项目；请使用“添加已有项目”")
+            mode = choose_initial_mode(app)
+            if mode is None:
+                return
+            root = Path(folder).resolve()
+            project_creation_busy = True
+            display(f"正在新建项目：{root.name}\n模板和注册表写入在后台进行，请稍候。")
+
+            def worker():
+                try:
+                    path = create_project(root, registry=registry, execution_mode=mode)
+                    replies.put(("project-ready", path, None))
+                except Exception as error:
+                    replies.put(("project-error", root, str(error)))
+                finally:
+                    replies.put(("project-done", root, None))
+
+            threading.Thread(target=worker, daemon=True).start()
+        except (OSError, ValueError) as error:
+            display(f"新建项目失败：{error}")
+            messagebox.showerror("无法新建项目", str(error), parent=app)
+
+    def add_existing():
+        folder = filedialog.askdirectory(title="选择已有项目文件夹")
+        if not folder:
+            return
+        try:
+            config = Path(folder) / PROJECT_CONFIG_NAME
+            if not config.is_file():
+                raise ValueError("所选文件夹没有 agent_runtime.json，请使用“新建项目”")
+            register_project(config, registry=registry)
+            finish_registration(config)
+        except (OSError, ValueError) as error:
+            display(f"添加项目失败：{error}")
+            messagebox.showerror("无法添加项目", str(error), parent=app)
 
     def show(_event=None):
         path = selected()
@@ -240,7 +292,7 @@ def main(initial_project=None):
             try:
                 service = read_service(path)
                 url = (
-                    f"\n\n选择／继续对话：\n{conversation_url(service['studio_port'])}"
+                    f"\n\n打开／继续对话：\n{conversation_url(service['studio_port'])}"
                     if service
                     else "\n\n服务尚未启动。"
                 )
@@ -300,9 +352,20 @@ def main(initial_project=None):
         refresh()
 
     def drain():
+        nonlocal project_creation_busy
         while not replies.empty():
             kind, path, value = replies.get_nowait()
-            if kind == "ready":
+            if kind == "project-ready":
+                project_creation_busy = False
+                finish_registration(path)
+                display(f"已新建项目：{path.parent.name}\n项目已加入列表，可继续启动服务。")
+            elif kind == "project-error":
+                project_creation_busy = False
+                display(f"新建项目失败：{value}")
+                messagebox.showerror("无法新建项目", value, parent=app)
+            elif kind == "project-done":
+                project_creation_busy = False
+            elif kind == "ready":
                 process, reused, service = value
                 if start_cancellations.get(path) and start_cancellations[path].is_set():
                     continue
@@ -310,35 +373,58 @@ def main(initial_project=None):
                     owned[path] = process
                 if selected() == path:
                     show()
-            elif kind == "message" and selected() == path:
-                display(value)
+                if path in open_after_start:
+                    open_after_start.discard(path)
+                    try:
+                        open_project_conversations(path)
+                    except ValueError as error:
+                        display(str(error))
+            elif kind == "message":
+                open_after_start.discard(path)
+                if selected() == path:
+                    display(value)
             elif kind == "done":
                 busy.discard(path)
                 refresh()
         app.after(200, drain)
 
     def close():
-        if busy:
+        if busy or project_creation_busy:
             messagebox.showinfo(
-                "操作进行中", "请等待启动或计算请求返回后再关闭；其他项目仍可操作。"
+                "操作进行中", "请等待项目创建或服务操作返回后再关闭。"
             )
             return
-        if owned and not messagebox.askokcancel(
-            "关闭项目管理", "将停止本窗口启动的本地服务；超算作业不会自动取消。"
+        running = _running_registered_projects(registry)
+        for path in owned:
+            if path not in running:
+                running.append(path)
+        if running and not messagebox.askokcancel(
+            "关闭项目管理", "将停止所有已登记项目的本地服务；超算作业不会自动取消。"
         ):
             return
-        for process in owned.values():
-            if not _stop_owned_process(process):
-                messagebox.showerror("退出失败", "服务仍在退出，请稍后重试。")
+        from phase_agent.runtime.local_project_launcher import stop_project_service
+
+        for path in running:
+            try:
+                process = owned.get(path)
+                if not stop_project_service(path, process):
+                    raise RuntimeError("服务仍在退出")
+            except (OSError, RuntimeError, ValueError) as error:
+                messagebox.showerror("退出失败", f"{path.parent.name}：{error}")
                 return
+        owned.clear()
         app.destroy()
 
-    def open_conversations():
+    def open_or_start_conversations():
         path = selected()
         if path is None:
             return
         try:
-            open_project_conversations(path)
+            if read_service(path):
+                open_project_conversations(path)
+            else:
+                open_after_start.add(path)
+                launch()
         except ValueError as error:
             display(str(error))
 
@@ -354,10 +440,10 @@ def main(initial_project=None):
 
     for column, (label, command) in enumerate(
         (
-            ("选择文件夹", add),
-            ("启动服务", launch),
+            ("新建项目", new_project),
+            ("添加已有项目", add_existing),
             ("重启服务", lambda: launch(restarting=True)),
-            ("选择／继续对话", open_conversations),
+            ("打开／继续对话", open_or_start_conversations),
             ("查看本轮过程", open_process),
             ("停止服务", stop),
         )

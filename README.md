@@ -97,13 +97,13 @@ Agent 生成输入和Slurm脚本，你在超算提交。登录节点负责提交
 
 | 作业 | 提交入口 | 回传 |
 | --- | --- | --- |
-| Relax / MC | `inputs` 内批次 `GPU.sh` | 对应 `results` |
-| DFT | 对应单任务脚本 | 对应 `results` |
-| 微调 | 训练轮 `inputs/GPU.sh`，一次 | 指标/逐点CSV、模型清单、完成标记 |
+| Relax / MC | 登记的完整 `_input` 内 `submit_all.sh`，一次 | 配对 `_output` |
+| DFT | 登记的完整 `_input` 内 `submit_all.sh`，一次 | 配对 `_output` |
+| 微调 | 登记的完整 `_input` 内 `submit_all.sh`，一次 | 配对 `_output`，含指标/模型清单/完成标记 |
 | 补清单 | 原训练轮 `inputs/GPU_manifest.sh` | `results/models.json` |
 | 独立验证 | 原训练轮 `inputs/GPU_validation.sh` | 指定的验证JSON |
 
-回传后说“继续”。默认每个作业分组：Relax最多100个task、MC最多10个模拟、DFT一个结构；分组大小与累计预算上限分别管理。
+回传后说“继续”。默认每个 GPU 作业内串行分组：Relax 至多100个 task、MC 至多20个 task，末组可少于此数；DFT每组1个结构。组容量由 `supercomputer.batch_sizes` 配置，与累计预算分别管理。外层交付脚本派发内部计算脚本，不需另行提交内部 GPU.sh；历史任务沿原登记脚本和路径回收，已提交任务不重复提交。
 
 详细说明：[训练交接](docs/guides/training.md#doc-training_handoff)、[轻量回传](docs/guides/workspace.md#doc-lightweight_result_transfer)、[每轮传输布局](docs/guides/workspace.md#doc-round_transfer_layout)。无常驻服务的分步模式见 [phase_agent/runtime/README.md](phase_agent/runtime/README.md)。
 

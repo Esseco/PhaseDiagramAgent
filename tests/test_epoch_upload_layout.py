@@ -8,7 +8,8 @@ def test_epoch_naming_preserves_ids(tmp_path):
     path, metadata = build_upload_batch_directory(tmp_path, state, batch_id="remote-000006",
         stage="deep_search", model_version="m1", operation_id="op", search_group_index=1,
         segment_index=1, parent_relax_round=1)
-    assert path.parts[-4] == "epoch0"
+    assert path.parts[-5] == "epoch0"
+    assert path.parts[-4] == "calculations"
     assert path.parent.name == "inputs"
     assert path.parts[-3] == "G0001_Relax-0001_MC-round-0002"
     assert path.name.endswith("remote-000006")

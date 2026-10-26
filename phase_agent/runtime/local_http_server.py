@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
 import secrets
+from time import monotonic
 from filelock import Timeout as FileLockTimeout
 
 
@@ -43,6 +44,7 @@ def create_local_http_server(
                 self._boundary_failure(error, read_only=True)
 
         def do_POST(self):
+            self._post_body_read = False
             try:
                 self._post()
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -196,7 +198,7 @@ def create_local_http_server(
                     length = int(self.headers.get("Content-Length", "0"))
                     if length <= 0 or length > 8192:
                         raise request_error("请求内容无效")
-                    body = json.loads(self.rfile.read(length).decode("utf-8"))
+                    body = json.loads(self._read_post_body(length).decode("utf-8"))
                     key = body.get("api_key") if isinstance(body, dict) else None
                     if not isinstance(key, str) or len(key.strip()) < 16:
                         raise request_error("请粘贴完整的 DeepSeek API Key")
@@ -238,7 +240,7 @@ def create_local_http_server(
                     length = int(self.headers.get("Content-Length", "0"))
                     if length <= 0 or length > max_request_bytes:
                         raise request_error("invalid body size")
-                    body = json.loads(self.rfile.read(length).decode("utf-8"))
+                    body = json.loads(self._read_post_body(length).decode("utf-8"))
                     from phase_agent.runtime.control_request_contracts import (
                         validate_control_request,
                     )
@@ -333,7 +335,7 @@ def create_local_http_server(
                 length = int(self.headers.get("Content-Length", "0"))
                 if length <= 0 or length > max_request_bytes:
                     raise request_error("request body is empty or too large")
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                payload = json.loads(self._read_post_body(length).decode("utf-8"))
                 response = request_handler(payload, chat_handler, model_id=model_id)
             except (UnicodeDecodeError, json.JSONDecodeError, request_error) as error:
                 self._json(400, error_formatter("invalid_request", str(error)))
@@ -365,7 +367,44 @@ def create_local_http_server(
             except (ValueError, IndexError):
                 return False
 
+        def _read_post_body(self, length):
+            body = self.rfile.read(length)
+            self._post_body_read = True
+            return body
+
+        def _discard_rejected_post_body(self):
+            # Closing with unread POST bytes can reset the response on Windows.
+            # Drain only bounded bodies and never wait indefinitely on a client.
+            self.close_connection = True
+            if getattr(self, "_post_body_read", False):
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                return
+            if not 0 < length <= max_request_bytes:
+                return
+            previous_timeout = self.connection.gettimeout()
+            try:
+                deadline = monotonic() + 0.25
+                remaining = length
+                while remaining:
+                    timeout = deadline - monotonic()
+                    if timeout <= 0:
+                        break
+                    self.connection.settimeout(timeout)
+                    chunk = self.rfile.read1(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            except OSError:
+                pass
+            finally:
+                self.connection.settimeout(previous_timeout)
+
         def _json(self, status, value):
+            if status >= 400 and self.command == "POST":
+                self._discard_rejected_post_body()
             body = json.dumps(
                 value, ensure_ascii=False, separators=(",", ":"), allow_nan=False
             ).encode("utf-8")
@@ -373,6 +412,8 @@ def create_local_http_server(
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
 

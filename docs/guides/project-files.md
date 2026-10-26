@@ -9,8 +9,11 @@
 ├── parameters/                  初始配置、运行配置和确认版本
 ├── structures/                  母结构、候选结构
 ├── workflow_state/              科学状态、账本、审批和执行凭据
+│   ├── dialogue_memory/         哈希命名的对话记忆摘要
+│   └── dialogue_process/        哈希命名的对话处理记录
+├── shared_dft/                  共享 DFT 数据读取库 records.sqlite3
 ├── interaction_records/
-│   ├── epoch0/                  本轮交互；阶段_YYYYMMDD_序号.md
+│   ├── epoch0/                  本轮交互；英文阶段名_YYYYMMDD_序号.md
 │   ├── epoch1/
 │   ├── project/                 项目级维护说明
 │   └── unassigned/              无法可靠确定轮次的旧记录
@@ -18,12 +21,15 @@
 │   ├── README.md                提交与回传索引
 │   ├── epoch0/
 │   │   ├── README.md            完整模型版本与各目录用途
-│   │   ├── transfers/           普通计算、训练的配对上传和回传
-│   │   ├── relax_mc/            弛豫与蒙特卡洛配对批次
-│   │   ├── verified_results/    已校验读取的原始结果
-│   │   ├── recovery/            仅回收资料和故障凭据
-│   │   ├── storage_archives/    完整归档包
-│   │   └── G0001_*/             登记的计算工作目录；inputs 与 results
+│   │   ├── layout_manifest.json  直接子目录的层级、登记状态和未分类项
+│   │   ├── calculations/        登记的计算工作目录；每个 operation 保留 inputs 与 results
+│   │   ├── delivery/
+│   │   │   ├── transfers/       普通计算、训练的配对上传和回传
+│   │   │   └── relax_mc/        弛豫与蒙特卡洛配对批次
+│   │   └── evidence/
+│   │       ├── verified_results/ 已校验读取的原始结果
+│   │       ├── recovery/         仅回收资料和故障凭据
+│   │       └── storage_archives/ 完整归档包
 │   └── epoch1/
 ├── analysis_outputs/
 │   ├── output_index.md          已有产物索引
@@ -44,15 +50,16 @@
 
 ## 日常使用
 
-1. 阅读本轮答复中的实际路径。上传完整 `_input` 文件夹，在超算执行其中的 `sbatch submit_all.sh`。
+1. 先读 `submissions/README.md`、`submission_index.json`，再读目标 `epochN/README.md` 与 `layout_manifest.json`。阅读本轮答复中的实际路径。上传完整 `_input` 文件夹，在超算执行其中的 `sbatch submit_all.sh`。
 2. 将远端对应 `_output` 文件夹整体放回原登记目录，再告诉 Agent“已回传”。程序沿登记的回传路径校验和读取，不扫描其他项目寻找结果。
-3. `verified_results` 是已校验的科学结果与凭据；分析图表看 `analysis_outputs/epochN/`。历史已提交任务不重投。
-4. 交互详细记录在 `interaction_records/epochN/`；答复保留本轮文件的完整地址。项目级维护文档放 `project`，无法可靠确定轮次的旧记录放 `unassigned`。
+3. `calculations` 只保存登记的本地计算；上传和回传只看 `delivery/`；`evidence/` 是已校验科学结果与凭据。分析图表看 `analysis_outputs/epochN/`。历史已提交任务不重投。
+4. 交互详细记录在 `interaction_records/epochN/`；答复保留本轮文件的完整地址。项目级维护文档放 `project`，无法可靠确定轮次的旧记录放 `unassigned`。共享 DFT 数据由 `shared_dft/records.sqlite3` 读取；对话缓存和处理记录分别在 `workflow_state/dialogue_memory/`、`workflow_state/dialogue_process/`。
 
 ## 维护实现
 
 模型与 epoch 的对应仍由 `upload_layout.model_rounds` 登记。目录采用简短 epoch 名称，完整模型版本与任务、批次身份不变。重复编号对应不同模型会显式报错，防止目录合并。
 
+- `tools/remote/submission_architecture.py`：四层提交契约和每个 epoch 的 `layout_manifest.json`。
 - `tools/remote/model_upload_directory.py`：轮次目录的共享命名。
 - `runtime/interaction_report_paths.py`：交互目录和独占序号；未知模型不会猜测 epoch。
 - `tools/remote/submission_handoff.py`：普通计算和训练的 transfers 配对包。
@@ -67,3 +74,5 @@
 目录被占用而无法移动时，迁移明确报错并保留原数据；不再创建目录链接。
 
 旧路径的读取转换复用 `configuration/session/relocate_workspace_paths.py`，支持多次搬迁与循环检测；冻结配置保持原样。当前状态持久化新路径，工作流控制记录保留迁移版本，旧检查点在读取时转换，过期状态写入会被拒绝。迁移不依赖目录 junction 或文件硬链接。
+
+未登记的提交目录、旧式回传包和其他历史材料统一放在 `submissions/previously_used/`，禁止从该目录提交。

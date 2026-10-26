@@ -24,19 +24,22 @@ def test_only_one_node_emits_reply(tmp_path):
         for message in body.get("messages", [])
     ]
     assert len(emitted) == 1 and emitted[0].content == "proposal question"
-    assert not any(
-        body.get("reply") == "proposal question"
+    assert [
+        name
         for update in updates
-        for body in update.values()
-        if isinstance(body, dict)
-    )
+        for name, body in update.items()
+        if isinstance(body, dict) and body.get("messages")
+    ] == ["respond"]
 
 
-def test_yes_without_saved_plan_goes_to_semantic_model():
+def test_yes_without_saved_plan_cannot_approve_or_plan(tmp_path):
     runtime = SimpleNamespace(
-        context=SimpleNamespace(handler=SimpleNamespace(config_delegate=None), conversation_id="t")
+        context=SimpleNamespace(
+            handler=SimpleNamespace(config_delegate=None, state_path=tmp_path / "state.json"),
+            conversation_id="t",
+        )
     )
-    assert route_request({"message": "同意", "facts": {}}, runtime)["operation"] == "decide"
+    assert "当前没有可批准" in route_request({"message": "同意", "facts": {}}, runtime)["reply"]
     assert (
         route_request(
             {"message": "同意", "facts": {"pending_execution_policies": {"p": {}}}}, runtime

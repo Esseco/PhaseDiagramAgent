@@ -3,7 +3,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 import pytest
-from phase_agent.tools.remote import transfer_limits as limits
+from phase_agent.tools.remote import transfer_bundle as limits
 from phase_agent.tools.remote.transfer_bundle import create_bundle, import_bundle, validate_bundle
 
 

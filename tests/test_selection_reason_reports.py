@@ -51,7 +51,7 @@ def test_region_reason_and_evidence_appear_in_markdown_only(tmp_path):
         f"结果：Branch 方案待确认。\nBranch 分布：`{artifacts['text']}`\n下一步：核对后回复同意。"
     )
     reply = save_interaction(tmp_path, "继续", full, full, state)
-    report = next((tmp_path / "交互记录").glob("*.md")).read_text(encoding="utf-8")
+    report = next((tmp_path / "interaction_records").rglob("*.md")).read_text(encoding="utf-8")
     for text in (
         "本轮 branch 选点理由",
         "本轮补充低钠区覆盖",

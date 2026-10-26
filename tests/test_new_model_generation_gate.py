@@ -126,7 +126,7 @@ def test_cancelled_bundle_cannot_reactivate_or_rewrite_files(tmp_path):
         import_results(action={"parameters": {"bundle_id": "b"}}, context={"event_state": s})
 
 
-def test_generation_records_only_genuinely_new_branch_ids(monkeypatch):
+def test_generation_records_only_genuinely_new_branch_ids(monkeypatch, tmp_path):
     from phase_agent.tools.workflows import create_active_learning_handlers as module
 
     manager = SimpleNamespace(
@@ -146,7 +146,7 @@ def test_generation_records_only_genuinely_new_branch_ids(monkeypatch):
 
     monkeypatch.setattr(module, "run_branch_generation", generate)
     config = {
-        "structure_directory": "fake",
+        "structure_directory": str(tmp_path / "structures"),
         "batch_size": 2,
         "initial_states_per_branch": 1,
         "seed": 0,

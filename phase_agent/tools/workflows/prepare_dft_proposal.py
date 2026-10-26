@@ -53,6 +53,15 @@ def prepare_dft_proposal(action, state, decision_state, config, *, agent_client=
         return DFTProposalPreparation(deepcopy(action), state, environment_error)
     prepared, error = _preview_with_complete_feedback(action, state, config)
     if not error or agent_client is None:
+        if not error and prepared is not None:
+            # The first approval is for the scientific DFT decision.  Keep the
+            # selection preview for the decision record, but defer batch input
+            # generation until that decision is approved.
+            parameters = prepared.setdefault("parameters", {})
+            preview = parameters.pop("dft_input_preview", None)
+            if preview is not None:
+                parameters["dft_selection_preview"] = preview
+            parameters["prepare_inputs_after_approval"] = True
         return DFTProposalPreparation(prepared if not error else deepcopy(action), state, error)
     from phase_agent.tools.workflows.dft_coverage_review import coverage_evidence
 
@@ -100,6 +109,11 @@ def prepare_dft_proposal(action, state, decision_state, config, *, agent_client=
     if error:
         return DFTProposalPreparation(deepcopy(action), state, error)
     if prepared:
+        parameters = prepared.setdefault("parameters", {})
+        preview = parameters.pop("dft_input_preview", None)
+        if preview is not None:
+            parameters["dft_selection_preview"] = preview
+        parameters["prepare_inputs_after_approval"] = True
         prepared["parameters"]["plan_revision_notice"] = (
             "原方案未通过核验；LLM已修订，需确认新方案。"
         )

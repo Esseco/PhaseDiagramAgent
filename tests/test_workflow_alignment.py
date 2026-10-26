@@ -179,7 +179,7 @@ def test_small_dft_batch_keeps_independent_audit():
     assert result["summary"]["audit_selected"] >= 1
 
 
-def test_new_proposal_uses_existing_100_to_1000_contract(monkeypatch):
+def test_new_proposal_uses_current_region_policy_without_target_count(monkeypatch):
     import phase_agent.decisions.agent.propose_tool_action as module
 
     captured = []
@@ -193,7 +193,11 @@ def test_new_proposal_uses_existing_100_to_1000_contract(monkeypatch):
         {}, agent_client=lambda x: {}, allowed_tools=["generate_branches"], config={}
     )
     p = captured[0]["decision_context"]["branch_count_policy"]
-    assert p["minimum"] == 100 and p["maximum"] == 1000
+    from phase_agent.tools.policy.region_sampling import VERSION
+
+    assert p["version"] == VERSION
+    assert p["count_is_result"] is True and p["approval_required"] is True
+    assert not {"minimum", "maximum", "total_quota", "batch_size"} & p.keys()
 
 
 def test_training_complete_does_not_request_another_scientific_choice():

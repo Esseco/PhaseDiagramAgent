@@ -1,5 +1,6 @@
 """Exercise application startup under Studio's blocking-call detector, without services."""
 import asyncio
+import threading
 from unittest.mock import Mock, AsyncMock
 from blockbuster import blockbuster_ctx
 from phase_agent.runtime import studio_runtime
@@ -15,6 +16,12 @@ def test_startup_with_blocking_detector(tmp_path, monkeypatch):
     monkeypatch.setattr('phase_agent.runtime.studio_checkpoint_persistence.install_checkpoint_persistence', lambda: None)
     monkeypatch.setattr('phase_agent.runtime.studio_checkpoint_persistence.flush_checkpoint_persistence', lambda: None)
     monkeypatch.setattr('phase_agent.runtime.studio_run_lifecycle.recover_studio_runs', AsyncMock(return_value=0))
+    payload_threads = []
+    main_thread = threading.get_ident()
+    monkeypatch.setattr(
+        'phase_agent.runtime.studio_payloads.install_studio_payload_views',
+        lambda: payload_threads.append(threading.get_ident()),
+    )
 
     async def run():
         with blockbuster_ctx(scanned_modules='phase_agent'):
@@ -26,6 +33,7 @@ def test_startup_with_blocking_detector(tmp_path, monkeypatch):
     control.serve_forever.assert_called_once()
     control.shutdown.assert_called_once()
     control.server_close.assert_called_once()
+    assert len(payload_threads) == 1 and payload_threads[0] != main_thread
 
 def test_async_sqlite_checkpoint_operations_with_blocking_detector(tmp_path, monkeypatch):
     from langgraph_runtime_inmem import checkpoint as runtime

@@ -176,7 +176,9 @@ def publish_output_catalog(state, directory):
     from phase_agent.analysis.feedback.workspace_guide import publish_epoch_guides
 
     publish_epoch_guides(directory, state)
-    _publish_bytes(path, catalog_markdown(output_catalog(state), Path(directory)).encode("utf-8"))
+    _publish_bytes(
+        path, catalog_markdown(output_catalog(state), Path(directory), state=state).encode("utf-8")
+    )
     state.pop("output_index_csv_path", None)
     state["output_index_path"] = str(path)
 
@@ -302,6 +304,9 @@ def _publish_csv(path, fields, rows):
 
 
 def _publish_bytes(path, data):
+    from phase_agent.tools.remote.transfer_bundle import local_path
+
+    path = local_path(path)
     if path.is_file() and path.read_bytes() == data:
         return
     path.parent.mkdir(parents=True, exist_ok=True)

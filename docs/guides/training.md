@@ -208,8 +208,10 @@ This folder contains `training.json`, `dft_records.json`, `mlip_dft_metrics.json
 `energy_comparison.csv`, `force_comparison.csv`, and `metrics.csv`.
 The model-version directory also has `round_metrics.csv` for all its DFT rounds,
 beside the existing MLIP `phase_diagram.csv` and `history/`.
-The cumulative DFT hull remains at `dft/phase_diagram.csv`, with a separate
-DFT energy basis; predictions and DFT reference energies are never mixed in a hull.
+The official production hull uses the current MLIP model only. DFT records
+remain comparison, phase-competition and training evidence. Historical/offline
+DFT hulls are preserved as diagnostics; recovery does not rebuild them or mix
+DFT reference energies into the official MLIP hull.
 
 Scope uses the saved upload operation/search group/parent Relax lineage.
 Readable group/round names come from saved task paths or the upload operation

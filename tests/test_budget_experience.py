@@ -219,6 +219,8 @@ def test_dialogue_model_receives_budget_experience_with_no_execution(tmp_path):
 
     def model(payload):
         calls.append(payload)
+        if len(calls) == 1:
+            return {"kind": "inspect_evidence", "topics": ["budget"]}
         return {"kind": "answer", "answer": "历史耗时可参考，相对成本未知"}
 
     handler = make_handler(tmp_path, model)
@@ -227,6 +229,7 @@ def test_dialogue_model_receives_budget_experience_with_no_execution(tmp_path):
         [{"role": "user", "content": "解释已有预算经验"}], conversation_id="budget-memory"
     )
     assert "相对成本未知" in reply
-    experience = calls[0]["decision_context"]["round_budget_evidence"]["budget_experience"]
+    assert "round_budget_evidence" not in calls[0]["decision_context"]
+    experience = calls[1]["decision_context"]["round_budget_evidence"]["budget_experience"]
     assert experience["coverage"]["elapsed_seconds"] == 1
     assert experience["decision_examples"][0]["actual_relative_cost"] is None

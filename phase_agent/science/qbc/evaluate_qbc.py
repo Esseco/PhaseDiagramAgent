@@ -27,6 +27,8 @@ def evaluate_qbc(
             forces = np.asarray(result["forces"], dtype=float)
             if forces.shape != (len(structure), 3):
                 raise ValueError(f"模型 {member['model_id']} 的 forces shape={forces.shape}")
+            if not np.isfinite(energy) or not np.isfinite(forces).all():
+                raise ValueError(f"模型 {member['model_id']} 的 energy/forces 包含非有限值")
             predictions.append(
                 {
                     "model_id": member["model_id"],

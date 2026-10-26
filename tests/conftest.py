@@ -28,6 +28,11 @@ def pytest_configure(config):
         else Path(tempfile.gettempdir()) / "pdt"
     )
     parent.mkdir(parents=True, exist_ok=True)
+    spelling = str(parent)
+    if os.name == "nt" and not spelling.startswith("\\\\?\\"):
+        parent = Path(
+            "\\\\?\\UNC\\" + spelling[2:] if spelling.startswith("\\\\") else "\\\\?\\" + spelling
+        )
     run = tempfile.TemporaryDirectory(prefix="", dir=parent)
     directory = Path(run.name)
     # Keep the extended spelling for cleanup, but subprocesses (notably Node)

@@ -64,6 +64,17 @@ def test_retention_preserves_latest_and_pending_writes_per_namespace(tmp_path):
         assert prune_history(conn) == 0
 
 
+def test_role_specific_retention_can_shorten_training_history(tmp_path):
+    path = str(tmp_path / "training.sqlite")
+    config = {"configurable": {"thread_id": "training", "checkpoint_ns": ""}}
+    with CompactSqliteSaver.from_conn_string(path, history_keep=3) as saver:
+        for index in range(9):
+            config = saver.put(config, checkpoint(index), {"source": "loop"}, {})
+    with CompactSqliteSaver.from_conn_string(path, history_keep=3) as saver:
+        assert saver.conn.execute("SELECT count(*) FROM checkpoints").fetchone()[0] == 3
+        assert saver.get_tuple(config).checkpoint["id"] == "0008"
+
+
 def test_subgraph_retention_is_bounded_and_protects_old_interrupt(tmp_path):
     path = str(tmp_path / "subgraphs.sqlite")
     with CompactSqliteSaver.from_conn_string(path) as saver:

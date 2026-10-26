@@ -8,14 +8,14 @@ from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_a
 
 
 class TokenPolicyTest(unittest.TestCase):
-    def test_routine_disables_thinking_and_caps_output(self):
+    def test_routine_disables_thinking_and_respects_configured_output(self):
         client = create_deepseek_client(api_key="mock", thinking="enabled", max_tokens=2400)
         with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
                    return_value=FakeResponse(completion('{"tool":"prepare_local_batch_files"}'))) as request:
             client({"mode": "autonomous_search", "state": {}})
         body = json.loads(request.call_args.args[0].data)
         self.assertEqual(body["thinking"]["type"], "disabled")
-        self.assertEqual(body["max_tokens"], 1600)
+        self.assertEqual(body["max_tokens"], 2400)
 
     def test_important_decision_enables_reasoning(self):
         client = create_deepseek_client(api_key="mock", max_tokens=2400)
@@ -42,10 +42,10 @@ class TokenPolicyTest(unittest.TestCase):
         with patch("phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
                    side_effect=[FakeResponse(completion("bad")), FakeResponse(completion("bad"))]):
             action = propose_agent_tool_action({}, agent_client=client, allowed_tools=["pause_search"])
-        self.assertEqual(action["_llm_usage"]["calls"], 2)
-        self.assertEqual(action["_llm_usage"]["output_tokens"], 8)
+        self.assertEqual(action["_llm_usage"]["calls"], 1)
+        self.assertEqual(action["_llm_usage"]["output_tokens"], 4)
 
-    def test_length_retry_stops_thinking(self):
+    def test_reasoning_length_recovery_keeps_thinking(self):
         first = completion("", finish_reason="length")
         first["choices"][0]["message"]["reasoning_content"] = "mock thought"
         client = create_deepseek_client(api_key="mock", thinking="enabled")
@@ -53,6 +53,8 @@ class TokenPolicyTest(unittest.TestCase):
                    side_effect=[FakeResponse(first), FakeResponse(completion('{"tool":"pause_search"}'))]) as request:
             result = client({"decision_kind": "strategy"})
         retry = json.loads(request.call_args.args[0].data)
-        self.assertEqual(retry["thinking"]["type"], "disabled")
-        self.assertEqual(retry["max_tokens"], 8192)
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(retry["thinking"]["type"], "enabled")
+        self.assertEqual(retry["reasoning_effort"], "low")
+        self.assertEqual(retry["max_tokens"], 16384)
         self.assertEqual(result["_llm_usage"]["calls"], 2)

@@ -52,23 +52,35 @@ async function openThread(thread){
  try{localStorage.setItem(storageKey,preferred);}catch{say('浏览器未允许保存选择；本次仍打开该对话。');}
  location.assign(studioUrl(preferred));
 }
-async function api(path,method='GET',data){
+async function api(path,method='GET',data,timeoutMs=15000){
  const options={method,headers:{'Content-Type':'application/json'}};
  if(data!==undefined)options.body=JSON.stringify(data);
- const response=await fetch(path,options);
- if(!response.ok)throw Error(`请求失败 ${response.status}: ${(await response.text()).slice(0,160)}`);
- const text=await response.text();return text?JSON.parse(text):null;
+ options.signal=AbortSignal.timeout(Math.max(1,timeoutMs));
+ try{
+  const response=await fetch(path,options);
+  if(!response.ok)throw Error(`请求失败 ${response.status}: ${(await response.text()).slice(0,160)}`);
+  const text=await response.text();return text?JSON.parse(text):null;
+ }catch(error){
+  if(['TimeoutError','AbortError'].includes(error.name))throw Error('请求等待超时；结果待核对，请刷新或查看本轮过程，不要重复操作。');
+  throw error;
+ }
 }
 function say(text,error=false){notice.textContent=text;notice.className=error?'error':'';}
 const active=run=>['running','pending'].includes(run.status);
 async function pause(thread){
- const runs=await api(`/threads/${thread.thread_id}/runs?limit=100`);
- for(const run of runs.filter(active))await api(`/threads/${thread.thread_id}/runs/${run.run_id}/cancel?wait=false&action=interrupt`,'POST');
+ const deadline=Date.now()+30000;
+ const request=(path,method='GET')=>{
+  const remaining=deadline-Date.now();
+  if(remaining<=0)throw Error('暂停等待已结束；后台状态待核对，请刷新或查看本轮过程，不要重复操作。');
+  return api(path,method,undefined,Math.min(15000,remaining));
+ };
+ const runs=await request(`/threads/${thread.thread_id}/runs?limit=100`);
+ for(const run of runs.filter(active))await request(`/threads/${thread.thread_id}/runs/${run.run_id}/cancel?wait=false&action=interrupt`,'POST');
  if(!runs.some(active)){say('没有活动请求。若仍显示busy，这是残留状态，可删除该对话。');return;}
  say('暂停已请求，等待后台退出；当前模型请求可能需要等待返回或超时。');
- for(let n=0;n<30;n++){
-  await new Promise(resolve=>setTimeout(resolve,1000));
-  const current=await api(`/threads/${thread.thread_id}`);
+ for(let n=0;n<30&&Date.now()<deadline;n++){
+  await new Promise(resolve=>setTimeout(resolve,Math.min(1000,deadline-Date.now())));
+  const current=await request(`/threads/${thread.thread_id}`);
   if(current.status!=='busy'){say('已暂停。可在Studio中发送新的“继续”恢复项目。');return;}
  }
  say('暂停信号已发出，后台尚未退出。稍后刷新；不要重复提交计算。');

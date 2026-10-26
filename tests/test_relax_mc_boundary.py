@@ -1,4 +1,5 @@
 from copy import deepcopy
+import pytest
 from phase_agent.tools.policy.branch_conditions import branch_entry_errors, mc_entry_facts
 from phase_agent.decisions.agent.proposal_validation import proposal_errors
 from phase_agent.graphs.proposal_graph import request_with_langgraph
@@ -30,7 +31,7 @@ def test_ready_pool_requires_current_model_and_completed_diagram():
     assert not mc_entry_facts(state)['ready']
 
 
-def test_model_repairs_premature_mc_into_separate_relax_proposal():
+def test_premature_mc_is_rejected_without_automatic_model_repair():
     payload={'instruction':'choose one action','allowed_tools':['allocate_mc_bohb','prepare_local_batch_files'],'decision_context':{'mc_entry_conditions':mc_entry_facts(initial())}}
     calls=[]
     def model(request):
@@ -38,11 +39,11 @@ def test_model_repairs_premature_mc_into_separate_relax_proposal():
         if len(calls)==1:
             return mc()
         return {'tool':'prepare_local_batch_files','task_key':'relax1','parameters':{'mode':'relax_inputs'},'budget':0,'reason':'Need Relax results before allocating MC'}
-    result=request_with_langgraph(model,payload)
-    assert len(calls)==2
-    assert result['tool']=='prepare_local_batch_files'
-    assert 'mc_budget' not in result['parameters']
-    assert any(e.startswith('action.prerequisite:') for e in calls[1]['validation_errors'])
+    original = deepcopy(payload)
+    with pytest.raises(ValueError, match='action.prerequisite: MC requires recovered Relax'):
+        request_with_langgraph(model,payload)
+    assert len(calls)==1
+    assert payload == original
 
 
 def test_mc_input_files_also_blocked_before_relax():
@@ -51,10 +52,12 @@ def test_mc_input_files_also_blocked_before_relax():
     assert any(e.startswith('action.prerequisite:') for e in proposal_errors(action,payload))
 
 
-def test_relax_proposal_explains_upload_then_recovery_then_mc():
+def test_relax_proposal_requires_approval_and_defers_submission():
     action={'tool':'prepare_local_batch_files','parameters':{'mode':'relax_inputs'}}
     result={'status':'awaiting_approval','agent_proposal':{'recommended_action':action['tool'],'raw_action':action,'estimated_cost':{}}}
     reply=format_workflow_reply(result,None,verbose=False)
-    assert '由你上传超算并提交' in reply
-    assert '本次不分配 MC 步数' in reply
-    assert '回收弛豫结果后' in reply
+    assert '待确认' in reply and '准备计算输入' in reply
+    assert '输入准备后停止' in reply
+    assert '提交超算属于后续操作' in reply
+    assert action['parameters'] == {'mode': 'relax_inputs'}
+    assert not result.get('execution')

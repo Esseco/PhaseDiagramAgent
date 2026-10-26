@@ -154,3 +154,18 @@ def test_server_bootstrap_installs_store_before_starting_cli(monkeypatch):
     )
     main()
     assert calls == [("langgraph_cli", checkpoint_container)]
+
+
+def test_server_filters_only_benign_windows_transport_disconnects():
+    from types import SimpleNamespace
+    from phase_agent.runtime.studio_server import _is_benign_transport_disconnect
+
+    callback = SimpleNamespace(__qualname__="_ProactorBasePipeTransport._call_connection_lost")
+    handle = SimpleNamespace(_callback=callback)
+
+    assert _is_benign_transport_disconnect(
+        {"exception": ConnectionResetError(10054), "handle": handle}
+    )
+    assert not _is_benign_transport_disconnect(
+        {"exception": ValueError("workflow failed"), "handle": handle}
+    )
