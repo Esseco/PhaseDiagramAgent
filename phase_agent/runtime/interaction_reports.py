@@ -50,7 +50,7 @@ def _trace(value):
 
 def short_reply(reply):
     """Keep concrete findings and actions; this never selects a scientific action."""
-    filler = {"本次：已检查当前项目状态。", "预算：本次未提供新的计算预算。"}
+    filler = {"本次：已检查当前项目状态。", "本次：已读取状态。", "预算：本次未提供新的计算预算。"}
     lines = [
         line.strip()
         for line in str(reply).splitlines()
@@ -70,6 +70,13 @@ def short_reply(reply):
     if finding:
         if finding not in selected:
             selected.append(finding)
+        purpose = first(("本次：",))
+        if (
+            purpose
+            and purpose not in selected
+            and not purpose.startswith(("本次：已保存输入或计算方案", "本次：已检查当前项目状态"))
+        ):
+            selected.append(purpose)
     else:
         # An ordinary answer may have no fixed prefix; keep the answer itself.
         plain = next(
@@ -77,6 +84,7 @@ def short_reply(reply):
                 line
                 for line in lines
                 if line not in selected
+                and line not in {"本轮总结：", "下一步建议（待批准）："}
                 and not line.startswith(
                     ("原因：", "阻碍：", "需注意：", "下一步：", "建议：", "预算：")
                 )
@@ -87,13 +95,20 @@ def short_reply(reply):
             selected.append(plain)
     for prefixes in (
         ("原因：", "阻碍：", "回传核对失败：", "需注意："),
+        ("建议依据：",),
+        ("范围：", "首批："),
         ("下一步：", "建议：", "需要你："),
+        ("确认范围：", "审批范围：", "审批边界："),
         ("预算：",),
     ):
         line = first(prefixes)
         if line and line not in selected:
             selected.append(line)
     handoff_prefixes = (
+        "待审对象：",
+        "本轮微调结果报告：",
+        "Branch 分布与构成文件：",
+        "训练安排：",
         "Relax+MC 输入地址：",
         "Relax+MC 提交脚本：",
         "Relax+MC 回收地址：",
@@ -102,12 +117,16 @@ def short_reply(reply):
         "DFT 回传地址：",
         "DFT 回收地址：",
         "提交脚本：",
+        "提交路径：",
+        "回收路径：",
+        "上传整个文件夹：",
+        "提交：",
+        "回传：",
     )
     handoff_lines = [
         line
         for line in lines
-        if any(line.startswith(prefix) for prefix in handoff_prefixes)
-        and line not in selected
+        if any(line.startswith(prefix) for prefix in handoff_prefixes) and line not in selected
     ]
     if handoff_lines:
         next_index = next(
@@ -125,7 +144,24 @@ def short_reply(reply):
             line = first((prefix,))
             if line and line not in selected:
                 selected.append(line)
-    return "  \n".join(line if len(line) <= 220 else line[:217] + "…" for line in selected)
+    return "  \n".join(
+        line
+        if len(line) <= 220
+        or line.startswith(
+            (
+                "下一步：",
+                "建议：",
+                "需要你：",
+                "确认范围：",
+                "审批范围：",
+                "审批边界：",
+                *handoff_prefixes,
+            )
+        )
+        or re.search(r"[A-Za-z]:[\\/]", line)
+        else line[:217] + "…"
+        for line in selected
+    )
 
 
 def save_interaction(root, message, full_reply, display_reply, state, *, record=None):
@@ -145,6 +181,7 @@ def save_interaction(root, message, full_reply, display_reply, state, *, record=
     text = [
         f"# 本轮交互记录\n\n时间：{now.isoformat()}\n",
         f"记录标识：`{identity}`；项目：`{root}`。",
+        "编号说明：文件末尾数字是交互记录序号，不是训练次数；科研轮次以 epoch 为准。",
         "## 用户消息\n\n" + str(message),
         "## 本轮结论\n\n" + summary,
     ]

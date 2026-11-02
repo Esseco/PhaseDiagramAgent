@@ -1,7 +1,9 @@
 """Attach the same frozen allocation preview to initial model MC proposals."""
 
 from copy import deepcopy
-from phase_agent.decisions.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
+from phase_agent.agents.strategic.strategy.estimate_branch_mc_budget import (
+    estimate_branch_mc_budget,
+)
 
 
 def prepare_mc_preview(action, state, context, config):

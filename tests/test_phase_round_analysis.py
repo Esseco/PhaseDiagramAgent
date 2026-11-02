@@ -34,12 +34,15 @@ def test_complete_round_generates_once_and_reuses_derived_receipt(tmp_path, monk
     calls = []
     image = tmp_path / "plot.png"
     image.write_bytes(b"real-file-stand-in")
+    hd = tmp_path / "hd.png"
+    hd.write_bytes(b"hd-file-stand-in")
 
     def plot(state, **kwargs):
         calls.append(kwargs)
+        kwargs["artifacts"].update(main=[str(image)], hd=[str(hd)])
         return f"已绘制当前 MLIP 相图：`{image}`"
 
-    monkeypatch.setattr(plotting, "phase_diagram_reply", plot)
+    monkeypatch.setattr(plotting, "_plot", plot)
     state = registered(tmp_path)
     before = deepcopy(state)
     first = publish_relax_mc_analysis(state, "b1")
@@ -59,7 +62,7 @@ def test_incomplete_or_unbound_rounds_never_plot(tmp_path, monkeypatch, change):
     import phase_agent.runtime.phase_diagram_chat as plotting
 
     monkeypatch.setattr(
-        plotting, "phase_diagram_reply", lambda *a, **kw: pytest.fail("must not plot")
+        plotting, "_plot", lambda *a, **kw: pytest.fail("must not plot")
     )
     state = registered(tmp_path)
     batch = state["relax_mc_batches"]["b1"]
@@ -95,7 +98,7 @@ def test_failed_render_is_explicit_and_does_not_claim_completed(tmp_path, monkey
     import phase_agent.runtime.phase_diagram_chat as plotting
 
     monkeypatch.setattr(
-        plotting, "phase_diagram_reply", lambda *a, **kw: "当前 MLIP 相图未绘制：缺少数据"
+        plotting, "_plot", lambda *a, **kw: "当前 MLIP 相图未绘制：缺少数据"
     )
     assert (
         publish_relax_mc_analysis(registered(tmp_path), "b1")["status"] == "diagnostic_unavailable"
@@ -108,7 +111,12 @@ def test_round_markdown_is_numbered_and_identifies_model_and_files(tmp_path, mon
 
     image = tmp_path / "plot.png"
     image.write_bytes(b"fixture")
-    monkeypatch.setattr(plotting, "phase_diagram_reply", lambda *a, **kw: f"PNG：`{image}`")
+    hd = tmp_path / "hd.png"
+    hd.write_bytes(b"hd-fixture")
+    def plot(*args, **kwargs):
+        kwargs["artifacts"].update(main=[str(image)], hd=[str(hd)])
+        return f"PNG: `{image}`"
+    monkeypatch.setattr(plotting, "_plot", plot)
     receipt = publish_relax_mc_analysis(registered(tmp_path), "b1")
     markdown = Path(receipt["markdown_path"]).read_text(encoding="utf-8")
     assert "b1" in markdown and "m1" in markdown and "h1" in markdown
@@ -126,9 +134,12 @@ def test_missing_artifact_is_restored_but_changed_historical_hull_is_not_redrawn
 
     def plot(*args, **kwargs):
         image.write_bytes(b"fixture")
+        hd = tmp_path / "hd.png"
+        hd.write_bytes(b"hd-fixture")
+        kwargs["artifacts"].update(main=[str(image)], hd=[str(hd)])
         return f"PNG：`{image}`"
 
-    monkeypatch.setattr(plotting, "phase_diagram_reply", plot)
+    monkeypatch.setattr(plotting, "_plot", plot)
     state = registered(tmp_path)
     first = publish_relax_mc_analysis(state, "b1")
     Path(first["markdown_path"]).unlink()
@@ -144,7 +155,7 @@ def test_unexpected_plot_error_never_breaks_verified_import(tmp_path, monkeypatc
     def broken(*args, **kwargs):
         raise RuntimeError("renderer unavailable")
 
-    monkeypatch.setattr(plotting, "phase_diagram_reply", broken)
+    monkeypatch.setattr(plotting, "_plot", broken)
     result = publish_relax_mc_analysis(registered(tmp_path), "b1")
     assert (
         result["status"] == "diagnostic_unavailable" and "renderer unavailable" in result["reason"]

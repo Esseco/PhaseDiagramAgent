@@ -3,6 +3,7 @@
 
 def create_tool_registry(handlers=None) -> dict:
     from phase_agent.tools.dispatch.scientific_operations import operation_catalog
+    from phase_agent.agents.permissions import advisory_roles
 
     handlers = handlers or {}
     specs = {
@@ -32,6 +33,20 @@ def create_tool_registry(handlers=None) -> dict:
             "name": name,
             "owner": owner,
             "handler": handlers.get(name),
+            "proposal_roles": ("strategic",),
+            "execution_roles": ("simulation",),
+            "advisory_roles": tuple(
+                sorted(
+                    {
+                        role
+                        for operation in operation_catalog([name])
+                        for role in advisory_roles(operation["operation"])
+                    }
+                )
+            ),
+            "parameter_schema": {"type": "object"},
+            "result_schema": {"type": "object"},
+            "failure_policy": "return_to_strategic",
             "operations": operation_catalog([name]) if callable(handlers.get(name)) else [],
             "reservation_mode": "children" if name in child_reservations else "action",
         }

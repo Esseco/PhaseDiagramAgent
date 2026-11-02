@@ -4,7 +4,7 @@ import pytest
 
 from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull, rank_relaxed_branches
 from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
-from phase_agent.decisions.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
+from phase_agent.agents.strategic.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
 
 
 def _evidence():

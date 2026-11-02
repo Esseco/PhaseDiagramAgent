@@ -174,7 +174,7 @@ def test_unselected_valid_record_retains_shared_structure_registration(tmp_path)
 
 
 def test_semantic_policy_contract_and_config_only_turn():
-    from phase_agent.decisions.agent.dialogue_contract import (
+    from phase_agent.agents.common.dialogue_contract import (
         dialogue_errors,
         is_dialogue,
         dialogue_output_contract,

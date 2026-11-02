@@ -74,3 +74,43 @@ def consume_refresh_scope(refresh):
         **deepcopy(refresh["approved_scope"]),
         "remaining_waves": 0,
     }
+
+
+def is_refresh_planning_hold(state, key, reservation):
+    """An approved future allowance is not evidence of an unfinished action."""
+    import math
+    from phase_agent.tools.workflows.model_refresh_state import current_model_refresh
+
+    refresh = current_model_refresh(state)
+    plan = refresh.get("plan") or {}
+    scope = refresh.get("approved_scope") or {}
+    amount = reservation.get("reserved_cost")
+    return bool(
+        refresh.get("status") in {"waiting_results", "supplement_ready"}
+        and refresh.get("approved_by")
+        and refresh.get("wave") in {0, 1}
+        and plan.get("checksum")
+        and key == refresh.get("supplemental_reservation_key")
+        and key == f"model-refresh:{plan['checksum']}:supplement-envelope"
+        and reservation.get("task_key") == key
+        and reservation.get("status") == "reserved"
+        and not reservation.get("reconciliation_required")
+        and reservation.get("stage") == "relax_and_feature"
+        and reservation.get("config_version")
+        == scope.get("config_version")
+        == state.get("confirmed_config_version")
+        and reservation.get("model_version")
+        == scope.get("model_version")
+        == plan.get("new_model_version")
+        == refresh.get("new_model_version")
+        and scope.get("plan_checksum") == plan["checksum"]
+        and scope.get("remaining_waves") == 1
+        and scope.get("maximum_count") == plan.get("maximum_supplemental_count")
+        and scope.get("tool") == "prepare_local_batch_files"
+        and scope.get("submit_authorized") is False
+        and isinstance(amount, (int, float))
+        and not isinstance(amount, bool)
+        and math.isfinite(amount)
+        and amount > 0
+        and amount == scope.get("maximum_cost") == plan.get("maximum_supplemental_cost")
+    )

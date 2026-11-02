@@ -18,6 +18,13 @@ def _spec(tool, purpose, *, parameters=None, stage=None, targets="structure_ids"
 
 
 OPERATIONS = {
+    "prepare_training_handoff": _spec(
+        "prepare_local_batch_files",
+        "单独审批训练交接输入；parameters需job_key及kind=manifest或validation，不提交计算",
+        parameters={"mode": "training_handoff_inputs"},
+        targets="none",
+        outputs=("handoffs",),
+    ),
     "prepare_ordering_search": _spec(
         "prepare_local_batch_files",
         "调用Process_AL_MC规划并准备独立TM/Na+TM搜索；需phase、tm_ratios、na_content，以及max_det_H或h_matrices二选一，可传oxidation_states与options",
@@ -27,7 +34,7 @@ OPERATIONS = {
     ),
     "recover_ordering_search": _spec(
         "prepare_local_batch_files",
-        "读取已登记独立搜索结果；parameters含plan_id和可选results_directory，结果不自动写入主相图或启动DFT",
+        "读取已登记独立搜索结果；parameters含plan_id和results_archive，外部回传必须是最小校验压缩包，结果不自动写入主相图或启动DFT",
         parameters={"mode": "ordering_search_results"},
         targets="none",
         outputs=("global_ranking_csv", "all_joint_csv", "diagnostics_csv"),
@@ -38,6 +45,13 @@ OPERATIONS = {
         parameters={"mode": "relax_mc_inputs"},
         targets="branch_ids",
         outputs=("upload_archive", "workload", "batch_diagnosis"),
+    ),
+    "prepare_relax_mc_resume": _spec(
+        "prepare_local_batch_files",
+        "识别HPC启动/I/O故障并准备原封装缺失项补算交接；必须通过远端resume预检与原有提交审批，保留已完成结果",
+        parameters={"mode": "relax_mc_resume"},
+        targets="none",
+        outputs=("recovery_plan", "next_action"),
     ),
     "recover_relax_mc_batch": _spec(
         "prepare_local_batch_files",
@@ -79,6 +93,12 @@ OPERATIONS = {
         "依据已有 QBC 与 Ehull 证据选择 DFT",
         outputs=("task_ids", "validated_selection"),
     ),
+    "restart_failed_task": _spec(
+        "restart_failed_task",
+        "仅重试一个已登记且可重试的失败科学任务；保留原失败记录并重新走预算与审批",
+        targets="retryable_task_ids",
+        outputs=("retry_task_id", "retry_input_path"),
+    ),
     "prepare_dft_inputs": _spec(
         "prepare_local_batch_files",
         "准备已批准 DFT 任务输入",
@@ -114,9 +134,17 @@ OPERATIONS = {
 
 
 def operation_catalog(allowed_tools=None, *, registry=None):
+    from phase_agent.agents.permissions import advisory_roles
+
     allowed = set(allowed_tools) if allowed_tools is not None else None
     return [
-        {"operation": name, **deepcopy(spec)}
+        {
+            "operation": name,
+            **deepcopy(spec),
+            "advisory_roles": list(advisory_roles(name)),
+            "proposal_roles": ["strategic"],
+            "execution_roles": ["simulation"],
+        }
         for name, spec in OPERATIONS.items()
         if (allowed is None or spec["tool"] in allowed)
         and (registry is None or callable((registry.get(spec["tool"]) or {}).get("handler")))
@@ -160,7 +188,15 @@ def operation_binding_errors(action, *, config_version, model_version):
     errors = []
     expected = {"config_version": config_version, "model_version": model_version}
     for key, value in bindings.items():
-        if key not in expected:
+        if key == "relax_only_x_values":
+            if (
+                action.get("tool") or action.get("action_type")
+            ) != "generate_branches" or value != [0]:
+                errors.append("invalid_operation_binding:relax_only_x_values")
+        elif key == "human_constraint":
+            if not isinstance(value, str) or not value.strip():
+                errors.append("invalid_operation_binding:human_constraint")
+        elif key not in expected:
             errors.append("unknown_operation_binding:" + key)
         elif value is None or value != expected[key]:
             errors.append("operation_binding_mismatch:" + key)

@@ -73,10 +73,26 @@ def create_tool_nodes(
             "response": context.finish(context.callback("finish", finish)(context.frame)),
         }
 
+    def simulation_plan(state, runtime: Runtime[WorkflowRuntime]):
+        context = require_runtime(runtime)
+        callback = context.stages.get("simulation_plan")
+        return accept(
+            callback(context.frame) if callback else context.frame, runtime, "simulation_planned"
+        )
+
+    def simulation_check(state, runtime: Runtime[WorkflowRuntime]):
+        context = require_runtime(runtime)
+        callback = context.stages.get("simulation_check")
+        if callback:
+            context.frame = callback(context.frame)
+        return {"phase": "simulation_checked"}
+
     return {
         "initialize_action": initial,
         "model_refresh_barrier": gated("refresh", refresh, "refresh_checked"),
         "prepare_proposal": gated("prepare", prepare, "proposed"),
+        "simulation_plan": simulation_plan,
+        "simulation_check": simulation_check,
         "approval_gate": gated("approve", approve, "approval_checked"),
         "validate_action": validation_node,
         "audit_outcome": finish_node,

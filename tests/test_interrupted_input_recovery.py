@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 from phase_agent.tools.state.execution_receipts import begin_execution, recovery_report
 from phase_agent.tools.state.execution_reconciliation import (
     apply_reconciliation,
@@ -135,8 +135,12 @@ def test_durable_progress_distinguishes_prewrite_and_partial_output(tmp_path):
     checks = inspect_execution(state, issue, state_path=path)
     assert checks["preparation_progress"]["boundary"] == "effects_possible"
     assert any(item["path"] == str(output) for item in checks["artifact_checks"])
-    with pytest.raises(ValueError, match="产出|文件|副作用"):
+    before = deepcopy(state)
+    with pytest.raises(ValueError, match="产出|文件|副作用|写入"):
         propose_reconciliation(path, state, "old-input", "verified_no_effect", ATTESTATION)
+    assert state == before
+    assert (output / "partial.txt").read_text() == "partial"
+    assert recovery_report(path, state)["unsettled"][0]["identity"] == identity
 
 
 @pytest.mark.parametrize("boundary", ["before_write", "after_mkdir"])

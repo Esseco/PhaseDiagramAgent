@@ -1,0 +1,632 @@
+"""Opt-in analysis adapter. No network client construction or business tools."""
+
+import json
+from copy import deepcopy
+
+
+def proposal_material(payload):
+    """Explicit transport allowlist: summaries and reviewed references only."""
+    from phase_agent.models.transport_tables import expand_evidence_tables
+
+    payload = expand_evidence_tables(payload)
+    context = payload.get("decision_context") or {}
+    fields = {
+        "status",
+        "version",
+        "energy_basis_id",
+        "entry_count",
+        "stable_count",
+        "record_id",
+        "candidate_id",
+        "branch_id",
+        "batch_id",
+        "task_id",
+        "phase",
+        "composition",
+        "ehull",
+        "is_stable",
+        "model_version",
+        "energy_mae",
+        "energy_rmse",
+        "force_mae",
+        "force_rmse",
+        "mae",
+        "rmse",
+        "count",
+        "completed_count",
+        "actual_cost",
+        "reward",
+        "new_stable_entries",
+        "ehull_improvement",
+        "knowledge_id",
+        "scope",
+        "statement",
+        "maturity",
+        "evidence_refs",
+        "items",
+        "input_tokens",
+        "output_tokens",
+        "action",
+        "tool",
+        "reason",
+        "target_ids",
+    }
+    fields.update(
+        {
+            "mc_entry_conditions",
+            "required",
+            "ready",
+            "hull_reference_version",
+            "phase_diagram_version",
+            "decision_feedback",
+            "decision_review_format",
+            "decision",
+            "outcome",
+            "observation",
+            "rationale",
+            "expected_outcome",
+            "alternatives",
+            "source",
+            "config_version",
+            "instruction",
+            "fields",
+            "action_status",
+            "execution_status",
+            "matched_task_status",
+            "measured_cost",
+            "measured_cost_samples",
+            "registered_structure_count",
+        }
+    )
+    fields.update(
+        {
+            "mlip",
+            "dft",
+            "phase_coverage",
+            "lowest_ehull_entries",
+            "rewards",
+            "actions",
+            "O3",
+            "OP2",
+            "P3",
+            "O1",
+            "total",
+            "completed",
+            "failed",
+            "pending",
+            "energy",
+            "energy_per_atom",
+            "metrics",
+            "retrieval_reason",
+            "matched_terms",
+            "applicability",
+            "min",
+            "max",
+        }
+    )
+    fields.update(
+        {
+            "post_dft_assessment",
+            "comparison",
+            "energy_metrics",
+            "force_metrics",
+            "energy_mae_per_atom",
+            "energy_rmse_per_atom",
+            "force_component_mae",
+            "force_component_rmse",
+            "paired_count",
+            "eligible_count",
+            "recovered_count",
+            "submitted_count",
+            "available_budget",
+            "budget_remaining",
+            "relative_cost",
+            "atom_count",
+            "x_Na_per_O2",
+            "ehull_per_atom",
+            "qbc",
+            "uncertainty",
+            "max_tasks_per_round",
+            "round_task_scope",
+            "batch_size_instruction",
+            "independent_audit_candidate_ids",
+            "error",
+            "single_point_max_per_round",
+            "single_point_cost_per_round",
+            "max_relax_fraction",
+            "minimum_new_dft_records",
+            "branch_batch_size",
+            "finetune_min_new_dft",
+            "finetune_max_new_dft",
+            "finetune_enabled",
+            "comparison_status",
+        }
+    )
+
+    fields.update(
+        {
+            "candidate_validation",
+            "search_evidence",
+            "old_metrics",
+            "new_metrics",
+            "forces",
+            "checks",
+            "independent_test_completed",
+            "limitations",
+            "training_validation_planning",
+            "post_refresh_search",
+            "new_model_generation",
+            "new_branch_count",
+            "post_refresh",
+            "prefer_new_branches",
+            "generated_branch_ids",
+            "first_search_completed",
+            "refresh_plan_checksum",
+            "decision_authority",
+            "available_branch_count",
+            "mc_completed",
+            "mc_pending",
+            "relax_completed",
+            "training_excluded_data_ids",
+            "reviews",
+            "agent_model_reviews",
+            "training_already_completed",
+            "approved_direction",
+        }
+    )
+    fields.update(
+        {
+            "report_id",
+            "source_model_version",
+            "training_round",
+            "evaluation_type",
+            "kfold_metrics",
+            "energy_MAE_meV_per_atom",
+            "energy_RMSE_meV_per_atom",
+            "force_MAE_meV_per_A",
+            "force_RMSE_meV_per_A",
+            "candidate_pool",
+            "decision_outcomes",
+            "decision_id",
+            "chosen_alternative",
+            "alternatives",
+            "expected_benefit",
+            "expected_cost",
+            "required",
+            "active_model_version",
+            "training_reports",
+            "existing_pool",
+            "observed_budget_outcomes",
+            "instruction",
+            "unlabelled_candidates",
+            "qbc_available_count",
+            "qbc_model_versions",
+            "training_report",
+            "committee_count",
+            "out_of_fold_structures",
+            "report_status",
+            "observed_outcome",
+            "uncertainty",
+            "cost_basis",
+            "benefit_basis",
+            "choice",
+            "revisit_when",
+        }
+    )
+
+    # Bounded factual resource experience; atom-level payloads remain excluded.
+    fields.update(
+        {
+            "retrieval",
+            "observations",
+            "task_observations",
+            "max_mc_steps",
+            "budget_experience",
+            "elapsed_seconds",
+            "gpu_hours",
+            "enabled_generation_strategies",
+            "scientific_scope",
+            "boundary",
+            "configuration_space",
+            "roles",
+            "fixed_values",
+            "fixed_T_source",
+            "TM_ratio",
+            "at_x",
+            "intermediate",
+            "P",
+            "H",
+            "x",
+            "T",
+            "N",
+            "generation_strategy_constraint",
+            "generation_plan",
+            "serial_task_seconds",
+            "coverage",
+            "config_version",
+            "strategy",
+            "stage",
+            "proposed_budget",
+            "sample_count",
+            "task_count",
+            "dft_budget",
+            "backend",
+            "energy_method",
+            "runtime_source",
+            "energy_improvement_ev_per_atom",
+            "cohort_id",
+            "character_budget",
+            "included_cohorts",
+            "cpu_count",
+            "quota",
+            "fmax",
+            "energy_basis_id",
+            "actual_relative_cost",
+            "gpu_source",
+            "decision_examples",
+            "budget_meaning",
+            "measurement_counts",
+            "batch_size",
+            "na_max",
+            "interpretation",
+            "estimated_relative_cost",
+            "available_decisions",
+            "atom_count_range",
+            "included_decisions",
+            "patience_steps",
+            "na_min",
+            "available_cohorts",
+            "max_det_H",
+            "tasks",
+            "actual_mc_steps",
+            "stop_reason",
+            "range",
+            "comparable_cohorts",
+            "relax_cell",
+            "min_improvement",
+            "mc_budget",
+            "median",
+            "conditions",
+            "observed_rewards",
+            "gpu_count",
+            "samples",
+            "used_characters",
+            "failed_count",
+            "parameters",
+            "relax_steps",
+            "hardware",
+        }
+    )
+
+    fields.update(
+        {
+            "bundle_id",
+            "branch_ids",
+            "workload",
+            "expected_results_archive",
+            "upload_archive",
+            "script_path",
+            "return_available",
+            "return_error",
+            "result_summary",
+            "gpu_jobs_upper_by_wave",
+            "mc_task_upper",
+            "mc_task_reference",
+            "relax_structure_tasks",
+            "mc_step_upper",
+            "coordinator_jobs",
+            "cpu_control_jobs_upper",
+            "submission_policy",
+            "max_concurrent_jobs",
+        }
+    )
+
+    # Preserve bound DFT evidence and guidance, including units and conditional scope.
+    fields.update(
+        {
+            "reference_framework",
+            "role",
+            "primary_goal",
+            "D_definition",
+            "D_unit",
+            "H_unit",
+            "Ehull_unit",
+            "reference_steps",
+            "evidence_patterns",
+            "when",
+            "consider",
+            "purpose",
+            "representative_selection",
+            "adaptation",
+            "cautions",
+            "review_requirements",
+            "dft_sampling_evidence",
+            "decision_made",
+            "geometry_key",
+            "structure_sha256",
+            "hull_version",
+            "snapshot_evidence_digest",
+            "D_rule",
+            "composition_per_O2",
+            "D_score",
+            "D_status",
+            "D_gap_meV_per_O2",
+            "D_candidate_id",
+            "D_candidate_size",
+            "D_candidate_geometry_keys",
+            "D_candidate_structure_paths",
+            "D_reference_structure_paths",
+            "H_layers",
+            "H_single_sequence",
+            "H_single_max",
+            "H_D_candidate_union_sequence",
+            "H_D_candidate_union_max",
+            "distance_to_layer_hull_meV_per_O2",
+            "H_path_reference",
+            "H_path_scope",
+            "formal_Ehull_reference",
+            "quality_priority_eligible",
+            "sampling_evidence_scope",
+            "endpoint_protected",
+            "structure_review",
+            "structure_file_status",
+            "predicted_Ehull",
+            "ehull_unit",
+            "energy_std",
+            "energy_per_atom_std",
+            "f_std_max",
+            "f_std_p95",
+            "force_max_atom_disagreement",
+            "force_rms_disagreement",
+            "qbc_status",
+            "qbc_interpretation",
+        }
+    )
+
+    def summary(value, parent=None):
+        if parent in {"TM_ratio", "composition_per_O2"} and isinstance(value, dict):
+            import re
+
+            return {
+                key: item
+                for key, item in value.items()
+                if re.fullmatch(r"[A-Z][a-z]?", str(key)) and type(item) in (int, float)
+            }
+        if parent == "at_x" and isinstance(value, dict):
+            from fractions import Fraction
+
+            result = {}
+            for key, item in value.items():
+                try:
+                    if 0 <= Fraction(key) <= 1:
+                        result[key] = summary(item)
+                except (ValueError, TypeError, ZeroDivisionError):
+                    continue
+            return result
+        if isinstance(value, dict):
+            return {
+                key: summary(item, key)
+                for key, item in value.items()
+                if key in fields and (key != "forces" or isinstance(item, dict))
+            }
+        if isinstance(value, list):
+            return [summary(item) for item in value]
+        return deepcopy(value)
+
+    material = {
+        "instruction": payload.get("instruction", "Return one complete action JSON."),
+        "allowed_tools": deepcopy(payload.get("allowed_tools") or []),
+        "mode": payload.get("mode"),
+        "decision_context": {
+            key: deepcopy(context[key])
+            if key
+            in {
+                "branch_pool_facts",
+                "branch_pool_review_contract",
+                "branch_pool_review_required",
+                "generation_region_contract",
+                "expert_advice",
+                "evidence_snapshot_id",
+            }
+            else summary(context[key])
+            for key in (
+                "current_phase_diagram",
+                "relevant_approved_knowledge",
+                "long_term_human_advice",
+                "coverage_gaps",
+                "recent_experience",
+                "task_stage_evidence",
+                "post_dft_assessment",
+                "qbc_candidates",
+                "relax_mc_batches",
+                "available_branches",
+                "available_budget",
+                "dft_selection_policy",
+                "independent_audit_candidate_ids",
+                "dft_validation_feedback",
+                "training_result_reports",
+                "round_budget_evidence",
+                "candidate_validation",
+                "search_evidence",
+                "training_validation_planning",
+                "post_refresh_search",
+                "new_model_generation",
+                "branch_pool_facts",
+                "branch_pool_review_contract",
+                "branch_pool_review_required",
+                "generation_region_contract",
+                "decision_authority",
+                "training_already_completed",
+                "approved_direction",
+                "scientific_scope",
+                "enabled_generation_strategies",
+                "generation_strategy_constraint",
+                "early_branch_planning",
+                "workflow_policy",
+                "workflow_instruction",
+                "ordering_search_instruction",
+                "mc_entry_conditions",
+                "decision_feedback",
+                "decision_review_format",
+                "expert_advice",
+                "evidence_snapshot_id",
+            )
+            if key in context
+        },
+    }
+    if "agent_role" in payload:
+        material["agent_role"] = deepcopy(payload["agent_role"])
+    if "human_comment" in payload:
+        material["human_comment"] = deepcopy(payload["human_comment"])
+    if "current_proposal" in payload:
+        from phase_agent.models.prepare_llm_request import compact_current_proposal
+
+        material["current_proposal"] = compact_current_proposal(payload["current_proposal"])
+    # Schemas are program-owned contracts, not scientific/raw filesystem data.
+    material["output_contracts"] = deepcopy(payload.get("output_contracts") or {})
+    if payload.get("invalid_branch_proposal"):
+        material["invalid_branch_proposal"] = deepcopy(payload["invalid_branch_proposal"])
+    if payload.get("validation_errors"):
+        material["validation_errors"] = list(payload["validation_errors"])
+        material["repair_instruction"] = (
+            "Return the complete corrected action using the supplied contracts and evidence."
+        )
+    return material
+
+
+def create_proposal_client(model, *, recursion_limit=16, expert_client=None):
+    """Caller supplies an approved model; production wiring is deliberately separate."""
+    from deepagents import create_deep_agent
+    from deepagents.backends import StateBackend
+    from deepagents.backends.utils import create_file_data
+    from langchain.agents.middleware import wrap_tool_call
+    from phase_agent.models.create_deepseek_client import _parse_json_object
+    from phase_agent.models.prepare_llm_request import prepare_llm_request
+
+    @wrap_tool_call
+    def restrict_tools(request, handler):
+        if request.tool_call["name"] in {"task", "execute"}:
+            raise ValueError("Proposal harness cannot delegate or execute commands")
+        return handler(request)
+
+    from phase_agent.policies.relax_mc_preference import RELAX_MC_PREFERENCE
+
+    agent = create_deep_agent(
+        model=model,
+        backend=StateBackend(),
+        subagents=[],
+        middleware=[restrict_tools],
+        memory=["/memory/AGENTS.md"],
+        name="scientific_proposal",
+        system_prompt=RELAX_MC_PREFERENCE
+        + (
+            "Analyze supplied scientific facts and approved knowledge. "
+            "Files are invocation-local scratch, not business state or durable knowledge. "
+            "Do not execute, delegate, approve, submit, train or activate anything. "
+            "Return exactly one complete JSON object matching the supplied instruction. "
+            "Return one scientific action or the typed dialogue response. "
+            "Cite supplied evidence IDs; never invent measurements. "
+            "For the default one-upload Relax+MC package, propose operation "
+            "prepare_relax_mc_batch on prepare_local_batch_files with mode=relax_mc_inputs "
+            "and explicit existing branch IDs. Diagnosis and workload preview precede approval. "
+            "This freezes the model and shared MC rules, prepares files only, and permits "
+            "remote Relax plus initial MC and at most two feedback additions. Without a hull "
+            "bootstrap at100/10; no later MC without a valid hull. Never duplicate tasks "
+            "owned by an active relax_mc_batches entry. After verified return choose Branch "
+            "or DFT from phase diagram, coverage and QBC evidence. "
+            "Distinguish human constraints from observations and check memory applicability."
+        ),
+    )
+
+    from uuid import uuid4
+
+    cache_namespace = ("deep_client", uuid4().hex)
+
+    def uncached_call(payload):
+        from phase_agent.models.transport_tables import compact_evidence_tables
+
+        transport = prepare_llm_request(payload)
+        prepared = compact_evidence_tables(proposal_material(transport))
+        prepared["transport_policy"] = transport["decision_context"]["transport_policy"]
+        memory_text = (
+            "Approved knowledge is supplied once in decision_context.relevant_approved_knowledge "
+            "in the current request. Read those complete entries and their provenance; "
+            "they are evidence, not execution authorization."
+        )
+        from phase_agent.runtime.token_usage import provider_usage_callback
+
+        result = agent.invoke(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": json.dumps(prepared, ensure_ascii=False, separators=(",", ":")),
+                    }
+                ],
+                "files": {
+                    "/memory/AGENTS.md": create_file_data(
+                        "Approved references, not execution authorization.\n" + memory_text
+                    )
+                },
+            },
+            config={
+                "recursion_limit": recursion_limit,
+                "callbacks": [provider_usage_callback(payload.get("mode"))],
+            },
+        )
+        messages = result.get("messages") or []
+        if not messages or messages[-1].type != "ai" or messages[-1].tool_calls:
+            raise ValueError("Deep Agents did not return a final proposal")
+        action = _parse_json_object(messages[-1].text)
+        usage = [message.usage_metadata or {} for message in messages if message.type == "ai"]
+        action["_llm_usage"] = {
+            "calls": len(usage),
+            "input_tokens": sum(row.get("input_tokens", 0) for row in usage),
+            "output_tokens": sum(row.get("output_tokens", 0) for row in usage),
+            "cost": None,
+            "model": getattr(model, "model_name", "injected"),
+            "mode": payload.get("mode", "unknown"),
+            "transport_metrics": transport.get("transport_metrics"),
+            "reasoning_enabled": True,
+        }
+        action["_proposal_harness"] = "deepagents"
+        return deepcopy(action)
+
+    def call(payload):
+        from phase_agent.runtime.token_usage import cached_request
+
+        return cached_request(payload, uncached_call, namespace=cache_namespace)
+
+    call.decision_backend = "langgraph"
+    if expert_client is not None:
+        from phase_agent.models.capabilities import copy_model_capabilities
+
+        copy_model_capabilities(expert_client, call)
+    return call
+
+
+def create_deepseek_proposal_client(
+    *, api_key, model, base_url, timeout, max_tokens=8192, recursion_limit=16, expert_client=None
+):
+    """Explicit opt-in provider factory; never chosen by existing default clients."""
+    from langchain_openai import ChatOpenAI
+
+    chat_model = ChatOpenAI(
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        timeout=timeout,
+        max_tokens=max_tokens,
+        temperature=0,
+        max_retries=0,
+        extra_body={"thinking": {"type": "disabled"}},
+    )
+    if expert_client is None:
+        from phase_agent.models.create_deepseek_client import create_deepseek_client
+
+        expert_client = create_deepseek_client(
+            api_key=api_key, model=model, base_url=base_url, timeout=timeout, max_tokens=max_tokens
+        )
+    return create_proposal_client(
+        chat_model, recursion_limit=recursion_limit, expert_client=expert_client
+    )

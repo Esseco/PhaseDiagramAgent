@@ -4,7 +4,22 @@ import json
 from pathlib import Path
 
 
-def read_only_reply(handler, message, facts, conversation_id=None):
+def read_only_reply(handler, message, facts, conversation_id=None, *, include_review_controls=True):
+    reply = _read_only_reply(
+        handler, message, facts, conversation_id, include_review_controls=include_review_controls
+    )
+    if reply is not None:
+        from phase_agent.runtime.recovery_diagnostics import recovery_diagnostic_notice
+
+        notice = recovery_diagnostic_notice(handler.state_path)
+        if notice:
+            reply = notice + "\n" + reply
+    return reply
+
+
+def _read_only_reply(
+    handler, message, facts, conversation_id=None, *, include_review_controls=True
+):
     from phase_agent.graphs.dialogue.commands import _is_status_command, format_status_reply
     from phase_agent.runtime.plan_queries import is_plan_query, pending_plan_reply
     from phase_agent.runtime.artifact_queries import finetune_location_reply
@@ -28,11 +43,12 @@ def read_only_reply(handler, message, facts, conversation_id=None):
             reply += "\n" + pending_plan_reply(facts)
             bind_presented_proposal(handler, facts)
         return reply
-    from phase_agent.graphs.dialogue.saved_control import unavailable_review_reply
+    if include_review_controls:
+        from phase_agent.graphs.dialogue.saved_control import unavailable_review_reply
 
-    reply = unavailable_review_reply(handler, message, facts)
-    if reply is not None:
-        return reply
+        reply = unavailable_review_reply(handler, message, facts)
+        if reply is not None:
+            return reply
     reply = finetune_location_reply(message, facts)
     if reply is not None:
         return reply

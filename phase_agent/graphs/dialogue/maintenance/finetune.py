@@ -5,9 +5,11 @@ from phase_agent.graphs.dialogue.commands import classify_user_decision, _drop_f
 
 
 def handle(self, user_message, state, messages, conversation_id):
-    state, stale_pending_removed = _drop_finished_pending(state)
+    cleaned, stale_pending_removed = _drop_finished_pending(state)
     if stale_pending_removed:
-        write_json(self.state_path, state)
+        write_json(self.state_path, cleaned)
+        state.clear()
+        state.update(cleaned)
     from phase_agent.tools.local.regenerate_finetune_inputs import (
         CONFIRM,
         is_finetune_regeneration_request,

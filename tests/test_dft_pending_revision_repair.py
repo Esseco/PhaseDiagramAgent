@@ -127,7 +127,9 @@ def test_missing_audit_candidate_is_revised_once_by_fake_agent(monkeypatch):
     saved = pending["agent_proposal"]["raw_action"]
     assert saved["task_key"] == "model-correction"
     assert [row["candidate_id"] for row in saved["parameters"]["decisions"]] == ["near", "audit"]
-    assert saved["parameters"]["dft_input_preview"]["task_count"] == 2
+    assert saved["parameters"]["dft_selection_preview"]["task_count"] == 2
+    assert saved["parameters"]["prepare_inputs_after_approval"] is True
+    assert "dft_input_preview" not in saved["parameters"]
     assert (
         pending["feedback_history"][-1]["prior_proposal"]
         == before["pending_execution_policies"]["p"]["agent_proposal"]

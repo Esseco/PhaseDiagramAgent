@@ -59,7 +59,7 @@ def prepare_branch_relaxation(candidates, state, context):
                 saved_pool["version"], saved_pool
             )
     records = []
-    from phase_agent.decisions.agent.choose_debug_next_action import _verified_migrated_relax_ids
+    from phase_agent.agents.strategic.choose_debug_next_action import _verified_migrated_relax_ids
 
     migrated_ids = _verified_migrated_relax_ids(current, mlip, version)
     for branch in candidates:

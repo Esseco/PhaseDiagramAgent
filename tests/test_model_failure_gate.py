@@ -33,7 +33,7 @@ def test_continue_discards_failed_pause_without_executing():
               "fallback_reason": "llm_failed: truncated"}
     state = {"pending_execution_policies": {
         "__single_interactive_action__": {"agent_proposal": {"raw_action": action}}}}
-    with patch("phase_agent.decisions.agent.choose_debug_next_action.choose_debug_next_action", return_value=None),\
+    with patch("phase_agent.agents.strategic.choose_debug_next_action.choose_debug_next_action", return_value=None),\
          patch("phase_agent.tools.workflows.run_tool_step.propose_agent_tool_action", return_value=action) as propose:
         result = run_tool_step(state, {"config": {}}, registry={},
                                execution_mode="interactive", context={"user_message": "继续"})

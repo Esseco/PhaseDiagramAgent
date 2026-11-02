@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull
 from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
-from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
-from phase_agent.decisions.agent.resolve_mc_budget_feedback import resolve_mc_full_plan_steps
+from phase_agent.agents.strategic.revise_tool_proposal import revise_tool_proposal
+from phase_agent.agents.strategic.resolve_mc_budget_feedback import resolve_mc_full_plan_steps
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
-from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.policies.execution_policy import build_agent_proposal
 from phase_agent.tools.step_runner.file_protocol import write_json
 from phase_agent.tools.workflows.run_tool_step import run_tool_step
 from phase_agent.runtime.agent_api import RunWorkflowChatHandler

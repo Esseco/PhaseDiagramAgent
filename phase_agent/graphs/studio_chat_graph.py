@@ -63,6 +63,32 @@ def send_local_message(text, thread_id):
     return send_project_message(text, thread_id)
 
 
+def _message_identity(thread, message_id, text):
+    return {
+        "invocation_id": f"{thread}:{message_id}",
+        "config_version": "studio-gateway-v1",
+        "action_hash": hashlib.sha256(text.encode()).hexdigest(),
+        "tool": "studio_send_message",
+    }
+
+
+def _completed_reply(path, identity):
+    from phase_agent.tools.state.execution_receipts import execution_events
+
+    for event in execution_events(path, identity["invocation_id"]):
+        payload = event["payload"]
+        reply = (payload.get("evidence") or {}).get("reply")
+        if (
+            event["event"] == "tool_returned"
+            and payload.get("identity") == identity
+            and payload.get("outcome") == "completed"
+            and isinstance(reply, str)
+            and reply.strip()
+        ):
+            return reply
+    return None
+
+
 def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpointer=None):
     from phase_agent.graphs.scientific_graph import scientific_graph, use_scientific_graph
 
@@ -73,6 +99,32 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
         try:
             text = user_text(messages)
         except ValueError as error:
+            thread = (config.get("configurable") or {}).get("thread_id")
+            # add_messages replaces a retried human ID in place: the saved AI
+            # answer stays last. Only a matching completed journal permits delivery.
+            if (
+                thread
+                and state.get("request_thread") == thread
+                and messages
+                and messages[-1].type == "ai"
+            ):
+                request = next((m for m in reversed(messages) if m.type == "human"), None)
+                path = receipt_path or os.environ.get("PHASE_STUDIO_RECEIPT_PATH")
+                if (
+                    path
+                    and request is not None
+                    and isinstance(request.content, str)
+                    and request.content == state.get("request_text")
+                ):
+                    reply = _completed_reply(
+                        path, _message_identity(thread, request.id, request.content)
+                    )
+                    if reply and messages[-1].content == reply:
+                        return {
+                            "reply": reply,
+                            "request_text": request.content,
+                            "request_thread": thread,
+                        }
             return {"reply": f"未执行：{error}", "request_text": "", "request_thread": ""}
         message = messages[-1]
         thread = (config.get("configurable") or {}).get("thread_id")
@@ -85,7 +137,6 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
         message = messages[-1]
         text = state["request_text"]
         thread = state["request_thread"]
-        digest = hashlib.sha256(text.encode()).hexdigest()
         path = receipt_path or os.environ.get("PHASE_STUDIO_RECEIPT_PATH")
         if not path:
             raise ValueError(
@@ -96,12 +147,7 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
             record_execution_return,
         )
 
-        execution_identity = {
-            "invocation_id": f"{thread}:{message.id}",
-            "config_version": "studio-gateway-v1",
-            "action_hash": digest,
-            "tool": "studio_send_message",
-        }
+        execution_identity = _message_identity(thread, message.id, text)
         claim = begin_execution(Path(path), execution_identity)
         from phase_agent.runtime.studio_recovery import can_resume_message
 
@@ -113,6 +159,15 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
                 os.environ.get("PHASE_AGENT_RUNTIME_CONFIG"), execution_identity["invocation_id"]
             )
         )
+        if (
+            not claim["allowed"]
+            and claim.get("reason") != "identity_changed"
+            and claim.get("phase") == "returned"
+        ):
+            # Redeliver the completed response after a dropped stream, not the action.
+            delivered = _completed_reply(path, execution_identity)
+            if delivered:
+                return {"reply": delivered}
         if not claim["allowed"] and not recoverable:
             return {
                 "reply": "该消息已尝试发送，禁止历史重放；请核对业务状态。",
@@ -140,10 +195,13 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
 
             check_cancelled()
             reply = sender(text, thread)
+            if not isinstance(reply, str) or not reply.strip():
+                reply = "本轮没有可显示的回复，请核对已保存的项目状态；不要重复提交任务。"
+            # Business work has returned. Preserve its answer even if delivery is cancelled.
+            record_execution_return(
+                path, execution_identity, "completed", evidence={"reply": reply}
+            )
             check_cancelled()
-        record_execution_return(path, execution_identity, "completed")
-        if not isinstance(reply, str) or not reply.strip():
-            reply = "本轮没有可显示的回复，请核对已保存的项目状态；不要重复提交任务。"
         return {"reply": reply}
 
     async def async_agent(state, config, runtime: Runtime[StudioContext]):
@@ -168,7 +226,16 @@ def build_studio_graph(sender=send_local_message, *, receipt_path=None, checkpoi
 
     def respond(state):
         # Emit exactly one assistant message at the final node, including streaming.
-        return {"messages": [AIMessage(content=state["reply"])]} if state.get("reply") else {}
+        if not state.get("reply"):
+            return {}
+        request = next((m for m in reversed(state["messages"]) if m.type == "human"), None)
+        identity = None
+        if state.get("request_thread") and request is not None:
+            identity = (
+                "studio-reply-"
+                + hashlib.sha256(f"{state['request_thread']}:{request.id}".encode()).hexdigest()
+            )
+        return {"messages": [AIMessage(content=state["reply"], id=identity)]}
 
     graph.add_node("receive_message", receive_message)
     graph.add_node("agent", RunnableLambda(sync_entry, afunc=async_entry))

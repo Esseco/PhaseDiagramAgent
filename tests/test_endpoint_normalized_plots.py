@@ -138,9 +138,12 @@ def test_old_plot_receipt_is_republished_without_changing_review_ids(tmp_path, m
 
     def plot(*args, **kwargs):
         calls.append(1)
+        hd = tmp_path / "hd.png"
+        hd.write_bytes(b"hd-fixture")
+        kwargs["artifacts"].update(main=[str(image)], hd=[str(hd)])
         return f"PNG：`{image}`"
 
-    monkeypatch.setattr(chat, "phase_diagram_reply", plot)
+    monkeypatch.setattr(chat, "_plot", plot)
     state = registered(tmp_path)
     first = publish_relax_mc_analysis(state, "b1")
     receipt = json.loads(open(first["receipt_path"], encoding="utf-8").read())

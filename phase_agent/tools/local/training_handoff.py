@@ -44,6 +44,9 @@ def write_job(inputs, filename, command, config):
 
 
 def prepare_manifest_job(job, config, handoff):
+    from phase_agent.policies.training_handoff_scope import check_handoff
+
+    check_handoff(job, config, "manifest")
     inputs = Path(job["directory"]) / "inputs"
     if not inputs.is_dir() or not (inputs / "training_plan.json").is_file():
         raise ValueError("本地inputs或training_plan.json缺失；请恢复原训练输入")
@@ -156,6 +159,12 @@ def recover_validation(current, request, handoff):
             "new_model" if model is new else "old_model"
         ],
     )
+    validation["independent_test_completed"] = validation.get("passed") is True
+    validation["evidence_status"] = (
+        "independently_validated"
+        if validation.get("passed") is True
+        else "independent_validation_failed"
+    )
     stored = current.setdefault("candidate_models", {}).get(new["version"])
     if not stored or stored.get("status") != "user_rejected":
         current["candidate_models"][new["version"]] = {
@@ -165,6 +174,7 @@ def recover_validation(current, request, handoff):
             "dft_data_version": new["dataset_version"],
             "validation_data_version": settings["data_version"],
             "status": "validated_candidate",
+            "evidence_status": validation["evidence_status"],
         }
     stage = (
         "candidate_rejected"
@@ -184,6 +194,9 @@ def recover_validation(current, request, handoff):
 
 
 def prepare_validation_job(job, config, request, handoff):
+    from phase_agent.policies.training_handoff_scope import check_handoff
+
+    check_handoff(job, config, "validation")
     inputs = Path(job["directory"]) / "inputs"
     plan = request["plan"]
     settings = request["settings"]
@@ -244,7 +257,7 @@ def record_handoff(current, key, handoff):
 
 
 def advance_training_handoffs(state, config, *, state_path=None, graph=None, _owned=False):
-    from phase_agent.graphs.training_handoff_graph import run_training_handoffs
+    from phase_agent.graphs.recovery.training_handoff_graph import run_training_handoffs
 
     from phase_agent.interface_compatibility import call_with_optimizations
 

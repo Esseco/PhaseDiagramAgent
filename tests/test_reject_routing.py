@@ -2,7 +2,7 @@ import json
 from unittest.mock import Mock, patch
 from phase_agent.runtime.agent_api import RunWorkflowChatHandler
 from phase_agent.tools.step_runner.build_status_summary import build_status_summary
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 
 
 def test_reject_sensitive_plan_needs_no_sensitive_confirmation(tmp_path):

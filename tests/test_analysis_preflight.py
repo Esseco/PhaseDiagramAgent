@@ -3,8 +3,8 @@ from copy import deepcopy
 import pytest
 
 from tests.test_stage_aware_evidence import fixture
-from phase_agent.decisions.agent.summary_request import request_summary_first, summary_payload
-from phase_agent.decisions.agent.prepare_llm_request import needs_deep_reasoning
+from phase_agent.evidence.requests import request_summary_first, summary_payload
+from phase_agent.models.prepare_llm_request import needs_deep_reasoning
 
 
 def plan(tools=None, kind="scientific_comparison", reasoning="scientific"):

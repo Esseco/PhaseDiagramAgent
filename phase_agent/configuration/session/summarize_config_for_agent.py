@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from phase_agent.decisions.agent.generation_plan import configured_generation_strategies
+from phase_agent.agents.exploration.generation_plan import configured_generation_strategies
 
 from phase_agent.science.structures.boundary_utils import allowed_phases, det_H
 

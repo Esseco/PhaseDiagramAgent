@@ -29,6 +29,8 @@ class ToolActionState(TypedDict, total=False):
         "initialized",
         "refresh_checked",
         "proposed",
+        "simulation_planned",
+        "simulation_checked",
         "approval_checked",
         "validated",
         "executed",
@@ -37,13 +39,3 @@ class ToolActionState(TypedDict, total=False):
     selected_tool: str
     selected_operation: str
     response: dict
-
-
-class EventGraphState(TypedDict, total=False):
-    offset: int
-    step_id: str
-    response: dict
-
-
-class ProposalState(TypedDict):
-    proposal: dict

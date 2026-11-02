@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from phase_agent.tools.step_runner.file_protocol import read_json
-from phase_agent.analysis.state.project_authority import current_project
+from phase_agent.evidence.project_authority import current_project
 
 
 def current_config_session(handler):
@@ -15,7 +15,7 @@ def current_config_session(handler):
 
 
 def handler_project_context(handler, state):
-    from phase_agent.analysis.state.project_authority import (
+    from phase_agent.evidence.project_authority import (
         confirmed_configuration,
         configuration_changes,
     )

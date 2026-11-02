@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from fractions import Fraction
 from typing import Any
 
 from phase_agent.science.structures.identify_branch import identify_branch_parameters
@@ -22,11 +23,18 @@ def generate_composition_branches(
 ) -> list[dict[str, Any]]:
     rng = random.Random(seed)
     tasks = []
+    # Focused regions may omit nearer compositions; use the full legal grid
+    # to identify neighbours before intersecting with the approved region.
+    from phase_agent.science.structures.enumerate_legal_frameworks import enumerate_legal_frameworks
+
+    legal = enumerate_legal_frameworks(manager.boundary, phase_references)
     for parent_id in parent_branch_ids:
         parent = _branch(manager, parent_id)
         framework = _framework(frameworks, parent["P"], parent["H"])
+        full = _framework(legal, parent["P"], parent["H"])
+        neighbours = _neighbouring_x(parent["x"], full["allowed_x"])
         for x in framework["allowed_x"]:
-            if x != parent["x"]:
+            if Fraction(str(x)) in neighbours:
                 tasks.append((parent_id, parent, x))
     rng.shuffle(tasks)
 
@@ -52,6 +60,15 @@ def generate_composition_branches(
         )
         candidates.append(_candidate(parameters, structure, "composition", parent_id, current_seed))
     return candidates
+
+
+def _neighbouring_x(parent_x, allowed_x):
+    """Nearest legal composition on each side, independent of region filtering."""
+    parent = Fraction(str(parent_x))
+    ordered = sorted({Fraction(str(value)) for value in allowed_x})
+    below = [value for value in ordered if value < parent]
+    above = [value for value in ordered if value > parent]
+    return set(below[-1:] + above[:1])
 
 
 def _branch(manager: Any, branch_id: str) -> dict[str, Any]:

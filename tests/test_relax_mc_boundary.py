@@ -1,8 +1,8 @@
 from copy import deepcopy
 import pytest
-from phase_agent.tools.policy.branch_conditions import branch_entry_errors, mc_entry_facts
-from phase_agent.decisions.agent.proposal_validation import proposal_errors
-from phase_agent.graphs.proposal_graph import request_with_langgraph
+from phase_agent.policies.branch_conditions import branch_entry_errors, mc_entry_facts
+from phase_agent.agents.common.proposal_validation import proposal_errors
+from phase_agent.graphs.decision_team.graph import request_with_langgraph
 from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
 

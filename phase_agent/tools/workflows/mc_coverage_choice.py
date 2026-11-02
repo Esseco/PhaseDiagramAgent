@@ -26,7 +26,7 @@ def preserve(frame, *, reason=None):
     state = frame["current"]
     key = frame["pending_key"]
     proposal = frame["proposal"]
-    from phase_agent.analysis.state.project_authority import project_identity
+    from phase_agent.evidence.project_authority import project_identity
 
     stored = deepcopy(frame.get("stored") or {})
     stored.update(
@@ -96,7 +96,7 @@ def resolve(frame):
         params["compression_choice"] = "reduce_branch_count"
     action["decision_source"] = "explicit_user_instruction"
     from phase_agent.tools.workflows.prepare_mc_preview import prepare_mc_preview
-    from phase_agent.tools.policy.execution_policy import build_agent_proposal
+    from phase_agent.policies.execution_policy import build_agent_proposal
 
     try:
         action = prepare_mc_preview(
@@ -118,7 +118,7 @@ def resolve(frame):
         )
     stored = deepcopy(stored)
     stored["revision"] = int(stored.get("revision", 0)) + 1
-    from phase_agent.tools.policy.file_approval import proposal_hash
+    from phase_agent.policies.file_approval import proposal_hash
 
     original = stored.setdefault("original_record_id", stored["record_id"])
     stored["record_id"] = original + ":mc-scope:" + proposal_hash(proposal)[:16]

@@ -12,8 +12,8 @@ def collect_memory_candidates(state):
     known = {row.get("candidate_id") for row in pool}
     model = updated.get("active_model_version")
     config = updated.get("confirmed_config_version")
-    from phase_agent.analysis.state.training_result_evidence import training_result_evidence
-    from phase_agent.analysis.state.round_budget_evidence import budget_decision_outcomes
+    from phase_agent.evidence.training_result_evidence import training_result_evidence
+    from phase_agent.evidence.round_budget_evidence import budget_decision_outcomes
 
     updated["training_result_reports"] = training_result_evidence(updated)
     sources = []
@@ -125,7 +125,7 @@ def collect_memory_candidates(state):
                 ),
             }
             sources.append(("completed_batch", batch_id, summary, tuple(summary)))
-    from phase_agent.analysis.state.budget_experience import budget_experiences
+    from phase_agent.evidence.budget_experience import budget_experiences
 
     for experience in budget_experiences(updated):
         if not experience["parameters"] and not any(experience["measurement_counts"].values()):

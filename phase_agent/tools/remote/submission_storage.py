@@ -212,6 +212,10 @@ def _hide(path):
 
 
 def restore_storage_directory(root, kind):
+    from phase_agent.tools.workflows.readonly_views import is_read_only
+
+    if is_read_only():
+        return 0
     root = Path(root)
     archive = storage_archive(root, kind)
     if not archive.is_file():

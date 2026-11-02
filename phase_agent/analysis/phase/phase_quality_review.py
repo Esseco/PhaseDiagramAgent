@@ -128,6 +128,7 @@ def exclude_records(state, manager, record_ids, structure_ids, *, entry, directo
         active_model_version=model,
         output_directory=directory,
         output_state=current,
+        include_dft=False,
         parent_versions={"mlip": snapshot.get("version")},
     )
     current["phase_diagrams"].update(updated["diagrams"])
@@ -169,6 +170,9 @@ def exclude_records(state, manager, record_ids, structure_ids, *, entry, directo
             del manager.data["structures"][sid]
     current["coverage"] = manager.coverage()
     manager.data.setdefault("phase_quality_review_log", []).append(deepcopy(entry))
+    from phase_agent.analysis.feedback.export_dft_products import publish_output_catalog
+
+    publish_output_catalog(current, directory or current.get("analysis_output_directory"))
     return {
         "status": "completed",
         "state": current,

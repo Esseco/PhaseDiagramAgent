@@ -1,7 +1,7 @@
 import pytest
 
 from phase_agent.analysis.cost.generation_preflight import preview_generation_cost
-from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
+from phase_agent.agents.common.post_dft_review import valid_post_dft_review
 from tests.test_post_dft_review import review, parameters
 
 

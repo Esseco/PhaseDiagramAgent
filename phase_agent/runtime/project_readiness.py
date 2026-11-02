@@ -8,7 +8,7 @@ def project_readiness(state, config, settings, *, workspace):
     from phase_agent.configuration.session.relocate_workspace_paths import relocate_workspace_paths
     from phase_agent.configuration.schema.validate_search_config import validate_search_config
     from phase_agent.analysis.convergence.training_provenance import model_with_training_provenance
-    from phase_agent.tools.policy.workflow_policy import active_tasks
+    from phase_agent.policies.workflow_policy import active_tasks
 
     effective = deepcopy(config)
     if settings.get("local_path_relocations"):

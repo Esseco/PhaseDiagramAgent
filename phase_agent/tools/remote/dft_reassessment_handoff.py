@@ -1,6 +1,7 @@
 """Portable GPU recovery using original DFT artifacts and existing pair generation."""
 
 from pathlib import Path
+import ast
 import hashlib
 import json
 import shlex
@@ -25,9 +26,37 @@ RUNTIME = (
     "science/structures/load_result_structure.py",
     "science/mlip/run_mace_subprocess.py",
     "science/mlip/mace_worker.py",
+    "science/mlip/model_interface.py",
     "science/mlip/predict_structure.py",
     "science/qbc/summarize_member_energies.py",
 )
+
+
+def _write_runtime(root):
+    """Reject missing application imports before publishing an offline delivery."""
+    app = Path(__file__).parents[2]
+    sources = {relative: (app / relative).read_bytes() for relative in RUNTIME}
+    modules = {"phase_agent." + name[:-3].replace("/", ".") for name in sources}
+    for relative, source in sources.items():
+        tree = ast.parse(source, filename=relative)
+        compile(tree, relative, "exec")
+        dependencies = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                dependencies.add(node.module)
+            elif isinstance(node, ast.Import):
+                dependencies.update(alias.name for alias in node.names)
+        missing = sorted(
+            name for name in dependencies if name.startswith("phase_agent.") and name not in modules
+        )
+        if missing:
+            raise ValueError(
+                f"reassessment_runtime_dependency_missing:{relative}:{','.join(missing)}"
+            )
+    for relative, source in sources.items():
+        target = root / "runtime/phase_agent" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source)
 
 
 def prepare_reassessment_handoff(state, original, *, source_directory, returned_archive):
@@ -95,11 +124,7 @@ def prepare_reassessment_handoff(state, original, *, source_directory, returned_
             json.dumps(options, sort_keys=True), encoding="utf-8"
         )
         (root / "_transfer.py").write_text(portable_transfer_source(), encoding="utf-8")
-        app = Path(__file__).parents[2]
-        for relative in RUNTIME:
-            target = root / "runtime/phase_agent" / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes((app / relative).read_bytes())
+        _write_runtime(root)
         target = root / "runtime/Process_Vasp/workflows/atomate_runner.py"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(Path(atomate_runner.__file__).read_bytes())

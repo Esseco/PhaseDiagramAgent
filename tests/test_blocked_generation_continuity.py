@@ -160,10 +160,25 @@ def test_branch_revision_reaches_existing_online_generation_contract(tmp_path, m
             "missing_evidence": [],
             "revisit_conditions": ["生成后审阅"],
             "evidence_refs": refs,
+            "existing_branch_groups": [
+                {
+                    "branch_ids": ["old_branch"],
+                    "decision": "defer",
+                    "reason": "先完成当前模型首次新增，再审阅旧branch续搜",
+                    "evidence_refs": refs,
+                }
+            ],
         }
         return action
 
     manager = Manager()
+    manager.data["branches"]["old_branch"] = {
+        "P": "O3",
+        "H": H,
+        "x": "1",
+        "T": ["Fe"],
+        "structure_ids": [],
+    }
     manager.boundary = {"P": {}, "H": {}}
     reference = Structure(
         Lattice.cubic(5),

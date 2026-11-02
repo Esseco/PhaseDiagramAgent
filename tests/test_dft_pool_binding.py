@@ -68,7 +68,7 @@ def test_empty_pool_clears_stale_audit_without_inventing_candidates():
 
 
 def test_repair_fields_are_in_dft_topic():
-    from phase_agent.decisions.agent.summary_request import source_topic
+    from phase_agent.evidence.requests import source_topic
 
     assert source_topic("dft_validation_feedback") == "dft"
     assert source_topic("dft_selection_policy") == "dft"

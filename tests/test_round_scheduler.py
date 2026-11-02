@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 
-from phase_agent.decisions.strategy.default_round_strategy_config import default_round_strategy_config
+from phase_agent.agents.strategic.strategy.default_round_strategy_config import default_round_strategy_config
 from phase_agent.persistence.state.load_round_scheduler_state import load_round_scheduler_state
 from phase_agent.persistence.state.pause_strategy_round import pause_strategy_round
 from phase_agent.tools.workflows.run_round_scheduler import run_round_scheduler

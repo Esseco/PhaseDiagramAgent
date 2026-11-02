@@ -1,5 +1,5 @@
 import json
-from phase_agent.graphs.batch_recovery_graph import recover_batch_stages
+from phase_agent.graphs.recovery.batch_recovery_graph import recover_batch_stages
 from phase_agent.graphs.node_trace import append_node_trace
 
 
@@ -25,7 +25,7 @@ def test_partial_restart_and_failure_reports(tmp_path):
     assert report["dft_single_point"]["waived_ids"] == ["d1"]
     assert report["deep_search"]["status"] == "failures_require_review"
     from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver as SqliteSaver
-    from phase_agent.graphs.batch_recovery_graph import build_batch_recovery_graph
+    from phase_agent.graphs.recovery.batch_recovery_graph import build_batch_recovery_graph
 
     with SqliteSaver.from_conn_string(
         str(tmp_path / "langgraph_batches.sqlite"), maintain_history=False

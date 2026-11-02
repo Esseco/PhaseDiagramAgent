@@ -3,6 +3,25 @@
 from copy import deepcopy
 
 
+_PREVIEW_KEYS = {
+    "relax_mc_preview",
+    "dft_selection_preview",
+    "dft_input_preview",
+    "refresh_preview",
+}
+_PREVIEW_SUMMARY_KEYS = {
+    "task_count",
+    "selected_count",
+    "single_point_count",
+    "relax_count",
+    "qbc_available_count",
+    "workload",
+    "warnings",
+    "mode",
+    "bootstrap_first_mc",
+}
+
+
 def compact_action_history(record, *, _owned=False):
     if not isinstance(record, dict):
         return deepcopy(record)
@@ -22,13 +41,45 @@ def _audit_without_state(record, *, owned):
     # pending_execution_policies.
     for key in ("agent_proposal", "prior_proposal"):
         proposal = current.get(key)
-        if isinstance(proposal, dict) and "decision_context" in proposal:
-            proposal = dict(proposal)
-            proposal.pop("decision_context", None)
-            current[key] = proposal
+        if isinstance(proposal, dict):
+            current[key] = _compact_proposal(proposal, owned=owned)
     for key in ("result", "execution", "execution_result"):
         if isinstance(current.get(key), dict):
             current[key] = _audit_without_state(current[key], owned=owned)
+    return current
+
+
+def _compact_proposal(proposal, *, owned):
+    """Keep approval identity while removing repeated multi-megabyte previews."""
+    current = proposal if owned else dict(proposal)
+    current.pop("decision_context", None)
+    for key in ("action_parameters", "parameters"):
+        value = current.get(key)
+        if isinstance(value, dict):
+            current[key] = _compact_parameters(value, owned=owned)
+    raw_action = current.get("raw_action")
+    if isinstance(raw_action, dict):
+        raw_action = raw_action if owned else dict(raw_action)
+        raw_action.pop("decision_context", None)
+        parameters = raw_action.get("parameters")
+        if isinstance(parameters, dict):
+            raw_action["parameters"] = _compact_parameters(parameters, owned=owned)
+        current["raw_action"] = raw_action
+    return current
+
+
+def _compact_parameters(parameters, *, owned):
+    current = parameters if owned else dict(parameters)
+    for key in _PREVIEW_KEYS:
+        preview = current.pop(key, None)
+        if isinstance(preview, dict):
+            summary = {
+                name: deepcopy(preview[name]) for name in _PREVIEW_SUMMARY_KEYS if name in preview
+            }
+            if isinstance(preview.get("selected_structures"), list):
+                summary["selected_structure_count"] = len(preview["selected_structures"])
+            if summary:
+                current[key + "_summary"] = summary
     return current
 
 
@@ -54,3 +105,16 @@ def compact_state_history(state, *, _owned=False):
             for key, row in state["invocations"].items()
         }
     return state
+
+
+def compact_state_history_once(state, *, version=2):
+    """Compact duplicate audit previews once without touching scientific facts."""
+    if not isinstance(state, dict) or state.get("_history_compaction_version", 0) >= version:
+        return False
+    if not any(
+        state.get(key) for key in ("action_records", "decisions", "event_history", "invocations")
+    ):
+        return False
+    compact_state_history(state, _owned=True)
+    state["_history_compaction_version"] = version
+    return True

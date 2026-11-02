@@ -390,9 +390,7 @@ def main(initial_project=None):
 
     def close():
         if busy or project_creation_busy:
-            messagebox.showinfo(
-                "操作进行中", "请等待项目创建或服务操作返回后再关闭。"
-            )
+            messagebox.showinfo("操作进行中", "请等待项目创建或服务操作返回后再关闭。")
             return
         running = _running_registered_projects(registry)
         for path in owned:

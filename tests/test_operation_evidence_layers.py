@@ -1,7 +1,7 @@
 from copy import deepcopy
 import pytest
-from phase_agent.decisions.agent.summary_request import request_summary_first, summary_payload
-from phase_agent.decisions.agent.prepare_llm_request import needs_deep_reasoning
+from phase_agent.evidence.requests import request_summary_first, summary_payload
+from phase_agent.models.prepare_llm_request import needs_deep_reasoning
 
 
 def fixture():
@@ -243,11 +243,11 @@ def test_supporting_memory_can_be_read_completely_during_a_scientific_comparison
 
 def test_post_refresh_prompts_acknowledge_completed_registration_without_weakening_the_gate():
     from tests.test_new_model_generation_gate import switched, generated
-    from phase_agent.tools.policy.model_generation import (
+    from phase_agent.policies.model_generation import (
         new_model_generation_facts,
         new_model_search_errors,
     )
-    from phase_agent.analysis.state.training_context import post_refresh_search_context
+    from phase_agent.evidence.training_context import post_refresh_search_context
 
     before = switched()
     after = generated()

@@ -1,13 +1,22 @@
 """Public source layout and saved descriptors must survive removal of old packages."""
+
 import ast
 import json
 from pathlib import Path
-from phase_agent.module_references import import_saved_module
+from phase_agent.compatibility.module_references import import_saved_module
 from phase_agent.runtime.project_service import prepare_studio_config
 
 ROOT = Path(__file__).resolve().parents[1]
-OLD = {"run", "orchestration", "config_layer", "data_layer", "decision_layer",
-       "analysis_layer", "scientific_layer", "execution_layer"}
+OLD = {
+    "run",
+    "orchestration",
+    "config_layer",
+    "data_layer",
+    "decision_layer",
+    "analysis_layer",
+    "scientific_layer",
+    "execution_layer",
+}
 
 
 def test_application_has_one_package_and_no_old_imports():
@@ -23,7 +32,9 @@ def test_application_has_one_package_and_no_old_imports():
 def test_saved_adapter_reference_resolves_without_old_package():
     new = import_saved_module("phase_agent.runtime.default_run_config")
     assert import_saved_module("run.default_run_config") is new
-    assert import_saved_module("scientific_layer.dft.parse_vasp_result") is import_saved_module("phase_agent.science.dft.parse_vasp_result")
+    assert import_saved_module("scientific_layer.dft.parse_vasp_result") is import_saved_module(
+        "phase_agent.science.dft.parse_vasp_result"
+    )
 
 
 def test_generated_studio_config_uses_actual_code_root(tmp_path):
@@ -38,5 +49,39 @@ def test_generated_studio_config_uses_actual_code_root(tmp_path):
 
 
 def test_obsolete_controllers_and_rule_scores_are_absent():
-    paths = ['phase_agent/decisions/scoring/allocate_generation_quotas.py', 'phase_agent/decisions/scoring/decide_next_stage.py', 'phase_agent/decisions/scoring/estimate_calculation_cost.py', 'phase_agent/decisions/scoring/score_action_reward.py', 'phase_agent/decisions/scoring/score_additional_mc_value.py', 'phase_agent/decisions/scoring/score_branch_potential.py', 'phase_agent/decisions/scoring/score_coverage_gap.py', 'phase_agent/decisions/scoring/score_dft_value.py', 'phase_agent/decisions/scoring/score_generation_strategy.py', 'phase_agent/decisions/scoring/score_parent_branch.py', 'phase_agent/decisions/scoring/score_validation_improvement.py', 'phase_agent/decisions/scoring/update_strategy_weights.py', 'phase_agent/runtime/web_chat_gate.py', 'phase_agent/decisions/agent/langgraph_decision.py', 'phase_agent/decisions/strategy/update_search_policy.py', 'phase_agent/analysis/convergence/check_branch_stop.py', 'phase_agent/analysis/feedback/reevaluate_candidates.py', 'phase_agent/analysis/phase/identify_mc_result_phase.py', 'phase_agent/configuration/runtime/estimate_draft_cost.py', 'phase_agent/configuration/session/pause_for_config_change.py', 'phase_agent/tools/workflows/create_qbc_dft_tool_handler.py']
+    paths = [
+        "phase_agent/analysis/scoring/allocate_generation_quotas.py",
+        "phase_agent/analysis/scoring/decide_next_stage.py",
+        "phase_agent/analysis/scoring/estimate_calculation_cost.py",
+        "phase_agent/analysis/scoring/score_action_reward.py",
+        "phase_agent/analysis/scoring/score_additional_mc_value.py",
+        "phase_agent/analysis/scoring/score_branch_potential.py",
+        "phase_agent/analysis/scoring/score_coverage_gap.py",
+        "phase_agent/analysis/scoring/score_dft_value.py",
+        "phase_agent/analysis/scoring/score_generation_strategy.py",
+        "phase_agent/analysis/scoring/score_parent_branch.py",
+        "phase_agent/analysis/scoring/score_validation_improvement.py",
+        "phase_agent/analysis/scoring/update_strategy_weights.py",
+        "phase_agent/runtime/web_chat_gate.py",
+        "phase_agent/agents/common/langgraph_decision.py",
+        "phase_agent/agents/strategic/strategy/update_search_policy.py",
+        "phase_agent/analysis/convergence/check_branch_stop.py",
+        "phase_agent/analysis/feedback/reevaluate_candidates.py",
+        "phase_agent/analysis/phase/identify_mc_result_phase.py",
+        "phase_agent/configuration/runtime/estimate_draft_cost.py",
+        "phase_agent/configuration/session/pause_for_config_change.py",
+        "phase_agent/tools/workflows/create_qbc_dft_tool_handler.py",
+    ]
     assert all(not (ROOT / path).exists() for path in paths)
+
+
+def test_execution_stage_helper_moved_out_of_reliability_without_breaking_saved_names():
+    current = import_saved_module("phase_agent.tools.state.decide_next_calculation")
+    for previous in (
+        "decision_layer.calculation.decide_next_calculation",
+        "phase_agent.decisions.calculation.decide_next_calculation",
+        "phase_agent.agents.reliability.calculation.decide_next_calculation",
+    ):
+        assert import_saved_module(previous) is current
+    assert not (ROOT / "phase_agent/agents/reliability/calculation").exists()
+    assert current.decide_next_calculation({})["stage"] == "simple_check"

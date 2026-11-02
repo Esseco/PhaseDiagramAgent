@@ -1,6 +1,7 @@
 """Canonical Agent action and state snapshot schema helpers."""
 
 from copy import deepcopy
+import math
 
 
 ACTION_REQUIRED_FIELDS = ("action_type", "parameters", "reason", "expected_cost")
@@ -10,6 +11,10 @@ STATE_REQUIRED_FIELDS = ("current_status", "available_budget", "uncertainty", "s
 def normalize_action(action: dict) -> dict:
     if not isinstance(action, dict):
         raise TypeError("action must be a dict")
+    if action.get("tool") and action.get("action_type") and action["tool"] != action["action_type"]:
+        raise ValueError("action.tool: conflicts with action_type")
+    if "parameters" in action and not isinstance(action["parameters"], dict):
+        raise ValueError("invalid_action_parameters")
     from phase_agent.tools.dispatch.scientific_operations import bind_operation
 
     normalized = bind_operation(action)
@@ -23,6 +28,11 @@ def normalize_action(action: dict) -> dict:
     )
     supplied_budget = normalized.get("budget", normalized["expected_cost"])
     normalized["budget"] = _numeric_cost(supplied_budget)
+    from phase_agent.agents.common.action_contracts import action_contract_errors
+
+    errors = action_contract_errors(normalized)
+    if errors:
+        raise ValueError("; ".join(errors))
     return normalized
 
 
@@ -63,7 +73,9 @@ def validate_state_schema(snapshot: dict) -> list[str]:
 
 def _numeric_cost(value):
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
+        if math.isfinite(value) and value >= 0:
+            return float(value)
+        raise ValueError("invalid_budget: cost must be nonnegative and finite")
     if isinstance(value, dict):
         for key in (
             "value",
@@ -75,5 +87,5 @@ def _numeric_cost(value):
         ):
             candidate = value.get(key)
             if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
-                return float(candidate)
-    return 0.0
+                return _numeric_cost(candidate)
+    raise ValueError("invalid_budget: cost must be numeric")

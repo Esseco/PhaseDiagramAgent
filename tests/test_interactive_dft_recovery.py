@@ -11,7 +11,7 @@ from phase_agent.tools.workflows.refresh_dft_comparisons import refresh_dft_comp
 from phase_agent.tools.workflows.create_dft_comparison_evaluator import (
     create_dft_comparison_evaluator,
 )
-from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
 
 def co_state():

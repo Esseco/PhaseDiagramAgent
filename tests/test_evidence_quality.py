@@ -1,6 +1,6 @@
 from copy import deepcopy
 import pytest
-from phase_agent.decisions.agent.summary_request import request_summary_first, summary_payload, expand_topics, TOPICS, required_topics
+from phase_agent.evidence.requests import request_summary_first, summary_payload, expand_topics, TOPICS, required_topics
 
 
 def facts():

@@ -2,8 +2,8 @@
 
 from copy import deepcopy
 from phase_agent.tools.workflows.prepare_mc_preview import prepare_mc_preview
-from phase_agent.analysis.state.workflow_blockers import mc_allocation_facts
-from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.evidence.workflow_blockers import mc_allocation_facts
+from phase_agent.policies.execution_policy import build_agent_proposal
 from phase_agent.tools.budget.record_budget_usage import record_budget_usage
 
 

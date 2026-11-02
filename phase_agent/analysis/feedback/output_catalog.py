@@ -3,7 +3,7 @@
 from pathlib import Path
 import os
 import re
-from phase_agent.analysis.state.model_epoch import model_epoch
+from phase_agent.evidence.model_epoch import model_epoch
 
 
 CATALOG_FIELDS = (
@@ -77,6 +77,7 @@ def catalog_markdown(rows, root, state=None):
         ),
         "- 各 epoch 的 `round_metrics.csv`：本模型各 DFT 轮能量与受力误差。",
         "",
+        "- 完整发布状态：[MLIP](latest/phase_diagram_status.json) · [DFT误差](latest/dft_error_status.json)。状态未就绪时，latest 文件仅为上次完整版本。",
         "## 当前模型分析",
         "",
     ]
@@ -150,7 +151,40 @@ def output_catalog(state):
                 if epoch:
                     rows[-1]["submission_index_path"] = str(epoch.parent / "README.md")
 
+    for kind, publication in (state.get("analysis_publications") or {}).items():
+        if publication.get("status") == "completed":
+            version = publication.get("model_version")
+            add(version, "", "latest", kind + " latest", publication.get("latest_directory"))
+            add(
+                version,
+                "",
+                publication.get("version"),
+                kind + " archive",
+                publication.get("manifest_path"),
+            )
+    for kind, collection in (
+        ("phase_diagram", "phase_epoch_publications"),
+        ("dft_error", "dft_epoch_publications"),
+    ):
+        for publication in (state.get(collection) or {}).values():
+            add(
+                publication.get("model_version"),
+                "",
+                "epoch",
+                kind + " archive",
+                publication.get("manifest_path"),
+            )
+            if publication.get("directory"):
+                add(
+                    publication.get("model_version"),
+                    "",
+                    "versions",
+                    kind + " versions",
+                    Path(publication["directory"]).parent,
+                )
     for method, snapshot in (state.get("phase_diagrams") or {}).items():
+        if method != "mlip":
+            continue  # Legacy diagnostic files remain available at their original paths.
         version = snapshot.get("model_version") or state.get("active_model_version")
         stored = snapshot.get("csv_path")
         add(version, "", "current", f"phase_diagram_{method}", stored)

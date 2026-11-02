@@ -1,7 +1,7 @@
 """Runtime configuration reading, reference resolution and restart inspection."""
 
 from copy import deepcopy
-from phase_agent.module_references import import_saved_module
+from phase_agent.compatibility.module_references import import_saved_module
 import json
 from pathlib import Path
 

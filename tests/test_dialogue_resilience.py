@@ -1,7 +1,7 @@
 from copy import deepcopy
 import pytest
-from phase_agent.decisions.agent.dialogue_contract import dialogue_errors, normalize_dialogue
-from phase_agent.decisions.agent.decision_backend import request_decision_action
+from phase_agent.agents.common.dialogue_contract import dialogue_errors, normalize_dialogue
+from phase_agent.graphs.decision_team.backend import request_decision_action
 from tests.test_unified_react_dialogue import make_handler
 
 

@@ -22,7 +22,7 @@ form.addEventListener('submit',async event=>{{event.preventDefault();button.disa
 
 def test_and_save_api_key(api_key: str, *, settings: dict, activate_client) -> dict:
     """Make a tiny JSON-mode call, then persist and activate the key on success."""
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
     from phase_agent.runtime.deepseek_credentials import save_deepseek_api_key
 
     model = str(settings.get("model") or "deepseek-flash")

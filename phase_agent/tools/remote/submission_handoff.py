@@ -76,7 +76,7 @@ def handoff_root(directory):
     )
 
 
-def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=None):
+def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=None, afterany=None):
     """Build a portable dispatch package without changing scientific inputs."""
     import tempfile
     import shutil
@@ -85,6 +85,11 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
     scripts = sorted({Path(p).resolve().relative_to(directory).as_posix() for p in scripts})
     if not scripts:
         return None
+    from phase_agent.tools.remote.submission_dispatcher import submission_order
+
+    afterany = {} if afterany is None else afterany
+    submission_order(scripts, afterany)
+    prerequisites = {script for parents in afterany.values() for script in parents}
     files = set()
     result_roots = {}
     for script in scripts:
@@ -124,10 +129,15 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
             Path(__file__).with_name("transfer_bundle.py"),
             portable / "_round_transfer.py",
         )
-        (portable / "submission_plan.json").write_text(
-            json.dumps({"schema": 1, "scripts": scripts}), encoding="utf-8"
-        )
+        plan = {"schema": 1, "scripts": scripts}
+        if afterany:
+            plan["afterany"] = afterany
+        (portable / "submission_plan.json").write_text(json.dumps(plan), encoding="utf-8")
         for script in scripts:
+            if script in prerequisites:
+                # Intermediate tasks retain accounting; only the finalizer
+                # publishes a return package after the complete dependency.
+                continue
             target = portable / script
             content = target.read_text(encoding="utf-8")
             lines = content.splitlines(keepends=True)

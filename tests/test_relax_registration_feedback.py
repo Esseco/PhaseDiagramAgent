@@ -159,7 +159,7 @@ def test_feasible_action_uses_no_additional_proposal(tmp_path):
 
 
 def test_summary_transport_keeps_conflict_feedback_and_mc_evidence(tmp_path):
-    from phase_agent.decisions.agent.summary_request import summary_payload, expand_topics
+    from phase_agent.evidence.requests import summary_payload, expand_topics
     from phase_agent.tools.relax_mc_batch.plan import registration_facts
 
     manager, state, config, context, action = prepared(tmp_path)

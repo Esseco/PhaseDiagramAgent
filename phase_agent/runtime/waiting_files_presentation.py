@@ -17,7 +17,7 @@ def waiting_file_lines(state):
         recovery_lines = ["本地回传包已到，待本地校验与分析；任务尚未登记不代表超算仍在计算。"]
         recovery_lines.extend("待校验回传目录：`" + row["directory"] + "`。" for row in arrived)
         recovery_lines.append(
-            "下一步：回复“已回传，请回收分析”；复用现有结果，无需重新上传输入或提交计算。"
+            "下一步：已有结果等待你的回收批准；回复“回收”或“同意回收”执行本地校验与入账，无需重新上传输入或提交计算。"
         )
     from phase_agent.tools.remote.legacy_recovery import recovery_handoffs
 

@@ -236,7 +236,7 @@ def test_actual_snapshot_chat_front_door_has_zero_model_calls(tmp_path, monkeypa
     import os, json
     from pathlib import Path
     from phase_agent.runtime.chat_application import RunWorkflowChatHandler
-    from phase_agent.tools.policy.file_approval import proposal_hash
+    from phase_agent.policies.file_approval import proposal_hash
 
     snapshot_root = Path(
         os.environ.get("PHASE_PROJECT_SNAPSHOT_DIR", Path(__file__).parents[2] / "inputs")

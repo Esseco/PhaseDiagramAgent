@@ -2,7 +2,7 @@ import json
 from copy import deepcopy
 from phase_agent.tools.local.review_direction_command import review_direction_command
 from phase_agent.tools.local.recover_remote_training import inspect_training_results
-from phase_agent.graphs.direction_review_graph import direction_checkpoint
+from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
 from tests.test_remote_training_recovery import returned_job
 
 

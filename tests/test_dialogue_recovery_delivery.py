@@ -172,7 +172,7 @@ def test_true_dialogue_notice_analysis_proposal_approval_delivery(
                 "limitations": "本次未真实训练或提交。",
             },
         }
-        from phase_agent.decisions.agent.proposal_validation import proposal_errors
+        from phase_agent.agents.common.proposal_validation import proposal_errors
 
         assert not proposal_errors(action, payload)
         return action

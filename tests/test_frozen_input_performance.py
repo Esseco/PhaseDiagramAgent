@@ -61,7 +61,7 @@ def test_frozen_summary_does_not_recompute_search_directives(monkeypatch):
 
     forbidden = Mock(side_effect=AssertionError("must not plan new search"))
     monkeypatch.setattr(
-        "phase_agent.tools.policy.model_generation.new_model_generation_facts", forbidden
+        "phase_agent.policies.model_generation.new_model_generation_facts", forbidden
     )
     state = {
         "active_model_version": "m",

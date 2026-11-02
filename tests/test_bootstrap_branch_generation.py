@@ -39,7 +39,7 @@ class BootstrapBranchGenerationTest(unittest.TestCase):
         self.assertEqual(generator.call_args.kwargs["quotas"], {"coverage": 20})
 
     def test_empty_ledger_preserves_explicit_approved_allocations(self):
-        from phase_agent.decisions.agent.generation_plan import validate_generation_plan
+        from phase_agent.agents.exploration.generation_plan import validate_generation_plan
 
         quotas = {"coverage": 120, "composition": 96, "competing_phase": 84}
         plan = [

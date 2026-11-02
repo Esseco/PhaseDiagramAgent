@@ -58,6 +58,13 @@ def submit_phase(root, state, manager, manifest, io):
         batch["job_id"] = io.submit(batch["script_path"])
         batch["submission_state"] = "submitted"
         checkpoint(root, state, manager)
+    return submit_analysis(root, state, manager, manifest, io, batches)
+
+
+def submit_analysis(root, state, manager, manifest, io, batches):
+    """Use the original CPU phase controller after initial or approved retry jobs."""
+    phase = state["relax_mc_remote"]["phase"]
+    control = state["relax_mc_remote"]["phase_controllers"][str(phase)]
     if control.get("submission_state") == "submitting" and not control.get("job_id"):
         raise RuntimeError("analysis_receipt_uncertain; inspect Slurm before retry")
     if not control.get("job_id"):
@@ -125,7 +132,28 @@ def collect_phase(root, state, manager, manifest, io):
     )
     results = runner.collect_results(state)
     found = {r["task_id"]: r for r in results if r["task_id"] in expected}
-    missing = expected - found.keys()
+    # Processed MLIP tasks are deliberately omitted by the general collector.
+    # Verify their original signed artifacts instead of applying feedback twice.
+    from phase_agent.tools.remote.integrity import verify_result
+    from phase_agent.tools.remote.resolve_local_relax_structure import resolve_local_relax_structure
+
+    processed = set(state.get("processed_task_ids") or [])
+    retained = set()
+    for task in state.get("tasks") or []:
+        tid = task["task_id"]
+        if tid not in expected - found.keys() or tid not in processed:
+            continue
+        if task.get("status") != "completed":
+            continue
+        result = Path(task["result_path"]).with_name("result.json")
+        checked = verify_result(result, result.with_name("task.finished.json"), task)
+        if (
+            checked["valid"]
+            and checked["result"].get("status") == "completed"
+            and resolve_local_relax_structure(checked["result"], result.parent) is not None
+        ):
+            retained.add(tid)
+    missing = expected - found.keys() - retained
     from phase_agent.tools.relax_mc_batch.failure_diagnostics import record_remote_diagnostics
 
     results = list(found.values())
@@ -156,7 +184,7 @@ def collect_phase(root, state, manager, manifest, io):
     return state, results
 
 
-def advance(root, manifest, io, *, phase=None):
+def advance(root, manifest, io, *, phase=None, recollect_final=False):
     """Entry submits Relax; dependent analysis consumes exactly one completed phase."""
     root = Path(root)
     with _archive_lock(root):
@@ -167,7 +195,24 @@ def advance(root, manifest, io, *, phase=None):
         manager = PhaseDataManager(data["boundary"], data.get("system_config"))
         manager.data = data
         meta = state.setdefault("relax_mc_remote", {"phase": 0, "completed_mc_waves": []})
-        if meta.get("status") in {"completed", "paused", "partial", "failed"}:
+        if recollect_final and meta.get("status") != "completed":
+            if (
+                phase != 3
+                or meta.get("phase") != 3
+                or meta.get("status") not in {"paused", "partial", "failed"}
+                or not state.get("tasks")
+                or any(t.get("status") != "completed" for t in state["tasks"])
+            ):
+                raise ValueError("recollect_final_requires_completed_tasks_in_paused_final_phase")
+            control = meta["phase_controllers"]["3"]
+            jobs = [
+                b["job_id"] for b in state["slurm_batches"] if b["batch_id"] in control["batch_ids"]
+            ]
+            if control.get("job_id"):
+                jobs.append(control["job_id"])
+            if io.active(jobs):
+                raise ValueError("recollect_final_jobs_still_active")
+        elif meta.get("status") in {"completed", "paused", "partial", "failed"}:
             return {"status": meta["status"], "submitted": False}
         if phase is not None and phase != meta["phase"]:
             return {"status": "stale_phase", "submitted": False}

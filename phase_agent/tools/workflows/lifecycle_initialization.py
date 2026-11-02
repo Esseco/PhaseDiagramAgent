@@ -85,7 +85,7 @@ def _initialize_workflow(
     from phase_agent.persistence.result_recovery_commit import refresh_manager_after_recovery
 
     refresh_manager_after_recovery(manager, loaded_state, effective_config.get("ledger_path"))
-    from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
+    from phase_agent.policies.workflow_policy import normalize_workflow_state
 
     loaded_state = call_with_optimizations(
         normalize_workflow_state, loaded_state, _optimizations={"_owned": True}

@@ -1,7 +1,7 @@
 """Public workflow entry: assemble callbacks and invoke the lifecycle graph."""
 
 from functools import partial
-from phase_agent.tools.workflows.run_event_loop import run_action_turn
+from phase_agent.tools.workflows.run_action_turn import run_action_turn
 from phase_agent.tools.workflows.lifecycle_initialization import _initialize_workflow
 from phase_agent.tools.workflows.lifecycle_recovery import (
     _collect_workflow_results,
@@ -54,7 +54,7 @@ def run_workflow(
         )
         from phase_agent.tools.workflows.create_workflow_handlers import create_workflow_handlers
         from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
-        from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
+        from phase_agent.policies.workflow_policy import normalize_workflow_state
 
         config = build_effective_run_config(config_session, run_config)
         path = state_path or config.get("state_path")

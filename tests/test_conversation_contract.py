@@ -5,7 +5,7 @@ import json
 import pytest
 from tests.test_unified_react_dialogue import make_handler
 from phase_agent.tools.step_runner.file_protocol import read_json
-from phase_agent.decisions.agent.dialogue_contract import dialogue_errors, dialogue_output_contract
+from phase_agent.agents.common.dialogue_contract import dialogue_errors, dialogue_output_contract
 
 
 def test_complete_conversation_view_discuss_reject_restart_approve(tmp_path):
@@ -128,7 +128,7 @@ def test_scientific_proposal_reuse_or_refresh_preserves_usage(tmp_path, changed)
     handler = make_handler(tmp_path, model)
 
     def scientific():
-        from phase_agent.analysis.state.build_state_snapshot import build_state_snapshot
+        from phase_agent.evidence.build_state_snapshot import build_state_snapshot
 
         # The scientific workflow supplies full evidence; the dialogue request is a summary.
         payload = {
@@ -174,11 +174,11 @@ def test_recovery_transition_requests_one_dft_or_branch_proposal(tmp_path):
 def test_current_message_is_separate_from_historical_context():
     from unittest.mock import patch
     from tests.test_deepseek_client import FakeResponse, completion
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
 
     client = create_deepseek_client(api_key="test", thinking="disabled")
     with patch(
-        "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+        "phase_agent.models.create_deepseek_client.urllib.request.urlopen",
         return_value=FakeResponse(completion('{"kind":"answer","answer":"ok"}')),
     ) as request:
         client(

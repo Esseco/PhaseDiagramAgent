@@ -8,8 +8,8 @@ import pytest
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from phase_agent.graphs.approval_graph import durable_approval
-from phase_agent.graphs.batch_recovery_graph import recover_batch_stages
-from phase_agent.graphs.direction_review_graph import direction_checkpoint
+from phase_agent.graphs.recovery.batch_recovery_graph import recover_batch_stages
+from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
 from phase_agent.persistence.checkpoint_blobs import CheckpointBlobSerde
 from phase_agent.persistence.compact_checkpoints import CompactSqliteSaver, CompressedSerde
 
@@ -161,9 +161,9 @@ def test_loading_diagnostics_cover_checkpoint_entrypoints_and_codecs():
     from phase_agent.runtime.loaded_code import WATCHED_MODULES
 
     assert {
-        "phase_agent.graphs.batch_recovery_graph",
+        "phase_agent.graphs.recovery.batch_recovery_graph",
         "phase_agent.graphs.approval_graph",
-        "phase_agent.graphs.direction_review_graph",
+        "phase_agent.graphs.recovery.direction_review_graph",
         "phase_agent.persistence.compact_checkpoints",
         "phase_agent.persistence.checkpoint_blobs",
     } <= set(WATCHED_MODULES)

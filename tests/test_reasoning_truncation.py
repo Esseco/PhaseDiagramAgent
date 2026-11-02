@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from phase_agent.decisions.agent.create_deepseek_client import (
+from phase_agent.models.create_deepseek_client import (
     DeepSeekResponseError,
     create_deepseek_client,
 )

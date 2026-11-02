@@ -6,7 +6,7 @@ from copy import deepcopy
 import hashlib
 import json
 
-from phase_agent.decisions.strategy.choose_generation_strategy import (
+from phase_agent.agents.strategic.strategy.choose_generation_strategy import (
     choose_generation_strategy,
 )
 from phase_agent.tools.dispatch.dispatch_calculation_stage import (
@@ -26,7 +26,7 @@ from phase_agent.tools.state.branch_batch_state import (
     transition_branch_batch,
 )
 from phase_agent.science.mc.schedule_tiered_mc import schedule_tiered_mc
-from phase_agent.decisions.scoring.rank_branch_relax_prescreen import (
+from phase_agent.analysis.scoring.rank_branch_relax_prescreen import (
     rank_branch_relax_prescreen,
 )
 from phase_agent.tools.workflows.prepare_dedup_batch import prepare_dedup_batch
@@ -72,19 +72,22 @@ def _prepare_dedup(*, action, context):
 
 
 def _generate_branches(*, action, context):
-    from phase_agent.tools.policy.region_sampling import is_region
+    from phase_agent.policies.region_sampling import is_region
 
     if is_region(action):
         from phase_agent.tools.workflows.run_region_generation import (
             run_region_generation,
         )
 
-        return run_region_generation(action=action, context=context)
+        generated = run_region_generation(action=action, context=context)
+        from phase_agent.tools.workflows.scientific_module_scope import prepare_generated_module
+
+        return prepare_generated_module(action, generated, context)
     config = context["effective_config"]
     params = deepcopy(action.get("parameters") or {})
-    from phase_agent.tools.policy.workflow_policy import branch_batch_errors, settings
+    from phase_agent.policies.workflow_policy import branch_batch_errors, settings
 
-    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
+    from phase_agent.policies.adaptive_branch_count import is_adaptive_generation
 
     if not any(
         key in params for key in ("generation_plan", "quotas", "total_quota")
@@ -97,7 +100,7 @@ def _generate_branches(*, action, context):
             "reason": ";".join(errors),
             "state": context.get("event_state") or {},
         }
-    from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+    from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
     if post_dft_assessment(context.get("event_state") or {}, config) and not params.get(
         "generation_plan"
@@ -108,7 +111,7 @@ def _generate_branches(*, action, context):
             "reason": "DFT 后生成必须明确策略及目标相/Na分配；未生成结构。",
         }
     if params.get("generation_plan"):
-        from phase_agent.decisions.agent.generation_plan import (
+        from phase_agent.agents.exploration.generation_plan import (
             derive_generation_totals,
             validate_generation_plan,
         )
@@ -157,8 +160,8 @@ def _generate_branches(*, action, context):
             total_quota=int(params.get("total_quota", config.get("total_quota", 0))),
         )["quotas"]
     options = deepcopy(config.get("generation_options") or {})
-    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
-    from phase_agent.tools.policy.adaptive_branch_count import generation_review_errors
+    from phase_agent.policies.adaptive_branch_count import is_adaptive_generation
+    from phase_agent.policies.adaptive_branch_count import generation_review_errors
 
     review_errors = generation_review_errors(action, context.get("event_state") or {})
     if review_errors:
@@ -286,7 +289,7 @@ def _generate_branches(*, action, context):
 
 
 def _allocate_mc_bohb(*, action, context):
-    from phase_agent.decisions.agent.mc_contracts import mc_contract_errors
+    from phase_agent.agents.exploration.mc_contracts import mc_contract_errors
 
     errors = mc_contract_errors(
         action.get("parameters", {}), fallback_budget=action.get("budget", 0)
@@ -644,7 +647,7 @@ def _allocate_mc_bohb(*, action, context):
         }
         preview = params.get("budget_preview")
         if preview:
-            from phase_agent.decisions.strategy.estimate_branch_mc_budget import (
+            from phase_agent.agents.strategic.strategy.estimate_branch_mc_budget import (
                 estimate_branch_mc_budget,
             )
 

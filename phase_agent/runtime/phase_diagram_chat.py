@@ -15,6 +15,11 @@ from phase_agent.analysis.phase.endpoint_reference import (
 
 
 def _current_snapshot(state, method):
+    if method == "mlip":
+        from phase_agent.tools.relax_mc_batch.completion_gate import require_complete_imports
+
+        require_complete_imports(state)
+
     snapshot = (state.get("phase_diagrams") or {}).get(method) or {}
     from phase_agent.analysis.phase.phase_boundary import assert_snapshot_boundary
 
@@ -86,7 +91,17 @@ def phase_diagram_reply(state, *, operation, method="mlip", directory=None, form
         return f"当前 {method.upper()} 相图{'未绘制' if operation == 'plot' else 'CSV未导出' if operation == 'export_csv' else '位置无法确认'}：{error}。"
 
 
-def _plot(state, snapshot, method, directory, formats):
+def _plot(
+    state,
+    snapshot,
+    method,
+    directory,
+    formats,
+    *,
+    output_directory=None,
+    artifacts=None,
+    strict=False,
+):
     if (
         isinstance(formats, str)
         or not formats
@@ -107,7 +122,7 @@ def _plot(state, snapshot, method, directory, formats):
     if not points:
         raise ValueError("尚无可绘制的已验证相图数据")
     from Process_Phasediagram import plot_phase_diagram
-    from phase_agent.analysis.state.model_epoch import model_epoch, model_epoch_label
+    from phase_agent.evidence.model_epoch import model_epoch, model_epoch_label
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
@@ -115,7 +130,11 @@ def _plot(state, snapshot, method, directory, formats):
     csv_path, count, version = export_current_phase_diagram(
         deepcopy(state), directory=directory, method=method
     )
-    folder = csv_path.resolve().parent / "plots"
+    folder = (
+        Path(output_directory)
+        if output_directory is not None
+        else csv_path.resolve().parent / "plots"
+    )
     figure = Figure(figsize=(6.5, 4.8), constrained_layout=True)
     FigureCanvasAgg(figure)
     axes = figure.subplots()
@@ -149,6 +168,9 @@ def _plot(state, snapshot, method, directory, formats):
         figure.savefig(buffer, format=extension, dpi=300)
         path.write_bytes(buffer.getvalue())
         paths.append(path)
+    if artifacts is not None:
+        artifacts["main"] = [str(path) for path in paths]
+        artifacts["csv"] = str(csv_path)
     from phase_agent.analysis.phase.phase_quality_reports import quality_warning
 
     diagnostic_snapshot = {**snapshot, "csv_path": str(csv_path)}
@@ -162,13 +184,19 @@ def _plot(state, snapshot, method, directory, formats):
             report = get_phase_quality_report(state, snapshot=diagnostic_snapshot, write=True)
             compared = publish_quality_comparison(state, report, directory=folder, formats=formats)
             if compared["status"] == "completed":
+                if artifacts is not None:
+                    artifacts["hd"] = compared["plot_paths"]
                 comparison_note = (
                     "\n左右对照（右图第一/第二档假设排除并打×，第二档正式保留）：\n"
                     + "\n".join(f"`{p}`" for p in compared["plot_paths"])
                 )
             else:
+                if strict:
+                    raise ValueError(compared["reason"])
                 comparison_note = "\n对照图未生成：" + compared["reason"]
         except (OSError, ValueError, TypeError, KeyError) as error:
+            if strict:
+                raise
             comparison_note = "\n对照图核查未完成：" + str(error)
     return (
         f"已绘制当前 {method.upper()} 相图（版本 {version}，{count} 个结构；分相已开启）。\n"

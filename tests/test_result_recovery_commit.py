@@ -162,7 +162,7 @@ def test_long_lived_manager_reloads_committed_ledger_once_per_revision(tmp_path)
 def test_extended_drive_paths_relocate_without_touching_approved_snapshots(tmp_path, extended_posix):
     from copy import deepcopy
     from phase_agent.configuration.session.relocate_workspace_paths import relocate_workspace_paths
-    from phase_agent.tools.policy.file_approval import proposal_hash
+    from phase_agent.policies.file_approval import proposal_hash
 
     old = tmp_path / "submissions/verified/batch"
     new = tmp_path / "submissions/epoch1/verified_results/batch"

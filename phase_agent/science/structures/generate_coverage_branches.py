@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 from phase_agent.science.structures.boundary_utils import det_H
@@ -22,13 +23,17 @@ def generate_coverage_branches(
     preserve_reference_tm: bool = False,
 ) -> list[dict[str, Any]]:
     """按当前 P/H/x branch 数升序生成候选。"""
+
+    def region_key(phase, matrix, x):
+        return phase, tuple(tuple(row) for row in matrix), x
+
+    existing = manager.data["branches"].values()
+    region_counts = Counter(region_key(row["P"], row["H"], row["x"]) for row in existing)
+    phase_counts = Counter(row["P"] for row in manager.data["branches"].values())
     regions_by_phase = {}
     for framework in frameworks:
         for x in framework["allowed_x"]:
-            count = sum(
-                branch["P"] == framework["P"] and branch["H"] == framework["H"] and branch["x"] == x
-                for branch in manager.data["branches"].values()
-            )
+            count = region_counts[region_key(framework["P"], framework["H"], x)]
             regions_by_phase.setdefault(framework["P"], []).append(
                 (
                     count,
@@ -44,10 +49,6 @@ def generate_coverage_branches(
 
     # Cover every allowed phase early; within a phase, prefer smaller cells.
     candidates = []
-    phase_counts = {
-        phase: sum(branch["P"] == phase for branch in manager.data["branches"].values())
-        for phase in regions_by_phase
-    }
     offset = 0
     while len(candidates) < quota and any(regions_by_phase.values()):
         # Keep covering sparse regions, then revisit them with a new TM seed.

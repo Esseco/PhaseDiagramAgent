@@ -66,7 +66,12 @@ def run_mace_with_py_mace(
     if result.get("structure_path"):
         from pymatgen.core import Structure
 
-        result["structure"] = Structure.from_file(result["structure_path"])
+        result_file = Path(result["structure_path"])
+        result["structure"] = (
+            Structure.from_str(result_file.read_text(encoding="utf-8"), fmt="poscar")
+            if result_file.suffix.lower() == ".vasp"
+            else Structure.from_file(result_file)
+        )
     result["model_name"] = "mh-1"
     result["model_path"] = str(model)
     return result

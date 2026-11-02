@@ -65,6 +65,18 @@ def approval_reply(proposal, state, *, state_path=None, config=None):
         from phase_agent.runtime.proposal_presentation import mc_scope_lines
 
         scope_lines = mc_scope_lines(params)
+    elif (
+        params.get("mode") == "model_refresh_inputs"
+        and "supplemental_relax_parameters" not in params
+    ):
+        refresh = params.get("refresh_preview") or {}
+        candidates = refresh.get("candidates") or []
+        relax = sum(row.get("operation") == "relax" for row in candidates)
+        scope_lines = [
+            f"范围：首批弛豫 {relax}、单点 {len(candidates) - relax}；暂缓 {refresh.get('deferred', '未记录')}。",
+            f"首批相对成本 {refresh.get('initial_cost', '未记录')}；结果回收后直接展示新模型 branch 生成方案。",
+            "批准后生成刷新输入文件，由你提交超算；不自动追加弛豫或延长重试。",
+        ]
     elif "supplemental_relax_parameters" in params:
         settings = params["supplemental_relax_parameters"]
         count = len((proposal.get("raw_action") or {}).get("target_ids") or [])
@@ -72,19 +84,35 @@ def approval_reply(proposal, state, *, state_path=None, config=None):
         scope_lines = [
             f"设置：最多 {settings.get('relax_steps', 500)} 步，{settings.get('optimizer', 'LBFGS')}；未收敛结果排除，不自动延长或重试。"
         ]
-    from phase_agent.tools.policy.training_input_action import is_training_input_action
+    from phase_agent.policies.training_input_action import is_training_input_action
 
     if is_training_input_action(proposal.get("raw_action") or {"tool": tool, "parameters": params}):
         result = "待确认：微调模型，生成超算训练提交文件。"
         scope_lines.append(
             "批准后仅生成训练输入与提交脚本，由你上传提交；不本机训练、不自动激活模型。"
         )
+        authorized = (proposal.get("raw_action") or {}).get("_training_handoff_authorization") or {}
+        if authorized:
+            scope_lines.append(
+                "训练交接范围："
+                + "、".join(authorized.get("kinds") or [])
+                + "；范围或配置变化后重新审批，超算提交另行确认。"
+            )
     jobs = workload.get("gpu_jobs_upper_by_wave")
     budget = (
         f"最多 {sum(jobs)} 个 GPU 计算作业，另 1 个控制作业" if jobs else "计算量待任务展开后估算"
     )
     if "supplemental_relax_parameters" in params:
         budget = f"本批 {count} 个弛豫任务；预计相对成本 {(proposal.get('estimated_cost') or {}).get('estimated_total_cost', '未记录')}"
+    if (
+        params.get("mode") == "model_refresh_inputs"
+        and "supplemental_relax_parameters" not in params
+    ):
+        refresh = params.get("refresh_preview") or {}
+        budget = (
+            f"首批相对成本 {refresh.get('initial_cost', '未记录')}；"
+            "结果回收后直接进入新模型 branch 生成审阅"
+        )
     if workload:
         count = workload.get("relax_structure_tasks")
         waves = workload.get("mc_task_upper") or []
@@ -116,6 +144,15 @@ def approval_reply(proposal, state, *, state_path=None, config=None):
         if line.startswith("依据提醒：")
     ]
     boundary = card.get("approval_boundary") or "按本方案执行"
+    plan = (proposal.get("raw_action") or {}).get("research_plan") or {}
+    if plan.get("steps"):
+        from phase_agent.tools.dispatch.scientific_operations import OPERATIONS
+
+        scope_lines.append(
+            "研究路线："
+            + " → ".join(OPERATIONS[step["operation"]]["purpose"] for step in plan["steps"])
+            + "；本次仅执行当前一步，后续按新状态重新校验和授权。"
+        )
     from phase_agent.tools.workflows.generation_artifacts import proposal_artifacts
 
     artifacts = proposal_artifacts(proposal, state)
@@ -135,7 +172,50 @@ def approval_reply(proposal, state, *, state_path=None, config=None):
 
     path_lines = planned_handoff_lines(proposal, state, state_path, config=config)
     scope_warning = []
-    next_step = "下一步：回复‘同意’、‘拒绝’或提出修改。确认范围：" + boundary
+    recommendation = card["title"]
+    if tool == "prepare_local_batch_files" and params.get("mode") == "relax_mc_inputs":
+        recommendation = "准备 Relax+MC 输入"
+    if is_training_input_action(proposal.get("raw_action") or {"tool": tool, "parameters": params}):
+        recommendation = "微调模型并准备超算训练输入"
+    next_step = (
+        f"下一步：建议{recommendation}。是否同意？回复‘同意’、‘拒绝’或提出修改。确认范围："
+        + boundary
+    )
+    review = proposal.get("strategic_review") or {}
+    if review.get("status") == "awaiting_human_input":
+        next_step = "下一步：请审阅 Strategic 的研究方向，可回复‘同意’、‘拒绝’或提出建议。本次同意仅接受方向，之后还需单独批准执行。"
+    if (
+        params.get("mode") == "model_refresh_inputs"
+        and "supplemental_relax_parameters" not in params
+    ):
+        next_step = (
+            "下一步：是否批准生成刷新文件？回复‘同意’、‘拒绝’或提出修改。确认范围：" + boundary
+        )
+        if review.get("status") == "awaiting_human_input":
+            next_step = (
+                "下一步：请审阅研究方向并提出建议；接受方向不批准生成刷新文件，之后另行审批执行。"
+            )
+    scientific = (
+        (proposal.get("raw_action") or {}).get("scientific_decision")
+        or (proposal.get("decision_summary") or {}).get("scientific_decision")
+        or {}
+    )
+    rationale = (
+        scientific.get("rationale")
+        or proposal.get("reason")
+        or (proposal.get("raw_action") or {}).get("reason")
+    )
+    if not rationale:
+        review = (proposal.get("raw_action") or {}).get("post_dft_review") or {}
+        field = {
+            "search": "search_assessment",
+            "finetune": "finetune_assessment",
+            "supplement_dft": "dft_assessment",
+            "convergence": "convergence_assessment",
+            "stop": "convergence_assessment",
+            "revise_strategy": "reference_assessment",
+        }.get(review.get("choice"))
+        rationale = review.get(field)
     if artifacts.get("scope_mismatch"):
         scope_warning.append(
             "需注意：本批目标与该模型最近生成的 branch 完全无交集；请先核对概况文件中的范围。"
@@ -163,6 +243,7 @@ def approval_reply(proposal, state, *, state_path=None, config=None):
             "本次：" + purpose,
             *revisions,
             "结果：" + result,
+            *(["建议依据：" + str(rationale)[:160]] if rationale else []),
             *[line for line in scope_lines if line],
             "预算：" + budget,
             *evidence_lines,
@@ -185,8 +266,6 @@ def concise_body(reply, state):
         "预计相对成本：",
         "依据提醒：",
         "依据：",
-        "审批范围：",
-        "审批边界：",
         "本次仅查看",
         "完整记录：",
         "详细记录：",
@@ -216,8 +295,9 @@ def concise_body(reply, state):
             if jobs:
                 budgets.insert(0, f"最多 {jobs[1]} 个 GPU 计算作业，另 1 个控制作业。")
             line = "结果：" + line.removeprefix("封装估算：").split("；GPU", 1)[0] + "。"
-        line = re.sub(r"(?:sha256:)?[a-f0-9]{32,64}", "", line)
-        line = re.sub(r"config-\d+-[a-f0-9]+", "已确认配置", line)
+        if not re.search(r"[A-Za-z]:[\\/]", line):
+            line = re.sub(r"(?:sha256:)?[a-f0-9]{32,64}", "", line)
+            line = re.sub(r"config-\d+-[a-f0-9]+", "已确认配置", line)
         if line not in lines:
             lines.append(line)
     # A status query can include the full approval card. Keep its exact scope

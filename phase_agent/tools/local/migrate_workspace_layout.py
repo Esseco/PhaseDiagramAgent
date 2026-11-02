@@ -181,7 +181,7 @@ def migrate_workspace_layout(workspace, *, dry_run=False, agent_port=8765):
         if changed != original:
             edits.append((path, changed, path.read_bytes()))
     from phase_agent.analysis.phase.phase_snapshot_paths import model_output_directory
-    from phase_agent.analysis.state.model_epoch import model_epoch
+    from phase_agent.evidence.model_epoch import model_epoch
     from phase_agent.tools.local.workspace_csv_metadata import rewrite_csv_metadata
 
     epoch_roots = [

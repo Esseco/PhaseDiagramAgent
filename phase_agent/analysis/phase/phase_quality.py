@@ -106,7 +106,12 @@ def _points(snapshot, issues):
             energy = float(row["eform_per_O2"]) * 1000
             if x < 0 or not isfinite(x) or not isfinite(energy):
                 raise ValueError("nonfinite coordinate")
-            if row.get("source_version") not in (None, snapshot.get("model_version")):
+            source = row.get("source_version")
+            mixed_sources = snapshot.get("source_model_versions") or []
+            if source not in (None, snapshot.get("model_version")) and not (
+                snapshot.get("energy_policy") == "latest_valid_per_structure_v1"
+                and source in mixed_sources
+            ):
                 raise ValueError("record model mismatch")
             frameworks.add(tuple((k, v) for k, v in normalized if k != "Na"))
             key = _identity(row, index)

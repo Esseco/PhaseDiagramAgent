@@ -1,7 +1,7 @@
 import json
 from unittest.mock import Mock
 from phase_agent.runtime.conversation_context import conversation_context
-from phase_agent.decisions.agent.prepare_llm_request import needs_deep_reasoning
+from phase_agent.models.prepare_llm_request import needs_deep_reasoning
 
 
 

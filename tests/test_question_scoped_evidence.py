@@ -1,7 +1,7 @@
 from copy import deepcopy
 import json
 import pytest
-from phase_agent.decisions.agent.summary_request import request_summary_first
+from phase_agent.evidence.requests import request_summary_first
 from tests.test_operation_evidence_layers import fixture
 
 
@@ -191,7 +191,7 @@ def test_overview_does_not_preload_other_routes_just_because_they_are_compared()
 
 
 def test_overviews_never_summarize_explicit_human_constraints_out_of_rows():
-    from phase_agent.decisions.agent.evidence_overview import summarize
+    from phase_agent.evidence.overview import summarize
 
     rows = [
         {"id": str(i), "human_constraints": ["do not lose this human constraint"]}
@@ -266,7 +266,7 @@ def test_narrow_preload_does_not_prevent_later_route_change_and_original_full_re
 
 
 def test_first_read_has_bound_overview_and_stage_progress_without_pretending_a_full_pool():
-    from phase_agent.decisions.agent.summary_request import summary_payload
+    from phase_agent.evidence.requests import summary_payload
 
     p = fixture()
     p["state"].pop("tasks")
@@ -457,8 +457,8 @@ def test_nonmatching_initial_configuration_does_not_count_as_an_exact_read():
 
 
 def test_discovery_index_alias_roundtrips_exactly_without_dropping_fields_or_human_rules():
-    from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
-    from phase_agent.decisions.agent.transport_tables import expand_evidence_tables
+    from phase_agent.models.prepare_llm_request import prepare_llm_request
+    from phase_agent.models.transport_tables import expand_evidence_tables
 
     p = fixture()
     index = {
@@ -479,7 +479,7 @@ def test_discovery_index_alias_roundtrips_exactly_without_dropping_fields_or_hum
 
 def test_mc_selection_has_first_call_room_for_branch_envelope_without_disabling_thinking():
     from unittest.mock import patch
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
     from tests.test_deepseek_client import FakeResponse, completion
 
     payload = {

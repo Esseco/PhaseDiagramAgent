@@ -2,10 +2,10 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
-from phase_agent.tools.policy.adaptive_branch_count import policy_for, generation_review_errors
-from phase_agent.tools.policy.execution_policy import build_agent_proposal, apply_execution_policy
-from phase_agent.decisions.agent.propose_tool_action import _apply_generation_defaults
-from phase_agent.decisions.agent.generation_contracts import GenerationAllocation
+from phase_agent.policies.adaptive_branch_count import policy_for, generation_review_errors
+from phase_agent.policies.execution_policy import build_agent_proposal, apply_execution_policy
+from phase_agent.agents.strategic.propose_tool_action import _apply_generation_defaults
+from phase_agent.agents.exploration.generation_contracts import GenerationAllocation
 from phase_agent.science.structures.propose_branches import propose_branches
 from phase_agent.analysis.cost.generation_preflight import preview_generation_cost
 from phase_agent.tools.workflows.branch_review_view import readable_view, raw_record
@@ -148,7 +148,7 @@ def test_readable_target_and_rows_preserve_executable_source():
 
 
 def test_model_contract_rejects_96_before_presenting_proposal():
-    from phase_agent.decisions.agent.proposal_validation import proposal_errors
+    from phase_agent.agents.common.proposal_validation import proposal_errors
 
     value = action()
     value["parameters"]["batch_size"] = 96
@@ -160,8 +160,8 @@ def test_model_contract_rejects_96_before_presenting_proposal():
 
 
 def test_feedback_revision_keeps_policy_even_without_snapshot_context(monkeypatch):
-    from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
-    import phase_agent.decisions.agent.decision_backend as backend
+    from phase_agent.agents.strategic.revise_tool_proposal import revise_tool_proposal
+    import phase_agent.graphs.decision_team.backend as backend
 
     monkeypatch.setattr(backend, "request_decision_action", lambda client, payload: action())
     revised = revise_tool_proposal(
@@ -190,7 +190,7 @@ def test_shared_intermediate_allocation_does_not_list_endpoint_only_phase():
 
 
 def test_explicit_group_guards_are_distinct_from_implicit_defaults():
-    from phase_agent.tools.policy.adaptive_branch_count import configured_selection_guards
+    from phase_agent.policies.adaptive_branch_count import configured_selection_guards
 
     assert configured_selection_guards({"run": {"batch_size": 96}}) == {
         "max_per_framework": None,

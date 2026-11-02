@@ -208,6 +208,7 @@ def _source(candidate):
         "candidate_id": candidate.get("candidate_id"),
         "strategy": candidate.get("strategy"),
         "parent_branch_id": candidate.get("parent_branch_id"),
+        "near_hull_parent_evidence": candidate.get("near_hull_parent_evidence"),
         "seed": candidate.get("seed"),
         "source_path": candidate.get("source_path"),
     }

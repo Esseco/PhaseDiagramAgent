@@ -40,6 +40,50 @@ def initialize_branch_structures(
             raise ValueError(f"branch 缺少字段：{sorted(missing)}")
         branch_seed = seed + branch_index
         target_x = Fraction(normalize_fraction(original["x"]))
+        if original.get("strategy") == "composition":
+            from phase_agent.science.structures.inherit_near_hull_occupancy import (
+                inherited_na_structures,
+            )
+
+            from phase_agent.science.structures.boundary_utils import load_structure
+
+            full = load_structure(phase_references[original["P"]])
+            full.make_supercell(original["H"])
+            inherited = inherited_na_structures(
+                original,
+                full,
+                boundary,
+                phase_references,
+                min(initial_states_per_branch, 3),
+                branch_seed,
+            )
+            if not inherited:
+                raise ValueError("near_hull_parent_has_no_adjacent_na_configuration")
+            for state_index, (structure, parent_full, vector) in enumerate(inherited):
+                actual_T, _ = extract_T(structure, boundary["TM_ratio"])
+                if actual_T != list(original["T"]):
+                    raise RuntimeError("父结构邻近Na变化后T发生变化")
+                occupied_sites = [i for i, value in enumerate(vector) if value]
+                candidate = copy.copy(original)
+                candidate.update(
+                    {
+                        "candidate_id": _candidate_id(original, vector),
+                        "structure": structure,
+                        "full_na_structure": parent_full if target_x > 0 else None,
+                        "V": vector,
+                        "arrangement": {
+                            "V": vector,
+                            "occupied_sites": occupied_sites,
+                            "vacancy_sites": [i for i, value in enumerate(vector) if not value],
+                        },
+                        "initial_state_index": state_index,
+                        "initial_state_count": len(inherited),
+                        "initialization_seed": branch_seed,
+                        "initialization_method": "near_hull_parent_adjacent_na",
+                    }
+                )
+                output.append(candidate)
+            continue
         full = generate_branch_structure(
             boundary,
             phase=original["P"],

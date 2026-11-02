@@ -90,12 +90,15 @@ def _apply_execution_result(current, action, execution, *, record_id, formal, _o
             "pending_execution_policies": current.get("pending_execution_policies") or {},
         }
         current = merged if _owned else deepcopy(merged)
+    from phase_agent.tools.workflows.training_input_settlement import settle_training_input
+
+    current = settle_training_input(current, action, execution, record_id=record_id)
     payload_status = payload.get("status")
     if action.get("tool") in {
         "generate_branches",
         "select_dft_candidates",
     } and payload_status not in {"failed", "rejected", "not_configured", "awaiting_approval"}:
-        from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+        from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
         assessment = post_dft_assessment(current, current.get("confirmed_config") or {})
         source_scope = action.get("_post_dft_scope_key") or (assessment or {}).get("scope_key")

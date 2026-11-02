@@ -38,7 +38,7 @@ def reusable_selection(state):
     )
     audit = (state.get("execution_reconciliations") or {}).get(record.get("record_id")) or {}
     identity = audit.get("identity") or {}
-    from phase_agent.tools.policy.file_approval import proposal_hash
+    from phase_agent.policies.file_approval import proposal_hash
 
     verified_failure = (
         record.get("status") in {"failed", "reconciled_no_effect"}

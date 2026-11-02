@@ -215,7 +215,7 @@ def test_wrong_batch_archive_rejected_before_import(tmp_path):
     assert not (local / "result.json").exists()
 
 
-def test_all_referenced_pool_structures_returned_without_whole_worker_tree(tmp_path):
+def test_selected_branch_pool_geometry_returned_without_whole_worker_tree(tmp_path):
     from phase_agent.tools.relax_mc_batch.return_payload import result_files
 
     out = tmp_path / "jobs/results/t"
@@ -239,11 +239,11 @@ def test_all_referenced_pool_structures_returned_without_whole_worker_tree(tmp_p
             "pool_summary": [{"structure_file": "rank_1.vasp"}],
         },
     }
-    candidates = {"mc_pool": [{"source_task_id": "t", "structure_file": "rank_1.vasp"}]}
+    candidates = {"branch_candidates": [{"structure_path": str(work / "pool/rank_1.vasp")}]}
     selected = result_files(tmp_path, {"tasks": [task]}, candidates)
     assert work / "pool/rank_1.vasp" in selected
     assert work / "pool/unreferenced.vasp" not in selected
-    assert candidates["mc_pool"][0]["structure_path"] == str(work / "pool/rank_1.vasp")
+    assert candidates["branch_candidates"][0]["structure_path"] == str(work / "pool/rank_1.vasp")
 
 
 def test_training_manifest_followup_roundtrip_without_mutating_original(tmp_path, monkeypatch):
@@ -404,15 +404,22 @@ def test_remote_diagnostic_is_visible_without_results(tmp_path):
 def test_clock_and_publish_exit_hooks_are_composed_and_helpers_packed(tmp_path):
     from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
     from phase_agent.tools.remote.submission_handoff import prepare_handoff
-    root=tmp_path/'epoch0_m1';inputs=root/'inputs';inputs.mkdir(parents=True)
-    script=inputs/'GPU.sh'
-    write_unix_shell_script(script,'#!/bin/bash\n#SBATCH --gres=gpu:1\nset -euo pipefail\ntrue\n')
-    h=prepare_handoff(root,[script],payload_files=[script])
-    with zipfile.ZipFile(h['upload_archive']) as z:
-        assert 'inputs/_gpu_accounting.py' in z.namelist()
-        assert 'inputs/_gpu_transfer_bundle.py' in z.namelist()
-        text=z.read('inputs/GPU.sh').decode()
-    assert text.index('trap _gpu_usage_finish EXIT') < text.index('phase_status=$?') < text.index('set -euo pipefail')
-    final_trap=next(line for line in text.splitlines() if 'phase_status=$?' in line)
-    assert final_trap.index('_gpu_accounting.py') < final_trap.index('_round_transfer.py')
-    assert 'trap - EXIT' in final_trap and 'exit "$phase_status"' in final_trap
+
+    root = tmp_path / "epoch0_m1"
+    inputs = root / "inputs"
+    inputs.mkdir(parents=True)
+    script = inputs / "GPU.sh"
+    write_unix_shell_script(script, "#!/bin/bash\n#SBATCH --gres=gpu:1\nset -euo pipefail\ntrue\n")
+    h = prepare_handoff(root, [script], payload_files=[script])
+    with zipfile.ZipFile(h["upload_archive"]) as z:
+        assert "inputs/_gpu_accounting.py" in z.namelist()
+        assert "inputs/_gpu_transfer_bundle.py" in z.namelist()
+        text = z.read("inputs/GPU.sh").decode()
+    assert (
+        text.index("trap _gpu_usage_finish EXIT")
+        < text.index("phase_status=$?")
+        < text.index("set -euo pipefail")
+    )
+    final_trap = next(line for line in text.splitlines() if "phase_status=$?" in line)
+    assert final_trap.index("_gpu_accounting.py") < final_trap.index("_round_transfer.py")
+    assert "trap - EXIT" in final_trap and 'exit "$phase_status"' in final_trap

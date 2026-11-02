@@ -1,6 +1,15 @@
 """Read-only documentation projection of compiled graphs; never invokes them."""
 
 LABELS = {
+    "prepare_evidence": "绑定本轮科学事实",
+    "consultation_plan": "Strategic 确定咨询范围",
+    "exploration": "探索专家",
+    "reliability": "可靠性专家",
+    "scientific_proposal": "普通对话或兼容提案",
+    "coordinated_proposal": "Strategic 综合形成一个方案",
+    "simulation_plan": "Simulation 执行规划（灰色角色）",
+    "simulation_check": "Simulation 结果检查与异常诊断",
+    "validate_proposal": "校验最终提案",
     "receive_message": "接收并检查消息",
     "agent": "对话与决策流程",
     "respond": "输出回复",
@@ -38,8 +47,6 @@ LABELS = {
     "assess_and_export_round": "评估本轮并更新输出",
     "bounded_action_graph": "执行并记录本轮唯一动作",
     "prepare_inputs_and_finalize": "汇总本次结果",
-    "execute_validated_action": "进入审批与执行子图",
-    "persist_action_outcome": "记录结果与成本并判断是否继续",
     "initialize_action": "初始化动作与防重检查",
     "model_refresh_barrier": "检查模型刷新前置条件",
     "prepare_proposal": "形成决策与方案",
@@ -80,6 +87,8 @@ def render_overview():
     from phase_agent.graphs.studio_chat_graph import build_studio_graph
     from phase_agent.graphs.dialogue.graph import build_project_turn_graph
 
+    from phase_agent.graphs.decision_team.graph import build_proposal_graph
+
     lifecycle = scientific_graph()
     children = dict(lifecycle.get_subgraphs(recurse=True))
     actions = children["react"]
@@ -102,6 +111,9 @@ def render_overview():
         "## 训练回收与验证子图",
         mermaid_overview(children["observe|training_lifecycle"]),
         "等待节点使用原生interrupt，检查点保存在项目workflow_state/langgraph_training.sqlite；继续时携带最新业务状态重新核对。",
+        "## 科学策略决策与专家咨询",
+        mermaid_overview(build_proposal_graph()),
+        "Strategic 按需咨询 Exploration、Reliability；Simulation 在动作图中规划和检查执行。专家意见不授予权限。",
         "## 2. 单次决策、审批与动作执行",
         mermaid_overview(actions, group_tools=True),
         "工具叶节点只在本说明图中合并。真实工具如下（每次只选一个，不是顺序流水线）：",

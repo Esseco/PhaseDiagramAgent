@@ -177,6 +177,7 @@ def restore_quality_records(
         active_model_version=model,
         output_state=current,
         output_directory=directory,
+        include_dft=False,
         parent_versions={"mlip": previous.get("version")},
     )
     current.setdefault("phase_diagrams", {}).update(updated["diagrams"])
@@ -187,6 +188,9 @@ def restore_quality_records(
     current["coverage"] = shadow.coverage()
     shadow.data.setdefault("phase_quality_restoration_log", []).append(deepcopy(event))
     manager.data = shadow.data
+    from phase_agent.analysis.feedback.export_dft_products import publish_output_catalog
+
+    publish_output_catalog(current, directory or current.get("analysis_output_directory"))
     return {
         "status": "restored",
         "state": current,

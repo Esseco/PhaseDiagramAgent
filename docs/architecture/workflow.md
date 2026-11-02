@@ -1,35 +1,27 @@
-# 统一搜索闭环
+# 科研生命周期与模型 epoch
 
-唯一科学主流程：Branch 生成登记 → Relax+MLIP-MC 封装 → 回收并分析 → Agent 选择是否及对哪些结构生成 DFT → 回收并评估 → Agent 决定继续搜索、补 DFT、微调或检查收敛。没有合适 DFT 候选时可以直接继续搜索或检查收敛。
+一个已启用的 MLIP 版本对应一个 epoch；同一模型下的 Branch 批次、MC 分段和 DFT 批次都属于该 epoch，不因一次工具调用或 DFT 回收自动递增。
 
-每次生产调用最多推进一个科学动作。Agent 根据当前模型、相图、QBC、覆盖、误差、记忆和历史收益作决策；科学程序计算数值证据并检查任务、版本、依赖、数据质量与重复执行。Branch 完成后可以准备下一项封装提案，但不能沿用上一项批准执行。封装里的 MC 筛选、分档及最多三段计算复用已确认模块规则。
+## 新材料：epoch0
 
-取消 Sequential/Adaptive 搜索模式、第一轮限制、模式建议和阶段切换审批。审批执行／自动执行设置仍保留；交互执行继续逐项审批，扩大超胞、DFT Relax、模型激活等敏感操作保留必要授权。输入准备不代表超算已提交；用户自行上传和提交。代码更新不重启服务。
+1. 在独立项目确认组成、相/组分/超胞边界、母结构、模型、计算资源与预算。已有参考 DFT 时先确认使用初始模型还是先微调。
+2. Strategic 选择本次需咨询的专家。没有搜索结果时通常以 Exploration 为主；当前实现没有固定“每个 epoch 第一次只能 Exploration”的路由。Reliability 有证据时可参与，无证据时明确未知。
+3. Exploration 提出探索建议，Strategic 形成当前 Action。Simulation 生成执行计划，经授权后调用已有工具生成 Branch、准备并执行 Relax/MC；分步还是已批准封装范围，遵循原方案与配置。
+4. 回收结果、核对相和能量，更新当前模型凸包与证据。两位专家按需分析搜索充分性及可靠性；Strategic 比较旧 Branch 续搜、新 Branch、补 DFT、微调与暂停。
+5. DFT 回收后比较同帧能量/力误差、相竞争风险、覆盖、收益和成本，再选择下一动作。现有 MC/DFT 阶段门控继续生效，不是无限自由循环；每次最多执行一个已批准动作。
 
-## 可配置参数
+## 更新模型并进入 epoch1
 
-在配置草稿的 `workflow` 中设置，确认后生效：
+决定微调仅代表提出训练动作。累计合格 DFT → 训练输入与远端计算 → 回收报告/模型清单 → 独立验证 → 明确激活候选模型，才发生模型切换。训练完成或交叉验证通过都不自动激活。
 
-```json
-{
-  "workflow": {
-    "branch_batch_size": 900,
-    "finetune_min_new_dft": 10,
-    "finetune_max_new_dft": null
-  }
-}
-```
+切换至 M1 后保留 M0 相图和审计，先审批已有结构刷新，用 M1 的结果重建凸包；不同模型能量不直接混合。刷新完成后，若当前模型没有有效新增 Branch，先单独审批生成，再单独审批 Relax/MC。旧模型的搜索完成不代表新模型已搜过。
 
-- `branch_batch_size`：每次生成整批 Branch 的总配额上限，所有策略配额相加检查。Agent 可以选择更小批量。`run.batch_size` 仍是生成器内部处理批次，含义不同。
-- `finetune_min_new_dft`：允许微调的有效新增 DFT 数量下限。仅计当前模型的数据队列中通过收敛、质量与磁性检查且有有限能量值的唯一记录。微调前等待在途任务完成。
-- `finetune_max_new_dft`：可选的新增 DFT 累积上限，含已登记在途 DFT；`null` 不限制。设置整数时必须不小于下限。达到上限不自动训练，Agent 仍可选择继续 Branch 搜索、微调或检查收敛。
+随后重复“更新事实 → 专家建议 → Strategic 取舍 → 必要人工介入 → Simulation 执行”。epoch1 可以结束、暂停，或再次训练验证并激活 M2，进入 epoch2。两个 epoch 不等于两次 MC；每个 epoch 可以包含多次决策。
 
-新项目默认批量上限 900、微调下限 10、无累积上限。旧配置未新增这些字段时，先兼容读取显式 `agent.adaptive.branch_batch_size/branch_batch_fraction/branch_batch_max/N_min/N_max`；否则批量沿用 `run.total_quota`，微调下限沿用已有训练/QBC 门槛。新增 `workflow` 字段优先于旧参数；不会静默改写确认快照。
+## 运行与授权
 
-## 更新与恢复
+普通 Agent 使用已配置客户端；Codex 接管使用原生专家请求和相同科学执行边界，不触发项目配置模型。重大决策、高成本、严重冲突与敏感动作请求人工。普通动作只有已确认配置明确授权时可自动通过；路线未来步骤没有执行权。
 
-下次调用时，旧搜索模式、模式选择状态及 Adaptive 计划归档到 `workflow_migration_history`。只移除模式切换提案，已冻结科学审批、已登记任务、结果、模型和预算保留。旧短期计划中未登记为任务或科学审批的未来动作不自动执行；Agent 根据最新证据重新提出动作。
+对话回复后等待新消息或恢复事件，不建立后台自动科学循环。提交后等待结果；继续用于核对回传，不等于批准、提交或训练。Simulation 的准备成功不代表计算完成。短期事实及已审核长期记忆参与后续决策，但记忆不能授权执行。
 
-模型训练结果仍需验证和激活审批，激活后先完成已有结构与相图刷新，再使用新模型证据继续搜索。已有独立 Relax/MC 任务保留原回收路径；明确要求分步计算仍可使用现有工具，不构成另一搜索模式。
-
-验证使用假模型和假计算后端，测试统一调度、配置限制、审批复用、封装、DFT 与训练恢复；不代表真实 LLM/HPC 端到端验证。
+入口见 [启动](../guides/start.md)、[Codex](../guides/codex-team.md)；实现见 [project/graph.py](../../phase_agent/graphs/project/graph.py)、[decision_team/graph.py](../../phase_agent/graphs/decision_team/graph.py)、[model_generation.py](../../phase_agent/policies/model_generation.py)、[activate_validated_model.py](../../phase_agent/persistence/models/activate_validated_model.py)。

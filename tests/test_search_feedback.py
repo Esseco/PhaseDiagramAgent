@@ -69,7 +69,7 @@ class SearchFeedbackTest(unittest.TestCase):
                     },
                 ]
             )
-        diagrams = update_phase_diagram(records)
+        diagrams = update_phase_diagram(records, include_dft=True)
         self.assertEqual(diagrams["diagrams"]["mlip"]["status"], "completed")
         self.assertEqual(diagrams["diagrams"]["dft"]["status"], "completed")
         before = diagrams["diagrams"]["dft"]

@@ -86,7 +86,7 @@ def test_reference_has_no_weights_quotas_or_D_cutoff():
 
 
 def test_current_read_context_refreshes_evidence_without_changing_saved_candidates():
-    from phase_agent.analysis.state.build_decision_context import build_decision_context
+    from phase_agent.evidence.build_decision_context import build_decision_context
     s = sample()
     s["qbc_candidates"] = [dict(candidate_id="c", structure_sha256="g1", model_version="m1")]
     before = deepcopy(s)
@@ -108,8 +108,8 @@ def test_saved_selection_details_preserve_fixed_D_and_conditional_H():
 
 
 def test_semantic_proposal_receives_reference_without_new_model_call(monkeypatch):
-    import phase_agent.decisions.agent.propose_tool_action as module
-    from phase_agent.analysis.state.build_decision_context import build_decision_context
+    import phase_agent.agents.strategic.propose_tool_action as module
+    from phase_agent.evidence.build_decision_context import build_decision_context
     # Intercept the existing validated client boundary, not the scientific executor.
     captured = []
     def validated(client, payload):
@@ -167,7 +167,7 @@ def test_review_plot_preserves_points_and_makes_sparse_phases_visible(tmp_path, 
 
 def test_reference_patterns_use_existing_purposes_and_preserve_scientific_authority():
     from typing import get_args
-    from phase_agent.decisions.agent.scientific_decisions import SelectionPurpose
+    from phase_agent.agents.strategic.scientific_decisions import SelectionPurpose
 
     rules = dft_sampling_reference()
     allowed = set(get_args(SelectionPurpose.model_fields["purpose"].annotation))

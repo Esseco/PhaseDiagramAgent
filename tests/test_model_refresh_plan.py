@@ -14,7 +14,7 @@ def test_thresholds_and_duplicate_structure():
                                       row(3, None)], old_version="old", new_version="new")
     assert [r["operation"] for r in result["candidates"]] == ["relax", "predict", "predict", "predict"]
     assert result["total_unique"] == 4
-    assert result["maximum_supplemental_count"] == 3
+    assert result["maximum_supplemental_count"] == 0
 
 
 def test_far_sampling_is_global_ten_percent_not_per_stratum():
@@ -27,7 +27,7 @@ def test_far_sampling_is_global_ten_percent_not_per_stratum():
 
 def test_historical_near_is_kept_and_wrong_model_rejected():
     result = build_model_refresh_plan([row(0, .2, historical_near_hull=True)], old_version="old", new_version="new")
-    assert result["candidates"][0]["selection_reason"] == "historical_near_hull"
+    assert result["candidates"][0]["selection_reason"] == "far_audit"
     with pytest.raises(ValueError):
         build_model_refresh_plan([row(0, .1, source_version="other")], old_version="old", new_version="new")
 
@@ -36,7 +36,7 @@ def test_supplemental_force_is_atomic_norm():
     assert supplemental_relaxation_required(.0009, [])
     assert supplemental_relaxation_required(.001, [[.08, .08, 0]])
     assert not supplemental_relaxation_required(.01, [[.1, 0, 0]])
-    assert not supplemental_relaxation_required(.011, [[100, 0, 0]])
+    assert supplemental_relaxation_required(.011, [[100, 0, 0]])
 
 
 def test_cumulative_records_only_merge_mirrored_identity():

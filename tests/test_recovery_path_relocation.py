@@ -174,3 +174,31 @@ def test_live_workspace_binding_precedes_frozen_config_storage(tmp_path):
     }
     state["confirmed_config"]["storage"] = {"workspace_root": str(tmp_path / "old-workspace")}
     assert len(list(recovery_handoffs(state))) == 1
+
+
+@pytest.mark.parametrize("valid_receipt", [True, False])
+def test_recorded_delivery_lane_migration_preserves_remote_label(tmp_path, valid_receipt):
+    import shutil
+
+    state, handoff, _, _ = setup_delivery(tmp_path)
+    old = Path(handoff["folder"]).parent
+    new = old.parent / "delivery/transfers"
+    new.parent.mkdir()
+    shutil.move(str(old), str(new))
+    handoff["folder"] = str(new / "DFTSP_Batch01")
+    handoff["upload_archive"] = str(new / "DFTSP_Batch01/inputs.zip")
+    receipt = {
+        "project": tmp_path.name,
+        "status": "migrated",
+        "immutable_files_verified": 1,
+        "moves": [{"from": str(old), "to": str(new if valid_receipt else tmp_path / "unrelated")}],
+    }
+    (tmp_path / "submissions/.layout-migration.json").write_text(
+        json.dumps(receipt), encoding="utf8"
+    )
+    if valid_receipt:
+        assert recovery_plan(state, handoff)["source_folder"] == "epoch0_DFTSP_Batch01"
+        assert len(list(recovery_handoffs(state))) == 1
+    else:
+        with pytest.raises(ValueError, match="outside_original_scope"):
+            list(recovery_handoffs(state))

@@ -156,7 +156,7 @@ def test_exact_continue_restores_saved_selection_without_model(tmp_path):
 
 def test_control_transport_has_deadline_output_limit_and_no_science_contract(monkeypatch):
     from time import monotonic
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
 
     captured = []
 

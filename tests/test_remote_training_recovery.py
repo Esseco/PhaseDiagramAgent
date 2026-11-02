@@ -79,3 +79,22 @@ def test_natural_status_queries():
     for message in ("现在处于什么状态", "现在是什么状态？", "目前处于什么状态"):
         assert _is_status_command(message)
     assert not _is_status_command("现在重新生成训练输入")
+
+
+def test_training_recovery_excludes_ancestor_dft_handoffs(tmp_path):
+    from unittest.mock import patch
+
+    job, root = returned_job(tmp_path)
+    locations = {
+        "old-dft-output": {"directory": str(tmp_path)},
+        "training-output": {"directory": job["directory"]},
+        "validation-output": {"directory": str(root)},
+    }
+    with (
+        patch("phase_agent.tools.remote.transfer_bundle.registered_return_locations", return_value=locations),
+        patch("phase_agent.tools.remote.transfer_bundle.import_registered_bundles", return_value=[]) as importer,
+    ):
+        updated, reports = recover_remote_training({"remote_finetune_jobs": {"j": job}})
+    assert set(importer.call_args.kwargs["locations"]) == {"training-output", "validation-output"}
+    assert reports[0]["status"] == "validation_required"
+    assert updated["remote_finetune_jobs"]["j"]["status"] == "results_received"

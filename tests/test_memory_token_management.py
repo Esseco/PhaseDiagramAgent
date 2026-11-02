@@ -1,9 +1,9 @@
 from copy import deepcopy
 from unittest.mock import patch
 
-from phase_agent.analysis.state.build_decision_context import build_decision_context
-from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
-from phase_agent.decisions.agent.transport_tables import expand_evidence_tables
+from phase_agent.evidence.build_decision_context import build_decision_context
+from phase_agent.models.prepare_llm_request import prepare_llm_request
+from phase_agent.models.transport_tables import expand_evidence_tables
 from phase_agent.tools.workflows.preview_dft_inputs import preview_dft_inputs
 from phase_agent.configuration.defaults.default_dft_decision_config import default_dft_decision_config
 from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
@@ -76,7 +76,7 @@ def test_failed_validation_returns_to_llm_and_requires_approval():
     revised = deepcopy(action)
     revised["parameters"]["decisions"][0]["action"] = "DFT_SINGLE_POINT"
     preview = {"relative_cost": 30, "task_count": 1, "workload": []}
-    with patch("phase_agent.decisions.agent.choose_debug_next_action.choose_debug_next_action", return_value=None),\
+    with patch("phase_agent.agents.strategic.choose_debug_next_action.choose_debug_next_action", return_value=None),\
          patch("phase_agent.tools.workflows.run_tool_step.propose_agent_tool_action", return_value=action),\
          patch("phase_agent.tools.workflows.attach_dft_preview.preview_dft_inputs", side_effect=[(None, "dft_budget"), (preview, None)]),\
          patch("phase_agent.tools.workflows.run_tool_step.revise_tool_proposal", return_value={"revision_status": "revised", "action": revised}) as revise,\

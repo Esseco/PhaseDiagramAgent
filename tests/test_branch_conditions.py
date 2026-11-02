@@ -1,4 +1,4 @@
-from phase_agent.tools.policy.branch_conditions import branch_entry_errors, branch_facts
+from phase_agent.policies.branch_conditions import branch_entry_errors, branch_facts
 
 
 def test_returned_training_blocks_stale_training_action():

@@ -84,6 +84,10 @@ def run_mace_worker(job: dict) -> dict:
     if operation == "predict":
         from phase_agent.science.mlip.predict_structure import predict_structure
 
+        if parameters.get("refresh_force_threshold") is not None:
+            from phase_agent.science.mlip.refresh_inline import run_inline_refresh
+
+            return run_inline_refresh(job, predict_structure, run_mace_worker)
         return predict_structure(job)
     if operation == "relax":
         optimizer = parameters.pop("optimizer", "LBFGS")
@@ -99,6 +103,50 @@ def run_mace_worker(job: dict) -> dict:
             model_path = job.get("model_path")
         if not model_path:
             raise ValueError("Relax task requires model_path or model_paths")
+        framework = str(parameters.get("framework") or "mace").lower()
+        if framework != "mace":
+            # Generic ASE path for the selectable local Process_MLIP factory.
+            from ase.io import read, write
+            from ase.optimize import BFGS
+            from phase_agent.science.mlip.model_interface import create_calculator
+
+            input_path = Path(job["structure_path"])
+            atoms = read(
+                input_path, format="vasp" if input_path.suffix.lower() == ".vasp" else None
+            )
+            atoms.calc = create_calculator(
+                {
+                    **parameters,
+                    "framework": framework,
+                    "model_name": parameters.get("model_name") or job.get("model_version"),
+                    "local_repo_path": parameters.get("local_repo_path"),
+                },
+                model_path=model_path,
+            )
+            optimizer = BFGS(atoms, logfile=None)
+            optimizer.run(
+                fmax=float(parameters.pop("fmax", 0.05)),
+                steps=int(parameters.pop("relax_steps", 500)),
+            )
+            structure_path = output / "initial_relaxed.vasp"
+            write(structure_path, atoms, format="vasp", direct=True)
+            from phase_agent.tools.remote.integrity import file_checksum
+
+            return {
+                "status": "completed",
+                "optimizer": "BFGS",
+                "structure_path": str(structure_path),
+                "structure_checksum": file_checksum(structure_path),
+                "composition": {
+                    s: atoms.get_chemical_symbols().count(s)
+                    for s in set(atoms.get_chemical_symbols())
+                },
+                "atom_count": len(atoms),
+                "mlip_name": framework.upper(),
+                "mlip_version": job.get("model_version"),
+                "qbc": {"status": "not_available_single_model", "member_count": 1},
+            }
+
         from Process_AL_MC.relax import relax_structure_mace
 
         mace_head = parameters.pop("mace_head", None)
@@ -151,6 +199,13 @@ def run_mace_worker(job: dict) -> dict:
 
     if operation != "mc":
         raise ValueError(f"unsupported MLIP operation: {operation}")
+
+    framework = str(parameters.get("framework") or "mace").lower()
+    if framework not in {"mace", "chgnet"}:
+        raise ValueError(
+            f"MLIP framework {framework!r} does not support the current LayeredOxide MC worker; "
+            "choose mace/chgnet for MC or use the framework's dedicated MC adapter."
+        )
 
     from Process_AL_MC import LayeredOxide_MCOrderingClass
 

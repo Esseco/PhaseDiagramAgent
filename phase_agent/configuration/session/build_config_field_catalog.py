@@ -9,6 +9,9 @@ def build_config_field_catalog(config):
         "run.seed": "随机种子",
         "budgets.total_relative_cost": "总相对成本预算",
         "mlip.model_path": "超算端MLIP模型路径",
+        "mlip.framework": "MLIP框架（mace/sevennet/chgnet/orb/nep）",
+        "mlip.model_name": "本地MLIP模型预设或名称",
+        "mlip.local_repo_path": "本地MLIP代码仓库路径（只读依赖）",
         "calculation.mlip_version": "科学计算MLIP版本，与对话模型不同",
     }
     meanings.update(

@@ -28,7 +28,7 @@ def execution_state_issues(state):
             continue
         audit = (state.get("execution_reconciliations") or {}).get(record.get("record_id")) or {}
         identity = audit.get("identity") or {}
-        from phase_agent.tools.policy.file_approval import proposal_hash
+        from phase_agent.policies.file_approval import proposal_hash
 
         if (
             audit.get("resolution") in {"verified_no_effect", "verified_registered_effects"}

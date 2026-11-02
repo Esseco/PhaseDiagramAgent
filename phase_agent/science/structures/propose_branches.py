@@ -47,7 +47,7 @@ def propose_branches(
     if fixed_tm and space.get("fixed_T_source") != "phase_reference":
         raise ValueError("固定 T 必须指定 fixed_T_source=phase_reference")
     quotas = dict(quotas)
-    from phase_agent.decisions.agent.generation_plan import configured_generation_strategies
+    from phase_agent.agents.exploration.generation_plan import configured_generation_strategies
 
     enabled = set(configured_generation_strategies({"system": system}))
     enabled.intersection_update(generation.get("enabled_strategies", registry.names()))
@@ -101,6 +101,8 @@ def propose_branches(
             raise ValueError(f"目标相 {target_phase} 不在本轮合法框架内")
         filtered = []
         for framework in frameworks:
+            if focus.get("supercells") is not None and framework["H"] not in focus["supercells"]:
+                continue
             if focus.get("min_det_H") is not None and det_H(framework["H"]) < focus["min_det_H"]:
                 continue
             if focus.get("max_det_H") is not None and det_H(framework["H"]) > focus["max_det_H"]:

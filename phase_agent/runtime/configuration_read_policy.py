@@ -1,6 +1,6 @@
 """Recognize unchanged confirmed files without reopening a configuration review."""
 
-from phase_agent.analysis.state.project_authority import configuration_changes
+from phase_agent.evidence.project_authority import configuration_changes
 from phase_agent.configuration.session.load_editable_config_json import (
     load_editable_config_json,
 )

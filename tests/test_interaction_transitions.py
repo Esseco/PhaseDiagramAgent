@@ -3,8 +3,8 @@ import json
 from unittest.mock import patch
 import pytest
 from phase_agent.runtime.studio_reply_presentation import format_turn_reply
-from phase_agent.decisions.agent.summary_request import summary_payload
-from phase_agent.analysis.state.task_failure_facts import task_failure_facts
+from phase_agent.evidence.requests import summary_payload
+from phase_agent.evidence.task_failure_facts import task_failure_facts
 from phase_agent.graphs.dialogue.evidence import conversation_facts
 
 
@@ -146,7 +146,7 @@ def test_failed_retry_only_advertises_latest_same_scope_attempt():
 
 @pytest.mark.parametrize("content", ["", '{"tool":'])
 def test_scientific_length_retry_preserves_reasoning(content):
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
 
     bodies = []
 
@@ -181,7 +181,7 @@ def test_scientific_length_retry_preserves_reasoning(content):
 
     client = create_deepseek_client(api_key="fake", thinking="enabled")
     with patch(
-        "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+        "phase_agent.models.create_deepseek_client.urllib.request.urlopen",
         side_effect=provider,
     ):
         result = client(

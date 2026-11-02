@@ -1,5 +1,5 @@
 from phase_agent.runtime.local_project_launcher import DEFAULT_PROJECT_SETTINGS
-from phase_agent.tools.policy.execution_policy import apply_execution_policy
+from phase_agent.policies.execution_policy import apply_execution_policy
 
 
 def test_new_project_requires_approval_before_work():

@@ -116,15 +116,37 @@ def test_late_terminal_result_cannot_reactivate_or_settle_cancelled_mc():
 
 def test_changed_bundle_after_cancellation_needs_manual_review(tmp_path, monkeypatch):
     from phase_agent.tools.relax_mc_batch import results
+    from phase_agent.tools.remote.transfer_bundle import create_bundle
 
     state = state_fixture()
     updated, _ = cancel_task_waits(
         state, cancellation_scopes(state)[0]["scope_id"], user_message="取消"
     )
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    summary = {
+        "bundle_id": "bundle",
+        "plan_checksum": "plan",
+        "model_version": "m",
+        "config_version": "c",
+        "status": "completed",
+        "task_count": len(state["tasks"]),
+    }
+    write_json(remote / "result_summary.json", summary)
+    write_json(
+        remote / "workflow_state.json",
+        {"tasks": [{**task, "status": "completed"} for task in state["tasks"]]},
+    )
     archive = tmp_path / "results.zip"
-    archive.write_bytes(b"keep raw archive")
+    create_bundle(remote, list(remote.glob("*.json")), archive, kind="results")
+    archive_before = archive.read_bytes()
     updated["relax_mc_batches"] = {
-        "bundle": {"model_version": "m", "config_version": "c", "import_checksum": "old"}
+        "bundle": {
+            "model_version": "m",
+            "config_version": "c",
+            "plan_checksum": "plan",
+            "import_checksum": "old",
+        }
     }
     monkeypatch.setattr(results, "result_archive", lambda record: archive)
     monkeypatch.setattr(
@@ -136,11 +158,49 @@ def test_changed_bundle_after_cancellation_needs_manual_review(tmp_path, monkeyp
     assert result["state"]["tasks"] == updated["tasks"]
     assert result["state"]["budget_reservations"] == updated["budget_reservations"]
     assert "return_diagnostic" not in updated["relax_mc_batches"]["bundle"]
+    assert archive.read_bytes() == archive_before
+    diagnostic = result["state"]["relax_mc_batches"]["bundle"]["return_diagnostic"]
+    assert diagnostic["origin"] == "local_import"
+    assert diagnostic["code"] == "cancelled_mc_return_requires_manual_review"
+    assert diagnostic["task_ids"] == [task["task_id"] for task in updated["tasks"]]
+    assert result["state"]["pending_tasks"] == updated["pending_tasks"] == []
+    for field in ("used_relative_cost", "reserved_relative_cost", "processed_task_ids"):
+        assert result["state"][field] == updated[field]
+
+
+def test_invalid_late_archive_is_rejected_without_changing_cancelled_state(tmp_path, monkeypatch):
+    import zipfile
+    from phase_agent.tools.relax_mc_batch import results
+
+    state = state_fixture()
+    updated, _ = cancel_task_waits(
+        state, cancellation_scopes(state)[0]["scope_id"], user_message="Cancel local waiting"
+    )
+    archive = tmp_path / "invalid-results.zip"
+    archive.write_bytes(b"keep raw archive")
+    updated["relax_mc_batches"] = {
+        "bundle": {"model_version": "m", "config_version": "c", "import_checksum": "old"}
+    }
+    before = deepcopy(updated)
+    monkeypatch.setattr(results, "result_archive", lambda record: archive)
+    monkeypatch.setattr(
+        results, "import_bundle", lambda *a, **kw: pytest.fail("invalid late return imported")
+    )
+    with pytest.raises(zipfile.BadZipFile):
+        results.import_results(
+            action={"parameters": {"bundle_id": "bundle"}},
+            context={
+                "event_state": updated,
+                "effective_config": {"mlip": {}},
+                "config_version": "c",
+            },
+        )
+    assert updated == before
     assert archive.read_bytes() == b"keep raw archive"
 
 
 def test_typed_dialogue_control_cannot_smuggle_submission():
-    from phase_agent.decisions.agent.dialogue_contract import dialogue_errors
+    from phase_agent.agents.common.dialogue_contract import dialogue_errors
 
     action = {
         "kind": "cancel_waits",
@@ -200,8 +260,8 @@ def test_ambiguous_cancel_question_is_read_only(tmp_path):
 
 
 def test_cancellation_intent_reaches_scientific_summary_after_restart():
-    from phase_agent.analysis.state.build_decision_context import build_decision_context
-    from phase_agent.decisions.agent.summary_request import summary_payload
+    from phase_agent.evidence.build_decision_context import build_decision_context
+    from phase_agent.evidence.requests import summary_payload
 
     state = state_fixture()
     updated, _ = cancel_task_waits(

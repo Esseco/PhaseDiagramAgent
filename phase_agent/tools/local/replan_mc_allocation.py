@@ -2,7 +2,9 @@
 
 from copy import deepcopy
 
-from phase_agent.decisions.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
+from phase_agent.agents.strategic.strategy.estimate_branch_mc_budget import (
+    estimate_branch_mc_budget,
+)
 from phase_agent.tools.local.regenerate_mc_inputs import _approved_mc_preview
 
 

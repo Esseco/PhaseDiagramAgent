@@ -48,7 +48,7 @@ def test_recovery_followup_approval_keeps_round_metrics(tmp_path, detail, tool):
     state["pending_execution_policies"] = {"next": {"agent_proposal": result["agent_proposal"]}}
     before = deepcopy(result)
     text = render(result, tmp_path, detail)
-    assert "本轮 DFT：回收 1/1，合格配对 1" in text
+    assert "本轮 DFT：有效回收 1/1，合格配对 1" in text
     assert "能量 MAE/RMSE 10/10 meV/atom" in text
     assert "受力 MAE/RMSE 30/30 meV/Å" in text
     assert "同意" in text
@@ -66,7 +66,7 @@ def test_verified_recovery_wraps_analysis_only_once(tmp_path):
         "verified_recovery": {"dft_single_point": {"completed": 1, "failed": 0}},
     }
     text = render(result, tmp_path, "detailed")
-    assert text.count("本轮 DFT：回收 1/1") == 1
+    assert text.count("本轮 DFT：有效回收 1/1") == 1
     assert "本次已核对回传并更新记录" in text
 
 
@@ -95,7 +95,7 @@ def test_dialogue_present_passes_verified_recovery_to_brief_approval(tmp_path):
             runtime,
         )["reply"]
         text = format_epoch_reply(format_turn_reply(concise_body(reply, state), state), state)
-    assert "本轮 DFT：回收 1/1" in text
+    assert "本轮 DFT：有效回收 1/1" in text
     assert "能量 MAE/RMSE 10/10 meV/atom" in text
     assert "受力 MAE/RMSE 30/30 meV/Å" in text
     assert state_path.read_bytes() == saved_bytes
@@ -115,7 +115,7 @@ def test_recovery_missing_prediction_reports_unavailable_not_silence_or_zero(tmp
     state = {}
     add_result(state, evaluator=False)
     text = render({"status": "completed", "state": state, "recovered_count": 1}, tmp_path, "brief")
-    assert "本轮 DFT：回收 1/1，合格配对 0" in text
+    assert "本轮 DFT：有效回收 1/1，合格配对 0" in text
     assert "能量 MAE/RMSE 暂不可用" in text
     assert "受力 MAE/RMSE 暂不可用" in text
     assert "配对不完整" in text
@@ -142,3 +142,42 @@ def test_unrelated_proposal_does_not_repeat_old_round(tmp_path, tool):
         "brief",
     )
     assert "本轮 DFT：" not in text and "能量 MAE/RMSE" not in text
+
+
+@pytest.mark.parametrize("detail", ["brief", "detailed"])
+def test_failed_next_decision_preserves_recovery_in_final_chat(tmp_path, detail):
+    from phase_agent.runtime.interaction_reports import short_reply
+
+    state = {
+        "active_model_version": "m1",
+        "confirmed_config_version": "c1",
+        "post_recovery_next_step_pending": True,
+    }
+    for index in range(12):
+        add_result(state, task_id=f"dft-{index}")
+    for index in range(3):
+        failed = deepcopy(state["tasks"][0])
+        failed.update(task_id=f"failed-{index}", status="failed")
+        state["tasks"].append(failed)
+    for task in state["tasks"]:
+        task["config_version"] = "c1"
+    result = {
+        "status": "not_configured",
+        "state": state,
+        "verified_recovery": {"dft_single_point": {"completed": 12, "failed": 3}},
+        "reason": "llm_failed: ValueError: Invalid scientific decision: "
+        "scientific_decision_point_mismatch; dft_selection_purposes_must_match_selected_candidates",
+    }
+    before = deepcopy(result)
+    full = render(result, tmp_path, detail)
+    visible = short_reply(full)
+
+    assert "12/15" in visible
+    assert "已回收并入账的结果保留" in visible
+    assert "下一步建议未生成" in visible
+    assert "决策阶段" in visible and "候选用途" in visible
+    assert "重新分析下一步" in visible and "批准" in visible
+    assert "不重新回收" in visible and "不重跑整批" in visible
+    assert "先处理上述问题" not in visible
+    assert "本轮未执行：`workflow`" not in visible
+    assert result == before

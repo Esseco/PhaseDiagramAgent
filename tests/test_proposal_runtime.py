@@ -1,5 +1,5 @@
 from phase_agent.analysis.cost.estimate_proposal_runtime import estimate_proposal_runtime
-from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.policies.execution_policy import build_agent_proposal
 from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
 

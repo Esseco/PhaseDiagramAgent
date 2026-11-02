@@ -1,5 +1,7 @@
 # 源码阅读与开发约定
 
+完整目录归属见 [仓库架构](repository-layout.md)。计算阶段推进工具在 tools/state；科学策略由 Strategic 负责，Reliability 不选择全局执行阶段。
+
 按下方目录定位需要的说明；源码入口链接保留在对应章节。项目科学参数以确认配置为准。
 
 - [源码阅读与修改指南](#doc-source_guide)
@@ -14,7 +16,7 @@
 
 ### 按职责定位
 
-配置问题读 configuration；模型语义与输出错误读 decisions/agent；审批、预算、准备与回执读 tools；证据与相图读 analysis；算法和远端计算读 science；状态和记忆读 persistence；启动及服务读 runtime。HTTP/API 仅是传输接口，不能另建决策循环。详细位置见各包 README。
+配置问题读 configuration；角色判断读 agents，模型传输读 models，科学事实读 evidence；审批、预算、准备与回执读 tools；证据与相图读 analysis；算法和远端计算读 science；状态和记忆读 persistence；启动及服务读 runtime。HTTP/API 仅是传输接口，不能另建决策循环。详细位置见各包 README。
 
 ### 扩展模块的最短路径
 
@@ -32,7 +34,7 @@
 
 ### 旧数据兼容
 
-已保存的旧模块描述符通过 module_references.py 转换，旧科学数据有显式读取/迁移工具。保留数据兼容不等于保留旧执行框架。Pydantic 只验证契约；可选 Deep Agents/混合客户端只产生分析提案，仍进入同一个 LangGraph 校验与审批路径。
+已保存的旧模块描述符通过 compatibility/module_references.py 转换，旧科学数据有显式读取/迁移工具。保留数据兼容不等于保留旧执行框架。Pydantic 只验证契约；可选 Deep Agents/混合客户端只产生分析提案，仍进入同一个 LangGraph 校验与审批路径。
 
 ### 写给后续维护者
 
@@ -43,7 +45,7 @@
 
 ### Generation and approval invariants
 
-`decisions/agent/generation_plan.py` projects enabled strategies from explicit lists and boundary facts. Both proposal context and tool policy use it, including older unsynchronized snapshots. A single legal phase excludes competing_phase; a single TM species excludes tm_ordering. Never redistribute an explicit allocation to bypass a rejected constraint.
+`agents/exploration/generation_plan.py` projects enabled strategies from explicit lists and boundary facts. Both proposal context and tool policy use it, including older unsynchronized snapshots. A single legal phase excludes competing_phase; a single TM species excludes tm_ordering. Never redistribute an explicit allocation to bypass a rejected constraint.
 
 `tools/dispatch/execute_tool_action.py` supplies a deep copy of the approved action to the handler. Handler annotations cannot mutate the stored proposal or its receipt identity. A returned or failed execution receipt does not authorize replay. `reserved` means an occupied task key, not proof of submission or completion. Pending-plan advice must respect that persisted blocker.
 

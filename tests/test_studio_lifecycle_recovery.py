@@ -12,20 +12,28 @@ def test_studio_retry_resumes_failed_analysis_without_recollecting(tmp_path, mon
     monkeypatch.setenv("PHASE_AGENT_RUNTIME_CONFIG", str(config_path))
     calls = []
     failed = [False]
+
     def analyze(frame):
         if not failed[0]:
             failed[0] = True
             raise RuntimeError("analysis interrupted")
         return frame
+
     def sender(text, thread):
         result = run_search_workflow_graph(
             checkpoint_path=tmp_path / "workflow_state/langgraph_lifecycle.sqlite",
-            project_thread="project-scientific-lifecycle-v2", invocation_id=new_invocation(),
+            project_thread="project-scientific-lifecycle-v2",
+            invocation_id=new_invocation(),
             initialize=lambda: {"_workflow_prepared": True, "snapshot": {"config_version": "v1"}},
             collect=lambda frame: calls.append("collect") or frame,
-            analyze=analyze, wait=lambda frame: frame, assess=lambda frame: frame,
-            act=lambda frame, **kw: frame, finalize=lambda frame: {"status": "done"})
+            analyze=analyze,
+            wait=lambda frame: frame,
+            assess=lambda frame: frame,
+            act=lambda frame, **kw: frame,
+            finalize=lambda frame: {"status": "done"},
+        )
         return result["status"]
+
     graph = build_studio_graph(sender, receipt_path=tmp_path / "gateway/receipt.json")
     request = {"messages": [HumanMessage(content="继续", id="m")]}
     config = {"configurable": {"thread_id": "t"}}
@@ -34,4 +42,7 @@ def test_studio_retry_resumes_failed_analysis_without_recollecting(tmp_path, mon
     result = graph.invoke(request, config)
     assert result["messages"][-1].content == "done"
     assert calls == ["collect"]
-    assert "禁止历史重放" in graph.invoke(request, config)["messages"][-1].content
+    assert (
+        graph.invoke(request, config)["messages"][-1].content == "done"
+    )  # Redeliver the completed reply.
+    assert calls == ["collect"]

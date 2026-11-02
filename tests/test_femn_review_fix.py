@@ -7,12 +7,12 @@ import pytest
 from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
 from phase_agent.configuration.session.project_config_json import create_project_config_json
 from phase_agent.configuration.session.load_editable_config_json import load_editable_config_json
-from phase_agent.analysis.state.project_authority import configuration_changes
+from phase_agent.evidence.project_authority import configuration_changes
 from phase_agent.runtime.editable_config_baseline import editable_comparison_baseline
 from phase_agent.runtime.concise_dialogue import concise_body
-from phase_agent.decisions.agent.branch_pool_review import pool_context, review_errors
-from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
-from phase_agent.tools.policy.region_sampling import policy
+from phase_agent.agents.exploration.branch_pool_review import pool_context, review_errors
+from phase_agent.agents.strategic.propose_tool_action import propose_agent_tool_action
+from phase_agent.policies.region_sampling import policy
 from phase_agent.tools.workflows.region_review import write_proposal
 from phase_agent.runtime.review_presentation import review_card
 
@@ -22,7 +22,7 @@ def test_missing_optional_threshold_is_not_an_unapplied_edit(tmp_path):
     config['convergence'].pop('final_force_rmse_tolerance')
     path = tmp_path / 'config.json'
     create_project_config_json(path, config)
-    document = json.loads(path.read_text().split('\n', 1)[1])
+    document = json.loads(path.read_text(encoding="utf-8").split('\n', 1)[1])
     document['overrides'].setdefault('convergence', {})['final_force_rmse_tolerance'] = None
     path.write_text(json.dumps(document))
     baseline = editable_comparison_baseline(config, path, tmp_path)
@@ -66,7 +66,7 @@ def test_project_agent_can_defer_without_fixed_quota(tmp_path):
     assert '每轮选择100' not in json.dumps(context, ensure_ascii=False)
     state['workspace_layout'] = {'workspace_root': str(tmp_path)}
     result['parameters']['region_preview'] = {'existing_branch_count': 1}
-    payload = json.loads(__import__('pathlib').Path(write_proposal({'raw_action': result}, state)['json']).read_text())
+    payload = json.loads(__import__('pathlib').Path(write_proposal({'raw_action': result}, state)['json']).read_text(encoding="utf-8"))
     assert payload['本次新增branch数'] == 0
     assert payload['已有branch是否需要补充']['建议'] == '先复用已有branch，暂不补充'
     card = review_card('p', {'agent_proposal': {'raw_action': result}})

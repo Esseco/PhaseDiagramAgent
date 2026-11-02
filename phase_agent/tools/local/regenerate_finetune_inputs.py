@@ -61,6 +61,8 @@ def _files(directory):
         root_names = {
             "GPU.sh",
             "run_training.sh",
+            "run_training_task.py",
+            "collect_results.sh",
             "collect_training_results.py",
             "transfer_bundle.py",
             "_gpu_accounting.py",

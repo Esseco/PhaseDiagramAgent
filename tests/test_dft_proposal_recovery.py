@@ -6,7 +6,7 @@ import pytest
 
 from phase_agent.graphs.dialogue.nodes import route_request
 from phase_agent.graphs.dialogue.state import TurnRuntime
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 from phase_agent.tools.state.execution_receipts import (
     begin_execution,
     record_execution_return,

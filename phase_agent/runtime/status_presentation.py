@@ -2,8 +2,9 @@
 
 from collections import Counter
 import json
+from phase_agent.tools.workflows.readonly_views import read_only_view
 from pathlib import Path
-from phase_agent.analysis.state.model_epoch import model_epoch_label, model_epoch
+from phase_agent.evidence.model_epoch import model_epoch_label, model_epoch
 from phase_agent.tools.state.task_waiting import awaiting_task_result
 from phase_agent.runtime.chat_state_presentation import (
     brief_chat_state,
@@ -31,6 +32,7 @@ STAGE_NAMES = {
 }
 
 
+@read_only_view
 def format_progress(state):
     model = state.get("active_model_version") or "未记录"
     epoch = model_epoch(state, model)
@@ -148,7 +150,9 @@ def format_progress(state):
         if job.get("status") == "results_received" and not job.get("activated")
     ]
     if recovered:
-        lines.append("已登记微调回收结果；下一步检查模型清单和验证记录，无需重复生成训练输入。")
+        lines.append(
+            "结果：本轮微调回传已登记，尚未分析或生成下一 epoch 的待审方案；无需重复生成训练输入。"
+        )
         for result in recovered:
             issues = result.get("issues") or []
             if issues:
@@ -161,7 +165,7 @@ def format_progress(state):
             )
         else:
             lines.append(
-                "执行方案：回复‘继续’，检查独立验证数据与标准并准备验证作业；验证通过后单独审批激活。"
+                "下一步：回复‘已回收’、‘继续’或同意分析，由项目 Agent 直接分析并生成本轮微调结果报告，再展示是否进入下一 epoch 的具体方案；切换模型需另行批准。"
             )
         if pending:
             lines.append(
@@ -176,7 +180,7 @@ def format_progress(state):
         tool = action.get("tool") or proposal.get("recommended_action")
         name = ACTION_NAMES.get(tool, tool or "待审批操作")
         params = action.get("parameters") or proposal.get("action_parameters") or {}
-        from phase_agent.tools.policy.branch_conditions import branch_entry_errors
+        from phase_agent.policies.branch_conditions import branch_entry_errors
 
         blocked = branch_entry_errors(action, state)
         if (
@@ -208,8 +212,10 @@ def format_progress(state):
         ]
     elif state.get("pending_dft_recovery_question"):
         lines.append("下一步：回复“继续回收”或“不再回收”，确认是否等待剩余 DFT。")
-    elif partial_recovery_facts(state):
-        lines.append("下一步：回复“继续”使用已回收子集，或回复“补全”只生成失败任务的重试方案；不会重跑整批。")
+    elif not training and partial_recovery_facts(state):
+        lines.append(
+            "下一步：回复“继续”使用已回收子集，或回复“补全”只生成失败任务的重试方案；不会重跑整批。"
+        )
     elif training:
         from phase_agent.runtime.training_reply import training_delivery_lines
 

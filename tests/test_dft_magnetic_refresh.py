@@ -263,15 +263,15 @@ def test_all_dft_points_revoked_does_not_leave_old_current_csv(tmp_path):
     for row in rows:
         row["energy_method"] = "dft"
         row["source_version"] = "vasp"
-    first = update_phase_diagram(rows, output_directory=tmp_path)["diagrams"]["dft"]
+    first = update_phase_diagram(rows, output_directory=tmp_path, include_dft=True)["diagrams"]["dft"]
     original = Path(first["archive_csv_path"]).read_bytes()
     for row in rows:
         row["checks_passed"] = False
-    second = update_phase_diagram(rows, output_directory=tmp_path)["diagrams"]["dft"]
+    second = update_phase_diagram(rows, output_directory=tmp_path, include_dft=True)["diagrams"]["dft"]
     assert second["status"] == "unknown"
     with Path(second["csv_path"]).open(encoding="utf-8-sig", newline="") as stream:
         assert list(csv.DictReader(stream)) == []
     assert Path(first["archive_csv_path"]).read_bytes() == original
     timestamp = Path(second["csv_path"]).stat().st_mtime_ns
-    repeated = update_phase_diagram(rows, output_directory=tmp_path)["diagrams"]["dft"]
+    repeated = update_phase_diagram(rows, output_directory=tmp_path, include_dft=True)["diagrams"]["dft"]
     assert Path(repeated["csv_path"]).stat().st_mtime_ns == timestamp

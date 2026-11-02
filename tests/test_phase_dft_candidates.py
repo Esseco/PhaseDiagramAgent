@@ -100,7 +100,7 @@ def test_exact_far_snapshot_binding_distinguishes_unscored_D_from_missing_eviden
 
 
 def test_revision_receives_high_D_breadth_reference(monkeypatch):
-    from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
+    from phase_agent.agents.strategic.revise_tool_proposal import revise_tool_proposal
     from phase_agent.analysis.phase.phase_dft_sampling import dft_sampling_reference
 
     captured = []
@@ -114,7 +114,7 @@ def test_revision_receives_high_D_breadth_reference(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "phase_agent.decisions.agent.decision_backend.request_decision_action", request
+        "phase_agent.graphs.decision_team.backend.request_decision_action", request
     )
     revise_tool_proposal(
         {"raw_action": {"tool": "select_dft_candidates"}},

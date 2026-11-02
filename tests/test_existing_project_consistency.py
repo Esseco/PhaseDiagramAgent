@@ -3,8 +3,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from phase_agent.analysis.state.project_authority import configuration_changes
-from phase_agent.analysis.state.project_authority import current_project
+from phase_agent.evidence.project_authority import configuration_changes
+from phase_agent.evidence.project_authority import current_project
 from phase_agent.configuration.defaults.default_layered_search_config import (
     default_layered_search_config,
 )
@@ -125,7 +125,7 @@ def test_workflow_state_junction_does_not_rename_project_as_diagram(tmp_path):
         / "state.json"
     )
     with patch(
-        "phase_agent.analysis.state.project_authority.Path.resolve",
+        "phase_agent.evidence.project_authority.Path.resolve",
         return_value=resolved,
     ):
         card = current_project({}, state_path=state_path)

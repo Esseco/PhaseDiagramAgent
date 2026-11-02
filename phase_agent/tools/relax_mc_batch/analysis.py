@@ -139,7 +139,6 @@ def candidate_pool(state):
         for r in ((state.get("phase_diagrams") or {}).get("mlip") or {}).get("entries") or []
     }
     latest = {}
-    all_pool = []
     for task in state.get("tasks") or []:
         if task.get("status") != "completed":
             continue
@@ -161,19 +160,12 @@ def candidate_pool(state):
                 "actual_phase": task.get("actual_phase"),
                 "phase_identification_status": task.get("phase_identification_status"),
             }
-        for index, row in enumerate(output.get("pool_summary") or []):
-            all_pool.append(
-                {
-                    "source_task_id": task["task_id"],
-                    "branch_id": task["branch_id"],
-                    "pool_index": index,
-                    **deepcopy(row),
-                }
-            )
     from phase_agent.science.qbc.post_mc_candidates import post_mc_candidates
 
     return {
         "branch_candidates": post_mc_candidates(state, state["active_model_version"])
         or list(latest.values()),
-        "mc_pool": all_pool,
+        # Local selection consumes branch_candidates. Historical pool statistics
+        # remain in the signed results, without requiring every pool geometry.
+        "mc_pool": [],
     }

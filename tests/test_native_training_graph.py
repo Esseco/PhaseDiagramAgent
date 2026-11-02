@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from tests.test_training_handoff import setup, config
 from phase_agent.tools.local.training_handoff import advance_training_handoffs
-from phase_agent.graphs.training_handoff_graph import build_training_handoff_graph
+from phase_agent.graphs.recovery.training_handoff_graph import build_training_handoff_graph
 
 
 def test_sqlite_restart_resumes_native_interrupt_with_latest_state(tmp_path):
@@ -149,3 +149,20 @@ def test_unfinished_node_recovery_rechecks_canonical_inputs(tmp_path):
     current, waits = advance_training_handoffs(state, {}, state_path=path)
     assert waits[0]["stage"] == "validation_prerequisites_required"
     assert not (inputs / "GPU_manifest.sh").exists()
+
+
+def test_finished_activated_handoff_does_not_replay():
+    from types import SimpleNamespace
+    from phase_agent.graphs.recovery.training_handoff_graph import _run_job
+
+    class FinishedGraph:
+        def get_state(self, _):
+            return SimpleNamespace(next=(), values={"business": {}})
+
+        def invoke(self, *args):
+            raise AssertionError("finished activated handoff must not replay")
+
+    current = {"remote_finetune_jobs": {"j": {"activated": True}}}
+    result = _run_job(FinishedGraph(), current, {}, "j", "thread")
+    assert result["business"] is current
+    assert result["inspection"] is None

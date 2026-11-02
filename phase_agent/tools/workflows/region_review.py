@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 
 from phase_agent.tools.relax_mc_batch.files import read, write
-from phase_agent.tools.policy.region_sampling import CONTROLS
+from phase_agent.policies.region_sampling import CONTROLS
 from phase_agent.tools.workflows.compact_review import review_artifacts
 
 
@@ -51,13 +51,14 @@ def write_proposal(proposal, state):
                 "钠含量Na每O2范围": [row["na_min"], row["na_max"]],
                 "选择理由": row["reason"],
                 "证据": row["evidence_refs"],
+                "选定扩胞矩阵": row.get("supercells"),
                 "合法相_超胞_钠含量组合数": detail.get("legal_cells"),
                 "已有覆盖组合数": detail.get("covered_cells"),
                 "组合数说明": "组合内可有多个TM排列；此数不是计划或实际branch数。",
             }
         )
     controls = params.get("sampling_controls") or CONTROLS
-    from phase_agent.decisions.agent.branch_pool_review import readable_review
+    from phase_agent.agents.exploration.branch_pool_review import readable_review
 
     deferred = not params["regions"]
     payload = {
@@ -76,10 +77,13 @@ def write_proposal(proposal, state):
         "项目已有branch数": preview.get("existing_branch_count"),
         "本次选择理由": action.get("reason"),
         "本次选择的区域": rows,
+        "Agent策略目标占比": params.get("strategy_shares"),
+        "策略比例说明": "按新增候选受控采样；合法候选不足或去重会使实际比例不同。",
         "本次新增branch数": 0 if deferred else None,
         "数量说明": "本次建议不新增，新增数为0；保留已登记branch，后续搜索另行提案。"
         if deferred
         else "不预设总数或各区域配额；实际新增数与相、超胞、Na分布在生成登记后统计。",
+        "首轮覆盖规则": (params.get("region_preview") or {}).get("initial_coverage"),
         "停止规则": {
             "区域停止": f"连续{controls['stagnant_batches']}小批没有新覆盖或新的初始TM近邻相关性描述符。",
             "每小批最多尝试": controls["batch_attempts"],
@@ -135,13 +139,31 @@ def write_result(history, manager, registered, state, action):
             }
         )
     report = history["summary"].get("sampling_report") or {}
+    strategy_branches = {}
+    for registered_row in registered:
+        branch_id = registered_row["branch_id"]
+        if branch_id not in new:
+            continue
+        structure = (manager.data.get("structures") or {}).get(registered_row["structure_id"], {})
+        for source in structure.get("generation_sources") or []:
+            strategy = source.get("strategy")
+            if strategy:
+                strategy_branches.setdefault(strategy, set()).add(branch_id)
+    actual_strategies = {key: len(value) for key, value in sorted(strategy_branches.items())}
     payload.update(
         {
-            "状态": "已生成，保护阈值触发后待审阅"
-            if report.get("status") == "paused_for_review"
-            else "已生成",
+            "状态": "已部分生成，初始化失败待审阅"
+            if (report.get("initial_coverage") or {}).get("required")
+            and history["summary"].get("initialization_failed_branches")
+            else (
+                "已生成，保护阈值触发后待审阅"
+                if report.get("status") == "paused_for_review"
+                else "已生成"
+            ),
             "本次新增branch数": len(new),
             "本次登记结构数": len(registered),
+            "实际策略branch数": actual_strategies,
+            "实际策略说明": "按已登记结构的生成来源去重统计；多个来源可指向同一branch。",
             "实际分布": [
                 {"相": p, "超胞倍数det_H": h, "钠含量Na每O2": x, "branch数": n}
                 for (p, h, x), n in sorted(counts.items())
@@ -180,6 +202,7 @@ def write_result(history, manager, registered, state, action):
         "new_branch_count": len(new),
         "registered_branch_count": len(rows),
         "registered_structure_count": len(registered),
+        "strategy_branch_counts": actual_strategies,
         "branches": rows,
     }
     payload["程序记录（可折叠）"] = raw

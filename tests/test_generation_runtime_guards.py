@@ -1,8 +1,8 @@
 from copy import deepcopy
 import pytest
-from phase_agent.decisions.agent.generation_plan import configured_generation_strategies
+from phase_agent.agents.exploration.generation_plan import configured_generation_strategies
 from phase_agent.tools.dispatch.execute_tool_action import execute_tool_action
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 from phase_agent.runtime.workflow_reply_presentation import _friendly_validation_errors
 
 @pytest.mark.parametrize('phase_scope', [['O3'], {'at_x': {'0': ['O3'], '1': ['O3']}, 'intermediate': ['O3']}])

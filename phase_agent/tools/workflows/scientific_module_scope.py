@@ -5,18 +5,64 @@ import math
 
 
 def attach_module_scope(action, state, config):
-    # New plans stop after generation. Previously frozen scopes remain executable.
+    """Freeze local Relax-MC input preparation inside the branch approval."""
+    from phase_agent.policies.model_generation import new_model_generation_facts
+
+    generation = new_model_generation_facts(state)
+    if generation["required"] and not generation["ready"]:
+        # First post-refresh registration has its own approval. Downstream
+        # inputs require a separate proposal after actual branches are known.
+        return action
+    params = action.setdefault("parameters", {})
+    if (
+        params.get("module_execution_scope")
+        or ((action.get("scientific_decision") or {}).get("module_execution") == "stepwise")
+        or (state.get("scientific_decision_policy") or {}).get("mlip_execution") == "stepwise"
+    ):
+        return action
+    preview = params.get("generation_cost_preview") or {}
+    selected = preview.get("selected_branch_upper")
+    cost = preview.get("relax_mc_cost_upper")
+    if type(selected) is not int or selected < 0 or not isinstance(cost, (int, float)):
+        return action
+    params["module_execution_scope"] = {
+        "schema_version": 1,
+        "operation": "prepare_relax_mc_batch",
+        "config_version": state.get("confirmed_config_version"),
+        "model_version": state.get("active_model_version")
+        or (config.get("mlip") or {}).get("version")
+        or (config.get("mlip") or {}).get("name"),
+        "branch_upper": selected,
+        "relative_cost_upper": float(cost),
+        "maximum_mc_segments": 3,
+        "submit_authorized": False,
+        "mc_policy": deepcopy(config.get("mc_policy") or {}),
+    }
     return action
 
 
 def prepare_generated_module(action, result, context):
+    # Reinitialization publishes the new pool for selection before a separate
+    # Relax/MC approval; it does not reuse an older bundled preparation scope.
+    if (action.get("parameters") or {}).get("replace_initial_pool"):
+        return result
     scope = (action.get("parameters") or {}).get("module_execution_scope")
     if not scope or not result.get("registered"):
         return result
+    summary = result.get("summary") or {}
+    initial = (summary.get("sampling_report") or {}).get("initial_coverage") or {}
+    if initial.get("required") and (
+        not initial.get("complete") or summary.get("initialization_failed_branches")
+    ):
+        return {
+            **result,
+            "status": "paused_for_review",
+            "reason": "initial_coverage_incomplete; review initialization failures before preparing inputs",
+        }
     state = result["state"]
     from phase_agent.tools.relax_mc_batch.plan import attach_preview
     from phase_agent.tools.relax_mc_batch.prepare import prepare_batch
-    from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+    from phase_agent.policies.validate_tool_action import validate_tool_action
 
     branches = sorted({r["branch_id"] for r in result["registered"]})
     config = context["effective_config"]
@@ -75,8 +121,19 @@ def prepare_generated_module(action, result, context):
                 "scope": deepcopy(scope),
             }
         )
+        failed_state = locals().get("prepared", {}).get("state") or state
+        failed_state.setdefault("module_preparation_reports", []).append(
+            {
+                "parent_task_key": action.get("task_key"),
+                "branch_ids": branches,
+                "status": "blocked",
+                "reason": str(error),
+                "scope": deepcopy(scope),
+            }
+        )
         return {
             **result,
+            "state": failed_state,
             "module_preparation": {"status": "blocked", "reason": str(error)},
             "reason": "Branch generation completed; module packaging blocked: " + str(error),
         }

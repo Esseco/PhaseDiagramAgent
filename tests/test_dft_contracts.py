@@ -1,6 +1,6 @@
 import json
 import pytest
-from phase_agent.decisions.agent.dft_contracts import DFTDecision, dft_contract_errors
+from phase_agent.agents.reliability.dft_contracts import DFTDecision, dft_contract_errors
 from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
 
 
@@ -30,7 +30,7 @@ def test_schema_does_not_authorize_unknown_candidate():
 
 
 def test_post_dft_repair_uses_same_dft_schema_once():
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
     from tests.test_post_dft_review import review
     requests = []
     def client(payload):

@@ -1,5 +1,5 @@
-from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
-from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
+from phase_agent.agents.common.post_dft_review import valid_post_dft_review
+from phase_agent.agents.strategic.propose_tool_action import propose_agent_tool_action
 from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 from tests.test_post_dft_review import review, parameters
 

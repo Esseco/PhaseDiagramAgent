@@ -11,7 +11,7 @@ from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from phase_agent.tools.workflows.create_workflow_handlers import create_workflow_handlers
 from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
 from phase_agent.tools.budget.reserve_action_budget import reserve_action_budget
-from phase_agent.tools.workflows.run_event_loop import run_event_loop
+from phase_agent.tools.workflows.run_action_turn import run_action_turn
 from phase_agent.runtime import run_workflow
 
 
@@ -70,37 +70,30 @@ def test_runtime_relax_defaults_do_not_change_confirmed_result_identity():
     assert "relax_parameters" not in effective["mlip"]
 
 
-def test_autonomous_event_loop_routes_every_action_through_policy_and_registry():
+def test_explicit_action_turns_route_each_action_through_policy_and_registry():
     session = _session()
-    actions = iter(
-        [
-            {"tool": "check_convergence", "parameters": {}, "budget": 0, "reason": "inspect"},
-            {"tool": "pause_search", "parameters": {}, "budget": 0, "reason": "pause"},
-        ]
-    )
+    actions = iter([
+        {"tool": "check_convergence", "parameters": {}, "budget": 0, "reason": "inspect"},
+        {"tool": "pause_search", "parameters": {}, "budget": 0, "reason": "pause"},
+    ])
     registry = create_tool_registry(create_workflow_handlers())
-    result = run_event_loop(
-        {},
-        session,
-        registry=registry,
-        agent_client=lambda _: next(actions),
-        execution_mode="autonomous",
-        max_steps=2,
-    )
+    options = dict(registry=registry, agent_client=lambda _: next(actions), execution_mode="autonomous")
+    first = run_action_turn({}, session, **options)
+    assert first["steps_executed"] == 1
+    assert len(first["state"]["action_records"]) == 1
+    result = run_action_turn(first["state"], session, **options)
+    events = first["events"] + result["events"]
     assert result["status"] == "paused"
-    assert result["steps_executed"] == 2
-    assert all(item["validation"]["valid"] for item in result["events"])
-    assert [item["final_action"]["tool"] for item in result["events"]] == [
-        "check_convergence",
-        "pause_search",
-    ]
+    assert result["steps_executed"] == 1
+    assert all(item["validation"]["valid"] for item in events)
+    assert [item["final_action"]["tool"] for item in events] == ["check_convergence", "pause_search"]
     assert len(result["state"]["action_records"]) == 2
 
 
 def test_interactive_event_loop_resumes_from_disk(tmp_path):
     session = _session()
     path = tmp_path / "event-state.json"
-    first = run_event_loop(
+    first = run_action_turn(
         {},
         session,
         registry=create_tool_registry(create_workflow_handlers()),
@@ -115,7 +108,7 @@ def test_interactive_event_loop_resumes_from_disk(tmp_path):
         state_path=path,
     )
     assert first["status"] == "awaiting_approval"
-    second = run_event_loop(
+    second = run_action_turn(
         path,
         session,
         registry=create_tool_registry(create_workflow_handlers()),
@@ -138,7 +131,7 @@ def test_file_approval_supports_comment_revision_then_explicit_approval(tmp_path
     state_path = tmp_path / "state.json"
     approvals = tmp_path / "approvals"
     registry = create_tool_registry(create_workflow_handlers())
-    first = run_event_loop(
+    first = run_action_turn(
         {},
         session,
         registry=registry,
@@ -161,7 +154,7 @@ def test_file_approval_supports_comment_revision_then_explicit_approval(tmp_path
     (action_dir / "decision-r000.json").write_text(
         json.dumps(decision, ensure_ascii=False), encoding="utf-8"
     )
-    revised = run_event_loop(
+    revised = run_action_turn(
         state_path,
         session,
         registry=registry,
@@ -183,7 +176,7 @@ def test_file_approval_supports_comment_revision_then_explicit_approval(tmp_path
     (action_dir / "decision-r001.json").write_text(
         json.dumps(approval, ensure_ascii=False), encoding="utf-8"
     )
-    completed = run_event_loop(
+    completed = run_action_turn(
         state_path,
         session,
         registry=registry,
@@ -247,7 +240,7 @@ def test_pending_task_is_recovered_and_settled_before_next_agent_action():
             }
         }
     )
-    first = run_event_loop(
+    first = run_action_turn(
         {},
         session,
         registry=create_tool_registry(handlers),
@@ -261,11 +254,11 @@ def test_pending_task_is_recovered_and_settled_before_next_agent_action():
             "reason": "search",
         },
         execution_mode="autonomous",
-        max_steps=5,
+        max_steps=1,
     )
     assert first["status"] == "pending"
     assert first["state"]["budget_reservations"]["K1"]["status"] == "submitted"
-    second = run_event_loop(
+    second = run_action_turn(
         first["state"],
         session,
         registry=create_tool_registry(create_workflow_handlers()),
@@ -284,7 +277,7 @@ def test_pending_task_is_recovered_and_settled_before_next_agent_action():
             }
         ],
         execution_mode="autonomous",
-        max_steps=2,
+        max_steps=1,
     )
     assert second["status"] == "paused"
     assert second["state"]["budget_reservations"]["K1"]["status"] == "settled"

@@ -141,7 +141,10 @@ def _assign_na(
             _assign_charge_balanced_average_tm_valence(structure, fraction, error)
     else:
         structure.add_oxidation_state_by_element(oxidation_states)
-    from Process_Vasp.structure import gen_ESGS_structure
+    try:
+        from Process_Vasp.structure import gen_ESGS_structure
+    except ModuleNotFoundError:
+        from Process_Vasp.structures.structure import gen_ESGS_structure
 
     generated = gen_ESGS_structure(structure, 1)
     if not generated:

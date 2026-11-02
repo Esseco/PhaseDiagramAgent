@@ -24,12 +24,18 @@ def update_phase_diagram(
     parent_versions: dict[str, str] | None = None,
     active_model_version: str | None = None,
     output_state: dict | None = None,
-    include_dft: bool = True,
+    include_dft: bool = False,
+    latest_per_structure: bool = False,
 ) -> dict[str, Any]:
     """分别构建 mlip/dft 相图，保留原能量并保存可追踪版本。"""
     if energy_basis not in {"total", "per_atom", "per_formula_unit"}:
         raise ValueError("energy_basis 必须是 total/per_atom/per_formula_unit")
     output = {"energy_basis": energy_basis, "diagrams": {}, "mlip_by_version": {}}
+    refresh_plan = ((output_state or {}).get("model_refresh") or {}).get("plan") or {}
+    latest_mode = (
+        latest_per_structure or refresh_plan.get("energy_policy") == "latest_valid_per_structure_v1"
+    )
+    latest_normalized = []
     from phase_agent.analysis.phase.phase_boundary import (
         phase_boundary_rule,
         outside_phase_boundary,
@@ -106,6 +112,8 @@ def update_phase_diagram(
                 )
             except (KeyError, TypeError, ValueError) as error:
                 rejected.append({"record_id": item.get("record_id"), "reason": str(error)})
+        if method == "mlip" and latest_mode:
+            latest_normalized.extend(normalized)
         snapshot = _build_snapshot(
             method,
             normalized,
@@ -157,7 +165,7 @@ def update_phase_diagram(
             )
             directory = phase_snapshot_directory(root, method, output_version, state=output_state)
             if output_state is not None:
-                from phase_agent.analysis.state.model_epoch import model_epoch
+                from phase_agent.evidence.model_epoch import model_epoch
 
                 snapshot["epoch"] = model_epoch(output_state, output_version)
             filename = f"phase_diagram_{method}_{snapshot['version']}"
@@ -212,6 +220,95 @@ def update_phase_diagram(
         else "no_results_for_active_model",
         "entries": [],
     }
+    if latest_mode:
+        from phase_agent.analysis.phase.latest_mlip_lineage import latest_mlip_records
+
+        rounds = ((output_state or {}).get("upload_layout") or {}).get("model_rounds") or {}
+        try:
+            latest, issues, aliases = latest_mlip_records(
+                latest_normalized, (output_state or {}).get("tasks") or [], rounds, return_aliases=True
+            )
+        except (OSError, ValueError, TypeError) as error:
+            latest, issues, aliases = [], [{"reason": str(error)}], {}
+        if issues:
+            snapshot = {
+                "method": "mlip",
+                "model_version": chosen,
+                "status": "unknown",
+                "reason": "latest_structure_lineage_unresolved",
+                "issues": issues,
+                "entries": [],
+                "energy_policy": "latest_valid_per_structure_v1",
+                "version": hashlib.sha256(json.dumps(issues, sort_keys=True).encode()).hexdigest()[
+                    :12
+                ],
+            }
+        else:
+            for record in latest:
+                record["source_version"] = record.get("model_version") or record.get(
+                    "source_version"
+                )
+            snapshot = _build_snapshot(
+                "mlip",
+                latest,
+                [],
+                energy_basis,
+                (parent_versions or {}).get("mlip"),
+                phase_rule=phase_rule,
+            )
+            sources = sorted({r["source_version"] for r in latest})
+            provenance = [(r.get("record_id"), r["source_version"]) for r in latest]
+            snapshot["version"] = hashlib.sha256(
+                json.dumps(
+                    [snapshot["version"], chosen, sorted(provenance), sorted(aliases.items())],
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest()[:12]
+            snapshot["equivalent_record_aliases"] = aliases
+            active_snapshot = output["mlip_by_version"].get(chosen) or {}
+            if active_snapshot.get("refresh_coverage"):
+                snapshot["refresh_coverage"] = active_snapshot["refresh_coverage"].copy()
+            snapshot.update(
+                model_version=chosen,
+                energy_policy="latest_valid_per_structure_v1",
+                energy_basis_id=f"mlip:latest-per-structure:{energy_basis}",
+                source_model_versions=sources,
+                mixed_model_versions=len(sources) > 1,
+                independent_model_comparability="not_established",
+            )
+        if output_directory is not None:
+            directory = phase_snapshot_directory(
+                Path(output_directory), "mlip", chosen, state=output_state
+            )
+            from phase_agent.evidence.model_epoch import model_epoch
+
+            snapshot["epoch"] = model_epoch(output_state or {}, chosen)
+            if snapshot.get("status") == "completed" and snapshot.get("entries"):
+                directory.mkdir(parents=True, exist_ok=True)
+                filename = f"phase_diagram_mlip_{snapshot['version']}"
+                path = directory / f"{filename}.json"
+                archive = directory / f"{filename}.csv"
+                if path.is_file():
+                    stored = json.loads(path.read_text(encoding="utf-8"))
+                    if stored.get("version") != snapshot["version"]:
+                        raise ValueError("mixed_hull_snapshot_identity_mismatch")
+                    snapshot = stored
+                else:
+                    export_phase_diagram_csv(snapshot, archive)
+                    snapshot["path"] = str(path)
+                    path.write_text(
+                        json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                from phase_agent.analysis.phase.publish_current_csv import publish_current_csv
+
+                if archive.is_file():
+                    publish_current_csv(snapshot, archive)
+            else:
+                _publish_empty_current_csv(
+                    snapshot, directory, f"phase_diagram_mlip_{snapshot['version']}"
+                )
+        output["diagrams"]["mlip"] = snapshot
     return output
 
 

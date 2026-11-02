@@ -102,7 +102,7 @@ def prepare_relax_upload_batches(*, action, context):
     settings_id = hashlib.sha256(
         json.dumps(settings, sort_keys=True, default=str).encode()
     ).hexdigest()[:12]
-    from phase_agent.decisions.agent.choose_debug_next_action import _verified_migrated_relax_ids
+    from phase_agent.agents.strategic.choose_debug_next_action import _verified_migrated_relax_ids
 
     migrated_ids = _verified_migrated_relax_ids(state, model, version)
     created = []

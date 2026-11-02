@@ -2,10 +2,10 @@ import csv
 import json
 from copy import deepcopy
 import pytest
-from phase_agent.analysis.state.training_result_evidence import training_result_evidence
-from phase_agent.analysis.state.round_budget_evidence import round_budget_evidence, budget_decision_outcomes
-from phase_agent.decisions.agent.round_budget_review import round_budget_review_errors
-from phase_agent.decisions.agent.proposal_validation import proposal_errors
+from phase_agent.evidence.training_result_evidence import training_result_evidence
+from phase_agent.evidence.round_budget_evidence import round_budget_evidence, budget_decision_outcomes
+from phase_agent.agents.strategic.round_budget_review import round_budget_review_errors
+from phase_agent.agents.common.proposal_validation import proposal_errors
 from phase_agent.persistence.memory.collect_memory_candidates import collect_memory_candidates
 from phase_agent.persistence.memory.verify_evidence_refs import verify_evidence_refs
 

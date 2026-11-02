@@ -16,7 +16,7 @@ def activate_validated_model(
             "state": state,
             "reason": "new_model_not_validated",
         }
-    from phase_agent.tools.policy.workflow_policy import active_tasks
+    from phase_agent.policies.workflow_policy import active_tasks
 
     if active_tasks(state):
         return {
@@ -24,6 +24,20 @@ def activate_validated_model(
             "state": state,
             "reason": "model_switch_waits_for_inflight_tasks",
         }
+    evidence_status = validation.get("evidence_status")
+    if (
+        evidence_status == "independently_validated"
+        and validation.get("independent_test_completed") is not True
+    ):
+        return {"status": "rejected", "state": state, "reason": "independent_evidence_inconsistent"}
+    if evidence_status == "research_candidate" and (
+        validation.get("independent_test_completed") is not False
+        or validation.get("evaluation_type")
+        not in {"grouped_cross_validation_review", "training_artifact_integrity"}
+    ):
+        return {"status": "rejected", "state": state, "reason": "research_evidence_inconsistent"}
+    if evidence_status not in {None, "research_candidate", "independently_validated"}:
+        return {"status": "rejected", "state": state, "reason": "candidate_evidence_not_eligible"}
     old = state.get("active_model_version")
     new = new_model.get("version")
     if not new:

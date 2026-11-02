@@ -108,7 +108,8 @@ def test_default_training_prepares_portable_inputs_not_local_training(tmp_path):
     assert params["foundation_model"] == "/remote/models/m1.model"
     assert not Path(params["valid_file"]).is_absolute()
     assert "minimum_new_dft_records" not in params
-    assert "-n mace" in (directory / "run_training.sh").read_text()
+    assert "conda activate mace" in (directory / "GPU.sh").read_text()
+    assert "run_training_task.py" in (directory / "run_training.sh").read_text()
     main = job["report"]["main_model"]
     assert main["folds"] == 5
     seen = []
@@ -144,7 +145,7 @@ def test_default_training_prepares_portable_inputs_not_local_training(tmp_path):
     assert "未覆盖" in blocked["reason"]
     assert params["train_file"] == params["valid_file"] == "../_shared_data/train.xyz"
     assert params["patience"] == 20
-    assert "collect_training_results.py" in (directory / "run_training.sh").read_text()
+    assert "collect_training_results.py" in (directory / "collect_results.sh").read_text()
 
 
 def test_legacy_training_environment_uses_remote_template_not_local():

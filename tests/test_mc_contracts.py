@@ -1,5 +1,5 @@
 import pytest
-from phase_agent.decisions.agent.mc_contracts import mc_contract_errors
+from phase_agent.agents.exploration.mc_contracts import mc_contract_errors
 from phase_agent.tools.workflows.create_active_learning_handlers import _allocate_mc_bohb
 
 

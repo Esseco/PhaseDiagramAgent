@@ -167,9 +167,31 @@ def prepare_ordering_inputs(*, action, context):
     prepared = prepare_ordering_search(plan, root)
     from phase_agent.tools.remote.manual_upload_runner import _bundle_mc_backend
 
-    _bundle_mc_backend(root / "runtime")
-    backend = root / "runtime" / "mc_backend" / "Process_AL_MC"
-    shutil.copytree(backend, root / "runtime" / "Process_AL_MC", dirs_exist_ok=True)
+    import tempfile
+
+    target_backend = root / "runtime" / "Process_AL_MC"
+    with tempfile.TemporaryDirectory(prefix=".ordering-backend-", dir=root.parent) as temporary:
+        _bundle_mc_backend(Path(temporary))
+        backend = Path(temporary) / "mc_backend" / "Process_AL_MC"
+        if not target_backend.exists():
+            target_backend.parent.mkdir(exist_ok=True)
+            backend.rename(target_backend)
+        else:
+            for candidate in backend.rglob("*"):
+                if candidate.is_file():
+                    target = target_backend / candidate.relative_to(backend)
+                    if not target.is_file() or target.read_bytes() != candidate.read_bytes():
+                        raise ValueError("ordering backend differs; reconcile the existing handoff")
+    remote = Path(__file__).parents[1] / "remote"
+    shutil.copy2(remote / "transfer_bundle.py", root / "transfer_bundle.py")
+    (root / "export_ordering_result.py").write_text(
+        (remote / "export_ordering_result.py")
+        .read_text(encoding="utf-8")
+        .replace(
+            "from phase_agent.tools.remote.transfer_bundle import", "from transfer_bundle import"
+        ),
+        encoding="utf-8",
+    )
     profiles = (context.get("relax_mc_runtime") or {}).get("stage_profiles") or {}
     if profiles:
         from phase_agent.tools.relax_mc_batch.files import gpu_profile, script
@@ -187,12 +209,38 @@ def prepare_ordering_inputs(*, action, context):
         "Independent fixed-composition TM-focused search. Inputs only; no job submitted.\n"
         "Use the configured MACE environment: python run_search.py\n"
         "Submit manually with the reviewed site profile if submit_search.sh is present.\n"
-        "Copy the whole directory back after completion, including plan.json, execution_binding.json, result.json, matrices and CSV files.\n"
+        "After completion: python export_ordering_result.py .\n"
+        "Return only the generated .results.zip; keep models, logs, runtime and search history on the server.\n"
+        "The archive retains the plan, model binding, checksummed result manifest, ranking CSVs and referenced structures.\n"
         "Each parallel worker loads a model; workers and GPU memory are part of the reviewed workload.\n"
         "Interrupted running claims require explicit reconciliation; preserve history files.\n",
         encoding="utf-8",
     )
-    archive = shutil.make_archive(str(root) + ".inputs", "zip", root_dir=root)
+    from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
+
+    archive = create_bundle(
+        root,
+        [
+            p
+            for p in input_files(root)
+            if p.relative_to(root).parts[:2] == ("runtime", "Process_AL_MC")
+            and p.suffix == ".py"
+            or p.parent == root
+            and p.name
+            in {
+                "plan.json",
+                "run_search.py",
+                "workload.json",
+                "README.md",
+                "submit_search.sh",
+                "transfer_bundle.py",
+                "export_ordering_result.py",
+            }
+        ],
+        str(root) + ".inputs.zip",
+        kind="inputs",
+        binding={"plan_id": plan["plan_id"]},
+    )
     state.setdefault("ordering_searches", {})[plan["plan_id"]] = {
         "plan_id": plan["plan_id"],
         "directory": str(root),
@@ -223,6 +271,32 @@ def recover_ordering_results(*, action, context):
     if not record:
         return {"status": "rejected", "state": state, "reason": "Unknown registered ordering plan"}
     directory = params.get("results_directory") or record["directory"]
+    archive = params.get("results_archive")
+    if archive:
+        import json
+        import tempfile
+        import zipfile
+        from phase_agent.tools.remote.transfer_bundle import (
+            import_bundle,
+            validate_bundle,
+            MANIFEST,
+        )
+        from phase_agent.tools.remote.export_ordering_result import allowed_result
+
+        validate_bundle(archive, extra_result_suffixes=(".csv",))
+        with zipfile.ZipFile(archive) as bundle:
+            inventory = json.loads(bundle.read(MANIFEST))
+        if inventory.get("batch_binding", {}).get("plan_id") != plan_id or any(
+            not allowed_result(row["path"]) for row in inventory["files"]
+        ):
+            raise ValueError("ordering return archive scope or plan mismatch")
+        with tempfile.TemporaryDirectory(prefix=".ordering-return-") as temporary:
+            import_bundle(archive, temporary, extra_result_suffixes=(".csv",))
+            inspect_ordering_search(temporary, expected_plan_id=plan_id)
+        directory = str(Path(record["directory"]) / "returned")
+        import_bundle(archive, directory, extra_result_suffixes=(".csv",))
+    elif Path(directory).resolve() != Path(record["directory"]).resolve():
+        raise ValueError("external ordering returns require a validated results_archive")
     result = inspect_ordering_search(directory, expected_plan_id=plan_id)
     state["ordering_searches"][plan_id].update(
         status=result["status"], results_directory=str(Path(directory).resolve()), result=result

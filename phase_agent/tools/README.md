@@ -6,7 +6,7 @@
 
 - [dispatch/create_tool_registry.py](dispatch/create_tool_registry.py)
 - [workflows/run_tool_step.py](workflows/run_tool_step.py)
-- [policy/validate_tool_action.py](policy/validate_tool_action.py)
+- [policy/validate_tool_action.py](../policies/validate_tool_action.py)
 - [workflows/create_dft_selection_handler.py](workflows/create_dft_selection_handler.py)
 
 职责和审批边界见 [Graph 架构](../../docs/architecture/graph.md#doc-graph_architecture)，使用说明见 [文档索引](../../docs/README.md)。

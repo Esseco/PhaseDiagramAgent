@@ -71,12 +71,26 @@ def _drop_finished_pending(state):
     }
     records = {row.get("record_id"): row for row in state.get("action_records") or []}
     invocations = state.get("invocations") or {}
-    obsolete = [
-        key
-        for key, item in pending.items()
-        if (invocations.get(key) or records.get(item.get("record_id")) or {}).get("status")
-        in finished
-    ]
+    from phase_agent.tools.workflows.compact_action_history import compact_action_history
+
+    obsolete = []
+    for key, item in pending.items():
+        latest = records.get(item.get("record_id")) or {}
+        if latest.get("status") == "awaiting_approval":
+            continue
+        receipt = invocations.get(key) or latest
+        if receipt.get("status") not in finished:
+            continue
+        proposed = item.get("agent_proposal")
+        completed = receipt.get("agent_proposal")
+        if proposed and completed:
+            if compact_action_history({"agent_proposal": proposed}) != compact_action_history(
+                {"agent_proposal": completed}
+            ):
+                continue
+        elif int(item.get("revision", 0)) > 0:
+            continue  # A status-only old receipt cannot identify a new revision.
+        obsolete.append(key)
     if not obsolete:
         return state, False
     updated = deepcopy(state)

@@ -9,7 +9,7 @@ from phase_agent.configuration.session.confirm_config_snapshot import confirm_co
 from phase_agent.tools.workflows.run_tool_step import _initialize_tool_step, run_tool_step
 from phase_agent.tools.workflows.tool_outcomes import _store_completed
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
-from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.policies.execution_policy import build_agent_proposal
 
 
 def fixture():

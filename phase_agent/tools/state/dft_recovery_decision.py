@@ -4,7 +4,7 @@ from copy import deepcopy
 import hashlib
 import json
 
-from phase_agent.analysis.state.dft_round_status import dft_recovery_rounds, dft_round_scope
+from phase_agent.evidence.dft_round_status import dft_recovery_rounds, dft_round_scope
 from phase_agent.tools.state.task_waiting import active_pending_tasks
 
 
@@ -44,17 +44,13 @@ def cancel_dft_recovery_waits(state, task_ids, *, user_message):
     return current
 
 
-def classify_dft_recovery_reply(message, state):
+def classify_dft_recovery_reply(message, state, *, allow_short_replies=True):
     """Only exact replies to a saved question; never infer a choice from 'continue'."""
     question = state.get("pending_dft_recovery_question")
     if not question:
         return None
     text = str(message).strip().lower().rstrip("。.!！").replace(" ", "")
     close = {
-        "否",
-        "不",
-        "不用了",
-        "不等了",
         "不回收",
         "不回收了",
         "不再回收",
@@ -63,12 +59,16 @@ def classify_dft_recovery_reply(message, state):
         "取消剩余dft",
         "剩下的不回收了",
         "不再回收剩余dft",
+        "不再回收dft",
         "就用已有结果继续",
         "不回收了，继续",
     }
-    wait = {"是", "继续回收", "继续等待", "等剩余结果", "还要回收", "回收剩余dft"}
+    wait = {"继续回收", "继续等待", "等剩余结果", "还要回收", "回收剩余dft"}
+    if allow_short_replies:
+        close |= {"否", "不", "不用了", "不等了"}
+        wait.add("是")
     # Plain approval words cannot consume a scientific action's approval.
-    if not state.get("pending_execution_policies"):
+    if allow_short_replies and not state.get("pending_execution_policies"):
         close |= {"拒绝", "reject", "no"}
         wait |= {"同意", "approve", "yes"}
     choice = "close" if text in close else "wait" if text in wait else None

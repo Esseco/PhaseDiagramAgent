@@ -1,11 +1,11 @@
 """Explicit human generation limits must survive Agent proposal revision."""
 
-from phase_agent.decisions.agent.propose_tool_action import _apply_generation_defaults
-from phase_agent.decisions.agent.resolve_explicit_generation_request import (
+from phase_agent.agents.strategic.propose_tool_action import _apply_generation_defaults
+from phase_agent.agents.exploration.resolve_explicit_generation_request import (
     _requested_branch_batch_size, _requested_max_det_H,
     resolve_explicit_generation_request,
 )
-from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
+from phase_agent.agents.strategic.revise_tool_proposal import revise_tool_proposal
 
 
 def test_selected_branch_count_is_not_candidate_quota():
@@ -44,7 +44,7 @@ def test_explicit_generation_request_preserves_selected_branch_limit():
 
 def test_over_confirmed_legacy_limit_feedback_cancels_old_approvable_proposal():
     from phase_agent.configuration.defaults.default_layered_search_config import default_layered_search_config
-    from phase_agent.tools.policy.execution_policy import build_agent_proposal
+    from phase_agent.policies.execution_policy import build_agent_proposal
     from phase_agent.tools.workflows.run_tool_step import run_tool_step
 
     config = default_layered_search_config()

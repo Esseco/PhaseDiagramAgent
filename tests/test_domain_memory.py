@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from phase_agent.analysis.state.build_decision_context import build_decision_context
+from phase_agent.evidence.build_decision_context import build_decision_context
 from phase_agent.persistence.memory.build_domain_skill_draft import build_domain_skill_draft
 from phase_agent.persistence.memory.collect_memory_candidates import collect_memory_candidates
 from phase_agent.persistence.memory.load_matching_domain_skills import load_matching_domain_skills

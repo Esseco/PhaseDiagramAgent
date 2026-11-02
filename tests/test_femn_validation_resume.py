@@ -58,9 +58,7 @@ def rejected_selection():
 
 
 def resume(state, config=None):
-    forbidden = Mock(
-        side_effect=AssertionError("must not call model or prepare/execute tasks")
-    )
+    forbidden = Mock(side_effect=AssertionError("must not call model or prepare/execute tasks"))
     config = config or {
         "agent": {"allowed_tools": ["select_dft_candidates"]},
         "qbc": default_dft_decision_config(),
@@ -95,12 +93,13 @@ def test_resume_revalidates_complete_decisions_without_model_or_mutation():
     assert proposal["reuse_source_record_id"] == "old"
     assert (
         raw["parameters"]["decisions"]
-        == before["action_records"][-1]["agent_proposal"]["raw_action"]["parameters"][
-            "decisions"
-        ]
+        == before["action_records"][-1]["agent_proposal"]["raw_action"]["parameters"]["decisions"]
     )
     assert raw["target_ids"] == ["s"]
-    assert raw["parameters"]["dft_input_preview"]["task_count"] == 1
+    assert raw["parameters"]["dft_selection_preview"]["task_count"] == 1
+    assert raw["parameters"]["dft_selection_preview"]["candidate_ids"] == ["s"]
+    assert raw["parameters"]["prepare_inputs_after_approval"] is True
+    assert "dft_input_preview" not in raw["parameters"]
     assert raw["budget"] != 999
     assert result["record_id"] == "new"
     assert "human_feedback" not in result and "execution" not in result
@@ -164,9 +163,7 @@ def test_current_preflight_failure_preserves_plan_without_reselection(defect):
     if defect == "missing_group":
         action["parameters"]["decisions"].pop()
     elif defect == "duplicate":
-        action["parameters"]["decisions"].append(
-            deepcopy(action["parameters"]["decisions"][0])
-        )
+        action["parameters"]["decisions"].append(deepcopy(action["parameters"]["decisions"][0]))
     elif defect == "unknown":
         action["parameters"]["decisions"][0]["candidate_id"] = "unknown"
     elif defect == "environment":

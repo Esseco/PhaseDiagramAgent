@@ -47,6 +47,7 @@ def restart_failed_task(state, task_id, *, budget_limits, config_version, max_re
             "slurm_batch_id",
             "slurm_array_index",
             "input_path",
+            "task_checksum",
             "result_path",
             "outputs",
             "result",

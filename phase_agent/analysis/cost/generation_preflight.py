@@ -93,7 +93,7 @@ def generation_framework_costs(manager, phase_references, config, state):
 
 
 def attach_generation_preflight(action, state, context, config):
-    from phase_agent.tools.policy.region_sampling import is_region, preview
+    from phase_agent.policies.region_sampling import is_region, preview
 
     if is_region(action):
         action["parameters"]["region_preview"] = preview(
@@ -103,6 +103,24 @@ def attach_generation_preflight(action, state, context, config):
             config,
             state,
         )
+        # Region counts are discovered during sampling.  Freeze the approved
+        # legal-cell envelope so the same approval also prepares inputs for the
+        # branches actually registered, without authorizing submission.
+        legal = sum(
+            row.get("legal_cells", 0)
+            for row in action["parameters"]["region_preview"].get("regions", [])
+        )
+        if legal:
+            from phase_agent.tools.workflows.scientific_module_scope import attach_module_scope
+
+            budgets = config.get("budgets") or {}
+            remaining = budgets.get("total_relative_cost")
+            if isinstance(remaining, (int, float)):
+                action["parameters"]["generation_cost_preview"] = {
+                    "selected_branch_upper": legal,
+                    "relax_mc_cost_upper": float(remaining),
+                }
+                attach_module_scope(action, state, config)
         return action
     if action.get("tool") != "generate_branches" or not (action.get("parameters") or {}).get(
         "generation_plan"
@@ -117,7 +135,7 @@ def attach_generation_preflight(action, state, context, config):
     preview = preview_generation_cost(action, frameworks, state, config)
     from phase_agent.tools.budget.check_budget import budget_is_hard
 
-    from phase_agent.tools.policy.adaptive_branch_count import budget_limits_for_action
+    from phase_agent.policies.adaptive_branch_count import budget_limits_for_action
 
     if preview["status"] == "over_budget" and budget_is_hard(
         budget_limits_for_action(action, config.get("budgets"))
@@ -125,7 +143,7 @@ def attach_generation_preflight(action, state, context, config):
         raise ValueError(
             f"扩胞前Relax+MC粗估 {preview['relax_mc_cost_upper']:.3g} 超过剩余预算 {preview['remaining_budget']:.3g}；请缩小胞/数量或修订预算，未生成结构"
         )
-    from phase_agent.tools.policy.adaptive_branch_count import is_adaptive_generation
+    from phase_agent.policies.adaptive_branch_count import is_adaptive_generation
 
     if is_adaptive_generation(action):
         preview["budget_enforcement"] = "advisory"

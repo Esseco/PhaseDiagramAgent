@@ -5,7 +5,7 @@ import json
 
 def configuration_view(handler, facts):
     from phase_agent.runtime.project_context import handler_project_context, current_config_session
-    from phase_agent.analysis.state.project_authority import confirmed_configuration
+    from phase_agent.evidence.project_authority import confirmed_configuration
 
     card = handler_project_context(handler, facts)
     config = confirmed_configuration(facts, current_config_session(handler))

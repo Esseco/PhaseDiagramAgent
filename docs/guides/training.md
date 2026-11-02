@@ -15,7 +15,7 @@
 The existing scientific graph collects training artifacts, then advances a durable training_handoff in each remote_finetune_job. State is saved before returning a manual wait. Repeated continue reads returned files and preserves identical generated scripts. No scheduler calls or local model inference are performed.
 
 1. Missing paths/hashes: generates inputs/GPU_manifest.sh and refreshes collect_training_results.py. Upload both to the original HPC inputs directory; submit sbatch GPU_manifest.sh. Return results/models.json.
-2. Complete manifest: checks independent validation prerequisites. It never uses K-fold results or the full training set as an independent test.
+2. Complete manifest: the handoff checks independent-validation prerequisites. If they are missing and a matched grouped CV review can be built, the existing CV-review route may register a candidate and return awaiting_activation_approval. This is a provisional research transition, not an independent test of the final model; inspect the returned stage, evidence_type and candidate rather than treating missing independent-validation inputs as a universal activation block. The independent-validation route remains available when configured.
 3. Configured independent validation: generates validation.xyz, validation_request.json, validate_remote_training.py and GPU_validation.sh. Upload to original inputs; submit sbatch GPU_validation.sh. Return the request-specific results/validation-<request_id>.json.
 4. Recovery binds the report to the request, model manifest and dataset hashes, checks finite metrics, then registers candidate_models using the existing validate_mlip criteria. Failed validation/rejected candidates return control to downstream Agent decision-making.
 5. Successful candidates require an explicit chat command: 激活候选 <candidate-version> 原因：<review reason>. 拒绝候选 <candidate-version> 原因：<reason> records rejection. Generic continue/approve never activates. Activation rechecks returned artifact fingerprints, uses existing governance and marks model-dependent results stale. Next continue enters existing model-refresh approval, followed by round-budget comparison.
@@ -58,7 +58,7 @@ Tests use actual SQLite saver close/reopen, native interrupt snapshots, fresh-st
 
 ### 实现入口
 
-[phase_agent/graphs/training_handoff_graph.py](../../phase_agent/graphs/training_handoff_graph.py)。
+[phase_agent/graphs/recovery/training_handoff_graph.py](../../phase_agent/graphs/recovery/training_handoff_graph.py)。
 
 <a id="doc-remote_training_recovery"></a>
 
@@ -70,15 +70,11 @@ Tests use actual SQLite saver close/reopen, native interrupt snapshots, fresh-st
 
 校验包括完成标记、原模型版本、训练轮、委员会成员、唯一主模型、逐折成员、逐点数量、有限数值；模型路径必须是超算绝对路径，并记录SHA256。相对路径旧清单允许登记已回传指标，但标为 metadata_required，不能据此激活。可在更新过收集脚本的超算 inputs 目录运行 `python collect_training_results.py --manifest-only` 补清单，无需重训。
 
-### 当前边界
+### 当前验证与激活边界
 
-本次接通的是回收、校验与状态展示，不是完整远端模型验证/激活通道。validation_required 表示需要独立验证，而不是验证已通过。现有训练器型验证接口尚未与仅远端路径的回收候选自动连接；生命周期在这里安全停止并说明原因，不重新建议微调输入。后续需要实现远端验证输入生成、同版本验证回收及独立激活审批，然后才恢复新模型结构刷新。
+远端路径候选通过 training_handoff 原生子图处理。已有独立验证配置时可准备验证输入并回收结果；验证失败不激活。若独立验证前提不足，已有实现可在具备同帧分组 K 折比较时登记 CV 审阅候选，返回 awaiting_activation_approval：经明确批准切换后刷新结构和凸包，再进入下一轮科学决策；不自动进入 DFT。K 折并非最终全数据模型的独立测试，不应把临时研究切换当作最终交付验证通过。两条路径都须明确批准具体候选版本及原因，以实际返回 stage、evidence_type 和候选状态为准。CV 报告中的 activatable 字段与交接阶段可能并存，不能单独用该字段推断当前候选是否已登记或判断最终模型独立验证已通过。
 
-K折汇总来自回传CSV，仅供评估；不得冒充最终全数据主模型的独立测试结果。
-
-### 验证记录
-
-初版针对性测试15项通过。之后增补逐折完整性校验及对应测试数据；完整回归和该增补复测因工具审批额度耗尽未执行，不声称全量验证完成。未处理真实工作区数据。
+新训练动作的 parameters.handoff_scope 默认仅 manifest；包含 validation 时须在方案中列出并审核。超出原授权或配置改变后，用 prepare_training_handoff 单独审批派生输入。该授权不包括上传和 HPC 提交。升级前任务保留原历史交接契约，不补写新授权。
 
 [phase_agent/tools/local/recover_remote_training.py](../../phase_agent/tools/local/recover_remote_training.py)。
 
@@ -276,3 +272,7 @@ Agent 先按最终结构识别/复用相，再生成 `magnetic_check` 与 `spin_
 
 [phase_agent/tools/remote/collect_training_results.py](../../phase_agent/tools/remote/collect_training_results.py)。
 
+
+### 候选证据状态
+
+`evidence_status=research_candidate` 表示分组CV审阅形成的研究候选，未完成独立测试；经明确批准切换后刷新结构和凸包，进入下一轮决策，不自动选择或提交DFT。`independently_validated` 仅在独立验证返回且通过后登记。历史无该字段的候选保留旧流程；审批展示可根据原CV类型标注研究候选。旧兼容字段 `status=validated_candidate` 和 `validation.passed` 是流程资格字段，不是独立验证证明；检查 `independent_test_completed` 与证据状态。

@@ -254,6 +254,7 @@ def _workflow_wait_gate(frame):
     pre_reconciled = frame["pre_reconciled"]
     manual_wait = frame["manual_wait"]
     rebuilding = frame["rebuilding"]
+    retry_input_only = _failed_retry_input_only(frame)
     runtime_path = state_path or effective_config.get("state_path")
     from phase_agent.tools.workflows.reference_dft_startup import startup_gate
 
@@ -268,7 +269,7 @@ def _workflow_wait_gate(frame):
         _save_runner_state(startup["state"], runtime_path)
         return startup
     if runtime_path:
-        from phase_agent.graphs.execution_recovery_graph import execution_recovery_report
+        from phase_agent.graphs.recovery.execution_recovery_graph import execution_recovery_report
 
         report = execution_recovery_report(runtime_path, feedback["state"])
         feedback["state"]["execution_recovery_report"] = report
@@ -350,7 +351,7 @@ def _workflow_wait_gate(frame):
             "steps_executed": 0,
             "submitted": False,
         }
-    if recovery_question and execution_mode == "interactive":
+    if recovery_question and execution_mode == "interactive" and not retry_input_only:
         _save_runner_state(feedback["state"], state_path or effective_config.get("state_path"))
         return {
             "status": "awaiting_dft_recovery_decision",
@@ -369,7 +370,12 @@ def _workflow_wait_gate(frame):
         }
     from phase_agent.tools.workflows.model_refresh_state import refresh_active
 
-    if manual_wait and not rebuilding and not refresh_active(feedback["state"]):
+    if (
+        manual_wait
+        and not rebuilding
+        and not retry_input_only
+        and not refresh_active(feedback["state"])
+    ):
         wait_state = feedback["state"]
         _save_runner_state(wait_state, state_path or effective_config.get("state_path"))
         return {
@@ -390,13 +396,42 @@ def _workflow_wait_gate(frame):
     return frame
 
 
+def _failed_retry_input_only(frame):
+    """Let an explicit failed-task input request reach normal validation/approval.
+
+    Other pending tasks and their recovery question remain unchanged.
+    """
+    state = frame["feedback"]["state"]
+    target = getattr(frame.get("agent_client"), "_failed_retry_target", None)
+    if target is None and frame.get("human_feedback"):
+        for record in state.get("pending_execution_policies", {}).values():
+            proposal = record.get("agent_proposal") or {}
+            action = proposal.get("raw_action") or proposal
+            if (action.get("tool") or action.get("action_type")) == "restart_failed_task" and (
+                action.get("parameters") or {}
+            ).get("prepare_inputs_after_approval"):
+                targets = action.get("target_ids") or []
+                if len(targets) == 1:
+                    target = targets[0]
+                    break
+    return bool(
+        target
+        and any(
+            t.get("task_id") == target
+            and t.get("stage") in {"dft_single_point", "dft_relax"}
+            and t.get("status") in {"failed", "timeout"}
+            for t in state.get("tasks", [])
+        )
+    )
+
+
 def _assess_workflow_round(frame):
     feedback = frame["feedback"]
     effective_config = frame["effective_config"]
     manager = frame["manager"]
     runtime_adapters = frame["runtime_adapters"]
     state_path = frame["state_path"]
-    from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+    from phase_agent.evidence.post_dft_assessment import post_dft_assessment
     from phase_agent.tools.workflows.refresh_dft_comparisons import refresh_dft_comparisons
 
     assessment = post_dft_assessment(feedback["state"], effective_config)

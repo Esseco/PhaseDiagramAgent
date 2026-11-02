@@ -14,7 +14,7 @@ from phase_agent.persistence.memory.review_queue import propose_memory_update
 from phase_agent.tools.local.prepare_local_batch_files import prepare_local_batch_files
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from phase_agent.tools.workflows.run_tool_step import run_tool_step
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 from phase_agent.tools.step_runner.build_status_summary import build_status_summary
 from phase_agent.tools.step_runner.file_protocol import write_json
 from phase_agent.runtime.local_agent_control import LocalAgentControl

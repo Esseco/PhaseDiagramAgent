@@ -82,6 +82,18 @@ def inspect_execution(state, issue, *, state_path=None):
                             if path.is_file()
                             else "missing"
                         )
+                        if status == "missing" and key in {
+                            "input_directory",
+                            "output_directory",
+                            "directory",
+                        }:
+                            archived = (
+                                path.parent
+                                / "interrupted"
+                                / path.name.replace("_input", "").replace("_output", "")
+                            )
+                            if archived.is_dir():
+                                status = "archived"
                         if (
                             awaiting
                             and status == "missing"

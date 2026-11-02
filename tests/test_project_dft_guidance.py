@@ -1,8 +1,8 @@
 from copy import deepcopy
 
-from phase_agent.analysis.state.build_decision_context import build_decision_context
+from phase_agent.evidence.build_decision_context import build_decision_context
 from phase_agent.analysis.phase.phase_dft_sampling import dft_sampling_reference
-from phase_agent.decisions.agent.deepagents_proposal import proposal_material
+from phase_agent.models.deepagents_proposal import proposal_material
 from tests.test_phase_quality import sample
 
 

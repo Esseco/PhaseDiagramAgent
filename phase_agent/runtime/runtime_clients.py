@@ -7,7 +7,7 @@ def create_optional_runtime_client(parameters, *, credential_loader=None, client
 
         credential_loader = load_deepseek_api_key
     if client_factory is None:
-        from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+        from phase_agent.models.create_deepseek_client import create_deepseek_client
 
         client_factory = create_deepseek_client
     if parameters.get("thinking") not in {None, "enabled", "disabled"}:

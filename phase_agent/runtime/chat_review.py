@@ -16,11 +16,11 @@ def review_pending(
     is_sensitive=None,
 ):
     """Accept a decision only from the authenticated local approval surface."""
-    from phase_agent.tools.policy.file_approval import proposal_hash
+    from phase_agent.policies.file_approval import proposal_hash
 
     with handler.lock:
         state = read_json(handler.state_path, {}) or {}
-        from phase_agent.analysis.state.project_authority import project_identity
+        from phase_agent.evidence.project_authority import project_identity
 
         if (
             decision in {"approve", "confirm_sensitive"}
@@ -49,10 +49,25 @@ def review_pending(
         current_version = build_status_summary(
             state, config_version=state.get("confirmed_config_version")
         )["summary_id"]
-        from phase_agent.analysis.state.project_authority import project_identity
+        from phase_agent.evidence.project_authority import project_identity
 
         proposal = pending.get("agent_proposal") or {}
         current_hash = proposal_hash(proposal)
+        if decision in {"approve", "confirm_sensitive"}:
+            from phase_agent.policies.recovery_transition import (
+                post_recovery_tools,
+                legacy_post_recovery_plan_ids,
+            )
+
+            allowed = post_recovery_tools(state)
+            action = proposal.get("raw_action") or {}
+            if plan_id in legacy_post_recovery_plan_ids(state) or (
+                allowed is not None
+                and (action.get("tool") or action.get("action_type")) not in allowed
+            ):
+                raise request_error(
+                    "proposal_context_changed; 原方案不属于当前回收后的科学阶段，请重新展示具体方案后审批；未执行"
+                )
         if expected_state_version != current_version:
             # summary_id includes read-only facts, token accounting and
             # presentation metadata. Those may change while the immutable
@@ -63,7 +78,9 @@ def review_pending(
                 raise request_error("proposal_hash_mismatch; refresh the approval page")
             bound_identity = pending.get("project_identity")
             if bound_identity and bound_identity != project_identity(state):
-                raise request_error("proposal_context_changed; 模型或生效设置已改变，需更新具体方案")
+                raise request_error(
+                    "proposal_context_changed; 模型或生效设置已改变，需更新具体方案"
+                )
             expected_state_version = current_version
 
         if (

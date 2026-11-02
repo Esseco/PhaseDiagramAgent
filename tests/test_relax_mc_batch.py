@@ -290,8 +290,34 @@ def test_model_missing_and_input_corruption_submit_no_children(tmp_path, monkeyp
 def test_return_import_rebases_results_preserves_ledger_and_is_idempotent(tmp_path, monkeypatch):
     manager, state, config, context, action, result = package(tmp_path)
     config["phase_diagram_directory"] = str(tmp_path / "analysis")
-    execute, calls = fake_executor(monkeypatch)
+    original_execute, calls = fake_executor(monkeypatch)
+
+    def execute(batch, state, manager):
+        rows = original_execute(batch, state, manager)
+        for row in rows:
+            task = next(t for t in state["tasks"] if t["task_id"] == row["task_id"])
+            worker = Path(task["input_path"]).parent
+            (worker / "pool").mkdir(exist_ok=True)
+            name = "unused_pool_candidate.vasp"
+            (worker / "pool" / name).write_text("remote-only unselected geometry")
+            row["outputs"]["pool_summary"] = [
+                {"structure_file": name, "energy_mean_per_atom": -4.0}
+            ]
+            out = Path(task["result_path"]).parent
+            write(out / "result.json", row)
+            marker = read(out / "task.finished.json")
+            marker["result_checksum"] = file_checksum(out / "result.json")
+            write(out / "task.finished.json", marker)
+        return rows
+
     outcome = run_batch(result["directory"], submit=True, batch_executor=execute)
+    with zipfile.ZipFile(outcome["archive"]) as archive:
+        assert not any("unused_pool_candidate" in name for name in archive.namelist())
+        assert json.loads(archive.read("candidate_pool.json"))["mc_pool"] == []
+        assert all(
+            t["outputs"]["pool_summary"]
+            for t in json.loads(archive.read("workflow_state.json"))["tasks"]
+        )
     returned = Path(result["expected_results_archive"])
     returned.parent.mkdir(exist_ok=True)
     shutil.copy2(outcome["archive"], returned)
@@ -374,7 +400,7 @@ def test_failure_does_not_overwrite_submission_receipt_checkpoint(tmp_path, monk
 @pytest.mark.parametrize("mode", ["Sequential", "Adaptive"])
 def test_combined_operation_both_modes_dry_run_creates_no_tasks(mode, tmp_path, monkeypatch):
     from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
-    from phase_agent.tools.workflows.run_event_loop import run_event_loop
+    from phase_agent.tools.workflows.run_action_turn import run_action_turn
     import subprocess
 
     manager, state, config, context, action = fixture(tmp_path)
@@ -395,7 +421,7 @@ def test_combined_operation_both_modes_dry_run_creates_no_tasks(mode, tmp_path, 
         "actions": [{"id": "batch", "kind": "Relax", "depends_on": [], "action": action}],
     }
     registry = create_tool_registry({name: forbidden for name in create_tool_registry()})
-    result = run_event_loop(
+    result = run_action_turn(
         state,
         {"status": "confirmed", "confirmed_snapshot": {"config_version": "v1", "config": config}},
         registry=registry,

@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from phase_agent.tools.policy.region_sampling import (
+from phase_agent.policies.region_sampling import (
     CONTROLS,
     MODE,
     errors,
@@ -10,11 +10,11 @@ from phase_agent.tools.policy.region_sampling import (
     preview,
 )
 from phase_agent.tools.workflows.region_controller import sample_regions
-from phase_agent.tools.policy.workflow_policy import branch_batch_errors
-from phase_agent.decisions.agent.propose_tool_action import _apply_generation_defaults
-from phase_agent.decisions.agent.proposal_validation import proposal_errors
+from phase_agent.policies.workflow_policy import branch_batch_errors
+from phase_agent.agents.strategic.propose_tool_action import _apply_generation_defaults
+from phase_agent.agents.common.proposal_validation import proposal_errors
 from phase_agent.tools.workflows.region_review import write_proposal, write_result
-from phase_agent.tools.policy.execution_policy import (
+from phase_agent.policies.execution_policy import (
     build_agent_proposal,
     apply_execution_policy,
 )
@@ -151,6 +151,24 @@ def test_guard_is_pause_and_regions_get_first_pass(monkeypatch):
     assert "guard" in report["stop_reason"]
 
 
+def test_project_branch_cap_stops_uniform_region_round():
+    p = params()
+    p["max_new_branches"] = 5
+    calls = []
+
+    def producer(*args, **kwargs):
+        calls.append(kwargs["strategy_options"]["_focus"]["region_id"])
+        start = sum(1 for _ in calls)
+        return [candidate(f"{start}-{i}") for i in range(16)]
+
+    chosen, report = sample_regions(
+        Manager(), {}, p, producer=producer, descriptor=lambda r: tuple(r["T"])
+    )
+    assert len(chosen) == 5
+    assert report["status"] == "paused_for_review"
+    assert "guard" in report["stop_reason"]
+
+
 def test_empty_regions_explicit_defer():
     p = {"sampling_mode": MODE, "regions": [], "defer_reason": "已有新branch待评价"}
     chosen, report = sample_regions(Manager(), {}, p, descriptor=lambda r: None)
@@ -208,8 +226,10 @@ def test_metadata_preview_never_expands(monkeypatch):
     )
     manager = Manager()
     manager.boundary = {"P": {}, "H": {}}
-    report = preview(params(), manager, {"O3": reference}, {}, {})
-    assert report["regions"][0]["legal_cells"] == 1
+    full = params()
+    full["regions"][0]["na_min"] = 0
+    report = preview(full, manager, {"O3": reference}, {}, {})
+    assert report["regions"][0]["legal_cells"] == 2
     assert report["expected_new_branch_count"] is None
 
 
@@ -236,7 +256,7 @@ def test_changed_review_rejected_before_generator(monkeypatch):
 
 
 def test_online_agent_gets_only_region_contract(monkeypatch):
-    import phase_agent.decisions.agent.propose_tool_action as module
+    import phase_agent.agents.strategic.propose_tool_action as module
 
     seen = []
 
@@ -260,7 +280,7 @@ def test_online_agent_gets_only_region_contract(monkeypatch):
 
 
 def test_service_failure_cannot_bootstrap_legacy_quota(monkeypatch):
-    import phase_agent.decisions.agent.propose_tool_action as module
+    import phase_agent.agents.strategic.propose_tool_action as module
 
     def failed(*args, **kwargs):
         raise RuntimeError("503")

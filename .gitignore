@@ -8,3 +8,7 @@ r68/
 logs/
 backups/
 .write_probe_codex
+
+.ruff_cache/
+
+.langgraph_api/

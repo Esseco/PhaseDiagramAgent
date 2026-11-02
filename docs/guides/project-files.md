@@ -35,8 +35,13 @@
 │   ├── output_index.md          已有产物索引
 │   ├── round_summary.csv        跨轮汇总
 │   ├── gpu_usage.csv            跨轮 GPU 用量
+│   ├── latest/                 当前模型最新完整产物副本（先看 *_status.json）
+│   │   ├── phase_diagram/      main.png、hd_cross.png、CSV、JSON、报告、manifest
+│   │   └── dft_error/          能量/受力误差图、比较表、metrics、数据清单、manifest
 │   ├── epoch0/
-│   │   ├── phase_diagrams/      mlip、dft、combined 及 history
+│   │   ├── phase_diagram/      versions/<指纹>/ 不可变完整版本，以及 latest/
+│   │   ├── dft_error/          同一模型累计 DFT 配对的 versions/<指纹>/ 与 latest/
+│   │   ├── phase_diagrams/     MLIP 底层 history；旧 dft/combined 历史保留可读
 │   │   ├── Search-group-*/DFT-round-*/
 │   │   │   ├── comparisons/    比较表、指标和 plots
 │   │   │   ├── training/       训练结构与标签
@@ -76,3 +81,11 @@
 旧路径的读取转换复用 `configuration/session/relocate_workspace_paths.py`，支持多次搬迁与循环检测；冻结配置保持原样。当前状态持久化新路径，工作流控制记录保留迁移版本，旧检查点在读取时转换，过期状态写入会被拒绝。迁移不依赖目录 junction 或文件硬链接。
 
 未登记的提交目录、旧式回传包和其他历史材料统一放在 `submissions/previously_used/`，禁止从该目录提交。
+
+## 分析版本与 latest
+
+每次核验结果更新（包括 Relax、MC 分段、DFT 同帧预测补充）、排除/恢复与模型刷新，自动发布当前 MLIP 双图及各已登记 epoch 的累计 DFT 误差。普通产物索引只将 MLIP 作为正式相图；旧 DFT/combined 文件不删除。
+
+版本由模型/epoch、输入内容、绘图和质量规则决定；重复输入复用版本，不覆盖历史。manifest.json 保存输入指纹、模型绑定、父版本、必需文件和 SHA256 校验和。最新完整副本同时更新 epoch 内 latest 与项目级 latest。两张相图或能量/受力图任一失败，不发布不完整版本；*_status.json / latest_status.json 明确标记 not_ready，保留的上一版不能称为当前模型结果。图中的 HD 打叉仅表示既有规则的假设排除对照，不自动删除正式数据。
+
+DFT 误差按原轮冻结模型、同帧有效配对累计，用 data_id 或 task_id+frame 去重，冲突身份显式失败。能量按结构等权，受力汇总全部原子 Cartesian 分量，重新计算 MAE/RMSE，不平均各轮指标。dataset_manifest.json 与逐轮旧产物保留来源。缺少当前模型的实际预测时保持待评估，不将旧模型预测重命名为新 epoch，也不自动宣称独立测试集误差。

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from phase_agent.tools.workflows.readonly_views import read_only_view
 from pathlib import Path
 
 from phase_agent.runtime.boundary_diagnostics import describe_failure
@@ -30,6 +31,7 @@ def _inspect(sections, issues, name, callback, path=None):
         return None
 
 
+@read_only_view
 def inspect_project(state_path):
     state_path = Path(state_path).resolve()
     sections, issues = {}, []
@@ -167,6 +169,7 @@ def inspect_project(state_path):
     }
 
 
+@read_only_view
 def inspect_runtime(runtime_path):
     """Diagnose independent project files, including a not-yet-created scientific state."""
     from phase_agent.runtime.runtime_config_io import (

@@ -7,7 +7,7 @@ import hashlib
 import json
 
 from phase_agent.analysis.feedback.calculate_search_reward import calculate_search_reward
-from phase_agent.analysis.state.summarize_agent_state import summarize_agent_state
+from phase_agent.evidence.summarize_agent_state import summarize_agent_state
 from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
 from phase_agent.analysis.phase.refresh_identified_phases import refresh_identified_phases
 from phase_agent.analysis.phase.ensure_phase_identification import ensure_phase_identification

@@ -4,8 +4,8 @@ import json
 import pytest
 
 from phase_agent.configuration.schema.action_state_schema import normalize_action
-from phase_agent.decisions.agent.action_contracts import action_contract_errors
-from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
+from phase_agent.agents.common.action_contracts import action_contract_errors
+from phase_agent.models.prepare_llm_request import prepare_llm_request
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from phase_agent.tools.dispatch.execute_tool_action import execute_tool_action
 from phase_agent.tools.dispatch.scientific_operations import OPERATIONS, operation_catalog
@@ -206,7 +206,7 @@ def test_cached_production_graph_has_operation_nodes_without_global_handlers():
 
 
 def test_decision_backend_advertises_operations_to_injected_agent():
-    from phase_agent.decisions.agent.decision_backend import request_decision_action
+    from phase_agent.graphs.decision_team.backend import request_decision_action
 
     received = []
 
@@ -273,3 +273,18 @@ def test_named_operation_reuses_persisted_receipt_and_cannot_execute_twice(tmp_p
     assert second["status"] == "execution_reconciliation_required"
     assert len(calls) == 1
     assert action == original
+
+
+def test_relax_only_operation_metadata_is_bound_and_validated():
+    from phase_agent.tools.dispatch.scientific_operations import operation_binding_errors
+
+    action = {
+        "tool": "generate_branches",
+        "operation_context": {
+            "relax_only_x_values": [0],
+            "human_constraint": "x=0 只做 Relax",
+        },
+    }
+    assert operation_binding_errors(action, config_version="c1", model_version="m1") == []
+    action["operation_context"]["relax_only_x_values"] = [0.25]
+    assert operation_binding_errors(action, config_version="c1", model_version="m1")

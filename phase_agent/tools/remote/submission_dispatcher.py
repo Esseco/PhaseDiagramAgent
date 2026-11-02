@@ -38,6 +38,28 @@ def save(path, payload):
     os.replace(temporary, path)
 
 
+def submission_order(scripts, afterany):
+    """Validate local script dependencies before any scheduler side effect."""
+    from graphlib import CycleError, TopologicalSorter
+
+    if not isinstance(afterany, dict) or set(afterany) - set(scripts):
+        raise ValueError("Invalid afterany dependency targets")
+    for parents in afterany.values():
+        if (
+            not isinstance(parents, list)
+            or not parents
+            or any(not isinstance(parent, str) or parent not in scripts for parent in parents)
+            or len(set(parents)) != len(parents)
+        ):
+            raise ValueError("Invalid afterany dependency scripts")
+    try:
+        return list(
+            TopologicalSorter({job: afterany.get(job, []) for job in scripts}).static_order()
+        )
+    except CycleError as error:
+        raise ValueError("Cyclic submission dependencies") from error
+
+
 def preflight_models(root, jobs):
     """Check all selected MLIP dependencies before submitting any child job."""
     required = {}
@@ -159,6 +181,8 @@ def _run(root):
                 or any(j not in names or Path(j).suffix not in {".sh", ".sbatch"} for j in jobs)
             ):
                 raise ValueError("Invalid job script list")
+            dependencies = plan.get("afterany", {})
+            jobs = submission_order(jobs, dependencies)
             for job in jobs:
                 if receipt["jobs"].get(job, {}).get("status") == "submitting":
                     raise RuntimeError(
@@ -216,12 +240,19 @@ def _run(root):
             if receipt["jobs"].get(job, {}).get("status") == "submitted":
                 print("Already submitted:", job, receipt["jobs"][job]["job_id"])
                 continue
-            # Persist intent first: interruption cannot cause a blind duplicate submission.
+            target = safe_path(root, job)
+            parent_ids = [receipt["jobs"][parent]["job_id"] for parent in dependencies.get(job, [])]
+            if any(not isinstance(job_id, str) or not job_id.isdigit() for job_id in parent_ids):
+                raise ValueError("Invalid submitted dependency job ID")
+            command = ["sbatch", "--parsable"]
+            if parent_ids:
+                command.append("--dependency=afterany:" + ":".join(parent_ids))
+            command.append(target.name)
+            # Persist intent immediately before the side effect, after validation.
             receipt["jobs"][job] = {"status": "submitting"}
             save(receipt_path, receipt)
-            target = safe_path(root, job)
             result = subprocess.run(
-                ["sbatch", "--parsable", target.name],
+                command,
                 cwd=target.parent,
                 capture_output=True,
                 text=True,
@@ -236,6 +267,8 @@ def _run(root):
                     "Unexpected sbatch reply; check Slurm before retry: " + result.stdout
                 )
             receipt["jobs"][job] = {"status": "submitted", "job_id": job_id}
+            if parent_ids:
+                receipt["jobs"][job]["afterany_job_ids"] = parent_ids
             save(receipt_path, receipt)
             submitted += 1
             print("Submitted:", job, job_id)

@@ -1,7 +1,7 @@
 import json
 from copy import deepcopy
 import pytest
-from phase_agent.analysis.state.decision_evidence import candidate_evidence, transport_copy
+from phase_agent.evidence.decision_evidence import candidate_evidence, transport_copy
 from phase_agent.runtime.chat_application import RunWorkflowChatHandler
 
 

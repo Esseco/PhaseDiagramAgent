@@ -64,6 +64,6 @@ def test_unknown_and_outside_scope_are_not_treated_as_low_or_required():
 
 
 def test_dft_topic_contains_coverage_review():
-    from phase_agent.decisions.agent.summary_request import source_topic
+    from phase_agent.evidence.requests import source_topic
 
     assert source_topic("dft_DH_coverage_review") == "dft"

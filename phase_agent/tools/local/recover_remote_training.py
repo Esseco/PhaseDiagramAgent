@@ -55,6 +55,13 @@ def inspect_training_results(job):
                 raise ValueError("Invalid registered model manifest path")
             if candidate.is_file():
                 paths["models.json"] = candidate
+        if paths[FILES[0]].is_file():
+            marker = json.loads(paths[FILES[0]].read_text(encoding="utf-8-sig"))
+            if marker.get("status") == "failed" and marker.get("failed_training_tasks"):
+                names = [str(row.get("model_id")) for row in marker["failed_training_tasks"]]
+                raise ValueError(
+                    "训练失败或未完成：" + "、".join(names) + "；已保留其他成员产出，未自动重训"
+                )
         missing = [name for name, path in paths.items() if not path.is_file()]
         if missing:
             raise ValueError("缺少 " + "、".join(missing))
@@ -181,7 +188,7 @@ def recover_remote_training(state, *, _owned=False):
                 source: target
                 for source, target in registered_return_locations(current).items()
                 if Path(target["directory"]) == Path(job["directory"])
-                or Path(job["directory"]).is_relative_to(Path(target["directory"]))
+                or Path(target["directory"]).is_relative_to(Path(job["directory"]))
             },
         )
         if errors:

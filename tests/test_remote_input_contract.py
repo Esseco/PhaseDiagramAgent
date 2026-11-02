@@ -3,7 +3,7 @@ import zipfile
 import json
 from phase_agent.science.mlip.slurm_executor import remote_model_references
 from phase_agent.tools.remote.submission_handoff import prepare_handoff
-from phase_agent.decisions.agent.dialogue_contract import dialogue_errors
+from phase_agent.agents.common.dialogue_contract import dialogue_errors
 
 
 def test_hpc_path_wins_without_local_inspection(monkeypatch):

@@ -8,8 +8,7 @@ from phase_agent.runtime.partial_recovery import partial_recovery_facts
 def result_recovery_facts(state):
     tasks = state.get("tasks") or []
     partial_rows = {
-        (row.get("kind"), row.get("identity")): row
-        for row in partial_recovery_facts(state)
+        (row.get("kind"), row.get("identity")): row for row in partial_recovery_facts(state)
     }
     rows = []
     for identity, batch in (state.get("relax_mc_batches") or {}).items():

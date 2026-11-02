@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from phase_agent.decisions.agent.transport_tables import (
+from phase_agent.models.transport_tables import (
     compact_evidence_tables,
     expand_evidence_tables,
 )
@@ -43,7 +43,7 @@ def test_branch_and_related_scientific_rows_are_losslessly_encoded(field):
 
 
 def test_small_report_tables_keep_json_types_and_exact_values():
-    from phase_agent.decisions.agent.transport_tables import (
+    from phase_agent.models.transport_tables import (
         compact_evidence_tables,
         expand_evidence_tables,
     )

@@ -26,6 +26,25 @@ def handle(self, user_message, state, messages, conversation_id):
             from phase_agent.graphs.dialogue.support import review_presented_proposal
 
             return review_presented_proposal(self, state, user_message)
+        if str(user_message).strip() in {"拒绝", "reject"} and not any(
+            state.get(key)
+            for key in (
+                "pending_execution_policies",
+                "pending_mc_regeneration",
+                "pending_finetune_regeneration",
+                "pending_dft_regeneration",
+            )
+        ):
+            from phase_agent.tools.workflows.model_refresh_gate import (
+                review_saved_input_authorization,
+            )
+
+            reviewed = review_saved_input_authorization(
+                state, {"decision": "reject", "comment": user_message}
+            )
+            if reviewed is not None:
+                write_json(self.state_path, reviewed["state"])
+                return reviewed["reason"]
         from phase_agent.tools.local.review_candidate_command import review_candidate_command
         from phase_agent.tools.local.review_direction_command import review_direction_command
 
@@ -36,7 +55,14 @@ def handle(self, user_message, state, messages, conversation_id):
         review = review_candidate_command(user_message, state, state_path=self.state_path)
         if review is not None:
             write_json(self.state_path, review["state"])
-            return review["reason"]
+            from phase_agent.runtime.model_activation_followup import (
+                propose_refresh_after_activation,
+            )
+
+            following = propose_refresh_after_activation(
+                self, review, state.get("active_model_version")
+            )
+            return following["reason"] if following is not None else review["reason"]
     from phase_agent.runtime.configuration_chat import _is_config_json_import_command
 
     return None

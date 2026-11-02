@@ -1,8 +1,8 @@
 from copy import deepcopy
 
 from phase_agent.analysis.phase import phase_quality_reports
-from phase_agent.decisions.agent.prepare_llm_request import needs_deep_reasoning, prepare_llm_request
-from phase_agent.decisions.agent.summary_request import request_summary_first
+from phase_agent.models.prepare_llm_request import needs_deep_reasoning, prepare_llm_request
+from phase_agent.evidence.requests import request_summary_first
 
 
 def test_phase_quality_report_reuses_fingerprint(monkeypatch):

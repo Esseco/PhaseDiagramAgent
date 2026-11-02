@@ -7,17 +7,17 @@ from phase_agent.interface_compatibility import call_with_optimizations
 from copy import deepcopy
 from typing import Any
 
-from phase_agent.decisions.agent.propose_tool_action import (
+from phase_agent.agents.strategic.propose_tool_action import (
     _apply_generation_defaults,
     propose_agent_tool_action,
 )
-from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
+from phase_agent.agents.strategic.revise_tool_proposal import revise_tool_proposal
 from phase_agent.persistence.memory.decision_memory import (
     update_long_term_advice,
     update_long_term_memory,
 )
 from phase_agent.tools.dispatch.execute_tool_action import execute_tool_action
-from phase_agent.tools.policy.execution_policy import apply_execution_policy, build_agent_proposal
+from phase_agent.policies.execution_policy import apply_execution_policy, build_agent_proposal
 from phase_agent.tools.budget.reserve_action_budget import reserve_action_budget
 from phase_agent.tools.budget.record_budget_usage import record_budget_usage
 from phase_agent.tools.workflows.tool_outcomes import (
@@ -28,7 +28,7 @@ from phase_agent.tools.workflows.tool_outcomes import (
     _apply_execution_result,
     resumable_approval_wait,
 )
-from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+from phase_agent.policies.validate_tool_action import validate_tool_action
 from phase_agent.tools.state.state_manager import agent_state_summary, update_state_snapshot
 from phase_agent.tools.workflows.compact_action_history import compact_action_history
 
@@ -100,9 +100,11 @@ def tool_step_stages(
         ),
         refresh=_refresh_graph_gate,
         prepare=_prepare_tool_proposal,
+        simulation_plan=_simulation_plan_node,
         approve=_approval_graph_node,
         validate=_validation_graph_node,
         dispatch=_dispatch_graph_node,
+        simulation_check=_simulation_check_node,
         finish=_finish_graph_node,
     )
 
@@ -153,6 +155,43 @@ def _initialize_tool_step(
         )
     )
     if cached is not None and not waiting:
+        pending = current["pending_execution_policies"].get(invocation_id) or {}
+        proposed = pending.get("agent_proposal")
+        completed = cached.get("agent_proposal")
+        conflicting = bool(proposed) and (
+            (
+                completed is not None
+                and compact_action_history({"agent_proposal": proposed})
+                != compact_action_history({"agent_proposal": completed})
+            )
+            or (completed is None and int(pending.get("revision", 0)) > 0)
+        )
+        if conflicting and cached.get("status") in {
+            "completed",
+            "failed",
+            "rejected",
+            "rejected_by_user",
+            "not_configured",
+            "paused",
+            "cancelled",
+            "budget_exhausted",
+        }:
+            rejecting = (
+                isinstance(human_feedback, dict) and human_feedback.get("decision") == "reject"
+            )
+            if rejecting:
+                current["pending_execution_policies"].pop(invocation_id, None)
+            return {
+                "status": "rejected_by_user" if rejecting else "proposal_context_changed",
+                "state": current,
+                "submitted": False,
+                "idempotent_replay": False,
+                "reason": (
+                    "已取消尚未执行的新版冲突方案，旧动作回执保留。下一步：重新提出使用新编号的具体方案，再审批。"
+                    if rejecting
+                    else "此编号已有已处理回执，不能当作新版方案执行或重放旧动作。下一步：拒绝该冲突方案后，重新提出使用新编号的方案；未执行。"
+                ),
+            }
         return {
             **deepcopy(current["invocations"][invocation_id]),
             "state": current,
@@ -268,12 +307,12 @@ def _prepare_tool_proposal(frame):
     invocation_id = frame["invocation_id"]
     human_feedback = frame["human_feedback"]
     replay_record = frame["replay_record"]
-    decision_state = agent_state_summary(current)
+    decision_state = agent_state_summary(current, manager=(context or {}).get("manager"))
     decision_state["user_message"] = str((context or {}).get("user_message") or "")
 
     pending_key = invocation_id or "__single_interactive_action__"
     stored = current["pending_execution_policies"].get(pending_key)
-    from phase_agent.analysis.state.project_authority import project_identity
+    from phase_agent.evidence.project_authority import project_identity
 
     if (
         (stored or {}).get("project_identity")
@@ -322,8 +361,8 @@ def _prepare_tool_proposal(frame):
         current["pending_execution_policies"].pop(pending_key, None)
         stored = None
         human_feedback = None
-    from phase_agent.analysis.state.round_budget_evidence import round_budget_evidence
-    from phase_agent.decisions.agent.round_budget_review import round_budget_review_errors
+    from phase_agent.evidence.round_budget_evidence import round_budget_evidence
+    from phase_agent.agents.strategic.round_budget_review import round_budget_review_errors
 
     budget_context = {"round_budget_evidence": round_budget_evidence(current)}
     if (
@@ -335,8 +374,8 @@ def _prepare_tool_proposal(frame):
         current["pending_execution_policies"].pop(pending_key, None)
         stored = None
         human_feedback = None
-    from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
-    from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
+    from phase_agent.evidence.post_dft_assessment import post_dft_assessment
+    from phase_agent.agents.common.post_dft_review import valid_post_dft_review
 
     closed_dft = post_dft_assessment(current, (context or {}).get("effective_config") or config)
     if (
@@ -441,7 +480,7 @@ def _prepare_tool_proposal(frame):
             for name in (config.get("agent") or {}).get("allowed_tools") or []
             if callable((registry.get(name) or {}).get("handler"))
         ]
-        from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+        from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
 
         next_action = choose_debug_next_action(
             current,
@@ -533,7 +572,7 @@ def _prepare_tool_proposal(frame):
                 config_version=current.get("confirmed_config_version"),
                 _optimizations={"_owned": True},
             )
-            decision_state = agent_state_summary(current)
+            decision_state = agent_state_summary(current, manager=(context or {}).get("manager"))
     if (
         mode == "interactive"
         and stored
@@ -555,7 +594,7 @@ def _prepare_tool_proposal(frame):
                 config_version=current.get("confirmed_config_version"),
                 _optimizations={"_owned": True},
             )
-            decision_state = agent_state_summary(current)
+            decision_state = agent_state_summary(current, manager=(context or {}).get("manager"))
     if mode == "interactive" and stored and not rejecting:
         prior_action = (stored.get("agent_proposal") or {}).get("raw_action") or {}
         has_mc_tasks = any(row.get("stage") == "deep_search" for row in current.get("tasks") or [])
@@ -566,7 +605,7 @@ def _prepare_tool_proposal(frame):
                 prior_action, current, (context or {}).get("effective_config") or config
             )
         ):
-            from phase_agent.decisions.agent.choose_debug_next_action import (
+            from phase_agent.agents.strategic.choose_debug_next_action import (
                 choose_debug_next_action,
             )
 
@@ -719,13 +758,79 @@ def _approval_graph_node(frame):
     record_id = frame["record_id"]
     pending_key = frame["pending_key"]
     invocation_id = frame["invocation_id"]
+    review = proposal.get("strategic_review") or {}
+    if review.get("status") == "awaiting_human_input":
+        from phase_agent.policies.execution_policy import _normalize_human_feedback
+        from phase_agent.agents.strategic.human_review import direction_review
+
+        feedback = _normalize_human_feedback(human_feedback)
+        if feedback and feedback["decision"] in {"approve", "modify"}:
+            if feedback["decision"] == "modify":
+                return {
+                    "status": "rejected",
+                    "state": current,
+                    "reason": "请先通过文字意见修订研究方向；方向接受不能直接修改并执行动作。",
+                }
+            proposal = deepcopy(proposal)
+            proposal["strategic_review"] = direction_review(
+                proposal["raw_action"], feedback=feedback
+            )
+            stored = {
+                **deepcopy(stored or {}),
+                "revision": int((stored or {}).get("revision", 0)) + 1,
+            }
+            stored.setdefault("feedback_history", []).append(
+                {"kind": "strategic_direction_accepted", "feedback": deepcopy(feedback)}
+            )
+            frame = {**frame, "proposal": proposal, "stored": stored}
+            human_feedback = None  # Direction acceptance never approves execution.
+    from phase_agent.agents.strategic.human_review import policy_auto_approved, review_reasons
+
+    effective_config = (frame.get("context") or {}).get("effective_config") or frame["config"]
+    automatic = (
+        mode == "interactive"
+        and not stored
+        and human_feedback is None
+        and policy_auto_approved(
+            proposal["raw_action"],
+            frame["config"],
+            estimated_cost=(proposal.get("estimated_cost") or {}).get("estimated_total_cost"),
+        )
+        and not review_reasons(
+            proposal["raw_action"],
+            effective_config,
+            estimated_cost=(proposal.get("estimated_cost") or {}).get("estimated_total_cost"),
+        )
+    )
     policy = apply_execution_policy(
         proposal,
-        execution_mode=mode,
+        execution_mode="autonomous" if automatic else mode,
         human_feedback=human_feedback,
         replay_record=replay_record,
     )
-    from phase_agent.tools.policy.native_approval import native_approval_gate
+    if automatic:
+        policy["authorization_source"] = "confirmed_policy"
+    # Reject malformed modifications before consuming the durable approval.
+    if policy.get("final_action") is not None:
+        from phase_agent.configuration.schema.action_state_schema import normalize_action
+
+        try:
+            policy["final_action"] = normalize_action(policy["final_action"])
+            from phase_agent.agents.simulation.agent import validate_frozen_plan
+
+            if policy["final_action"].get("_simulation_plan"):
+                validate_frozen_plan(policy["final_action"])
+        except (ValueError, TypeError) as error:
+            return {
+                "status": "rejected",
+                "state": current,
+                "agent_proposal": proposal,
+                "record_id": record_id,
+                "validation": {"valid": False, "errors": [str(error)]},
+                "execution": None,
+                "reason": str(error),
+            }
+    from phase_agent.policies.native_approval import native_approval_gate
 
     recovery_block = native_approval_gate(frame, policy)
     if recovery_block is not None:
@@ -742,7 +847,7 @@ def _approval_graph_node(frame):
             deepcopy((stored or {}).get("feedback_history") or []),
         )
         _upsert_record(current, record)
-        from phase_agent.analysis.state.project_authority import project_identity
+        from phase_agent.evidence.project_authority import project_identity
 
         current["pending_execution_policies"][pending_key] = {
             "project_identity": project_identity(current),
@@ -804,6 +909,59 @@ def _approval_graph_node(frame):
     return {**frame, "current": current, "policy": policy, "_graph_prepared": True}
 
 
+def _simulation_plan_node(frame):
+    from phase_agent.agents.simulation.agent import prepare_proposal
+
+    # A saved/approved proposal never calls a model again to plan execution.
+    if frame.get("stored") or frame.get("mode") == "replay":
+        return frame
+    try:
+        proposal = prepare_proposal(
+            frame["proposal"],
+            frame.get("agent_client"),
+            state=frame["current"],
+            config=(frame.get("context") or {}).get("effective_config") or frame["config"],
+            registry=frame["registry"],
+        )
+        if (
+            frame.get("mode") == "interactive"
+            and getattr(frame.get("agent_client"), "supports_strategic_review", False) is True
+        ):
+            from phase_agent.agents.strategic.human_review import direction_review, review_reasons
+
+            reasons = review_reasons(
+                proposal["raw_action"],
+                frame["config"],
+                estimated_cost=(proposal.get("estimated_cost") or {}).get("estimated_total_cost"),
+            )
+            if reasons:
+                proposal["strategic_review"] = {
+                    **direction_review(proposal["raw_action"]),
+                    "reasons": reasons,
+                }
+    except (ValueError, TypeError, OSError, RuntimeError) as error:
+        return {
+            "status": "rejected",
+            "state": frame["current"],
+            "reason": "Simulation planning: " + str(error),
+            "execution": None,
+        }
+    return {**frame, "proposal": proposal}
+
+
+def _simulation_check_node(frame):
+    from phase_agent.agents.simulation.agent import inspect_execution
+
+    if frame.get("execution") is not None and frame["action"].get("_simulation_plan"):
+        report = inspect_execution(frame["action"], frame["execution"], frame.get("agent_client"))
+        frame = {**frame, "simulation_report": report}
+        if report.get("llm_usage"):
+            frame["current"] = record_budget_usage(
+                frame["current"], {"llm_usage": report["llm_usage"]}
+            )
+    return frame
+
+
 def _validation_graph_node(frame):
     current = frame["current"]
     policy = frame["policy"]
@@ -816,6 +974,7 @@ def _validation_graph_node(frame):
     execute = frame["execute"]
     action = policy["final_action"]
     validation = validate_tool_action(action, current, session, registry)
+    action = validation.pop("canonical_action", action)
     if (
         not validation["valid"]
         and mode != "interactive"
@@ -825,12 +984,28 @@ def _validation_graph_node(frame):
         action = propose_agent_tool_action(decision_state, agent_client=None, allowed_tools=allowed)
         action["fallback_reason"] = ",".join(validation["errors"])
         validation = validate_tool_action(action, current, session, registry)
+        action = validation.pop("canonical_action", action)
 
     from phase_agent.tools.state.approved_direction import direction_action_errors
 
-    from phase_agent.tools.policy.workflow_policy import needs_human
+    from phase_agent.policies.workflow_policy import needs_human
 
     effective = (frame.get("context") or {}).get("effective_config") or config
+    from phase_agent.agents.strategic.human_review import review_reasons
+
+    if mode not in {"interactive", "dry_run"} and review_reasons(
+        action,
+        config,
+        estimated_cost=(frame["proposal"].get("estimated_cost") or {}).get("estimated_total_cost"),
+    ):
+        validation["valid"] = False
+        validation.setdefault("errors", []).append("strategic_human_review_required")
+    if action.get("_training_handoff_authorization"):
+        from phase_agent.policies.training_handoff_scope import proposed_scope
+
+        if action["_training_handoff_authorization"] != proposed_scope(action, effective):
+            validation["valid"] = False
+            validation["errors"].append("training_handoff_scope_changed")
     from phase_agent.configuration.schema.python_environments import dft_environment_error
 
     environment_error = dft_environment_error(action, effective)
@@ -896,6 +1071,7 @@ def _dispatch_graph_node(frame):
             **(context or {}),
             "confirmed_config": config,
             "event_state": current,
+            "executor_role": "simulation",
             "invocation_id": record_id,
             "approval_record_id": record_id,
             "config_version": validation["config_version"],
@@ -967,6 +1143,17 @@ def _finish_graph_node(frame):
         ),
         "record_id": record_id,
     }
+    if frame.get("simulation_report"):
+        response["simulation_report"] = deepcopy(frame["simulation_report"])
+        execution["simulation_report"] = deepcopy(frame["simulation_report"])
+    if policy.get("authorization_source"):
+        response["execution_authorization"] = {
+            "source": policy["authorization_source"],
+            "config_version": validation.get("config_version"),
+            "operation": action.get("operation"),
+        }
+        if execution is not None:
+            execution["execution_authorization"] = deepcopy(response["execution_authorization"])
     _upsert_record(
         current,
         _audit_record(
@@ -1024,7 +1211,7 @@ def _prepare_debug_relax_screen_action(
         return action
     stage = action.get("stage") or parameters.get("stage")
     if action.get("tool") == "run_calculation_stage" and stage == "deep_search":
-        from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+        from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
 
         preparation = choose_debug_next_action(
             state,
@@ -1060,7 +1247,7 @@ def _prepare_debug_relax_screen_action(
         return action
     if "prepare_local_batch_files" not in allowed_tools:
         return action
-    from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+    from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
 
     preparation = choose_debug_next_action(
         state,

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from phase_agent.persistence.memory.review_queue import propose_memory_update, review_memory_update
-from phase_agent.tools.policy.automatic_mode_authorization import authorize_automatic_action
+from phase_agent.policies.automatic_mode_authorization import authorize_automatic_action
 from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
 from phase_agent.tools.remote.automatic_controller import disable_automatic_mode, run_automatic_step
 from phase_agent.tools.remote.api import sync_tasks, submit_remote, sync_results, resume
@@ -16,7 +16,7 @@ from phase_agent.tools.workflows.accept_dedup_results import accept_dedup_result
 from phase_agent.tools.workflows.prepare_dedup_batch import prepare_dedup_batch
 from phase_agent.runtime.local_agent_control import LocalAgentControl
 from phase_agent.runtime.agent_api import RunWorkflowChatHandler
-from phase_agent.analysis.state.sanitize_untrusted_text import untrusted_text
+from phase_agent.evidence.sanitize_untrusted_text import untrusted_text
 
 
 class LocalAgentControlTest(unittest.TestCase):

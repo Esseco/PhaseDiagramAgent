@@ -3,13 +3,13 @@ import json
 
 import pytest
 
-from phase_agent.analysis.state.training_context import (
+from phase_agent.evidence.training_context import (
     validation_planning_context,
     post_refresh_search_context,
     training_review_active,
 )
-from phase_agent.analysis.state.build_decision_context import build_decision_context
-from phase_agent.decisions.agent.deepagents_proposal import proposal_material
+from phase_agent.evidence.build_decision_context import build_decision_context
+from phase_agent.models.deepagents_proposal import proposal_material
 
 
 def state():
@@ -149,7 +149,7 @@ def test_compact_transport_keeps_current_facts_and_scoped_status():
 
 
 def test_scientific_request_exposes_search_and_dft_without_forcing_action():
-    from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
+    from phase_agent.agents.strategic.propose_tool_action import propose_agent_tool_action
 
     s = state()
     s["decision_context"] = build_decision_context(s)

@@ -6,7 +6,7 @@ from copy import deepcopy
 import hashlib
 import json
 
-from phase_agent.analysis.state.build_state_snapshot import build_state_snapshot
+from phase_agent.evidence.build_state_snapshot import build_state_snapshot
 from phase_agent.configuration.schema.action_state_schema import validate_state_schema
 from phase_agent.persistence.memory.decision_memory import update_short_term_memory
 from phase_agent.persistence.memory.collect_memory_candidates import collect_memory_candidates
@@ -36,30 +36,32 @@ def update_state_snapshot(state: dict, *, config_version=None, _owned=False) -> 
     )
 
 
-def agent_state_summary(state: dict, *, _approval_only=False) -> dict:
-    from phase_agent.analysis.state.project_authority import current_project
+def agent_state_summary(state: dict, *, manager=None, _approval_only=False) -> dict:
+    from phase_agent.evidence.project_authority import current_project
 
     summary = deepcopy(state.get("current_state_snapshot") or {})
     summary["current_project"] = current_project(state)
     if _approval_only:
         return summary
-    from phase_agent.analysis.state.training_context import (
+    from phase_agent.evidence.training_context import (
         validation_planning_context,
         post_refresh_search_context,
     )
 
-    from phase_agent.tools.policy.model_generation import new_model_generation_facts
+    from phase_agent.policies.model_generation import new_model_generation_facts
 
-    from phase_agent.decisions.agent.branch_pool_review import pool_context
+    from phase_agent.agents.exploration.branch_pool_review import pool_context
 
     # Refresh scoped directives even when the cached snapshot predates this code.
     summary.setdefault("decision_context", {}).update(
         training_validation_planning=validation_planning_context(state),
         post_refresh_search=post_refresh_search_context(state),
         new_model_generation=new_model_generation_facts(state),
-        branch_pool_facts=pool_context(state),
+        branch_pool_facts=pool_context(
+            state, manager.data.get("branches") if manager is not None else None
+        ),
     )
-    from phase_agent.analysis.state.decision_evidence_catalog import decision_evidence_catalog
+    from phase_agent.evidence.decision_evidence_catalog import decision_evidence_catalog
 
     summary["decision_context"]["evidence_catalog"] = decision_evidence_catalog(
         summary["decision_context"]

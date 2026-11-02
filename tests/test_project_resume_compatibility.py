@@ -29,8 +29,8 @@ def task_state():
 
 def test_cancel_is_explicit_scoped_idempotent_and_not_a_dft_result():
     from phase_agent.tools.state.dft_recovery_decision import cancel_dft_recovery_waits
-    from phase_agent.analysis.state.dft_round_status import dft_recovery_rounds
-    from phase_agent.tools.policy.workflow_policy import active_tasks
+    from phase_agent.evidence.dft_round_status import dft_recovery_rounds
+    from phase_agent.policies.workflow_policy import active_tasks
 
     s = task_state()
     before = deepcopy(s)
@@ -208,7 +208,7 @@ def test_independent_validation_uses_restored_geometry_exclusions(tmp_path):
 
 def test_cancelled_dft_closes_recovery_without_counting_as_validated():
     from phase_agent.tools.state.dft_recovery_decision import cancel_dft_recovery_waits
-    from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+    from phase_agent.evidence.post_dft_assessment import post_dft_assessment
     from tests.test_dft_comparison_csv import add_result
 
     s = {}
@@ -225,7 +225,7 @@ def test_cancelled_dft_closes_recovery_without_counting_as_validated():
 
 def test_cancellation_reason_is_available_in_bounded_agent_context():
     from phase_agent.tools.state.dft_recovery_decision import cancel_dft_recovery_waits
-    from phase_agent.analysis.state.build_decision_context import build_decision_context
+    from phase_agent.evidence.build_decision_context import build_decision_context
 
     s = cancel_dft_recovery_waits(task_state(), ["missing"], user_message="不再回收")
     facts = build_decision_context(s)["dft_recovery_cancellations"]

@@ -12,6 +12,18 @@ def main(argv=None):
     run.add_argument("--submit", action="store_true")
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--phase", type=int)
+    run.add_argument(
+        "--recollect-final",
+        action="store_true",
+        help="recheck completed final-phase results and republish; no GPU submission",
+    )
+    resume = sub.add_parser(
+        "resume", help="preview or submit an approved missing-only startup failure retry"
+    )
+    resume.add_argument("--root", required=True)
+    resume.add_argument("--submit", action="store_true")
+    resume.add_argument("--expected-plan")
+    resume.add_argument("--exclude-node", action="append", default=[])
     inspect = sub.add_parser("inspect")
     inspect.add_argument("--archive", required=True)
     recover = sub.add_parser("recover", help="collect existing verified results only; never submit")
@@ -27,7 +39,16 @@ def main(argv=None):
     register.add_argument("--bundle-id", required=True)
     register.add_argument("--archive", required=True)
     args = parser.parse_args(argv)
-    if args.command == "register-recovery":
+    if args.command == "resume":
+        from phase_agent.tools.relax_mc_batch.resume import resume_batch
+
+        result = resume_batch(
+            args.root,
+            submit=args.submit,
+            expected_plan=args.expected_plan,
+            exclude_nodes=args.exclude_node,
+        )
+    elif args.command == "register-recovery":
         from phase_agent.tools.relax_mc_batch.files import read
         from phase_agent.tools.relax_mc_batch.recovery_receipt import register_recovery
 
@@ -37,7 +58,13 @@ def main(argv=None):
     elif args.command == "run":
         from phase_agent.tools.relax_mc_batch.run import run_batch
 
-        result = run_batch(args.root, submit=args.submit, dry_run=args.dry_run, phase=args.phase)
+        result = run_batch(
+            args.root,
+            submit=args.submit,
+            dry_run=args.dry_run,
+            phase=args.phase,
+            recollect_final=args.recollect_final,
+        )
     elif args.command == "recover":
         from pathlib import Path
         from phase_agent.tools.relax_mc_batch.recovery import build_recovery_return

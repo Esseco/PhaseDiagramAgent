@@ -174,7 +174,7 @@ class ExecutionPolicyTest(unittest.TestCase):
         self.assertIsNone(revised.get("execution_result"))
 
     def test_formal_revision_gets_stable_task_key(self):
-        from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
+        from phase_agent.agents.strategic.revise_tool_proposal import revise_tool_proposal
 
         proposal = {"raw_action": {"tool": "generate_branches", "task_key": "original"}}
         agent = lambda payload: {
@@ -201,7 +201,7 @@ class ExecutionPolicyTest(unittest.TestCase):
         self.assertEqual(first["action"]["task_key"], second["action"]["task_key"])
 
     def test_h_limit_feedback_uses_generator_parameter(self):
-        from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
+        from phase_agent.agents.strategic.revise_tool_proposal import revise_tool_proposal
 
         proposal = {"raw_action": {"tool": "generate_branches", "task_key": "original"}}
         agent = lambda payload: {
@@ -222,7 +222,7 @@ class ExecutionPolicyTest(unittest.TestCase):
 
     def test_mc_action_cannot_exceed_confirmed_per_round_limit(self):
         self.session["confirmed_snapshot"]["config"]["budgets"]["enforcement"] = "hard"
-        from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+        from phase_agent.policies.validate_tool_action import validate_tool_action
 
         registry = create_tool_registry({"allocate_mc_bohb": self._handler})
         action = {

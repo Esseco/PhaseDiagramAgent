@@ -47,7 +47,7 @@ def build_status_summary(state: dict, *, config_version=None) -> dict:
             ]
         ),
     }
-    from phase_agent.analysis.state.project_authority import project_identity
+    from phase_agent.evidence.project_authority import project_identity
 
     summary["project_identity"] = project_identity(state)
     versioned = deepcopy(summary)

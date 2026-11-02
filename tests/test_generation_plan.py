@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import pytest
-from phase_agent.decisions.agent.generation_plan import validate_generation_plan
-from phase_agent.decisions.agent.propose_tool_action import _apply_generation_defaults
+from phase_agent.agents.exploration.generation_plan import validate_generation_plan
+from phase_agent.agents.strategic.propose_tool_action import _apply_generation_defaults
 from phase_agent.science.structures.propose_branches import propose_branches
 
 
@@ -68,11 +68,11 @@ def test_target_is_passed_to_actual_generator():
 
 
 def test_enabled_strategy_constraints_reject_single_phase_competing_allocation():
-    from phase_agent.decisions.agent.generation_plan import (
+    from phase_agent.agents.exploration.generation_plan import (
         configured_generation_strategies,
         disabled_generation_allocations,
     )
-    from phase_agent.decisions.agent.proposal_validation import proposal_errors
+    from phase_agent.agents.common.proposal_validation import proposal_errors
 
     config = {
         "system": {"generation": {"enabled_strategies": ["coverage", "composition"]}},

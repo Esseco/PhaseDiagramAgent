@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from phase_agent.module_references import import_saved_module
+from phase_agent.compatibility.module_references import import_saved_module
 import json
 import os
 from pathlib import Path
@@ -11,7 +11,7 @@ from pathlib import Path
 from phase_agent.configuration.defaults.default_slurm_cluster_config import (
     default_slurm_cluster_config,
 )
-from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+from phase_agent.models.create_deepseek_client import create_deepseek_client
 from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
 from phase_agent.tools.step_runner import (
     advise_next_actions,

@@ -34,6 +34,9 @@ def build_tool_action_graph(
     )
 
     def after_prepare(state):
+        return END if "response" in state else "simulation_plan"
+
+    def after_plan(state):
         return END if "response" in state else "approval_gate"
 
     def after_initialize(state):
@@ -64,7 +67,8 @@ def build_tool_action_graph(
         "initialize_action", after_initialize, [END, "model_refresh_barrier"]
     )
     graph.add_conditional_edges("model_refresh_barrier", after_refresh, [END, "prepare_proposal"])
-    graph.add_conditional_edges("prepare_proposal", after_prepare, [END, "approval_gate"])
+    graph.add_conditional_edges("prepare_proposal", after_prepare, [END, "simulation_plan"])
+    graph.add_conditional_edges("simulation_plan", after_plan, [END, "approval_gate"])
     graph.add_conditional_edges("approval_gate", after_approval, [END, "validate_action"])
     if group_actions:
         from phase_agent.graphs.actions.groups import group_for, build_action_group
@@ -77,7 +81,7 @@ def build_tool_action_graph(
             graph.add_node(
                 group, build_action_group(names, nodes["dispatch"], group, operations=operations)
             )
-            graph.add_edge(group, "audit_outcome")
+            graph.add_edge(group, "simulation_check")
     else:
         graph.add_conditional_edges(
             "validate_action",
@@ -90,14 +94,18 @@ def build_tool_action_graph(
         )
         for name in registry:
             graph.add_node("tool__" + name, nodes["dispatch"])
-            graph.add_edge("tool__" + name, "audit_outcome")
+            graph.add_edge("tool__" + name, "simulation_check")
         for name in operation_names:
             graph.add_node("operation__" + name, nodes["dispatch"])
-            graph.add_edge("operation__" + name, "audit_outcome")
+            graph.add_edge("operation__" + name, "simulation_check")
+    graph.add_edge("simulation_check", "audit_outcome")
     graph.add_edge("audit_outcome", END)
     compiled = graph.compile(checkpointer=False, name="approved_scientific_action")
     from phase_agent.graphs.subgraph_visibility import expose_child
 
+    from phase_agent.graphs.decision_team.graph import build_proposal_graph
+
+    expose_child(compiled, "prepare_proposal", build_proposal_graph())
     if group_actions:
         for group in groups:
             expose_child(compiled, group, graph.nodes[group].runnable)

@@ -7,7 +7,7 @@ import re
 
 
 def report_directory(root, state):
-    from phase_agent.analysis.state.model_epoch import model_epoch
+    from phase_agent.evidence.model_epoch import model_epoch
 
     version = state.get("active_model_version")
     epoch = model_epoch(state, version) or ("epoch0" if not version else "unassigned")

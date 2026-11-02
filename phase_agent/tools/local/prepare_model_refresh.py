@@ -202,6 +202,17 @@ def prepare_model_refresh(*, action, context):
                 **relax_parameters,
                 "model_refresh_operation": row["operation"],
                 "model_refresh_wave": wave,
+                **(
+                    {
+                        "refresh_force_threshold": 0.1
+                        if row.get("ehull") is None or row["ehull"] <= 0.010
+                        else 0.2
+                    }
+                    if not wave
+                    and row["operation"] == "predict"
+                    and (plan.get("policy") or {}).get("force_followup_version") == 2
+                    else {}
+                ),
             },
         }
         state.setdefault("tasks", []).append(task)

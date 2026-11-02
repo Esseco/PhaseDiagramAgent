@@ -76,7 +76,7 @@ def test_agent_cannot_take_over_bohb_branch_or_fidelity(tmp_path):
     assert "execution" not in result["events"][0]
     assert not result["state"].get("pending_tasks")
     assert not result["state"].get("budget_reservations")
-    from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+    from phase_agent.policies.validate_tool_action import validate_tool_action
     checked = validate_tool_action(
         action, {}, _session(boundary),
         {"allocate_mc_bohb": {"handler": lambda **kwargs: None}},

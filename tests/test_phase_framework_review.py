@@ -268,7 +268,7 @@ def test_durable_human_retain_invalidates_stale_writer(tmp_path):
 
 
 def test_semantic_quality_review_contract_is_explicit_and_typed():
-    from phase_agent.decisions.agent.dialogue_contract import dialogue_errors, is_dialogue
+    from phase_agent.agents.common.dialogue_contract import dialogue_errors, is_dialogue
 
     action = {
         "kind": "phase_quality_review",
@@ -320,7 +320,8 @@ def test_joint_requires_every_geometry_confirmed_and_cannot_be_split(monkeypatch
         )
 
     monkeypatch.setattr(quality, "_cached_geometry", uncertain_mask)
-    assert not row_for(get_phase_quality_report(state))["automatic_exclusion_eligible"]
+    # Only the observer changed; bypass the separately tested fact-keyed report cache.
+    assert not row_for(quality.diagnose_phase_diagram(state))["automatic_exclusion_eligible"]
 
 
 def test_boundary_cleanup_updates_all_methods_but_keeps_backed_up_history(tmp_path):

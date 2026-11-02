@@ -1,0 +1,5 @@
+# 模型传输
+
+create_deepseek_client.py管理JSON模型请求，prepare_llm_request.py及transport_*整理传输。deepagents_proposal.py和hybrid_proposal.py保留现有提案后端；它们仍进入同一校验审批流程。
+
+客户端声明supports_expert_advice和expert_client，运行时包装使用capabilities.copy_model_capabilities透传。专家请求使用只读角色合同；配置、读证与合同修复不递归展开团队。缓存按调用角色和完整请求隔离，失败用量继续进入统计。

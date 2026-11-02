@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 import pytest
-from phase_agent.decisions.agent.hybrid_proposal import create_hybrid_client,choose_harness
+from phase_agent.models.hybrid_proposal import create_hybrid_client,choose_harness
 
 
 def test_routine_never_constructs_deep_client():

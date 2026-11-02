@@ -129,7 +129,7 @@ def test_feedback_recorder_is_mlip_only_and_idempotent():
 
 
 def test_training_barrier_does_not_waive_actually_running_dft():
-    from phase_agent.tools.policy.workflow_policy import active_tasks
+    from phase_agent.policies.workflow_policy import active_tasks
 
     assert active_tasks(
         {
@@ -154,7 +154,7 @@ def test_shared_data_disabled_by_default_and_explicit_sources_required(tmp_path)
 
 
 def test_advisory_dft_recommendation_does_not_discard_on_cost():
-    from phase_agent.decisions.qbc_selection.recommend_post_mc_dft import recommend_post_mc_dft
+    from phase_agent.agents.reliability.selection.recommend_post_mc_dft import recommend_post_mc_dft
 
     config = default_layered_search_config()
     config["budgets"]["total_relative_cost"] = 0
@@ -172,7 +172,7 @@ def test_advisory_dft_recommendation_does_not_discard_on_cost():
 
 
 def test_small_dft_batch_keeps_independent_audit():
-    from phase_agent.decisions.qbc_selection.select_dft_candidates import select_dft_candidates
+    from phase_agent.agents.reliability.selection.select_dft_candidates import select_dft_candidates
 
     pool = [{"candidate_id": str(i), "hull_impact": i} for i in range(10)]
     result = select_dft_candidates(pool, batch_size=2, seed=0, audit_fraction=0.05)
@@ -180,7 +180,7 @@ def test_small_dft_batch_keeps_independent_audit():
 
 
 def test_new_proposal_uses_current_region_policy_without_target_count(monkeypatch):
-    import phase_agent.decisions.agent.propose_tool_action as module
+    import phase_agent.agents.strategic.propose_tool_action as module
 
     captured = []
 
@@ -193,7 +193,7 @@ def test_new_proposal_uses_current_region_policy_without_target_count(monkeypatc
         {}, agent_client=lambda x: {}, allowed_tools=["generate_branches"], config={}
     )
     p = captured[0]["decision_context"]["branch_count_policy"]
-    from phase_agent.tools.policy.region_sampling import VERSION
+    from phase_agent.policies.region_sampling import VERSION
 
     assert p["version"] == VERSION
     assert p["count_is_result"] is True and p["approval_required"] is True
@@ -220,7 +220,7 @@ def test_training_complete_does_not_request_another_scientific_choice():
 
 
 def test_invalid_dft_review_fails_without_format_repair_call():
-    from phase_agent.decisions.agent.post_dft_review import request_review_repair
+    from phase_agent.agents.common.post_dft_review import request_review_repair
 
     calls = []
     with pytest.raises(ValueError):
@@ -343,7 +343,7 @@ def test_activation_cannot_bypass_real_inflight_task_barrier():
 
 
 def test_first_round_normal_feedback_requires_initial_finetune():
-    from phase_agent.tools.policy.workflow_policy import initial_direction_errors
+    from phase_agent.policies.workflow_policy import initial_direction_errors
 
     assessment = {"status": "evaluated", "eligible_structures": 10, "minimum_new_dft_records": 10}
     assert initial_direction_errors({"tool": "generate_branches"}, {}, assessment)
@@ -434,7 +434,7 @@ def test_historical_dft_cannot_complete_an_unrelated_new_search_cycle():
 
 
 def test_advisory_recommendation_does_not_truncate_to_reference_count():
-    from phase_agent.decisions.qbc_selection.recommend_post_mc_dft import recommend_post_mc_dft
+    from phase_agent.agents.reliability.selection.recommend_post_mc_dft import recommend_post_mc_dft
 
     pool = [{"candidate_id": str(i), "atom_count": 2} for i in range(4)]
     c = default_layered_search_config()
@@ -443,7 +443,7 @@ def test_advisory_recommendation_does_not_truncate_to_reference_count():
 
 
 def test_advisory_old_dft_count_cap_does_not_block_approved_sampling():
-    from phase_agent.tools.policy.workflow_policy import action_errors
+    from phase_agent.policies.workflow_policy import action_errors
 
     c = default_layered_search_config()
     c["workflow"]["finetune_min_new_dft"] = 1
@@ -482,7 +482,7 @@ def test_real_ui_supercell_size_max_is_deferred_until_tasks_end():
 
 
 def test_agent_official_hull_and_gain_context_excludes_dft_and_old_models():
-    from phase_agent.analysis.state.build_state_snapshot import build_state_snapshot
+    from phase_agent.evidence.build_state_snapshot import build_state_snapshot
 
     s = {
         "phase_diagrams": {

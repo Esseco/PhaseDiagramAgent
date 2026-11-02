@@ -27,6 +27,16 @@ class ProposeRequest(ControlRequest):
     instruction: Identifier
 
 
+class CodexProposalRequest(ControlRequest):
+    action: dict
+    context_version: Identifier
+    context_digest: Identifier | None = None
+
+
+class CodexReportRequest(ControlRequest):
+    plan_id: Identifier
+
+
 class DecisionRequest(ControlRequest):
     decision: Literal["approve", "reject", "confirm_sensitive", "modify"]
     plan_id: Identifier
@@ -86,6 +96,9 @@ class SkillPublishRequest(ControlRequest):
 MODELS = {
     "/phase/operations/resolve": OperationResolveRequest,
     "/phase/propose": ProposeRequest,
+    "/phase/codex/propose": CodexProposalRequest,
+    "/phase/codex/report": CodexReportRequest,
+    "/phase/codex/plot": ControlRequest,
     "/phase/recovery/transaction/resume": RecoveryTransactionResumeRequest,
     "/phase/decision": DecisionRequest,
     "/phase/recovery/propose": RecoveryProposeRequest,

@@ -5,13 +5,30 @@ import os
 
 
 def active_task_wait_reply(facts):
-    """Answer a continuation while work is still running without model routing."""
-    from phase_agent.runtime.chat_state_presentation import brief_chat_state
+    """Show registered work awaiting submission/results without replanning."""
+    from phase_agent.runtime.chat_state_presentation import brief_chat_state, waiting_training_job
     from phase_agent.tools.state.task_waiting import active_pending_tasks
 
+    training = waiting_training_job(facts)
+    if training and not facts.get("pending_execution_policies"):
+        from phase_agent.runtime.training_reply import training_delivery_lines
+
+        delivery = training_delivery_lines(training)
+        if delivery:
+            return "\n".join([brief_chat_state(facts), *delivery])
     active = active_pending_tasks(facts.get("tasks") or [])
     if not active:
         return None
+    if (facts.get("model_refresh") or {}).get("status") == "waiting_results":
+        from phase_agent.runtime.waiting_files_presentation import waiting_file_lines
+
+        return "\n".join(
+            [
+                brief_chat_state(facts),
+                *waiting_file_lines(facts),
+                "下一步：等待新模型结构刷新完成，回传刷新结果后回复‘已回收’；核对相图后提出 branch 生成方案。",
+            ]
+        )
     names = {
         "dft_single_point": "DFT 单点",
         "dft_relax": "DFT 优化",
@@ -31,8 +48,10 @@ def active_task_wait_reply(facts):
     ):
         history.append("已完成流程：Relax+MC 结果已回收并入账。")
     dft_prepared = any(
-        ((record.get("final_action") or {}).get("tool")
-         or ((record.get("agent_proposal") or {}).get("raw_action") or {}).get("tool"))
+        (
+            (record.get("final_action") or {}).get("tool")
+            or ((record.get("agent_proposal") or {}).get("raw_action") or {}).get("tool")
+        )
         == "select_dft_candidates"
         and (
             record.get("status") in {"prepared", "completed"}
@@ -59,11 +78,15 @@ def active_task_wait_reply(facts):
             if handoff.get("return_directory"):
                 return_paths.add(str(handoff["return_directory"]))
         if input_paths:
-            history.append("DFT 输入地址：" + "、".join(f"`{path}`" for path in sorted(input_paths)))
+            history.append(
+                "DFT 输入地址：" + "、".join(f"`{path}`" for path in sorted(input_paths))
+            )
         if submit_paths:
             history.append("提交脚本：" + "、".join(f"`{path}`" for path in sorted(submit_paths)))
         if return_paths:
-            history.append("DFT 回传地址：" + "、".join(f"`{path}`" for path in sorted(return_paths)))
+            history.append(
+                "DFT 回传地址：" + "、".join(f"`{path}`" for path in sorted(return_paths))
+            )
     elif any(row.get("stage") in {"relax_and_feature", "deep_search"} for row in active):
         next_step = "下一步：等待 Relax+MC 完成并回传结果；回传后回复‘已回传’，本轮不重新生成方案。"
         active_ids = {row.get("task_id") for row in active}
@@ -96,11 +119,17 @@ def active_task_wait_reply(facts):
             if return_path:
                 return_paths.add(str(return_path))
         if input_paths:
-            history.append("Relax+MC 输入地址：" + "、".join(f"`{path}`" for path in sorted(input_paths)))
+            history.append(
+                "Relax+MC 输入地址：" + "、".join(f"`{path}`" for path in sorted(input_paths))
+            )
         if submit_paths:
-            history.append("Relax+MC 提交脚本：" + "、".join(f"`{path}`" for path in sorted(submit_paths)))
+            history.append(
+                "Relax+MC 提交脚本：" + "、".join(f"`{path}`" for path in sorted(submit_paths))
+            )
         if return_paths:
-            history.append("Relax+MC 回收地址：" + "、".join(f"`{path}`" for path in sorted(return_paths)))
+            history.append(
+                "Relax+MC 回收地址：" + "、".join(f"`{path}`" for path in sorted(return_paths))
+            )
     else:
         next_step = "下一步：等待当前任务完成并回传结果；收到结果后再进行回收核对。"
     detail = "、".join(f"{name} {count} 个" for name, count in counts.items())
@@ -114,7 +143,7 @@ def generation_blocked_review(facts, reviews):
     row = reviews[0]
     record = (facts.get("pending_execution_policies") or {}).get(row["plan_id"]) or {}
     action = (record.get("agent_proposal") or {}).get("raw_action") or {}
-    from phase_agent.tools.policy.branch_conditions import branch_entry_errors
+    from phase_agent.policies.branch_conditions import branch_entry_errors
 
     errors = branch_entry_errors(action, facts)
     if set(errors) & {
@@ -162,11 +191,45 @@ def unavailable_review_reply(handler, message, facts):
         command in {"同意", "approve"} and reusable_selection(facts) is not None
     ):
         return None
+    if command in {"拒绝", "reject"} and not any(
+        facts.get(key)
+        for key in (
+            "pending_mc_regeneration",
+            "pending_finetune_regeneration",
+            "pending_dft_regeneration",
+        )
+    ):
+        from phase_agent.tools.workflows.model_refresh_state import current_model_refresh
+
+        refresh = current_model_refresh(facts)
+        authorization = refresh.get("input_authorization") or {}
+        if (
+            refresh.get("status") == "approval_required"
+            and authorization.get("plan")
+            and authorization.get("status", "approved") == "approved"
+        ):
+            return None  # Cancellation is still available after a budget block removed the pending row.
     if command in {"同意", "approve"}:
+        from phase_agent.tools.workflows.model_refresh_state import current_model_refresh
+
+        if current_model_refresh(facts).get("status") in {"approval_required", "supplement_ready"}:
+            return None  # Route to a fresh preview, never approve a missing plan.
+        # Consent to analyze a returned result is not approval of an absent model-switch plan.
+        if any(
+            job.get("status") == "results_received"
+            and job.get("original_model_version") == facts.get("active_model_version")
+            and not job.get("activated")
+            and not job.get("training_handoff")
+            for job in (facts.get("remote_finetune_jobs") or {}).values()
+        ):
+            return None
         from phase_agent.tools.state.execution_receipts import recovery_report
 
         if recovery_report(handler.state_path, facts)["unsettled"]:
             return None
+        waiting = active_task_wait_reply(facts)
+        if waiting:
+            return waiting
     return "当前没有可批准或拒绝的待审方案；本次未执行任务，也未调用模型重新决策。"
 
 
@@ -177,13 +240,121 @@ def recovery_reply(handler):
     state = read_json(handler.state_path, {}) or {}
     url = f"http://127.0.0.1:{os.environ.get('PHASE_CONTROL_PORT', '8765')}/phase/approval"
     return (
-        brief_chat_state(state)
-        + "\n检测到新的回传或待核对记录；本轮尚未回收、入账或分析。\n"
+        brief_chat_state(state) + "\n检测到新的回传或待核对记录；本轮尚未回收、入账或分析。\n"
         "下一步：先核对回传证据；回复‘同意回收’执行回收，或回复‘拒绝回收’保持当前状态。\n"
         "原选点与审批方案保留；上次失败尚需核对实际产物，单说同意不能解除。"
         f"请打开[执行恢复与审批]({url})，在执行恢复条目填写外部作业、产物及成本核对结果，"
         "点击“生成核对处理方案”，再确认该恢复方案。恢复后继续会复用原选点；本次未执行任务。"
     )
+
+
+def recovery_confirmation_reply(facts=None):
+    """Keep every entry point at the explicit recovery approval boundary."""
+    lines = [
+        "当前状态：已发现本轮已有回传结果，但尚未读取、校验、回收或入账；结果成功/失败数量尚未确认。"
+    ]
+    if facts:
+        from phase_agent.tools.state.task_waiting import active_pending_tasks
+
+        active = active_pending_tasks(facts.get("tasks") or [])
+        dft_count = sum(row.get("stage") in {"dft_single_point", "dft_relax"} for row in active)
+        relax_count = sum(
+            row.get("stage") in {"relax_and_feature", "deep_search"} for row in active
+        )
+        if dft_count:
+            lines.append(
+                f"当前回收目标：当前模型 DFT 未完成 {dft_count} 个；只处理本轮已登记 DFT 回传。"
+            )
+        elif relax_count:
+            lines.append(
+                f"当前回收目标：Relax+MC 未完成 {relax_count} 个；只处理本轮已登记 Relax+MC 回传。"
+            )
+        waiting = active_task_wait_reply(facts) or ""
+        path_prefixes = (
+            "Relax+MC 输入地址：",
+            "Relax+MC 提交脚本：",
+            "Relax+MC 回收地址：",
+            "DFT 输入地址：",
+            "DFT 提交脚本：",
+            "DFT 回传地址：",
+            "DFT 回收地址：",
+            "提交脚本：",
+        )
+        lines.extend(line for line in waiting.splitlines() if line.startswith(path_prefixes))
+    lines.append(
+        "下一步：将结果回传到上述目录，完成后回复‘已回收’或‘已回传’；系统直接读取、校验并分析本轮结果，生成报告。"
+    )
+    lines.append("也支持回复‘同意回收’开始分析；回复‘拒绝回收’则保持当前状态。")
+    lines.append(
+        "分析后展示本轮报告和具体下一步方案，等待你批准；回收确认不批准模型切换或下一轮计算。"
+    )
+    return "\n".join(lines)
+
+
+def semantic_recovery_intent(handler, facts, message, *, pending=True):
+    """Interpret recovery language with a bounded, non-executing intent call."""
+    normalized = str(message or "").strip().lower().rstrip("。.!！")
+    if normalized in {
+        "同意回收",
+        "批准回收",
+        "开始回收",
+        "继续回收",
+        "回收",
+        "请回收",
+        "回收分析",
+        "approve recovery",
+        "recover",
+        "已回收",
+        "回收完毕",
+        "回收完成",
+        "已回传",
+        "结果已回传",
+        "回传完成",
+    }:
+        return "approve"
+    if normalized in {"拒绝回收", "暂不回收", "不回收", "不再回收", "reject recovery"}:
+        return "reject"
+    if normalized in {"继续", "continue", "继续原运行"}:
+        return "status"
+    if not pending:
+        # Ordinary conversation already has a semantic model route. Do not
+        # classify a nonexistent recovery request in a second model call.
+        return "unknown"
+    client = getattr(handler, "workflow_kwargs", {}).get("agent_client")
+    if not callable(client):
+        return "unknown"
+    from phase_agent.runtime.turn_process import timed_call
+
+    payload = {
+        "mode": "recovery_intent",
+        "bounded_control": True,
+        "user_instruction": str(message)[:2000],
+        "current_state": {
+            "active_task_count": sum(
+                row.get("status") in {"pending", "running", "submitted", "unknown"}
+                for row in facts.get("tasks") or []
+            ),
+            "pending_recovery": True,
+        },
+        "allowed_intents": ["approve", "reject", "status", "question", "unknown"],
+        "output_contracts": {
+            "recovery_intent": "one allowed intent only",
+            "execution_fields": "forbidden",
+        },
+        "instruction": (
+            "理解用户对当前已回传结果的真实意图。用户确认已回收、已回传或明确要求本地回收分析，"
+            "返回 approve，仅授权读取、校验、入账及分析；询问是否可以回收、要求说明状态或说继续，返回 status/question；"
+            "明确拒绝返回 reject；无法确定返回 unknown。不得执行任何动作，不得生成科学方案。"
+        ),
+    }
+    try:
+        result = timed_call("recovery_intent", client, payload, category="model")
+    except Exception:
+        return "unknown"
+    if not isinstance(result, dict):
+        return "unknown"
+    intent = result.get("recovery_intent") or result.get("kind")
+    return intent if intent in {"approve", "reject", "status", "question", "unknown"} else "unknown"
 
 
 def route_saved_control(state, runtime, reviews):
@@ -236,7 +407,7 @@ def route_saved_control(state, runtime, reviews):
         }
         for r in reviews[:4]
     ]
-    from phase_agent.tools.policy.branch_conditions import branch_entry_errors, branch_facts
+    from phase_agent.policies.branch_conditions import branch_entry_errors, branch_facts
 
     for row in rows:
         record = (facts.get("pending_execution_policies") or {}).get(row["plan_id"]) or {}

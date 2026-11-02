@@ -3,8 +3,8 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
-from phase_agent.decisions.agent.transport_tables import (
+from phase_agent.models.prepare_llm_request import prepare_llm_request
+from phase_agent.models.transport_tables import (
     compact_evidence_tables,
     expand_evidence_tables,
 )
@@ -65,12 +65,12 @@ def test_nested_training_evidence_compacts_without_touching_human_constraints():
 
 
 def test_dft_output_budget_counts_table_rows_not_table_keys():
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
     from tests.test_deepseek_client import FakeResponse, completion
 
     client = create_deepseek_client(api_key="mock", thinking="disabled")
     with patch(
-        "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+        "phase_agent.models.create_deepseek_client.urllib.request.urlopen",
         return_value=FakeResponse(completion('{"tool":"select_dft_candidates"}')),
     ) as request:
         client(
@@ -97,7 +97,7 @@ def test_pending_activation_continue_shows_saved_plan_without_scientific_call(
     before = deepcopy(facts)
     runtime = SimpleNamespace(context=SimpleNamespace(handler=handler, conversation_id="t"))
     with patch(
-        "phase_agent.decisions.agent.propose_tool_action.propose_agent_tool_action",
+        "phase_agent.agents.strategic.propose_tool_action.propose_agent_tool_action",
         Mock(side_effect=AssertionError("no LLM")),
     ):
         result = route_request({"facts": facts, "message": "继续"}, runtime)

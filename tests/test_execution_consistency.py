@@ -73,3 +73,38 @@ def test_latest_successful_invocation_does_not_inherit_old_failure(tmp_path):
     state['action_records'].append({'record_id': 'a2', 'status': 'completed', 'final_action': {'task_key': 'initial'}})
     state['effective_decisions']['initial']['status'] = 'completed'
     assert recovery_report(tmp_path / 'state.json', state)['status'] == 'clear'
+
+
+def test_stale_presentation_cannot_hide_new_return_approval_gate(tmp_path, monkeypatch):
+    state = {
+        "active_model_version": "model-new",
+        "tasks": [
+            {
+                "task_id": "dft-1",
+                "stage": "dft_single_point",
+                "status": "pending",
+            }
+        ],
+        "execution_recovery_report": {"status": "clear", "unsettled": []},
+    }
+    monkeypatch.setattr(
+        "phase_agent.runtime.workflow_reply_presentation.recovery_report",
+        lambda *_args, **_kwargs: {"status": "clear", "unsettled": []},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "phase_agent.tools.workflows.recover_saved_results.recovery_candidate",
+        lambda _state: {"returned": True, "pending": True},
+    )
+
+    reply = format_workflow_reply(
+        {
+            "status": "execution_reconciliation_required",
+            "state": state,
+            "recovery_report": {"unsettled": [{"reason": "unsafe_inflight_checkpoint"}]},
+        },
+        tmp_path / "state.json",
+    )
+
+    assert "同意回收" in reply
+    assert "等待超算完成" not in reply

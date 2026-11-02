@@ -1,7 +1,7 @@
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
-from phase_agent.decisions.agent.deepagents_proposal import create_proposal_client, proposal_material
+from phase_agent.models.deepagents_proposal import create_proposal_client, proposal_material
 
 
 class OfflineModel(FakeMessagesListChatModel):
@@ -47,7 +47,7 @@ def test_contract_and_repair_material_preserved_without_raw_action():
 
 
 def test_proposal_passes_real_langgraph_contract():
-    from phase_agent.decisions.agent.decision_backend import request_decision_action
+    from phase_agent.graphs.decision_team.backend import request_decision_action
     client = create_proposal_client(OfflineModel(responses=[AIMessage(content=
         '{"tool":"select_dft_candidates","parameters":{"decisions":[{"candidate_id":"a",'
         '"action":"DFT_SINGLE_POINT","reason":"near hull"}]},"budget":30}')]))
@@ -95,7 +95,7 @@ def _dft_sampling_payload():
 
 
 def _assert_dft_material(material, payload):
-    from phase_agent.decisions.agent.transport_tables import expand_evidence_tables
+    from phase_agent.models.transport_tables import expand_evidence_tables
 
     actual = expand_evidence_tables(material)["decision_context"]
     expected = payload["decision_context"]
@@ -108,8 +108,8 @@ def _assert_dft_material(material, payload):
 
 def test_D_H_and_reference_survive_deep_projection_and_table_roundtrip():
     from copy import deepcopy
-    from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
-    from phase_agent.decisions.agent.transport_tables import compact_evidence_tables
+    from phase_agent.models.prepare_llm_request import prepare_llm_request
+    from phase_agent.models.transport_tables import compact_evidence_tables
 
     payload = _dft_sampling_payload()
     before = deepcopy(payload)

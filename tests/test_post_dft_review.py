@@ -1,6 +1,6 @@
 import pytest
-from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
-from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
+from phase_agent.agents.common.post_dft_review import valid_post_dft_review
+from phase_agent.agents.strategic.propose_tool_action import propose_agent_tool_action
 
 
 def review():
@@ -39,7 +39,7 @@ def test_review_requires_both_alternatives_and_matching_choice():
 
 
 def test_input_only_finetune_accepts_legacy_wire_label_not_search():
-    from phase_agent.decisions.agent.post_dft_review import request_review_repair
+    from phase_agent.agents.common.post_dft_review import request_review_repair
 
     fields = review()
     fields.update(choice="revise_strategy", finetune_recommendation="now")
@@ -56,13 +56,13 @@ def test_input_only_finetune_accepts_legacy_wire_label_not_search():
     assert normalized["post_dft_review"]["choice"] == "finetune"
     assert action["post_dft_review"]["choice"] == "revise_strategy"
     fields["choice"] = "search"
-    from phase_agent.decisions.agent.post_dft_review import normalize_review_choice
+    from phase_agent.agents.common.post_dft_review import normalize_review_choice
 
     assert not valid_post_dft_review(normalize_review_choice(action))
 
 
 def test_repair_response_tool_alias_is_normalized():
-    from phase_agent.decisions.agent.post_dft_review import request_review_repair
+    from phase_agent.agents.common.post_dft_review import request_review_repair
 
     fields = review()
     fields.update(choice="update_mlip", finetune_recommendation="now")
@@ -97,7 +97,7 @@ def test_generic_branch_reason_cannot_pass_post_dft_gate():
 
 
 def test_review_reports_specific_missing_field_and_choice_conflict():
-    from phase_agent.decisions.agent.post_dft_review import post_dft_review_errors
+    from phase_agent.agents.common.post_dft_review import post_dft_review_errors
 
     fields = review()
     fields.pop("limitations")
@@ -124,7 +124,7 @@ def test_llm_repairs_once_with_exact_feedback_and_consistent_schema():
             "post_dft_review": review(),
         }
 
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     result = request_validated_action(
         client,
@@ -147,7 +147,7 @@ def test_repair_failure_is_bounded_and_not_approved():
         requests.append(payload)
         return {"tool": "generate_branches", "parameters": parameters()}
 
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     with pytest.raises(ValueError, match="post_dft_review"):
         request_validated_action(
@@ -162,7 +162,7 @@ def test_repair_failure_is_bounded_and_not_approved():
 
 
 def test_repair_usage_includes_both_calls():
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     calls = []
 

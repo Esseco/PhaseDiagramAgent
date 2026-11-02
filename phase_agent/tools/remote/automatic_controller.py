@@ -1,6 +1,6 @@
 """One bounded automatic remote step under an explicit authorization snapshot."""
 
-from phase_agent.tools.policy.automatic_mode_authorization import authorize_automatic_action
+from phase_agent.policies.automatic_mode_authorization import authorize_automatic_action
 from phase_agent.tools.step_runner.file_protocol import read_json, write_json
 
 

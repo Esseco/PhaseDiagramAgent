@@ -31,7 +31,7 @@ def authorize_generation_policy_revision(state, confirmed_snapshot, *, allowed_p
     new = deepcopy(confirmed_snapshot.get("config") or {})
     if not old or not _same_outside_allowed(old, new, allowed_paths=allowed_paths):
         return {"status": "rejected_scientific_change", "state": current}
-    from phase_agent.tools.policy.workflow_policy import settings
+    from phase_agent.policies.workflow_policy import settings
 
     try:
         settings(new)

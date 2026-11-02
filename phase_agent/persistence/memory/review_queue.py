@@ -10,6 +10,7 @@ from phase_agent.persistence.memory.decision_memory import (
 )
 from phase_agent.persistence.memory.knowledge_record import knowledge_record
 from phase_agent.persistence.memory.verify_evidence_refs import verify_evidence_refs
+from phase_agent.persistence.memory.applicability import project_scope_matches
 
 
 def propose_memory_update(state, *, category, items, system_id, evidence_refs, source="agent"):
@@ -61,6 +62,25 @@ def review_memory_update(state, proposal_id, *, approved, reviewer="user"):
     if approved:
         if proposal.get("record"):
             record = knowledge_record(proposal["record"])
+            missing = verify_evidence_refs(updated, record["evidence_refs"], scope=record["scope"])
+            if missing:
+                raise ValueError(f"knowledge evidence references are missing: {missing}")
+            from phase_agent.persistence.memory.verify_evidence_refs import evidence_fingerprint
+
+            if proposal.get("evidence_fingerprint") and proposal[
+                "evidence_fingerprint"
+            ] != evidence_fingerprint(updated, record["evidence_refs"]):
+                raise ValueError(
+                    "knowledge evidence changed before approval; propose a new revision"
+                )
+            if record["maturity"] == "validated":
+                convergence = updated.get("convergence_result") or updated.get("convergence") or {}
+                if not (
+                    convergence.get("status") == "finished"
+                    and convergence.get("converged") is True
+                    and updated.get("user_accepted_convergence") is True
+                ):
+                    raise ValueError("validated knowledge requires accepted convergence evidence")
             if proposal.get("source") == "published_domain_skill":
                 record["status"] = "active"
                 record["maturity"] = "heuristic"
@@ -74,6 +94,7 @@ def review_memory_update(state, proposal_id, *, approved, reviewer="user"):
                 and row.get("system_id") == record.get("system_id")
                 and row.get("category") == record.get("category")
                 and row.get("applicability", {}) == record.get("applicability", {})
+                and project_scope_matches(row, record)
             }
             if targets - eligible:
                 raise ValueError(
@@ -111,6 +132,13 @@ def review_memory_update(state, proposal_id, *, approved, reviewer="user"):
 
 def propose_knowledge_record(state, record, *, source="agent"):
     """Queue structured knowledge; review_memory_update remains the approval gate."""
+    from phase_agent.persistence.memory.applicability import memory_scope
+
+    project_id = memory_scope(state)["project_id"]
+    if isinstance(record, dict) and record.get("scope") == "project" and project_id:
+        if record.get("project_id") not in {None, project_id}:
+            raise ValueError("project knowledge must be proposed in its applicable project")
+        record = {**record, "project_id": project_id}
     normalized = knowledge_record(record)
     if normalized["maturity"] == "validated":
         convergence = state.get("convergence_result") or state.get("convergence") or {}
@@ -124,7 +152,10 @@ def propose_knowledge_record(state, record, *, source="agent"):
     if missing:
         raise ValueError(f"knowledge evidence references are missing: {missing}")
     updated = deepcopy(state)
-    proposal_id = "memory-" + normalized["knowledge_id"]
+    from phase_agent.persistence.memory.verify_evidence_refs import evidence_fingerprint
+
+    fingerprint = evidence_fingerprint(state, normalized["evidence_refs"])
+    proposal_id = "memory-" + normalized["knowledge_id"] + "-" + fingerprint.rsplit("-", 1)[-1]
     queue = updated.setdefault("memory_review_queue", [])
     existing = next((row for row in queue if row.get("proposal_id") == proposal_id), None)
     if existing:
@@ -138,6 +169,7 @@ def propose_knowledge_record(state, record, *, source="agent"):
         and row.get("scope") == normalized["scope"]
         and row.get("system_id") == normalized.get("system_id")
         and row.get("applicability", {}) == normalized.get("applicability", {})
+        and project_scope_matches(row, normalized)
         and row.get("statement") != normalized["statement"]
     ]
     proposal = {
@@ -147,5 +179,6 @@ def propose_knowledge_record(state, record, *, source="agent"):
         "status": "conflict_review" if conflicts else "pending_review",
         "conflicts_with": conflicts,
     }
+    proposal["evidence_fingerprint"] = fingerprint
     queue.append(proposal)
     return {"state": updated, "proposal": proposal}

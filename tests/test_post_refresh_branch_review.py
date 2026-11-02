@@ -3,11 +3,11 @@ from copy import deepcopy
 import pytest
 
 from tests.test_new_model_generation_gate import switched, generated
-from phase_agent.tools.policy.model_generation import (
+from phase_agent.policies.model_generation import (
     new_model_generation_facts,
     new_model_search_errors,
 )
-from phase_agent.tools.policy.branch_conditions import branch_entry_errors
+from phase_agent.policies.branch_conditions import branch_entry_errors
 
 
 def test_refresh_requires_actual_generation_before_mc_or_dft():
@@ -60,7 +60,7 @@ def test_saved_mc_plan_is_visible_but_not_invited_for_approval():
 
 def test_refresh_status_names_required_generation_and_review():
     from phase_agent.runtime.chat_state_presentation import brief_chat_state
-    from phase_agent.analysis.state.training_context import post_refresh_search_context
+    from phase_agent.evidence.training_context import post_refresh_search_context
 
     text = brief_chat_state(switched())
     assert "先生成" in text and "branch" in text
@@ -71,7 +71,7 @@ def test_refresh_status_names_required_generation_and_review():
 
 def test_saved_mc_approval_revalidates_before_any_handler(tmp_path):
     from tests.test_event_loop import _session
-    from phase_agent.tools.workflows.run_event_loop import run_action_turn
+    from phase_agent.tools.workflows.run_action_turn import run_action_turn
 
     state = switched()
     proposal = {

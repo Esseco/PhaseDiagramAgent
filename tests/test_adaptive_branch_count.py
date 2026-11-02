@@ -1,11 +1,11 @@
 from copy import deepcopy
 import pytest
-from phase_agent.tools.policy.adaptive_branch_count import (
+from phase_agent.policies.adaptive_branch_count import (
     policy_for,
     budget_limits_for_action,
 )
-from phase_agent.tools.policy.workflow_policy import branch_batch_errors
-from phase_agent.decisions.agent.propose_tool_action import _apply_generation_defaults
+from phase_agent.policies.workflow_policy import branch_batch_errors
+from phase_agent.agents.strategic.propose_tool_action import _apply_generation_defaults
 
 
 def action(count):
@@ -64,7 +64,7 @@ def test_first_round_guidance_and_following_round_are_distinct():
 
 
 def test_budget_estimate_cannot_veto_new_branch_proposal():
-    from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+    from phase_agent.policies.validate_tool_action import validate_tool_action
 
     config = {
         "agent": {"allowed_tools": ["generate_branches"]},
@@ -173,7 +173,7 @@ def test_preflight_keeps_estimate_without_budget_rejection(monkeypatch):
 def test_new_model_proposal_uses_regions_and_counts_only_after_generation(monkeypatch):
     from importlib import import_module
 
-    module = import_module("phase_agent.decisions.agent.propose_tool_action")
+    module = import_module("phase_agent.agents.strategic.propose_tool_action")
     seen = []
 
     def fake(client, payload):

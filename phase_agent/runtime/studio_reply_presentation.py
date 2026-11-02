@@ -43,7 +43,7 @@ def format_turn_reply(reply, state, *, configuring=False):
             lines.append(saved_plan_details())
         return "\n".join(lines)
     if not configuring:
-        from phase_agent.analysis.state.batch_return_facts import batch_return_facts
+        from phase_agent.evidence.batch_return_facts import batch_return_facts
 
         returns = batch_return_facts(state)
         stale_claim = any(
@@ -139,6 +139,7 @@ def format_turn_reply(reply, state, *, configuring=False):
     ):
         current = "当前状态：尚未开始搜索。"
     body = []
+    explicit_next = any(line.startswith(("下一步：", "下一步方案：")) for line in lines)
     for line in lines:
         if line.startswith(("当前：", "当前阶段：", "当前状态：")):
             normalized = "当前状态：" + line.split("：", 1)[1]
@@ -160,7 +161,9 @@ def format_turn_reply(reply, state, *, configuring=False):
             )
         ):
             continue
-        if line.startswith(("下一步：", "下一步方案：", "Agent建议：")):
+        if line.startswith(("下一步：", "下一步方案：")) or (
+            line.startswith("Agent建议：") and not explicit_next
+        ):
             line = "建议：" + line.split("：", 1)[1]
         body.append(line)
     if not configuring and state.get("pending_execution_policies"):

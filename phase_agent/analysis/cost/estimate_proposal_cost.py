@@ -16,6 +16,7 @@ def estimate_proposal_cost(action, state):
             "scope": "Input preparation only; separate manual computation",
         }
     if tool == "generate_branches" and params.get("sampling_mode") == "region_adaptive":
+        scope = params.get("module_execution_scope") or {}
         return {
             "workload": [
                 {
@@ -24,9 +25,9 @@ def estimate_proposal_cost(action, state):
                     "actual_branch_count": None,
                 }
             ],
-            "estimated_total_cost": None,
+            "estimated_total_cost": scope.get("relative_cost_upper"),
             "cost_unit": "relative_cost",
-            "scope": "仅本地生成登记；数量完成后统计，无后续计算授权",
+            "scope": "生成登记并准备Relax+MC输入；人工提交超算，不授权运行",
         }
     scope = params.get("module_execution_scope")
     if tool == "generate_branches" and scope:

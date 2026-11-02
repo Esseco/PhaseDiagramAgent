@@ -139,7 +139,7 @@ def test_sequential_preview_dispatch_and_third_segment_use_same_real_task_plan(
     from types import SimpleNamespace
     from tests.test_relax_mc_handoff import _completed_relax_fixture, _write_vasp
     from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull
-    from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+    from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
     from phase_agent.tools.workflows.create_active_learning_handlers import _allocate_mc_bohb
 
     branches, structures, tasks, rows, entries, segments = {}, {}, [], [], [], []

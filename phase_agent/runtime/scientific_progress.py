@@ -93,7 +93,7 @@ def project_progress(state, state_path, *, session=None):
     progress["pending_review_count"] = len(progress["review_requests"])
     progress["plan_cards"] = [row["review_card"] for row in progress["review_requests"]]
     status, label, action = "ready", "可提出下一步方案", "回复继续，由 Agent 核对现有结果并提出方案"
-    from phase_agent.graphs.execution_recovery_graph import execution_recovery_report
+    from phase_agent.graphs.recovery.execution_recovery_graph import execution_recovery_report
 
     report = execution_recovery_report(state_path, state)
     progress["recovery_report"] = report

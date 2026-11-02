@@ -3,7 +3,7 @@
 from copy import deepcopy
 import hashlib
 
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 
 INPUT_MODES = {
     "relax_mc_inputs",

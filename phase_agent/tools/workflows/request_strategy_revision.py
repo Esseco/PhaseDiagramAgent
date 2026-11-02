@@ -3,7 +3,9 @@
 from copy import deepcopy
 from phase_agent.configuration.session.create_config_draft import create_config_draft
 from phase_agent.configuration.session.apply_config_revision import apply_config_revision
-from phase_agent.decisions.strategy.apply_strategy_adjustment import apply_strategy_adjustment
+from phase_agent.agents.strategic.strategy.apply_strategy_adjustment import (
+    apply_strategy_adjustment,
+)
 
 
 def request_strategy_revision(*, action, context):

@@ -64,6 +64,9 @@ def record_remote_diagnostics(root, state, results, missing, report, io):
     for batch in batches:
         job = str(batch.get("job_id") or "unknown")
         row = {"job_id": job, "state": "UNKNOWN", "exit_code": None, **evidence.get(job, {})}
+        from phase_agent.tools.relax_mc_batch.hpc_failure import classify_scheduler_failure
+
+        row["failure_category"] = classify_scheduler_failure(row)
         try:
             row["logs"] = log_tails(root, batch)
         except OSError as error:
@@ -158,7 +161,19 @@ def compact_diagnostics(report, path):
         "group_count": len(groups),
         "jobs": [
             {
-                **{k: r.get(k) for k in ("job_id", "state", "exit_code", "reason", "query_error")},
+                **{
+                    k: r.get(k)
+                    for k in (
+                        "job_id",
+                        "state",
+                        "exit_code",
+                        "reason",
+                        "query_error",
+                        "elapsed_seconds",
+                        "nodes",
+                        "failure_category",
+                    )
+                },
                 "logs": [
                     {"path": log.get("path"), "log_tail": str(log.get("log_tail") or "")[-2048:]}
                     for log in (r.get("logs") or [])[:3]

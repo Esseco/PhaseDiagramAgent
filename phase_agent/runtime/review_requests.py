@@ -1,7 +1,7 @@
 """One read-only queue for existing approval owners; no parallel executor."""
 
 from copy import deepcopy
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 
 
 def additional_reviews(state, session=None):
@@ -21,10 +21,23 @@ def additional_reviews(state, session=None):
                 continue
             kind, title, scope = (
                 "model_activation",
-                "切换候选模型",
+                f"进入 {handoff.get('next_epoch') or '下一 epoch'}：切换候选模型",
                 f"{state.get('active_model_version')} → {version}",
             )
+            evidence = candidate.get("evidence_status") or (candidate.get("validation") or {}).get(
+                "evidence_status"
+            )
+            if (
+                not evidence
+                and (candidate.get("validation") or {}).get("evaluation_type")
+                == "grouped_cross_validation_review"
+            ):
+                evidence = "research_candidate"
             boundary = "仅切换模型；结构刷新、搜索及提交另行审批"
+            if evidence == "research_candidate":
+                boundary += "；研究候选，尚未通过独立验证"
+            elif evidence == "independently_validated":
+                boundary += "；已通过独立验证"
         elif stage == "awaiting_direction_approval":
             kind, title, scope = (
                 "training_direction",
@@ -56,7 +69,7 @@ def additional_reviews(state, session=None):
                 title,
                 scope,
                 boundary,
-                proposal.get("reason") or handoff.get("reason"),
+                handoff.get("reason") or proposal.get("reason"),
                 sensitive=kind == "model_activation",
                 version=version,
             )
@@ -239,6 +252,14 @@ def review_additional(handler, state, row, decision, comment):
         updated = result["state"]
         status = "direction_reviewed" if updated != state else "not_executed"
     write_json(handler.state_path, updated)
+    if kind == "model_activation" and status == "activated" and decision != "reject":
+        from phase_agent.runtime.model_activation_followup import propose_refresh_after_activation
+
+        following = propose_refresh_after_activation(
+            handler, result, state.get("active_model_version")
+        )
+        if following is not None:
+            return following
     return {"status": status, "result": result}
 
 
@@ -270,7 +291,7 @@ def pending_reviews(state, session=None, *, state_path=None):
             }
         )
     rows.extend(additional_reviews(state, session))
-    from phase_agent.analysis.state.project_authority import current_project, project_identity
+    from phase_agent.evidence.project_authority import current_project, project_identity
 
     card = current_project(state, session, state_path=state_path)
     for row in rows:

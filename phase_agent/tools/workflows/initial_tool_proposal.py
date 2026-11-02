@@ -2,8 +2,18 @@
 
 from copy import deepcopy
 from phase_agent.tools.budget.record_budget_usage import record_budget_usage
-from phase_agent.tools.policy.execution_policy import build_agent_proposal
-from phase_agent.decisions.agent.post_dft_review import valid_post_dft_review
+from phase_agent.policies.execution_policy import build_agent_proposal
+from phase_agent.agents.common.post_dft_review import valid_post_dft_review
+
+
+def _post_dft_allowed_tools(allowed, *, awaiting_first_search=False):
+    from phase_agent.agents.common.post_dft_review import REVIEW_TOOLS
+
+    return [
+        tool
+        for tool in allowed
+        if tool in REVIEW_TOOLS or (awaiting_first_search and tool == "prepare_local_batch_files")
+    ]
 
 
 def _post_mc_allowed_tools(allowed, generation, *, post_mc):
@@ -19,11 +29,7 @@ def _post_mc_allowed_tools(allowed, generation, *, post_mc):
     blocked = {"allocate_mc_bohb", "generate_branches", "run_calculation_stage"}
     if not pending_post_refresh_search:
         blocked.add("prepare_local_batch_files")
-    return [
-        tool
-        for tool in tools
-        if tool not in blocked
-    ]
+    return [tool for tool in tools if tool not in blocked]
 
 
 def select_initial_proposal(
@@ -50,23 +56,23 @@ def select_initial_proposal(
         if callable((registry.get(name) or {}).get("handler"))
     ]
     post_recovery_only = bool(
-        current.get("post_recovery_next_step_pending")
-        or current.get("_recovery_just_approved")
+        current.get("post_recovery_next_step_pending") or current.get("_recovery_just_approved")
     )
     if post_recovery_only:
         # This is the final proposal boundary after result recovery.  The
         # dialogue layer may enter the scientific workflow with `advance`, so
         # enforce the phase transition again where the action is actually
-        # selected.  Relax/MC preparation must wait for a separate DFT/branch
-        # proposal approval.
-        allowed = [
-            tool for tool in allowed if tool in {"select_dft_candidates", "generate_branches"}
-        ]
+        # selected. Use the recovered stage's next-step scope, including the
+        # full post-DFT review. New scientific work still requires approval.
+        from phase_agent.policies.recovery_transition import post_recovery_tools
+
+        stage_tools = post_recovery_tools(current)
+        allowed = [tool for tool in allowed if tool in stage_tools]
         if not allowed:
             return {
                 "status": "not_configured",
                 "state": current,
-                "reason": "回收后缺少可用的 DFT 或 branch 动作；未生成 Relax/MC 方案。",
+                "reason": "回收后缺少本轮阶段可用的科学建议动作；未生成 Relax/MC 方案或执行新任务。",
                 "submitted": False,
             }
     if (
@@ -121,7 +127,7 @@ def select_initial_proposal(
             "reason": "原 DFT 选点的复用条件已变化；本次停止，未调用模型重新决策或执行任务。",
             "submitted": False,
         }
-    from phase_agent.tools.policy.branch_conditions import branch_facts
+    from phase_agent.policies.branch_conditions import branch_facts
     from phase_agent.runtime.turn_process import process_event
 
     facts = branch_facts(current)
@@ -130,14 +136,21 @@ def select_initial_proposal(
     decision_state.setdefault("decision_context", {})["branch_conditions"] = facts
     # Saved snapshots can predate a code update without any scientific change.
     # Refresh current execution facts at the actual model boundary as well.
-    from phase_agent.analysis.state.workflow_blockers import (
+    from phase_agent.evidence.workflow_blockers import (
         mc_allocation_facts,
         refresh_result_facts,
     )
 
     decision_state["decision_context"]["mc_entry_conditions"] = mc_allocation_facts(current)
     decision_state["decision_context"]["refresh_result_facts"] = refresh_result_facts(current)
-    from phase_agent.analysis.state.workflow_blockers import convergence_feedback
+    from phase_agent.evidence.task_failure_facts import task_failure_facts
+
+    decision_state["decision_context"]["retryable_tasks"] = [
+        {key: row.get(key) for key in ("task_id", "stage", "status")}
+        for row in task_failure_facts(current)["actionable_failures"]
+        if row.get("task_id")
+    ]
+    from phase_agent.evidence.workflow_blockers import convergence_feedback
 
     decision_state["decision_context"]["latest_convergence_check"] = convergence_feedback(current)
     process_event("科学分支进入条件", facts)
@@ -147,7 +160,7 @@ def select_initial_proposal(
         decision_state.setdefault("decision_context", {})["unified_dialogue"] = True
         # This project dispatches HPC inputs, never local scientific calculations.
         allowed = [name for name in allowed if name != "run_calculation_stage"]
-    from phase_agent.decisions.agent.choose_debug_next_action import (
+    from phase_agent.agents.strategic.choose_debug_next_action import (
         choose_debug_next_action,
     )
 
@@ -170,7 +183,7 @@ def select_initial_proposal(
     effective = (context or {}).get("effective_config") or config
     model = effective.get("mlip") or {}
     version = model.get("version") or model.get("name") or current.get("active_model_version")
-    from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+    from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
     assessment = post_dft_assessment(current, effective)
     decision_state.setdefault("decision_context", {})["post_dft_assessment"] = assessment
@@ -238,7 +251,11 @@ def select_initial_proposal(
                     and r.get("candidate_id") not in prior_relax
                 )
             ]
-        if not current["qbc_candidates"] and not assessment:
+        if (
+            not current["qbc_candidates"]
+            and not assessment
+            and not (post_recovery_only and "generate_branches" in allowed)
+        ):
             return {
                 "status": "not_configured",
                 "state": current,
@@ -264,23 +281,18 @@ def select_initial_proposal(
     )
     if assessment:
         safe_next = None
-        allowed = [
-            tool
-            for tool in allowed
-            if tool
-            in {
-                "generate_branches",
-                "update_mlip",
-                "select_dft_candidates",
-                "check_convergence",
-                "pause_search",
-                "adjust_strategy",
-            }
-        ]
+        awaiting_first_search = (
+            generation.get("post_refresh")
+            and generation.get("ready")
+            and not generation.get("first_search_completed")
+        )
+        allowed = _post_dft_allowed_tools(allowed, awaiting_first_search=awaiting_first_search)
     # A completed MC round normally moves the next proposal to DFT/convergence
     # review.  Keep Relax preparation available while a refreshed model still
     # has an unsearched first-generation branch set.
-    gated_tools = _post_mc_allowed_tools(allowed, generation, post_mc=post_mc)
+    gated_tools = _post_mc_allowed_tools(
+        allowed, generation, post_mc=post_mc and not post_recovery_only
+    )
     if gated_tools != allowed:
         safe_next = None
         allowed = gated_tools
@@ -324,12 +336,12 @@ def select_initial_proposal(
     from phase_agent.tools.local.training_followup_plan import saved_followup
 
     if (context or {}).get("manager") is not None:
-        from phase_agent.tools.policy.region_sampling import ledger_context
+        from phase_agent.policies.region_sampling import ledger_context
 
         decision_state.setdefault("decision_context", {})["branch_ledger_facts"] = ledger_context(
             context["manager"]
         )
-        from phase_agent.decisions.agent.branch_pool_review import pool_context
+        from phase_agent.agents.exploration.branch_pool_review import pool_context
 
         decision_state["decision_context"]["branch_pool_facts"] = pool_context(
             current, context["manager"].data["branches"]
@@ -344,7 +356,7 @@ def select_initial_proposal(
                 current["branch_region_review"]
             )
 
-    from phase_agent.analysis.state.scientific_decision_brief import decision_brief
+    from phase_agent.evidence.scientific_decision_brief import decision_brief
 
     decision_state.setdefault("decision_context", {})["scientific_decision_brief"] = decision_brief(
         current
@@ -379,7 +391,7 @@ def select_initial_proposal(
             if action.get("_llm_usage"):
                 current = record_budget_usage(current, {"llm_usage": action["_llm_usage"]})
             return {"status": "rejected", "state": current, "reason": preflight_error}
-    from phase_agent.decisions.agent.dialogue_contract import (
+    from phase_agent.agents.common.dialogue_contract import (
         is_dialogue,
         dialogue_result,
     )
@@ -397,7 +409,7 @@ def select_initial_proposal(
             "state": current,
             "reason": "本轮微调已完成，重复训练方案已拦截。请先审阅切换搜索或补采样/DFT的方案。",
         }
-    from phase_agent.tools.policy.workflow_policy import initial_direction_errors
+    from phase_agent.policies.workflow_policy import initial_direction_errors
 
     initial_errors = (
         initial_direction_errors(action, current, assessment) if not model_failed(action) else []

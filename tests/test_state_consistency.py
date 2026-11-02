@@ -2,7 +2,7 @@ import tempfile
 import unittest
 
 from phase_agent.persistence.models.activate_validated_model import activate_validated_model
-from phase_agent.analysis.state.summarize_agent_state import summarize_agent_state
+from phase_agent.evidence.summarize_agent_state import summarize_agent_state
 from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
 from phase_agent.tools.budget.expire_budget_reservations import expire_budget_reservations
 from phase_agent.tools.budget.reserve_budget import reserve_budget

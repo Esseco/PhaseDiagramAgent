@@ -41,4 +41,8 @@ def mark_model_dependent_results_stale(
             "refresh_required": marked,
         }
     )
+    if updated.get("analysis_output_directory"):
+        from phase_agent.analysis.feedback.export_dft_products import publish_output_catalog
+
+        publish_output_catalog(updated, updated["analysis_output_directory"])
     return {"state": updated, "marked": marked}

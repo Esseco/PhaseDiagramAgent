@@ -3,12 +3,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from phase_agent.analysis.state.project_authority import (
+from phase_agent.evidence.project_authority import (
     confirmed_configuration,
     current_project,
     project_identity,
 )
-from phase_agent.analysis.state.build_state_snapshot import build_state_snapshot
+from phase_agent.evidence.build_state_snapshot import build_state_snapshot
 from phase_agent.runtime.project_context import handler_project_context, project_context_line
 from phase_agent.tools.step_runner.build_status_summary import build_status_summary
 from phase_agent.tools.step_runner.file_protocol import read_json, write_json, content_id
@@ -304,7 +304,7 @@ def test_editable_file_diff_is_labeled_unapplied_without_changing_effective_sett
 
 
 def test_generated_H_and_reference_cache_are_not_misrepresented_as_user_edits():
-    from phase_agent.analysis.state.project_authority import configuration_changes
+    from phase_agent.evidence.project_authority import configuration_changes
 
     before = {
         "system": {

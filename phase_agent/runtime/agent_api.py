@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-from phase_agent.module_references import import_saved_module
+from phase_agent.compatibility.module_references import import_saved_module
 import json
 import os
 from pathlib import Path
@@ -357,7 +357,7 @@ def create_agent_runtime(config_path=None):
 
 def _make_deepseek_model_switcher(runtime_config_path, settings, *, system_prompt, thinking):
     """Create a local-only switcher that persists the selected model and replaces the client."""
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
     from phase_agent.runtime.deepseek_credentials import load_deepseek_api_key
     from phase_agent.runtime.set_deepseek_runtime_model import set_deepseek_runtime_model
 
@@ -387,7 +387,7 @@ def _make_deepseek_model_switcher(runtime_config_path, settings, *, system_promp
 
 def _make_deepseek_key_setup(chat_handler, runtime_config_path):
     """Build a local key tester that securely saves and activates a successful key."""
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
     from phase_agent.runtime.deepseek_credentials import load_deepseek_api_key
     from phase_agent.runtime.configuration_chat import (
         CONFIG_AGENT_SYSTEM_PROMPT,
@@ -485,7 +485,7 @@ def main(argv=None):
         "--parent-pid", type=int, help="stop this local Agent automatically when its launcher exits"
     )
     args = parser.parse_args(argv)
-    from phase_agent.decisions.agent.decision_backend import check_decision_backend
+    from phase_agent.graphs.decision_team.backend import check_decision_backend
 
     try:
         check_decision_backend(args.decision_backend)

@@ -1,7 +1,7 @@
 """Offline compute-node CLI for one portable remote manifest task."""
 
 import argparse
-from phase_agent.module_references import import_saved_module
+from phase_agent.compatibility.module_references import import_saved_module
 from phase_agent.tools.remote.worker import run_remote_task
 
 

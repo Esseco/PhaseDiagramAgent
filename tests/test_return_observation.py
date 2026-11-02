@@ -1,12 +1,13 @@
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 import phase_agent.tools.workflows.recover_saved_results as recovery
 
 
-def test_returns_recovered_with_original_config_without_migration(
-    tmp_path, monkeypatch
-):
+def test_returns_recovered_with_original_config_without_migration(tmp_path, monkeypatch):
     result = tmp_path / "result.json"
     result.write_text("{}")
     state = {
@@ -50,9 +51,7 @@ def test_returns_recovered_with_original_config_without_migration(
 
     monkeypatch.setattr(recovery, "apply_scientific_feedback", feedback)
     monkeypatch.setattr(recovery, "update_local_mlip_hull_pool", hull)
-    monkeypatch.setattr(
-        recovery, "_save_runner_state", lambda s, p: seen.update(saved=s)
-    )
+    monkeypatch.setattr(recovery, "_save_runner_state", lambda s, p: seen.update(saved=s))
     recovered = recovery.recover_saved_results(
         state,
         manager=object(),
@@ -71,9 +70,7 @@ def test_returns_recovered_with_original_config_without_migration(
         AssertionError("duplicate collection")
     )
     assert (
-        recovery.recover_saved_results(
-            recovered, manager=object(), result_collector=collector
-        )
+        recovery.recover_saved_results(recovered, manager=object(), result_collector=collector)
         == recovered
     )
 
@@ -101,9 +98,7 @@ def test_invalid_return_exposes_report_without_settlement(tmp_path):
             },
         }
     )
-    recovered = recovery.recover_saved_results(
-        state, manager=object(), result_collector=collector
-    )
+    recovered = recovery.recover_saved_results(state, manager=object(), result_collector=collector)
     assert recovered["tasks"] == state["tasks"]
     assert recovered["result_collection"]["invalid_count"] == 1
     assert "result_collection" not in state
@@ -156,9 +151,7 @@ def test_continue_with_active_dft_tasks_is_read_only_wait(tmp_path):
             "action_records": [
                 {
                     "status": "prepared",
-                    "agent_proposal": {
-                        "raw_action": {"tool": "select_dft_candidates"}
-                    },
+                    "agent_proposal": {"raw_action": {"tool": "select_dft_candidates"}},
                 }
             ],
         },
@@ -205,7 +198,10 @@ def test_dialogue_requires_explicit_recovery_approval(tmp_path, monkeypatch):
 
     def recover(state, **kwargs):
         calls.append(True)
-        return {"tasks": [{"task_id": "returned", "status": "completed"}], "result_collection": {"recovered_count": 1}}
+        return {
+            "tasks": [{"task_id": "returned", "status": "completed"}],
+            "result_collection": {"recovered_count": 1},
+        }
 
     monkeypatch.setattr(recovery, "recover_saved_results", recover)
     runtime = SimpleNamespace(
@@ -247,9 +243,7 @@ def test_recovery_gate_precedes_saved_plan(tmp_path, monkeypatch):
             ],
             "pending_execution_policies": {
                 "stale-plan": {
-                    "agent_proposal": {
-                        "raw_action": {"tool": "prepare_local_batch_files"}
-                    }
+                    "agent_proposal": {"raw_action": {"tool": "prepare_local_batch_files"}}
                 }
             },
         },
@@ -297,9 +291,7 @@ def test_approved_recovery_replaces_stale_plan_with_new_planning_turn(tmp_path, 
             ],
             "pending_execution_policies": {
                 "stale-plan": {
-                    "agent_proposal": {
-                        "raw_action": {"tool": "prepare_local_batch_files"}
-                    }
+                    "agent_proposal": {"raw_action": {"tool": "prepare_local_batch_files"}}
                 }
             },
             "action_records": [{"record_id": "stale-plan", "status": "awaiting_approval"}],
@@ -349,9 +341,7 @@ def test_acknowledged_return_is_not_recollected_on_every_continue(tmp_path, monk
             }
         }
     }
-    state["recovery_acknowledgement"] = {
-        "fingerprint": recovery_candidate_fingerprint(state)
-    }
+    state["recovery_acknowledgement"] = {"fingerprint": recovery_candidate_fingerprint(state)}
     assert recovery_candidate(state)["pending"] is False
     state["relax_mc_batches"]["batch"]["expected_results_archive"] = str(
         tmp_path / "new-results.zip"
@@ -392,6 +382,302 @@ def test_prepared_slurm_inputs_do_not_reopen_acknowledged_returns(tmp_path):
         }
     )
     assert recovery_candidate(state)["pending"] is False
+
+
+def test_new_dft_return_is_not_hidden_by_legacy_acknowledgement(tmp_path):
+    from phase_agent.tools.workflows.recover_saved_results import (
+        recovery_candidate,
+        recovery_candidate_fingerprint,
+    )
+
+    input_dir = tmp_path / "DFTSP_Batch01_input"
+    output_dir = tmp_path / "DFTSP_Batch01_output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    state = {
+        "slurm_batches": [
+            {
+                "batch_id": "remote-000001",
+                "status": "prepared",
+                "task_ids": ["DFT-1"],
+                "handoff": {
+                    "layout_version": 4,
+                    "folder": str(input_dir),
+                    "return_directory": str(output_dir),
+                    "import_directory": str(tmp_path / "import"),
+                    "upload_archive": str(input_dir / "inputs.zip"),
+                },
+            }
+        ],
+        "tasks": [
+            {
+                "task_id": "DFT-1",
+                "stage": "dft_single_point",
+                "status": "pending",
+                "result_path": str(tmp_path / "missing-result.json"),
+            }
+        ],
+        "execution_recovery_report": {"status": "clear", "unsettled": []},
+        "recovery_acknowledgement": {"scope": "explicit_user_recovery_approval"},
+    }
+    state["recovery_acknowledgement"]["fingerprint"] = recovery_candidate_fingerprint(state)
+    archive = output_dir / "calculations__G0001__results.results.zip"
+    archive.write_bytes(b"new DFT return")
+
+    candidate = recovery_candidate(state)
+
+    assert candidate["returned"] is True
+    assert candidate["pending"] is True
+
+
+def test_preparing_and_submitting_training_does_not_reopen_old_returns(tmp_path, monkeypatch):
+    from phase_agent.tools.workflows import recover_saved_results as module
+
+    monkeypatch.setattr(module, "has_registered_return", lambda _: True)
+    state = {"tasks": [], "remote_finetune_jobs": {}}
+    state["recovery_acknowledgement"] = {
+        "scope": "explicit_user_recovery_approval",
+        "fingerprint": module.recovery_candidate_fingerprint(state),
+    }
+    job = {
+        "status": "inputs_prepared",
+        "directory": str(tmp_path / "training"),
+        "activated": False,
+        "handoff": {"return_directory": str(tmp_path / "Finetune_Batch01_output")},
+    }
+    state["remote_finetune_jobs"]["new-training"] = job
+    for status in ("inputs_prepared", "submitted", "running"):
+        job["status"] = status
+        assert module.recovery_candidate(state)["pending"] is False
+    output = tmp_path / "Finetune_Batch01_output"
+    output.mkdir()
+    (output / "training.results.zip").write_bytes(b"new training output")
+    assert module.recovery_candidate(state)["pending"] is True
+
+
+def test_legacy_training_metadata_ack_is_accepted_until_actual_output_changes(
+    tmp_path, monkeypatch
+):
+    from phase_agent.tools.workflows import recover_saved_results as module
+
+    monkeypatch.setattr(module, "has_registered_return", lambda _: True)
+    state = {
+        "remote_finetune_jobs": {
+            "training": {"directory": str(tmp_path / "training"), "status": "inputs_prepared"}
+        }
+    }
+    state["recovery_acknowledgement"] = {
+        "scope": "explicit_user_recovery_approval",
+        "fingerprint": module.recovery_candidate_fingerprint(state, legacy_training_metadata=True),
+    }
+    assert module.recovery_candidate(state)["pending"] is False
+    output = tmp_path / "training" / "results"
+    output.mkdir(parents=True)
+    (output / "training.finished.json").write_text("{}", encoding="utf-8")
+    assert module.recovery_candidate(state)["pending"] is True
+
+
+def test_recovery_candidate_reuses_read_only_cache_until_state_or_return_changes(
+    tmp_path, monkeypatch
+):
+    from phase_agent.tools.workflows import recover_saved_results as module
+
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    return_dir = tmp_path / "return"
+    return_dir.mkdir()
+    state = {
+        "tasks": [],
+        "slurm_batches": [{"handoff": {"return_directory": str(return_dir)}}],
+    }
+    calls = {"returns": 0, "fingerprint": 0}
+
+    def count_returns(current):
+        calls["returns"] += 1
+        return False
+
+    def count_fingerprint(current):
+        calls["fingerprint"] += 1
+        return "fingerprint"
+
+    monkeypatch.setattr(module, "has_registered_return", count_returns)
+    monkeypatch.setattr(module, "recovery_candidate_fingerprint", count_fingerprint)
+    original_stat = Path.stat
+    directory_stat = return_dir.stat()
+    # Windows can retain a directory timestamp while a new archive is visible.
+    monkeypatch.setattr(
+        Path,
+        "stat",
+        lambda path, *args, **kwargs: (
+            directory_stat if path == return_dir else original_stat(path, *args, **kwargs)
+        ),
+    )
+
+    first = module.recovery_candidate(state, state_path=state_path)
+    second = module.recovery_candidate(state, state_path=state_path)
+
+    assert first == second
+    assert calls == {"returns": 1, "fingerprint": 1}
+    (return_dir / "new.results.zip").write_bytes(b"new")
+    module.recovery_candidate(state, state_path=state_path)
+    assert calls == {"returns": 2, "fingerprint": 2}
+
+
+def test_recovery_cache_detects_a_new_pending_task_result_file(tmp_path, monkeypatch):
+    from phase_agent.tools.workflows import recover_saved_results as module
+
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    result = tmp_path / "result.json"
+    state = {
+        "tasks": [
+            {
+                "task_id": "pending",
+                "stage": "dft_single_point",
+                "status": "pending",
+                "result_path": str(result),
+            }
+        ]
+    }
+    calls = []
+
+    def returns(_):
+        calls.append(True)
+        return result.is_file()
+
+    monkeypatch.setattr(module, "has_registered_return", returns)
+    monkeypatch.setattr(module, "recovery_candidate_fingerprint", lambda _: "fingerprint")
+    assert not module.recovery_candidate(state, state_path=state_path)["returned"]
+    result.write_text("{}", encoding="utf-8")
+    assert module.recovery_candidate(state, state_path=state_path)["returned"]
+    assert len(calls) == 2
+
+
+def test_registered_return_scan_ignores_historical_batches_when_tasks_are_pending(
+    tmp_path, monkeypatch
+):
+    from phase_agent.tools.remote import transfer_bundle as module
+
+    old_dir = tmp_path / "old-output"
+    current_dir = tmp_path / "current-output"
+    old_dir.mkdir()
+    current_dir.mkdir()
+    seen = []
+
+    def archives(root):
+        seen.append(str(root))
+        return [Path(root) / "result.results.zip"]
+
+    monkeypatch.setattr(module, "_registered_archives", archives)
+    monkeypatch.setattr(module, "_archive_receipt", lambda root, archive: Path(root) / "receipt")
+    monkeypatch.setattr(module, "checksum", lambda archive: "digest")
+    state = {
+        "tasks": [{"task_id": "current", "stage": "dft_single_point", "status": "pending"}],
+        "slurm_batches": [
+            {"task_ids": ["old"], "results_directory": str(old_dir)},
+            {"task_ids": ["current"], "results_directory": str(current_dir)},
+        ],
+    }
+
+    assert module.has_registered_return(state) is True
+    assert str(old_dir) not in seen
+    assert str(current_dir) in seen
+
+
+def test_recovery_intent_uses_bounded_semantic_classifier_for_natural_language():
+    from phase_agent.graphs.dialogue.saved_control import semantic_recovery_intent
+
+    seen = []
+
+    def client(payload):
+        seen.append(payload)
+        return {"recovery_intent": "approve"}
+
+    handler = SimpleNamespace(workflow_kwargs={"agent_client": client})
+    intent = semantic_recovery_intent(handler, {"tasks": []}, "已回传，可以回收")
+
+    assert intent == "approve"
+    assert seen and seen[0]["bounded_control"] is True
+    assert "execution" not in seen[0]["output_contracts"]
+
+
+def test_standalone_recovery_imperative_is_explicit_approval():
+    from phase_agent.graphs.dialogue.saved_control import semantic_recovery_intent
+
+    handler = SimpleNamespace(
+        workflow_kwargs={"agent_client": lambda _payload: (_ for _ in ()).throw(AssertionError())}
+    )
+
+    assert semantic_recovery_intent(handler, {"tasks": []}, "回收") == "approve"
+
+
+def test_no_pending_recovery_does_not_add_an_intent_model_call():
+    from phase_agent.graphs.dialogue.saved_control import semantic_recovery_intent
+
+    calls = []
+    handler = SimpleNamespace(workflow_kwargs={"agent_client": lambda p: calls.append(p)})
+    assert (
+        semantic_recovery_intent(handler, {"tasks": []}, "请解释当前状态", pending=False)
+        == "unknown"
+    )
+    assert calls == []
+    assert semantic_recovery_intent(handler, {"tasks": []}, "同意回收", pending=False) == "approve"
+    assert calls == []
+
+
+def test_natural_recovery_approval_enters_recovery_without_keyword_matching(tmp_path, monkeypatch):
+    from phase_agent.graphs.dialogue.nodes import read_project
+    from phase_agent.tools.step_runner.file_protocol import write_json
+
+    path = tmp_path / "state.json"
+    write_json(
+        path,
+        {
+            "tasks": [
+                {
+                    "task_id": "returned",
+                    "stage": "dft_single_point",
+                    "status": "pending",
+                    "result_path": str(tmp_path / "result.json"),
+                }
+            ]
+        },
+    )
+    (tmp_path / "result.json").write_text("{}", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        recovery,
+        "recover_saved_results",
+        lambda state, **kwargs: (
+            calls.append(True)
+            or {
+                **state,
+                "tasks": [
+                    {"task_id": "returned", "stage": "dft_single_point", "status": "completed"}
+                ],
+            }
+        ),
+    )
+    handler = SimpleNamespace(
+        state_path=path,
+        conversation_id=None,
+        config_delegate=None,
+        workflow_kwargs={"agent_client": lambda payload: {"recovery_intent": "approve"}},
+        last_turn_outcome=None,
+    )
+    runtime = SimpleNamespace(
+        context=SimpleNamespace(
+            handler=handler,
+            conversation_id="semantic-recovery",
+            messages=[{"role": "user", "content": "已回传，可以回收"}],
+        )
+    )
+
+    result = read_project({}, runtime)
+
+    assert calls == [True]
+    assert result["operation"] == "dispatch"
+    assert result["recovery_just_approved"] is True
 
 
 def test_post_recovery_gate_supersedes_stale_plan_before_saved_control(tmp_path):
@@ -488,8 +774,7 @@ def test_batch_settlement_is_isolated_and_idempotent():
 
     state = {
         "budget_reservations": {
-            f"k{i}": {"reserved_cost": 2, "stage": "relax_and_feature"}
-            for i in range(20)
+            f"k{i}": {"reserved_cost": 2, "stage": "relax_and_feature"} for i in range(20)
         },
         "reserved_relative_cost": 40,
     }
@@ -536,9 +821,7 @@ def test_interrupted_feedback_resumes_without_double_settlement(tmp_path, monkey
         "reserved_relative_cost": 2,
     }
     saved = []
-    monkeypatch.setattr(
-        recovery, "_save_runner_state", lambda s, p: saved.append(deepcopy(s))
-    )
+    monkeypatch.setattr(recovery, "_save_runner_state", lambda s, p: saved.append(deepcopy(s)))
     monkeypatch.setattr(
         recovery,
         "apply_scientific_feedback",
@@ -546,9 +829,7 @@ def test_interrupted_feedback_resumes_without_double_settlement(tmp_path, monkey
     )
     collector = SimpleNamespace(collect_results=lambda s: [incoming])
     with pytest.raises(RuntimeError, match="interrupted"):
-        recovery.recover_saved_results(
-            state, manager=object(), result_collector=collector
-        )
+        recovery.recover_saved_results(state, manager=object(), result_collector=collector)
     checkpoint = saved[-1]
     assert checkpoint["tasks"][0]["status"] == "completed"
     assert checkpoint["budget_usage"]["total_relative_cost"] == 1

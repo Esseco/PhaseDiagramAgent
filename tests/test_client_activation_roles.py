@@ -11,7 +11,7 @@ def test_key_activation_creates_only_one_decision_client(tmp_path):
     clients = [object(), object()]
     with patch("phase_agent.runtime.deepseek_setup.test_and_save_api_key",
                side_effect=lambda key, **kwargs: kwargs["activate_client"](key)),\
-         patch("phase_agent.decisions.agent.create_deepseek_client.create_deepseek_client",
+         patch("phase_agent.models.create_deepseek_client.create_deepseek_client",
                side_effect=clients) as factory:
         _make_deepseek_key_setup(handler, runtime)("mock-key")
     assert factory.call_count == 1
@@ -46,7 +46,7 @@ def test_key_activation_targets_current_configuration_delegate(tmp_path):
     client = object()
     with patch("phase_agent.runtime.deepseek_setup.test_and_save_api_key",
                side_effect=lambda key, **kwargs: kwargs["activate_client"](key)),\
-         patch("phase_agent.decisions.agent.create_deepseek_client.create_deepseek_client",
+         patch("phase_agent.models.create_deepseek_client.create_deepseek_client",
                return_value=client) as factory:
         _make_deepseek_key_setup(handler, tmp_path / "missing-old.json")("mock-key")
     assert delegate.agent_client is client

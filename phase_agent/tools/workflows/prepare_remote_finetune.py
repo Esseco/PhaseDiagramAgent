@@ -4,7 +4,6 @@ from copy import deepcopy
 from pathlib import Path
 import hashlib
 import json
-import shlex
 import re
 import yaml
 
@@ -15,7 +14,7 @@ from phase_agent.runtime.turn_process import timed_call
 
 def prepare_remote_finetune(state, config, *, replacement_directory=None):
     current = timed_call("finetune_state_copy", deepcopy, state, category="training_inputs")
-    from phase_agent.tools.policy.workflow_policy import active_tasks
+    from phase_agent.policies.workflow_policy import active_tasks
 
     if active_tasks(current):
         return {
@@ -104,12 +103,12 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         if not submission.is_dir():
             submission = Path(existing["directory"])
         from phase_agent.tools.remote.submission_storage import restore_storage_directory
-        from phase_agent.tools.remote.submission_handoff import prepare_handoff
+        from phase_agent.tools.remote.write_training_submission import prepare_training_handoff
 
         restore_storage_directory(Path(existing["directory"]) / "inputs", "inputs")
         handoff = existing.get("handoff")
         if not handoff or not Path(handoff["upload_archive"]).is_file():
-            handoff = prepare_handoff(Path(existing["directory"]), [submission / "GPU.sh"])
+            handoff = prepare_training_handoff(Path(existing["directory"]), submission)
             existing["handoff"] = handoff
         return {
             "status": "awaiting_remote_training",
@@ -207,7 +206,7 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     }
     report["remote_environment"] = {"name": environment, "source": environment_source}
     report["original_model_version"] = version
-    from phase_agent.analysis.state.model_epoch import model_epoch
+    from phase_agent.evidence.model_epoch import model_epoch
 
     report["epoch"] = model_epoch(current, version)
     report["training_round"] = directory.name
@@ -255,20 +254,17 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
             "state": current,
             "reason": f"训练输入尚未就绪：{error}；未训练或提交。",
         }
-    command = (
-        "python"
-        if environment == "current"
-        else f"conda run --no-capture-output -n {shlex.quote(environment)} python"
-    )
-    lines = ["#!/bin/bash", "set -euo pipefail", 'cd "$(dirname "$0")"']
-    for member in report["committees"]:
-        lines.append(
-            f"(cd {shlex.quote(member['model_id'])} && {command} -m mace.cli.run_train --config mace_train.yaml)"
-        )
-    for member in report["main_model"]["fold_jobs"]:
-        lines.append(
-            f"(cd {shlex.quote(member['model_id'])} && {command} -m mace.cli.run_train --config mace_train.yaml)"
-        )
+    models = [
+        row["model_id"] for row in [*report["committees"], *report["main_model"]["fold_jobs"]]
+    ]
+    report["execution"] = {
+        "mode": "slurm_array",
+        "training_models": models,
+        "gpus_per_job": 1,
+        "max_parallel_training_jobs": min(4, len(models)),
+        "collection_dependency": "afterany",
+        "collection_gpu_jobs": 1,
+    }
     evaluator = Path(__file__).parents[1] / "remote/collect_training_results.py"
     (inputs / "collect_training_results.py").write_text(
         evaluator.read_text(encoding="utf-8"), encoding="utf-8"
@@ -277,14 +273,23 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     (inputs / "transfer_bundle.py").write_text(
         bundle_source.read_text(encoding="utf-8"), encoding="utf-8"
     )
-    lines.append(f"{command} collect_training_results.py")
+    worker_source = Path(__file__).parents[1] / "remote/run_training_task.py"
+    (inputs / worker_source.name).write_text(
+        worker_source.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     (inputs / "training_plan.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
     # The portable training plan is the authoritative report; the lower-level
     # preparation report is superseded before this directory is published.
     (inputs / "finetune_report.json").unlink(missing_ok=True)
-    (inputs / "run_training.sh").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    (inputs / "run_training.sh").write_text(
+        '#!/bin/bash\nset -euo pipefail\ncd "$(dirname "$0")"\n'
+        ': "${SLURM_ARRAY_TASK_ID:?Submit the training array through submit_all.sh}"\n'
+        "python run_training_task.py\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     from phase_agent.tools.remote.write_training_submission import (
         write_training_submission,
     )
@@ -297,13 +302,13 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         category="training_inputs",
     )
     (directory / "results").mkdir(exist_ok=True)
-    from phase_agent.tools.remote.submission_handoff import prepare_handoff
+    from phase_agent.tools.remote.write_training_submission import prepare_training_handoff
 
     handoff = timed_call(
         "finetune_delivery_bundle",
-        prepare_handoff,
+        prepare_training_handoff,
         directory,
-        [inputs / "GPU.sh"],
+        inputs,
         category="training_inputs",
     )
     current.setdefault("remote_finetune_jobs", {})[digest] = {

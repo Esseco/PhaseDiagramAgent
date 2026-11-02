@@ -4,13 +4,13 @@ from copy import deepcopy
 import json
 import pytest
 
-from phase_agent.analysis.state.budget_experience import (
+from phase_agent.evidence.budget_experience import (
     budget_experiences,
     budget_experience_context,
     task_budget_observations,
 )
-from phase_agent.analysis.state.round_budget_evidence import round_budget_evidence
-from phase_agent.analysis.state.decision_evidence_catalog import decision_evidence_catalog
+from phase_agent.evidence.round_budget_evidence import round_budget_evidence
+from phase_agent.evidence.decision_evidence_catalog import decision_evidence_catalog
 from phase_agent.persistence.memory.collect_memory_candidates import collect_memory_candidates
 from phase_agent.persistence.memory.verify_evidence_refs import verify_evidence_refs
 
@@ -199,7 +199,7 @@ def test_whole_batch_runtime_and_mixed_models_do_not_become_task_estimates():
 
 
 def test_deepagents_transport_retains_budget_experience_without_heavy_payloads():
-    from phase_agent.decisions.agent.deepagents_proposal import proposal_material
+    from phase_agent.models.deepagents_proposal import proposal_material
 
     context = round_budget_evidence(sample_state())
     context["budget_experience"]["decision_examples"][0]["structure"] = {"sites": [1, 2, 3]}

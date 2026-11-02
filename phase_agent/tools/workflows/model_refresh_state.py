@@ -20,7 +20,7 @@ def refresh_preview(state, manager, config):
     represented = set()
     structures = manager.data.get("structures") or {}
 
-    def append(entry, *, historical=False):
+    def append(entry, *, historical=False, mixed=False):
         sid = entry.get("structure_id")
         if sid not in structures:
             raise ValueError(f"刷新结构未登记：{sid}")
@@ -31,7 +31,7 @@ def refresh_preview(state, manager, config):
         if entry.get("ehull") is not None:
             if entry.get("ehull_unit") != "eV/atom":
                 raise ValueError(f"刷新Ehull缺少明确的eV/atom单位：{sid}")
-            if not historical and entry.get("source_version") not in {None, old}:
+            if not historical and not mixed and entry.get("source_version") not in {None, old}:
                 raise ValueError(f"刷新Ehull来源模型不一致：{sid}")
             expected = entry.get("structure_sha256")
             if expected and expected != checksum:
@@ -57,6 +57,7 @@ def refresh_preview(state, manager, config):
                 "x_Na_per_O2": float(composition.get("Na", 0)) * 2 / oxygen,
                 "ehull": None if historical else entry.get("ehull"),
                 "source_version": old,
+                "energy_source_version": entry.get("source_version") if mixed else old,
                 "historical_near_hull": historical,
             }
         )
@@ -65,19 +66,43 @@ def refresh_preview(state, manager, config):
     diagram = refresh.get("old_diagram") or {}
     if diagram.get("model_version") not in {None, old}:
         raise ValueError("刷新旧相图版本不一致")
-    for entry in diagram.get("entries") or []:
-        append(entry)
-    for version, prior in (state.get("phase_diagrams_by_model") or {}).items():
-        if version in {old, refresh["new_model_version"]}:
-            continue
-        for entry in prior.get("entries") or []:
-            if entry.get("ehull") is not None and float(entry["ehull"]) <= 0.010:
-                append(entry, historical=True)
+    latest_policy = (config.get("model_refresh") or {}).get(
+        "energy_policy"
+    ) == "latest_valid_per_structure_v1"
+    if latest_policy:
+        from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
+
+        latest = update_phase_diagram(
+            state["phase_records"],
+            active_model_version=old,
+            output_state=state,
+            latest_per_structure=True,
+        )["diagrams"]["mlip"]
+        if latest.get("status") != "completed":
+            raise ValueError(
+                "最新结构能量谱系未解决，不能生成刷新预览："
+                + str(latest.get("issues") or latest.get("reason"))
+            )
+        for entry in latest.get("entries") or []:
+            append(entry, mixed=True)
+    else:
+        for entry in diagram.get("entries") or []:
+            append(entry)
+        for version, prior in (state.get("phase_diagrams_by_model") or {}).items():
+            if version in {old, refresh["new_model_version"]}:
+                continue
+            for entry in prior.get("entries") or []:
+                if entry.get("ehull") is not None and float(entry["ehull"]) <= 0.010:
+                    append(entry, historical=True)
     for sid in sorted(set(structures) - represented):
         append({"structure_id": sid})
     plan = build_model_refresh_plan(
         candidates, old_version=old, new_version=refresh["new_model_version"]
     )
+    if latest_policy:
+        plan["energy_policy"] = "latest_valid_per_structure_v1"
+        plan["energy_source_models"] = latest.get("source_model_versions", [])
+        plan["mixed_model_versions"] = latest.get("mixed_model_versions", False)
     if not plan["candidates"]:
         raise ValueError("累计结构池为空，不能生成刷新方案")
     from phase_agent.analysis.cost.calibrate_relative_cost import calibrate_relative_cost
@@ -109,8 +134,10 @@ def refresh_preview(state, manager, config):
         "note": "弛豫同类实测的规模粗估；单点暂用弛豫上界，不含排队，不是并行完成时间",
     }
     plan["initial_cost"] = sum(r["relative_cost"] for r in plan["candidates"])
-    plan["maximum_supplemental_cost"] = sum(
-        r["relative_cost"] for r in plan["candidates"] if r["operation"] == "predict"
+    plan["maximum_supplemental_cost"] = (
+        0.0
+        if (plan.get("policy") or {}).get("force_followup_version") == 2
+        else sum(r["relative_cost"] for r in plan["candidates"] if r["operation"] == "predict")
     )
     plan["maximum_total_cost"] = plan["initial_cost"] + plan["maximum_supplemental_cost"]
     plan["cost_basis"] = "size_aware_relax_upper_bound_for_single_point; runtime_unmeasured"
@@ -120,6 +147,13 @@ def refresh_preview(state, manager, config):
     plan["relax_parameters"] = deepcopy((config.get("mlip") or {}).get("relax_parameters") or {})
     plan["checksum"] = fingerprint(plan)
     return plan
+
+
+def current_model_refresh(state):
+    """Return refresh facts only when they belong to the active model epoch."""
+    refresh = state.get("model_refresh") or {}
+    active = state.get("active_model_version")
+    return refresh if active and refresh.get("new_model_version") == active else {}
 
 
 def refresh_active(state):

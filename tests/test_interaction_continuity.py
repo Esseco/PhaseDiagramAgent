@@ -84,10 +84,15 @@ def test_natural_approval_reuses_frozen_plan_and_survives_restart(tmp_path):
     assert len(executed) == 1 and len(calls) == 2
     state = read_json(handler.state_path, {})
     assert not state.get("pending_execution_policies")
-    assert (
-        state["action_records"][-1]["agent_proposal"]
-        == next(iter(original.values()))["agent_proposal"]
-    )
+    actual = state["action_records"][-1]["agent_proposal"]
+    expected = next(iter(original.values()))["agent_proposal"]
+    # Audit history intentionally omits bulky decision context. Every approved
+    # action field and parameter must still match the frozen pending proposal.
+    assert actual["raw_action"] == {
+        key: value for key, value in expected["raw_action"].items() if key != "decision_context"
+    }
+    for field in ("recommended_action", "action_parameters", "reason", "expected_purpose"):
+        assert actual[field] == expected[field]
     assert "再次" not in reply
 
 

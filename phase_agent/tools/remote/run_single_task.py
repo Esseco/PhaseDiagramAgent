@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from phase_agent.module_references import import_saved_module
+from phase_agent.compatibility.module_references import import_saved_module
 import json
 import os
 from pathlib import Path

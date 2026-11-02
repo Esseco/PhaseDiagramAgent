@@ -35,7 +35,7 @@ def test_studio_direct_message_and_history_replay(tmp_path):
 
     replay = graph.invoke({"messages": [HumanMessage(content="继续", id="m")]}, config)
 
-    assert "禁止历史重放" in replay["messages"][-1].content
+    assert replay["messages"][-1].content == "ok"  # Replay the answer, never the action.
 
     assert calls == ["继续"]
 

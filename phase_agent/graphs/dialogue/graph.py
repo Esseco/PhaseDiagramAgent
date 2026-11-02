@@ -92,6 +92,9 @@ def build_project_turn_graph(science=None):
     from phase_agent.graphs.subgraph_visibility import expose_child
 
     compiled = graph.compile(checkpointer=False, name="project_dialogue")
+    from phase_agent.graphs.decision_team.graph import build_proposal_graph
+
+    expose_child(compiled, "decide", build_proposal_graph())
     if science is not None:
         for name in ("scientific_workflow", "review"):
             expose_child(compiled, name, science)

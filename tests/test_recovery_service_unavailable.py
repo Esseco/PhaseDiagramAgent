@@ -17,7 +17,7 @@ def test_recovery_notification_defers_science_without_semantic_call(message,monk
 def test_503_is_specific_and_not_retried(monkeypatch):
     from urllib.error import HTTPError
     import urllib.request
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client,DeepSeekResponseError
+    from phase_agent.models.create_deepseek_client import create_deepseek_client,DeepSeekResponseError
     calls=[]
     def fail(*a,**kw):calls.append(1);raise HTTPError('https://api.deepseek.com',503,'unavailable',{},None)
     monkeypatch.setattr(urllib.request,'urlopen',fail)

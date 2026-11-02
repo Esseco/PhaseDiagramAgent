@@ -49,7 +49,7 @@ def _update_mlip(*, action, context):
                 "reason": "微调未启用；请先修订并确认配置。",
                 "state": state,
             }
-        from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+        from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
         assessment = post_dft_assessment(state, config)
         if assessment and assessment["status"] != "evaluated":
@@ -58,7 +58,7 @@ def _update_mlip(*, action, context):
                 "reason": "本轮原模型误差评估尚未完成；先补齐模型与评估。",
                 "state": state,
             }
-        from phase_agent.tools.policy.workflow_policy import settings, new_dft_ids, active_tasks
+        from phase_agent.policies.workflow_policy import settings, new_dft_ids, active_tasks
 
         minimum = settings(config)["finetune_min_new_dft"]
         from copy import deepcopy
@@ -139,13 +139,36 @@ def _pause_search(*, action, context):
 def _restart_failed_task(*, action, context):
     target = (action.get("target_ids") or [None])[0]
     config = context.get("effective_config") or {}
-    return restart_failed_task(
+    parameters = action.get("parameters") or {}
+    remediation = None
+    if parameters.get("repair_profile"):
+        if parameters["repair_profile"] != "vasp_symmetry_single_gpu":
+            raise ValueError("unknown_retry_repair_profile")
+        from phase_agent.tools.workflows.dft_failure_retry import symmetry_retry_settings
+
+        original = next(t for t in context["event_state"]["tasks"] if t["task_id"] == target)
+        remediation = symmetry_retry_settings(original)
+    result = restart_failed_task(
         context.get("event_state") or {},
         target,
         budget_limits=config.get("budgets") or {},
         config_version=context.get("config_version"),
         max_retries=int((action.get("parameters") or {}).get("max_retries", 1)),
     )
+    if result.get("status") != "prepared" or remediation is None:
+        return result
+    from phase_agent.tools.workflows.dft_failure_retry import apply_retry_settings
+
+    apply_retry_settings(result["task"], *remediation)
+    if not parameters.get("prepare_inputs_after_approval"):
+        return result
+    from phase_agent.tools.local.prepare_dft_upload_batches import prepare_dft_upload_batches
+
+    prepared = prepare_dft_upload_batches(
+        action={"target_ids": [result["task"]["task_id"]]},
+        context={**context, "event_state": result["state"]},
+    )
+    return {**prepared, "retry_task_id": result["task"]["task_id"], "retry_of": target}
 
 
 def _normalize_rules(rules):

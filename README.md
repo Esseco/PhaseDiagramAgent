@@ -7,20 +7,26 @@ Agent 在已确认的结构边界与预算内推荐 branch、MC、DFT 和模型�
 ```text
 Process_PhaseDiagram/
 ├── phase_agent/                 # 唯一应用包
-│   ├── graphs/                  # LangGraph 图、State、节点和 Runtime context
-│   │   ├── dialogue/            # 对话路由与上下文组织
-│   │   ├── project/             # initialize → observe → wait → analyze → react → finalize
-│   │   └── actions/             # 提案 → 人工审批 → 校验 → 工具 → 审计
-│   ├── tools/                   # 动作执行、预算、权限、远端脚本
-│   ├── decisions/               # LLM 请求、输出契约、科学决策
+│   ├── agents/                  # 四个 Agent 与公共契约
+│   │   ├── exploration/         # branch与Relax/MC探索充分性
+│   │   ├── reliability/         # DFT、模型训练与相稳定性可信度
+│   │   ├── strategic/           # 科研策略、专家咨询与人工意见
+│   │   └── simulation/          # 执行规划、工具调用检查与诊断
+│   ├── graphs/                  # dialogue/project/decision_team/actions/recovery
+│   ├── evidence/                # 事实快照、科学证据、引用与按需读取
+│   ├── models/                  # 模型客户端、传输、缓存与能力声明
+│   ├── policies/                # 权限、预算、参数与版本约束
+│   ├── tools/                   # 动作执行、输入准备及远端交接
 │   ├── configuration/           # 配置草稿、校验、确认版本
 │   ├── persistence/             # 科学账本、业务状态与记忆
-│   ├── analysis/                # 凸包、反馈、成本和可视化
-│   ├── science/                 # 结构、MLIP、DFT、BOHB 科学算法
+│   ├── analysis/                # 凸包、误差、反馈、成本和可视化
+│   ├── science/                 # 结构、MLIP、MC、DFT与训练算法
+│   ├── compatibility/           # 历史模块描述符的集中映射
 │   └── runtime/                 # 项目启动器、Studio/HTTP 及依赖组装
+│       └── codex/               # Codex 协议、客户端、原生团队与生命周期适配
 ├── settings/                    # 本地运行时配置及示例
 ├── tests/                       # 单元、集成与审批安全回归
-├── docs/                        # 架构和使用说明
+├── docs/                        # guides 操作 / architecture 维护
 ├── experiments/                 # 独立研究实验，非聊天控制入口
 ├── local/                       # 保留的本地数据，不属于源码
 ├── langgraph.json               # 注册 phase_chat / project_status / HTTP
@@ -29,7 +35,11 @@ Process_PhaseDiagram/
 
 目录参考 [LangGraph 官方应用结构](https://docs.langchain.com/oss/python/langgraph/application-structure)，按本项目规模细分职责。先读 `docs/architecture/graph.md`，再进入对应 `graph.py`；业务算法供节点调用，避免把算法改写成图调度器。科学项目的数据目录与这里的源码目录独立。
 
-原顶层分层包与旧入口已移出源码目录；备份位于同级 `_Process_PhaseDiagram_source_backups`。不要把备份加入 PYTHONPATH。保存的旧适配器模块引用由 `phase_agent/module_references.py` 明确转换；配置字段、科学状态及审批内容保持原格式。
+原顶层分层包与旧入口已移出源码目录；备份位于同级 `_Process_PhaseDiagram_source_backups`。不要把备份加入 PYTHONPATH。保存的旧适配器模块引用由 `phase_agent/compatibility/module_references.py` 明确转换；配置字段、科学状态及审批内容保持原格式。
+
+## 四 Agent决策
+
+探索专家贯通 branch 与 Relax/MC，可靠性专家贯通 DFT、微调及验证，Strategic比较路线并形成唯一待审方案。探索与可靠性专家使用同一事实快照；Simulation 在策略提案后规划执行、检查工具结果并诊断异常；专家意见不替代审批。普通问答、既有待审方案和历史任务继续沿用原入口。详见 [架构阅读指南](docs/architecture/four-agents.md)。
 
 ## 项目文件
 
@@ -75,7 +85,7 @@ python -m phase_agent.runtime.studio_service --runtime-config 'E:\0-PhaseDiagram
 - **激活候选 `<版本>` 原因：`<理由>`**：独立验证通过后单独批准模型。
 - **拒绝候选 `<版本>` 原因：`<理由>`**：记录审阅拒绝。
 
-日常对话支持上下文语义识别，表中的命令是便捷入口，并非唯一可接受措辞。普通对话由一个决策模型结合当前事实和有限记忆回答、修订配置或提出动作；程序检查权限、参数和预算。见 [Graph 架构与维护入口](docs/architecture/graph.md#doc-graph_architecture)。
+日常对话支持上下文语义识别，表中的命令是便捷入口，并非唯一可接受措辞。普通对话保持一次语义理解；新的科学提案由Strategic按需咨询探索与可靠性专家，再形成一个动作；程序检查权限、参数和预算。默认四个角色复用当前配置模型，Codex接管仍不调用项目配置模型。见 [Graph 架构与维护入口](docs/architecture/graph.md#doc-graph_architecture)。
 
 本地普通环境默认 py1；本地/远端科学环境分别配置，远端名称由用户提供，不从本地猜测。超算模型路径只作为本地元数据，不在本地加载。详情见 [初始与运行配置](docs/guides/configuration.md#doc-initial_and_run_configuration)。
 
@@ -142,7 +152,7 @@ history_backups/  历史备份
 | --- | --- |
 | phase_agent/graphs | LangGraph图、节点与运行上下文 |
 | phase_agent/configuration | 默认配置、校验、会话与有效配置 |
-| phase_agent/decisions | Agent建议、策略与评分 |
+| phase_agent/agents | Agent建议、策略与评分 |
 | phase_agent/tools | 审批、预算、任务、回收与作业生成 |
 | phase_agent/science | 结构、MLIP、MC、DFT、QBC与训练 |
 | phase_agent/persistence | 台账、模型状态与记忆 |
@@ -153,3 +163,64 @@ history_backups/  历史备份
 程序接口从 `from phase_agent.runtime import run_workflow` 进入。新增后端通过adapter/handler接入，不绕过权限、预算和模型版本校验。
 
 文档索引见 [docs/README.md](docs/README.md)，源码定位与修改约定见 [源码指南](docs/architecture/development.md#doc-source_guide)。开发默认使用 py1；开发工具依赖在 requirements-dev.txt，格式和静态检查使用 ruff.toml。运行与修改遵循 [AGENTS.md](AGENTS.md)。
+# Codex 接管入口
+
+Codex 接管只替换决策生成器，仍复用 Agent 的上下文、合法 action 校验、审批、执行隔离和记忆写回。
+
+本地命令入口：
+
+```bat
+codex-agent.cmd mcp --runtime-config E:\path\to\agent_runtime.json
+```
+
+该命令通过 stdio 提供 MCP 工具。固定项目模式使用 `--runtime-config`；通用模式省略它并传入一个或多个 `--project-root`，然后在对话内调用 `phase_list_projects` 和 `phase_select_project`。`phase_propose` 只进入待审批状态；只有显式调用 `phase_decide` 才会进入原审批处理。
+
+通用入口命令：
+
+```powershell
+& "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\codex-mcp.cmd" `
+  --repo-root "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram" `
+  --project-root "E:\\0-PhaseDiagram"
+```
+
+新对话中的使用顺序：
+
+1. 先调用 `phase_takeover_repo`，确认当前 MCP 已接管源码 repo。
+2. 调用 `phase_list_projects`，查看可接管项目和对应的 `agent_runtime.json`。
+3. 调用 `phase_select_project`，传入要接管的 `runtime_config` 完整路径；如果要新建项目，调用 `phase_create_project` 并传入 `workspace_root`。
+4. 调用 `phase_current_project` 和 `phase_context` 核对绑定，再按原审批流程推进。
+
+新项目只要已经生成标准的 `agent_runtime.json`，并位于 `--project-root` 下，就会自动出现在列表中。项目在其他目录时，可以把该目录加入多个 `--project-root`，或直接把它的 `agent_runtime.json` 传给 `phase_select_project`。每个 MCP 对话进程只绑定一个当前项目，不会混用不同项目的账本。
+
+在新 Codex 对话中可以直接使用下面的自然语言入口：
+
+```text
+接管 repo：E:\jupyter notebook\1-AL_for_PhaseDiagram\Process_PhaseDiagram。
+然后接管项目：E:\0-PhaseDiagram\NaNiO2-phase。
+先做 phase_context 核验，不提交作业。
+```
+
+新项目：
+
+```text
+接管 repo：E:\jupyter notebook\1-AL_for_PhaseDiagram\Process_PhaseDiagram。
+在 E:\0-PhaseDiagram\NewProject 下新建项目，然后选中它并运行初始化流程。
+```
+
+Codex 客户端的 MCP 配置可指向这个命令（路径按实际项目目录替换）：
+
+```json
+{
+  "mcpServers": {
+    "phase-agent-codex": {
+      "command": "E:\\jupyter notebook\\1-AL_for_PhaseDiagram\\Process_PhaseDiagram\\codex-agent.cmd",
+      "args": ["mcp", "--runtime-config", "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\agent_runtime.json"]
+    }
+  }
+}
+```
+
+
+Codex 原生四 Agent接管支持在策略决策中补充人的约束，并读取已有审核记忆；方向接受与执行审批独立，详见 [Codex 专家协作与人工介入](docs/guides/codex-team.md)。
+
+当前目录与文件归属见 [仓库架构](docs/architecture/repository-layout.md)，新材料与跨 epoch 流程见 [科研生命周期](docs/architecture/workflow.md)；重构和旧项目只读检查见 [四 Agent 验收](docs/architecture/four-agents-validation.md)。

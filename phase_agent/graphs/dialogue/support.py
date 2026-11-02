@@ -3,7 +3,7 @@
 from pathlib import Path
 from copy import deepcopy
 from phase_agent.tools.step_runner.build_status_summary import build_status_summary
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 
 
 def _binding_path(handler):
@@ -105,8 +105,21 @@ def review_presented_proposal(handler, state, message, *, requested_review=None)
             or "当前 MC 方案已不再待审批；未执行。"
         )
     rows = _review_rows(handler, state)
-    if len(rows) != 1:
-        return "当前没有唯一待审批方案，请在审批页选择对象；未执行任务。"
+    if not rows:
+        return (
+            "当前没有已保存的待审批方案，本次同意或拒绝未执行任务。\n"
+            "下一步：先展示当前阶段的具体方案、范围和预算，再批准；不能批准已失效的历史方案。"
+        )
+    if len(rows) > 1:
+        choices = [
+            f"待审对象：{row['plan_id']}：{(row.get('review_card') or {}).get('title') or row.get('recommended_action')}；{(row.get('review_card') or {}).get('scope', '范围未记录')}"
+            for row in rows[:6]
+        ]
+        return (
+            f"当前有 {len(rows)} 个待审批对象，没有唯一审批目标；本次未执行任务。\n"
+            + "\n".join(choices)
+            + "\n下一步：在审批页核对上述对象的范围和预算，选择其中一项批准或拒绝；本次不会合并批准。"
+        )
     row = rows[0]
     plan_id = row["plan_id"]
     if requested_review is not None:
@@ -118,10 +131,9 @@ def review_presented_proposal(handler, state, message, *, requested_review=None)
         decision = requested_review["decision"]
     else:
         decision = "approve" if message.strip().lower() in {"approve", "同意"} else "reject"
-    stored_proposal = (
-        ((state.get("pending_execution_policies") or {}).get(plan_id) or {}).get("agent_proposal")
-        or {}
-    )
+    stored_proposal = ((state.get("pending_execution_policies") or {}).get(plan_id) or {}).get(
+        "agent_proposal"
+    ) or {}
     binding = _load_binding(handler)
     if binding is None or binding.get("plan_id") != plan_id:
         bind_presented_proposal(handler, state)
@@ -182,12 +194,13 @@ def review_presented_proposal(handler, state, message, *, requested_review=None)
                 "state_version_stale",
                 "proposal_hash_mismatch",
                 "proposal_context_changed",
+                "当前模型版本与文件登记不一致",
                 "review_changed",
                 "plan is not pending",
             )
         ):
             return "方案或项目状态已变化，请重新查看方案后审核；未执行任务。"
-        return "批准后的 DFT 输入准备失败：" + (detail or "未提供具体原因") + "；未执行任务。"
+        return "批准后的方案执行失败：" + (detail or "未提供具体原因") + "；未执行任务。"
     _save_binding(handler, None)
     result = outcome.get("result") or {}
     if decision == "approve" and state.get("post_recovery_next_step_pending"):
@@ -205,7 +218,7 @@ def review_presented_proposal(handler, state, message, *, requested_review=None)
 
         bind_presented_proposal(handler, read_json(handler.state_path, {}) or {})
     if row.get("review_kind") != "scientific_action":
-        return result.get("reason") or outcome.get("reason") or str(outcome.get("status"))
+        return outcome.get("reason") or result.get("reason") or str(outcome.get("status"))
     return format_workflow_reply(result, handler.state_path)
 
 

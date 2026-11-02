@@ -67,14 +67,57 @@ def write_model_manifest(root, plan, output):
     return manifest
 
 
+def training_task_failures(root, plan):
+    if (plan.get("execution") or {}).get("mode") != "slurm_array":
+        return []
+    failures = []
+    for name in plan["execution"]["training_models"]:
+        try:
+            directory = (root / name).resolve()
+            if directory.parent != root.resolve():
+                raise ValueError("Invalid training model directory")
+            record = json.loads(
+                (directory / "training_task_status.json").read_text(encoding="utf-8")
+            )
+            if (
+                record.get("model_id") != name
+                or record.get("status") != "completed"
+                or record.get("exit_code") != 0
+            ):
+                raise ValueError(
+                    f"Training did not complete successfully: {record.get('status')}; exit={record.get('exit_code')}"
+                )
+            model_file(directory, name)
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            failures.append({"model_id": name, "reason": str(error)})
+    return failures
+
+
 def main():
-    from ase.io import read
-    from mace.calculators import MACECalculator
 
     root = Path(__file__).resolve().parent
     plan = json.loads((root / "training_plan.json").read_text(encoding="utf-8"))
     output = (root.parent if root.name == "inputs" else root) / "results"
     output.mkdir(exist_ok=True)
+    failures = training_task_failures(root, plan)
+    if failures:
+        (output / "training.finished.json").write_text(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "original_model_version": plan.get("original_model_version"),
+                    "failed_training_tasks": failures,
+                    "activated": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        raise RuntimeError(
+            "Failed or incomplete training tasks: " + ", ".join(row["model_id"] for row in failures)
+        )
+    from ase.io import read
+    from mace.calculators import MACECalculator
+
     energies, forces, summaries, manifest = [], [], [], []
     for job in plan["main_model"]["fold_jobs"]:
         name = job["model_id"]

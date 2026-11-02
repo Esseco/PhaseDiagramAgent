@@ -19,7 +19,7 @@ def render_flow_panel(state):
 
     from phase_agent.graphs.graph_overview import LABELS
 
-    from phase_agent.analysis.state.model_epoch import model_epoch_label
+    from phase_agent.evidence.model_epoch import model_epoch_label
 
     model = state.get("active_model_version") or "未记录"
 

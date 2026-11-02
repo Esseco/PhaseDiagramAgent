@@ -1,14 +1,14 @@
 from copy import deepcopy
 import pytest
 
-from phase_agent.tools.policy.workflow_policy import (
+from phase_agent.policies.workflow_policy import (
     settings,
     normalize_workflow_state,
     branch_batch_errors,
     action_errors,
     needs_human,
 )
-from phase_agent.tools.workflows.run_event_loop import run_action_turn
+from phase_agent.tools.workflows.run_action_turn import run_action_turn
 
 
 @pytest.mark.parametrize("mode", ["Sequential", "Adaptive"])
@@ -202,7 +202,7 @@ def test_lower_workflow_threshold_reaches_existing_training_backend():
 
 
 def test_agent_expansion_proposal_survives_defaults_and_requires_human():
-    from phase_agent.decisions.agent.propose_tool_action import _apply_generation_defaults
+    from phase_agent.agents.strategic.propose_tool_action import _apply_generation_defaults
 
     config = {
         "system": {"H_generation": {"enabled": True, "first_round_max_det_H": 4}},
@@ -357,10 +357,18 @@ def test_branch_followup_proposes_package_without_carrying_approval():
             }
         ],
     }
+    frame["human_feedback"] = {"decision": "approve", "comment": "仅批准生成branch"}
+    frame["replay_record"] = {"approved": True}
+    original = deepcopy(result)
     response = propose_after_generation(frame, result, event_loop=event_loop)
     assert response["status"] == "awaiting_approval"
+    assert len(calls) == 1
     assert calls[0]["human_feedback"] is None and calls[0]["execution_mode"] == "interactive"
-    assert "prepare_relax_mc_batch" in calls[0]["context"]["user_message"]
+    assert calls[0]["replay_record"] is None and calls[0]["max_steps"] == 1
+    assert "operation=prepare_relax_mc_batch" in calls[0]["context"]["user_message"]
+    assert "parameters.mode=relax_mc_inputs" in calls[0]["context"]["user_message"]
+    assert response["completed_generation"] == {"registered_structures": 12}
+    assert not response["submitted"] and result == original
 
 
 def test_legacy_scientific_approval_reuses_frozen_action_without_model_call():

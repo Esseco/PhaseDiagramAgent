@@ -20,15 +20,15 @@ def compact_state(state):
     }
 
 
-def result_files(root, state, candidates):
+def result_files(root, state, candidates, *, remote_root=None):
     root = Path(root).resolve()
     files = set()
-    result_dirs = {}
-    worker_dirs = {}
 
     def include(value, base, *, required=False):
         if not isinstance(value, str) or not value:
             return None
+        if remote_root and value.startswith(remote_root.rstrip("/") + "/"):
+            value = str(root / value[len(remote_root.rstrip("/")) + 1 :])
         path = Path(value)
         path = path.resolve() if path.is_absolute() else (base / path).resolve()
         if not path.is_relative_to(root):
@@ -86,12 +86,10 @@ def result_files(root, state, candidates):
         if result is None:
             continue
         directory = result.parent
-        result_dirs[task.get("task_id")] = directory
         worker = Path(task.get("input_path") or directory / "task.json")
         worker = (worker if worker.is_absolute() else root / worker).parent
         if not worker.resolve().is_relative_to(root):
             raise ValueError("return_worker_outside_batch")
-        worker_dirs[task.get("task_id")] = worker
         include("task.finished.json", directory, required=completed)
         raw = json.loads(result.read_text(encoding="utf-8"))
         # Read worker-relative pointers against that result, without modifying
@@ -112,28 +110,35 @@ def result_files(root, state, candidates):
         for name in ("mc_occupations.bin", "checkpoint.json", "checkpoint.json.gz"):
             include(name, directory)
         outputs = task.get("outputs") or {}
-        for row in outputs.get("pool_summary") or raw_outputs.get("pool_summary") or []:
-            name = row.get("structure_file")
-            if name:
-                value = include(name, directory)
-                if value is None:
-                    value = include(name, directory / "pool")
-                if value is None:
-                    include(name, worker / "pool", required=completed)
+        # A pool summary is statistics, not an export selection. Uncollected
+        # results still need their final geometry, including on controller failure.
+        if not (outputs.get("structure_path") or outputs.get("final_structure_path")):
+            geometry = raw_outputs.get("structure_path") or raw_outputs.get("final_structure_path")
+            if geometry:
+                name = Path(str(geometry).replace("\\", "/")).name
+                selected = None
+                for folder in (directory, directory / "pool", worker / "pool", worker):
+                    selected = include(name, folder)
+                    if selected is not None:
+                        break
+                if selected is None:
+                    include(
+                        geometry, directory, required=completed or raw.get("status") == "completed"
+                    )
         portable = rebase(task, root, portable=True)
-        referenced(portable.get("outputs") or {}, root, required=completed)
+        referenced(
+            {k: v for k, v in (portable.get("outputs") or {}).items() if k != "pool_summary"},
+            root,
+            required=completed,
+        )
         if task.get("stage") == "deep_search" and not (directory / "mc_occupations.bin").is_file():
             referenced({"structure_path": portable.get("structure_path")}, root)
 
-    referenced(rebase(candidates, root, portable=True), root, required=True)
-    for row in candidates.get("mc_pool") or []:
-        name = row.get("structure_file")
-        directory = result_dirs.get(row.get("source_task_id"))
-        if name and directory is not None:
-            selected = include(name, directory) or include(name, directory / "pool")
-            if selected is None:
-                selected = include(name, worker_dirs[row["source_task_id"]] / "pool", required=True)
-            row["structure_path"] = str(selected)
+    referenced(
+        rebase(candidates.get("branch_candidates") or [], root, portable=True),
+        root,
+        required=True,
+    )
     # Small allocation receipts are needed for the existing GPU usage audit.
     files.update((root / "jobs").rglob("*.runtime.json"))
     return sorted(files)

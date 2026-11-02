@@ -21,7 +21,7 @@ def _inspect(state, action, state_path):
 
     root = Path(state_path).resolve().parent.parent
     path = artifact_path(state, action.get("task_key"), action.get("parameters") or {})
-    from phase_agent.tools.policy.region_sampling import is_region
+    from phase_agent.policies.region_sampling import is_region
 
     if is_region(action):
         from phase_agent.tools.workflows.region_review import path_for
@@ -42,13 +42,54 @@ def _inspect(state, action, state_path):
     ):
         if raw.get(key) != expected:
             problems.append("inventory_identity_mismatch:" + key)
-    if raw.get("status") != "completed":
-        problems.append("inventory_not_completed")
     ledger_path = Path(state_path).resolve().parent / "ledgers/phase_data.json"
     if not ledger_path.is_file():
         problems.append("missing_structure_ledger")
         return output
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    if raw.get("status") == "awaiting_approval" and raw.get("actual") is None and not problems:
+        config = state.get("confirmed_config") or {}
+        storage = (config.get("config") or config).get("storage") or {}
+        candidates = Path(
+            (storage.get("paths") or {}).get("structures", "structures/candidate_structures")
+        )
+        if not candidates.is_absolute():
+            candidates = root / candidates
+        if not candidates.resolve().is_relative_to(root):
+            raise ValueError("candidate_directory_outside_project")
+        # A frozen regional proposal is not a generated inventory. Prove that
+        # neither its ledger nor its dedicated output directory has changed.
+        if is_region(action):
+            from types import SimpleNamespace
+            from phase_agent.policies.region_sampling import ledger_fingerprint
+
+            frozen = ((action.get("parameters") or {}).get("region_preview") or {}).get(
+                "ledger_fingerprint"
+            )
+            identity = str(action.get("task_key") or "")
+            output_dir = candidates / (
+                "RegionSampling-" + hashlib.sha256(identity.encode()).hexdigest()[:16]
+            )
+            prior = any(
+                row.get("task_key") == identity for row in state.get("generation_history") or []
+            )
+            if (
+                identity
+                and frozen
+                and frozen == ledger_fingerprint(SimpleNamespace(data=ledger))
+                and not prior
+                and not output_dir.exists()
+            ):
+                return None
+        # A review document is not an output; retain strict checks for any actual effect.
+        if (
+            not ledger.get("branches")
+            and not ledger.get("structures")
+            and not any(p.is_file() for p in candidates.rglob("*"))
+        ):
+            return None
+    if raw.get("status") != "completed":
+        problems.append("inventory_not_completed")
     actual = raw.get("actual") or {}
     rows = actual.get("branches") or []
     if not rows:

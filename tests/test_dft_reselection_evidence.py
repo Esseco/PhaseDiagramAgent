@@ -2,8 +2,8 @@
 
 from copy import deepcopy
 import pytest
-from phase_agent.decisions.agent.summary_request import summary_payload, request_summary_first
-from phase_agent.decisions.agent.hybrid_proposal import create_hybrid_client
+from phase_agent.evidence.requests import summary_payload, request_summary_first
+from phase_agent.models.hybrid_proposal import create_hybrid_client
 from tests.test_operation_evidence_layers import fixture
 
 FIELDS = {

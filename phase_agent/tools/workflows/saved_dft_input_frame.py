@@ -19,7 +19,7 @@ def prepare_saved_dft_input_frame(frame):
     if (proposal.get("raw_action") or {}).get("tool") != "select_dft_candidates":
         return frame
 
-    from phase_agent.tools.policy.workflow_policy import active_tasks
+    from phase_agent.policies.workflow_policy import active_tasks
     from phase_agent.tools.remote.transfer_bundle import has_registered_return
     from phase_agent.tools.workflows.model_refresh_state import refresh_active
 

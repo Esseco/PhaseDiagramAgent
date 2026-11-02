@@ -8,8 +8,8 @@ from phase_agent.configuration.session.create_config_draft import create_config_
 from phase_agent.configuration.session.apply_config_revision import apply_config_revision
 from phase_agent.configuration.session.confirm_config_snapshot import confirm_config_snapshot
 from phase_agent.configuration.schema.validate_configuration_space import validate_configuration_space
-from phase_agent.decisions.agent.generation_plan import configured_generation_strategies
-from phase_agent.decisions.agent.proposal_validation import proposal_errors
+from phase_agent.agents.exploration.generation_plan import configured_generation_strategies
+from phase_agent.agents.common.proposal_validation import proposal_errors
 import json
 
 
@@ -79,7 +79,7 @@ def test_fixed_variables_constrain_strategies_and_validate_values():
     assert any('fixed_values.x' in e for e in errors)
 
 def test_analysis_adapter_preserves_semantic_scope():
-    from phase_agent.decisions.agent.deepagents_proposal import proposal_material
+    from phase_agent.models.deepagents_proposal import proposal_material
     context = {'scientific_scope':{'boundary':{'P':{'at_x':{'0':['O3'],'1':['O3']},'intermediate':['O3']},'TM_ratio':{'Fe':.5,'Mn':.5}},'configuration_space':{'roles':{'T':'fixed'},'fixed_T_source':'phase_reference'},'instruction':'respect scope'},'enabled_generation_strategies':['coverage'],'generation_strategy_constraint':'respect fixed variables'}
     out = proposal_material({'decision_context':context})['decision_context']
     assert out['scientific_scope'] == context['scientific_scope']

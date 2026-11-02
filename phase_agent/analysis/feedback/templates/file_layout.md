@@ -14,7 +14,10 @@ submissions 保存输入、各阶段原始 results 和配对交付目录。新�
 
 ## 分析文件在哪里
 
-analysis_outputs/epoch…/phase_diagrams：MLIP、DFT、combined三种相图及history。
+analysis_outputs/epoch…/phase_diagram/：MLIP 主图与 HD 打叉对照图、CSV/JSON、报告和 manifest；versions/ 逐版本归档，latest/ 保存本 epoch 最新完整版本。
+analysis_outputs/epoch…/dft_error/：按原轮冻结模型累计的 DFT 同帧误差，versions/ 与 latest/ 分别保留历史和最新完整副本。
+analysis_outputs/latest/：当前模型的两类完整产物；先检查 *_status.json，not_ready 时旧文件不能称为当前结果。
+analysis_outputs/epoch…/phase_diagrams：MLIP 底层 history，旧 DFT/combined 历史保留可读。
 analysis_outputs/epoch…/Search-group…/DFT-round…：
 
 - comparisons：能量、受力逐点CSV，误差指标；plots是对角线图。
@@ -46,7 +49,9 @@ analysis_outputs/epoch…/Search-group…/DFT-round…：
 | submissions/epochN/evidence/recovery/ | 仅回收与故障核对资料 |
 | submissions/epochN/evidence/storage_archives/ | 完整归档包，程序按需恢复 |
 | submissions/previously_used/ | 未登记或旧式材料，仅供追溯 |
-| analysis_outputs/epochN/phase_diagrams/ | mlip、dft、combined 相图；history 保存历史快照 |
+| analysis_outputs/epochN/phase_diagram/、dft_error/ | 每类 versions/<指纹>/ 不可变归档与 latest/ 完整副本 |
+| analysis_outputs/latest/ | 当前模型最新完整副本和各类发布状态 |
+| analysis_outputs/epochN/phase_diagrams/ | MLIP 底层历史与旧 DFT/combined 兼容文件 |
 | analysis_outputs/epochN/Search-group-*/DFT-round-*/ | 每次 DFT 的 comparisons、training、diagnostics |
 
 submissions 中其余 G0001_* 为按搜索组编号的计算工作目录，inputs 是原始输入，results 是计算结果。

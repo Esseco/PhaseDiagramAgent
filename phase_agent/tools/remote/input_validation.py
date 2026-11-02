@@ -280,6 +280,12 @@ def _validate_handoff(folder, *, kind="dispatch"):
                     or len(set(scripts)) != len(scripts)
                 ):
                     fail("invalid_job_references", current)
+                from phase_agent.tools.remote.submission_dispatcher import submission_order
+
+                try:
+                    submission_order(scripts, plan.get("afterany", {}))
+                except ValueError:
+                    fail("invalid_job_dependencies", current)
                 active_scripts = set(scripts)
             for row in rows:
                 current = row["path"]

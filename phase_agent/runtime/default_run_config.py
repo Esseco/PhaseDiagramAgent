@@ -6,7 +6,7 @@ from typing import Any
 
 from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
 from phase_agent.science.bohb.default_bohb_config import default_bohb_config
-from phase_agent.decisions.strategy.default_round_strategy_config import (
+from phase_agent.agents.strategic.strategy.default_round_strategy_config import (
     default_round_strategy_config,
 )
 from phase_agent.configuration.defaults.layered_oxide_system_config import (

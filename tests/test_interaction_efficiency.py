@@ -2,12 +2,12 @@ from copy import deepcopy
 import hashlib
 import json
 from unittest.mock import patch
-from phase_agent.decisions.agent.transport_tables import (
+from phase_agent.models.transport_tables import (
     compact_evidence_tables,
     expand_evidence_tables,
     evidence_row_count,
 )
-from phase_agent.decisions.agent.summary_request import _evidence_revision
+from phase_agent.evidence.requests import _evidence_revision
 from phase_agent.runtime.turn_process import record_turn, _current
 from phase_agent.tools.step_runner.file_protocol import read_json
 
@@ -29,9 +29,7 @@ def test_mixed_scientific_rows_roundtrip_without_nulls_or_missing_candidates():
         rows.append(row)
     payload = {
         "tasks": rows,
-        "qbc_candidates": [
-            {"id": str(i), "ehull": i / 1000, "qbc": None} for i in range(200)
-        ],
+        "qbc_candidates": [{"id": str(i), "ehull": i / 1000, "qbc": None} for i in range(200)],
     }
     before = deepcopy(payload)
     compact = compact_evidence_tables(payload)
@@ -52,6 +50,30 @@ def test_streaming_revision_is_identical_and_tracks_hidden_changes():
     assert _evidence_revision(sources) == old
     sources["hidden"]["budget"] = 6
     assert _evidence_revision(sources) != old
+
+
+def test_summary_payload_reuses_persisted_state_revision_for_large_history(monkeypatch):
+    import phase_agent.evidence.requests as summary_request
+
+    payload = {
+        "state": {
+            "current_state_snapshot": {"source_fingerprint": "cached-revision"},
+            "tasks": [],
+            "event_history": [{"payload": "x" * 1000000}],
+        },
+        "decision_context": {},
+    }
+    monkeypatch.setattr(
+        summary_request,
+        "_evidence_revision",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("large history should use the persisted revision")
+        ),
+    )
+
+    request, _ = summary_request.summary_payload(payload)
+
+    assert request["evidence_revision"] == "cached-revision"
 
 
 def test_initial_state_parsed_once_and_not_shared_across_later_reads(tmp_path):
@@ -97,9 +119,7 @@ def test_lossless_business_checkpoint_migration_keeps_every_record(tmp_path):
         for i in range(12):
             cp = empty_checkpoint()
             cp["id"] = str(i).zfill(4)
-            cp["channel_values"] = {
-                "business_frame": {"loaded_state": {"tasks": ["fact" * 20000]}}
-            }
+            cp["channel_values"] = {"business_frame": {"loaded_state": {"tasks": ["fact" * 20000]}}}
             cfg = saver.put(cfg, cp, {"step": i}, {})
         saver.put_writes(cfg, [("__interrupt__", {"approval": "keep"})], "approval")
     result = compact_sqlite(source, target, preserve_all=True)

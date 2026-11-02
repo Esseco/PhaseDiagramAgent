@@ -1,5 +1,5 @@
 import pytest
-from phase_agent.graphs.direction_review_graph import direction_checkpoint
+from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
 
 
 def test_restart_resumes_same_proposal_and_routes(tmp_path):

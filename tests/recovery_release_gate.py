@@ -8,6 +8,10 @@ import sys
 import tempfile
 
 TARGETS = [
+    "tests/test_recovery_runtime_isolation.py",
+    "tests/test_dft_reassessment_guards.py",
+    "tests/test_refresh_prediction.py",
+    "tests/test_mlip_model_interface.py",
     "tests/test_selection_reason_reports.py",
     "tests/test_dft_environment_admission.py",
     "tests/test_project_registry_recovery.py",

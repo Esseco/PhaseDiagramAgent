@@ -111,12 +111,43 @@ def test_refresh_requires_own_approval_and_generates_portable_single_point(tmp_p
         __import__("pathlib").Path(task["input_path"]).read_text(encoding="utf-8")
     )
     assert portable["worker_job"]["operation"] == "predict"
+    assert portable["worker_job"]["parameters"]["refresh_force_threshold"] == 0.1
+    task_dir = __import__("pathlib").Path(task["input_path"]).parent
+    assert (task_dir / "_handoff_refresh_executor.py").is_file()
+    assert (task_dir / "_handoff_refresh_worker.py").is_file()
+    assert (task_dir / "_handoff_refresh_inline.py").is_file()
+    import subprocess
+    import sys
+    checked = subprocess.run([sys.executable, "-c", "import _handoff_refresh_executor; import _handoff_refresh_worker; import _handoff_refresh_inline"], cwd=task_dir, capture_output=True, text=True, timeout=20)
+    assert checked.returncode == 0, checked.stderr
+    assert "_handoff_refresh_executor:execute_mlip_task" in (task_dir.parent / "run_mlip_batch.py").read_text()
+    from zipfile import ZipFile
+    batches = second["state"]["slurm_batches"]
+    archive = next(b["handoff"]["upload_archive"] for b in batches if b.get("handoff") and task["task_id"] in b.get("task_ids", []))
+    with ZipFile(archive) as zipped:
+        names = zipped.namelist()
+        assert any(name.endswith("/_handoff_refresh_executor.py") for name in names)
+        assert any(name.endswith("/_handoff_refresh_worker.py") for name in names)
+        assert any(name.endswith("/_handoff_refresh_inline.py") for name in names)
     assert portable["worker_job"]["model_path"] == "/models/new.model"
     assert portable["worker_job"]["structure_path"] == "initial.vasp"
     assert "structure_path" not in portable
     assert "Model-refresh-0001" in task["input_path"] and "Single-point" in task["input_path"]
     assert "epoch1" in __import__("pathlib").Path(task["input_path"]).parts
     assert second["state"]["model_refresh"]["wave"] == 0
+
+
+def test_far_selected_task_has_inline_point_two_threshold(tmp_path):
+    state, session, context, registry = setup(tmp_path)
+    state["model_refresh"]["old_diagram"]["entries"][0]["ehull"] = 0.02
+    first = run_model_refresh_gate(state, session, registry=registry, context=context)
+    second = run_model_refresh_gate(first["state"], session, registry=registry, context=context, human_feedback="同意")
+    assert second["status"] == "prepared", second
+    task = second["state"]["tasks"][0]
+    assert task["parameters"]["refresh_force_threshold"] == 0.2
+    assert task["parameters"]["model_refresh_operation"] == "predict"
+    portable = json.loads(__import__("pathlib").Path(task["input_path"]).read_text(encoding="utf-8"))
+    assert portable["worker_job"]["parameters"]["refresh_force_threshold"] == 0.2
 
 
 def recovered_state(tmp_path):
@@ -132,7 +163,8 @@ def recovered_state(tmp_path):
         outputs={
             "single_point_completed": True,
             "structure_path": context["manager"].data["structures"]["s"]["source_path"],
-            "forces": [[0.11, 0, 0]],
+            "forces": [[0.11, 0, 0]] * 4,
+            "forces_unit": "eV/angstrom",
         },
     )
     prepared["phase_records"] = [
@@ -146,29 +178,36 @@ def recovered_state(tmp_path):
     return prepared, session, context, registry
 
 
-def test_bounded_supplement_and_no_third_wave(tmp_path):
+def test_inline_result_finishes_refresh_without_a_second_batch(tmp_path):
     state, session, context, registry = recovered_state(tmp_path)
-    proposal = run_model_refresh_gate(state, session, registry=registry, context=context)
-    assert proposal["status"] == "awaiting_approval", proposal
-    assert len(proposal["state"]["tasks"]) == 1
-    result = run_model_refresh_gate(
-        proposal["state"], session, registry=registry, context=context, human_feedback="同意"
+    task = state["tasks"][0]
+    source_sha = task["input_structure_sha256"]
+    task.update(converged=True)
+    task["outputs"].update(optimizer_converged=True, single_point_completed=False, refresh_force_followup={"input_structure_sha256": source_sha, "force_max_ev_per_angstrom": .11, "threshold_ev_per_angstrom": .1, "relaxed": True, "initial_prediction": {"single_point_completed": True, "forces_unit": "eV/angstrom", "forces": [[.11, 0, 0]] * 4, "structure_checksum": source_sha, "mlip_version": "new"}})
+    result = run_model_refresh_gate(state, session, registry=registry, context=context)
+    assert result["status"] == "completed", result
+    assert len(result["state"]["tasks"]) == 1
+    assert result["state"]["model_refresh"]["status"] == "completed"
+
+
+def test_legacy_supplement_checkpoint_migrates_to_completed(tmp_path):
+    state, session, context, registry = recovered_state(tmp_path)
+    state["model_refresh"]["plan"]["policy"].pop("force_followup_version")
+    state["model_refresh"].update(
+        status="supplement_ready",
+        supplemental_candidates=[{"structure_id": "obsolete"}],
     )
-    assert result["status"] == "prepared", result
-    assert result["state"]["model_refresh"]["wave"] == 1
-    tasks = result["state"]["tasks"]
-    assert len(tasks) == 2
-    tasks[-1].update(status="completed", converged=True)
-    result["state"]["phase_records"].append(
-        {"record_id": "r2", "source_task_id": tasks[-1]["task_id"], "source_version": "new"}
-    )
-    result["state"]["phase_diagrams"]["mlip"]["entries"].append(
-        {"record_id": "r2", "ehull": 0, "ehull_unit": "eV/atom"}
-    )
-    final, waiting = advance_refresh(result["state"])
-    assert waiting is None
-    assert final["model_refresh"]["status"] == "completed"
-    assert len(final["tasks"]) == 2
+    state["pending_execution_policies"] = {
+        "legacy": {
+            "agent_proposal": {
+                "raw_action": {"parameters": {"mode": "model_refresh_inputs"}}
+            }
+        }
+    }
+    result = run_model_refresh_gate(state, session, registry=registry, context=context)
+    assert result["status"] == "completed", result
+    assert result["state"]["model_refresh"]["supplemental_candidates"] == []
+    assert "legacy" not in result["state"]["pending_execution_policies"]
 
 
 def test_old_model_hull_cannot_supply_supplement_ehull(tmp_path):

@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 from phase_agent.tools.state.restore_generation_gate import restore_generation_gate
-from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
-from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
+from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
+from phase_agent.agents.strategic.propose_tool_action import propose_agent_tool_action
 from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
 
 

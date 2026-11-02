@@ -37,7 +37,7 @@ def test_refresh_display_does_not_authorize_undetermined_supplement():
         }
     }
     card = review_card("p", {"agent_proposal": proposal})
-    assert "另行审批" in card["approval_boundary"]
+    assert "branch" in card["approval_boundary"]
     assert "首批及" not in card["approval_boundary"]
 
 

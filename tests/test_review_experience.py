@@ -8,7 +8,7 @@ import pytest
 from phase_agent.runtime.review_presentation import proposal_changes, review_card
 from phase_agent.runtime.chat_review import review_pending
 from phase_agent.runtime.scientific_progress import scientific_progress
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 from phase_agent.tools.step_runner.build_status_summary import build_status_summary
 
 

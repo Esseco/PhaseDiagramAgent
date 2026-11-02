@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 
-from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 from phase_agent.tools.workflows.create_workflow_handlers import create_workflow_handlers
 from phase_agent.runtime.chat_state_presentation import brief_chat_state
 from tests.test_dft_comparison_csv import add_result

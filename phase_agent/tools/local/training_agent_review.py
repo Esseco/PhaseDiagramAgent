@@ -56,7 +56,13 @@ def review_training_choice(
                 "choice": "activate",
                 "review_policy": REVIEW_POLICY,
                 "user_feedback": feedback,
-                "reason": "训练成功回收，按已确认流程切换新模型，再刷新已有结构与凸包。",
+                "reason": "训练成功回收，按已确认流程申请进入下一 epoch：切换新模型，再刷新已有结构与凸包。"
+                + (
+                    "同帧比较覆盖不完整，具体范围和限制见本轮报告。"
+                    if (candidate.get("validation") or {}).get("checks", {}).get("fully_matched")
+                    is False
+                    else ""
+                ),
                 "alternatives": "DFT补采样与独立误差验收由后续搜索评估，不重复选择是否切换。",
                 "followup_action": None,
             }
@@ -77,7 +83,7 @@ def review_training_choice(
         handoff["direction_proposal"] = proposal
         handoff.setdefault("direction_status", "awaiting_approval")
         if state_path:
-            from phase_agent.graphs.direction_review_graph import direction_checkpoint
+            from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
 
             checkpoint = direction_checkpoint(state_path, proposal)
             handoff["direction_status"] = checkpoint.get("status", "awaiting_approval")
@@ -86,7 +92,13 @@ def review_training_choice(
             handoff["reason"] = (
                 "Agent判断：采用新模型。"
                 + review["reason"][:350]
-                + "\n本次执行：切换模型。切换后展示已有结构与凸包刷新的具体范围、成本；该新增计算动作再审批。回复‘同意’执行，‘拒绝’取消。"
+                + (
+                    f"\n本轮微调结果报告：`{handoff['training_report_path']}`。"
+                    if handoff.get("training_report_path")
+                    else ""
+                )
+                + f"\n是否进入 {handoff.get('next_epoch') or '下一 epoch'}？回复‘同意’批准切换本轮新模型，或‘拒绝’保留当前模型。"
+                + "切换后展示已有结构与凸包刷新的具体范围、成本；该新增计算动作再审批。"
             )
         else:
             approved = handoff.get("direction_status") == "approved"

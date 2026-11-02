@@ -50,7 +50,9 @@ class StudioStorage:
                                     getattr(self.memory, "writes", None),
                                     getattr(self.memory, "blobs", None),
                                 ):
-                                    collect = getattr(candidate, "collect_unreferenced_payloads", None)
+                                    collect = getattr(
+                                        candidate, "collect_unreferenced_payloads", None
+                                    )
                                     if collect is not None:
                                         collect()
                                 self.pruned = self.revision

@@ -1,6 +1,6 @@
 """Read-only approval cards and factual revision differences."""
 
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 
 LABELS = {
     "generate_branches": "生成候选结构",
@@ -70,6 +70,12 @@ def review_card(plan_id, record):
         single = sum(row["action"] == "DFT_SINGLE_POINT" for row in selected)
         relax = sum(row["action"] == "DFT_RELAX" for row in selected)
         scope = f"选中 {len(targets)} 个结构；DFT单点 {single} 个，结构优化 {relax} 个"
+        retry_inputs = params.get("registered_retry_input_ids") or []
+        if retry_inputs and params.get("prepare_inputs_after_approval"):
+            scope += (
+                f"；另含 {len(retry_inputs)} 个已登记重试，合计 {len(targets) + len(retry_inputs)} 个输入"
+                "；重试预算不重复预留"
+            )
     if tool == "generate_branches" and params.get("total_quota") is not None:
         scope = f"计划生成 {params['total_quota']} 个 branch，实际数量生成后核验"
     if preview:
@@ -82,7 +88,7 @@ def review_card(plan_id, record):
     if tool == "generate_branches" and params.get("module_execution_scope"):
         boundary = "生成并登记 branch，按已展示范围准备 Relax+MC 输入后停止；不提交超算。"
     if preview:
-        boundary = "仅准备本次已展示目标的输入；回收后若需补充弛豫，须按具体目标另行审批。"
+        boundary = "仅准备本次已展示目标的输入；回收后直接审阅新模型 branch 生成方案。"
         if "supplemental_relax_parameters" in params:
             boundary = "仅准备本批补充弛豫输入后停止；不提交计算，不自动延长或重试。"
     from phase_agent.runtime.chat_approval_rules import is_sensitive_proposal
@@ -90,9 +96,12 @@ def review_card(plan_id, record):
     region_mode = tool == "generate_branches" and params.get("sampling_mode") == "region_adaptive"
     if region_mode:
         scope = f"重点区域 {len(params.get('regions') or [])} 个；新增branch数量生成后统计"
-        boundary = (
-            "仅生成并登记branch及初始结构，保存实际统计后停止；不准备Relax/MC输入，不计算或提交。"
-        )
+        if params.get("module_execution_scope"):
+            boundary = (
+                "生成并登记branch后，按已批准范围自动准备对应Relax+MC输入；不运行或提交超算。"
+            )
+        else:
+            boundary = "仅生成并登记branch；后续Relax/MC输入需另行提案和审批，不运行或提交超算。"
 
     deferred = region_mode and not params.get("regions")
     if deferred:
@@ -107,6 +116,8 @@ def review_card(plan_id, record):
         if deferred
         else "生成branch（按需）"
         if region_mode
+        else "生成新模型刷新文件"
+        if params.get("mode") == "model_refresh_inputs"
         else LABELS.get(tool, tool or "待审阅动作"),
         "purpose": proposal.get("expected_purpose") or proposal.get("reason") or "未记录",
         "reason": proposal.get("reason") or "未记录",

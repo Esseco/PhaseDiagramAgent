@@ -4,11 +4,11 @@ from copy import deepcopy
 from collections import Counter
 import hashlib
 import json
-from phase_agent.analysis.state.workflow_blockers import refresh_result_facts, convergence_feedback
+from phase_agent.evidence.workflow_blockers import refresh_result_facts, convergence_feedback
 
 
 def progress_signature(facts):
-    from phase_agent.analysis.state.project_authority import project_identity
+    from phase_agent.evidence.project_authority import project_identity
 
     view = {
         "project": project_identity(facts),
@@ -30,10 +30,10 @@ def progress_signature(facts):
 
 
 def conversation_facts(facts, project):
-    from phase_agent.analysis.state.batch_return_facts import batch_return_facts
+    from phase_agent.evidence.batch_return_facts import batch_return_facts
     from phase_agent.runtime.partial_recovery import partial_recovery_facts
 
-    from phase_agent.analysis.state.task_failure_facts import task_failure_facts
+    from phase_agent.evidence.task_failure_facts import task_failure_facts
 
     tasks = facts.get("tasks") or []
     from phase_agent.tools.state.task_wait_cancellation import (
@@ -63,9 +63,11 @@ def conversation_facts(facts, project):
         "batch_return_facts": batch_return_facts(facts),
         "partial_recovery": partial_recovery_facts(facts),
         "partial_recovery_instruction": (
-            "部分回收只能二选一：继续时使用成功子集并明确标注覆盖不足；补全时只针对失败任务提出单项重试，"
-            "保留原失败记录，不得重跑或重建整批。"
+            "部分回收是后续方案的数据范围与限制，不是再次批准分析的前置步骤。"
+            "基于成功子集评估并提出下一步具体建议，明确覆盖不足；若建议补全，只为失败任务提出重试。"
+            "将采用子集或补全的理由、范围纳入同一待审方案，保留原失败记录，不得重跑或重建整批。"
         ),
+        "post_recovery_next_step_pending": bool(facts.get("post_recovery_next_step_pending")),
         "current_status": facts.get("status"),
         "human_constraints": deepcopy(
             (facts.get("decision_memory") or {}).get("long_term_advice")
@@ -111,7 +113,7 @@ def conversation_facts(facts, project):
 
 
 def read_topics(facts, topics, *, manager=None):
-    from phase_agent.analysis.state.build_decision_context import build_decision_context
+    from phase_agent.evidence.build_decision_context import build_decision_context
 
     fields = {
         "mc": (

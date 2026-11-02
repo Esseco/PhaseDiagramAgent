@@ -7,8 +7,8 @@ the successful subset, or prepare a retry for the failed task IDs only.
 
 from copy import deepcopy
 
-from phase_agent.analysis.state.dft_round_status import dft_recovery_rounds
-from phase_agent.analysis.state.task_failure_facts import task_failure_facts
+from phase_agent.evidence.dft_round_status import dft_recovery_rounds
+from phase_agent.evidence.task_failure_facts import task_failure_facts
 from phase_agent.tools.state.task_waiting import awaiting_task_result
 
 
@@ -106,37 +106,25 @@ def partial_recovery_facts(state):
             scope=scope,
         )
         if fact["partial"]:
-            fact["retryable_task_ids"] = sorted(
-                set(fact["failed_task_ids"]) & retryable
-            )
+            fact["retryable_task_ids"] = sorted(set(fact["failed_task_ids"]) & retryable)
             facts.append(fact)
 
     for bundle_id, batch in (state.get("relax_mc_batches") or {}).items():
         if model and batch.get("model_version") != model:
             continue
-        if batch.get("status") in {"cancelled", "superseded"} or not batch.get(
-            "import_checksum"
-        ):
+        if batch.get("status") in {"cancelled", "superseded"} or not batch.get("import_checksum"):
             continue
         members = [
-            row
-            for row in state.get("tasks") or []
-            if row.get("relax_mc_bundle_id") == bundle_id
+            row for row in state.get("tasks") or [] if row.get("relax_mc_bundle_id") == bundle_id
         ]
         summary = batch.get("result_summary") or {}
         failed_ids = list(summary.get("failed_task_ids") or [])
         failed_ids.extend(
-            row.get("task_id")
-            for row in members
-            if row.get("status") in {"failed", "timeout"}
+            row.get("task_id") for row in members if row.get("status") in {"failed", "timeout"}
         )
         failed_ids = sorted({value for value in failed_ids if value})
-        waiting_ids = [
-            row.get("task_id") for row in members if awaiting_task_result(row)
-        ]
-        successful_ids = [
-            row.get("task_id") for row in members if row.get("status") == "completed"
-        ]
+        waiting_ids = [row.get("task_id") for row in members if awaiting_task_result(row)]
+        successful_ids = [row.get("task_id") for row in members if row.get("status") == "completed"]
         expected = summary.get("task_count") or len(members)
         resolved_ids = set(successful_ids) | set(failed_ids)
         if (
@@ -156,8 +144,6 @@ def partial_recovery_facts(state):
             waiting_ids=waiting_ids,
         )
         if fact["partial"]:
-            fact["retryable_task_ids"] = sorted(
-                set(fact["failed_task_ids"]) & retryable
-            )
+            fact["retryable_task_ids"] = sorted(set(fact["failed_task_ids"]) & retryable)
             facts.append(fact)
     return facts

@@ -7,6 +7,7 @@ import sys
 PROJECT_CONFIG_NAME = "agent_runtime.json"
 DEFAULT_PROJECT_SETTINGS = {
     "agent_web_port": 7932,
+    "remote_workspace": None,
     "config_session_path": "parameters/config_session.json",
     "editable_config_draft_path": "parameters/search_config.project.json",
     "state_path": "workflow_state/state.json",
@@ -62,6 +63,7 @@ def write_project_entry(root):
 
 BOOTSTRAP_HINTS = {
     "notes": [
+        "初始化须登记本项目超算工作根目录 remote_workspace（Linux绝对路径）；未知时询问用户，不从项目名推测。可通过phase_set_remote_workspace修改，修改不搬移远端文件或授权上传提交。",
         "初始时提示用户可发送‘项目名称：Cr 相图’设置交互显示名称；名称可稍后设置，不阻止配置。",
         "母结构目录使用当前项目的配置；不要沿用其他项目的目录或相列表。",
         "远端模型路径由用户提供，仅保存为元数据。",

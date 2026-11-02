@@ -108,6 +108,7 @@ def compact_sqlite(
         if not {"checkpoints", "writes"}.issubset(tables):
             raise ValueError("Unknown checkpoint database schema")
         saver = CompactSqliteSaver(conn)
+
         def evidence(latest):
             result = {}
             for thread, ns, cid in latest:
@@ -187,9 +188,7 @@ def main(argv=None):
     source.add_argument("--sqlite-source", type=Path, help="source LangGraph SQLite checkpoint")
     source.add_argument("--pickle-source", type=Path, help="source PersistentDict pickle")
     parser.add_argument("--destination", required=True, type=Path)
-    parser.add_argument(
-        "--role", choices=("storage", "writes", "blobs"), help="pickle store role"
-    )
+    parser.add_argument("--role", choices=("storage", "writes", "blobs"), help="pickle store role")
     parser.add_argument("--preserve-all", action="store_true")
     parser.add_argument("--history-keep", type=int, default=8)
     parser.add_argument("--namespace-keep", type=int, default=32)

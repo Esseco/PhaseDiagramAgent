@@ -23,6 +23,45 @@ IDENTITY = (
 )
 
 
+def _recorded_delivery_move(root, original, current):
+    """Recognize the exact canonical lane move recorded by layout migration."""
+    root, original, current = Path(root).resolve(), original.resolve(), current.resolve()
+    if not original.is_relative_to(root) or not current.is_relative_to(root):
+        return False
+    epoch = original.parent.parent
+    if original.parent.name != "transfers" or not re.fullmatch(r"epoch\d+", epoch.name):
+        return False
+    if epoch.parent != root / "submissions":
+        return False
+    from phase_agent.tools.remote.submission_architecture import epoch_delivery_directory
+
+    canonical = epoch_delivery_directory(epoch, "transfers") / original.name
+    if current != canonical:
+        return False
+    receipt = root / "submissions/.layout-migration.json"
+    if not receipt.is_file() or receipt.stat().st_size > 1024**2:
+        return False
+    try:
+        data = json.loads(receipt.read_text(encoding="utf8"))
+    except (ValueError, UnicodeError):
+        return False
+    if not (
+        data.get("project") == root.name
+        and data.get("status") == "migrated"
+        and isinstance(data.get("immutable_files_verified"), int)
+        and data["immutable_files_verified"] > 0
+    ):
+        return False
+    return any(
+        isinstance(row, dict)
+        and row.get("from")
+        and row.get("to")
+        and Path(row["from"]).resolve() == original.parent
+        and Path(row["to"]).resolve() == current.parent
+        for row in data.get("moves") or []
+    )
+
+
 def _original_source_folder(state, handoff):
     """A local rename must not change the remote label in a bound recovery plan."""
     source = Path(handoff["folder"])
@@ -48,7 +87,10 @@ def _original_source_folder(state, handoff):
     names = {
         Path(row["from"]).name
         for row in control.get("path_relocations") or []
-        if Path(row["to"]).resolve() == source.resolve()
+        if (
+            Path(row["to"]).resolve() == source.resolve()
+            or _recorded_delivery_move(root, Path(row["to"]), source)
+        )
     }
     if len(names) > 1:
         raise ValueError("ambiguous_original_delivery_folder")
@@ -117,7 +159,7 @@ def _recovery_plan_matches(actual, expected):
     """Accept path-only changes made by a local submission layout migration."""
     if actual == expected:
         return True
-    for key in ("schema", "mode", "source_archive_sha256"):
+    for key in ("schema", "mode", "source_folder", "source_archive_sha256"):
         if actual.get(key) != expected.get(key):
             return False
     actual_tasks = actual.get("tasks") or []
@@ -202,6 +244,9 @@ def _recovery_import_directory(original, recovery_key):
     legacy = directory.parent / "_recovery" / recovery_key
     if legacy.exists():
         return legacy
+    previous = directory / "recovery" / recovery_key
+    if previous.is_dir():
+        return previous
     parents = [directory, *directory.parents]
     submission = next((p for p in parents if p.name == "submissions"), None)
     epoch = next(

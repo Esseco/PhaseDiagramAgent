@@ -5,6 +5,7 @@ import csv
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from pymatgen.core import Lattice, Structure
 import pytest
@@ -13,8 +14,8 @@ from phase_agent.analysis.feedback.dft_result_products import (
     record_dft_products,
     export_dft_products,
 )
-from phase_agent.analysis.state.summarize_model_rounds import summarize_model_rounds
-from phase_agent.analysis.state.dft_round_status import dft_recovery_rounds
+from phase_agent.evidence.summarize_model_rounds import summarize_model_rounds
+from phase_agent.evidence.dft_round_status import dft_recovery_rounds
 from phase_agent.tools.state.dft_recovery_decision import (
     classify_dft_recovery_reply,
     update_dft_recovery_question,
@@ -327,11 +328,23 @@ def test_ambiguous_action_approval_is_not_used_as_recovery_decision():
     assert classify_dft_recovery_reply("不再回收", state)["decision"] == "close"
 
 
-def test_chat_routes_actual_recovery_choice_without_approving_an_action(tmp_path):
+@pytest.mark.parametrize("backlog", [False, True])
+@pytest.mark.parametrize(
+    "message,decision", [("否", "close"), ("是", "wait"), ("继续回收", "wait"), ("同意", "wait")]
+)
+def test_chat_routes_actual_recovery_choice_without_approving_an_action(
+    tmp_path, monkeypatch, message, decision, backlog
+):
     state = update_dft_recovery_question(partial_state())
+    if not backlog:
+        state["feedback_processed_task_ids"] = ["D1"]
     path = tmp_path / "state.json"
     path.write_text(json.dumps(state), encoding="utf-8")
     calls = []
+    monkeypatch.setattr(
+        "phase_agent.tools.workflows.recover_saved_results.recover_saved_results",
+        lambda *a, **kw: pytest.fail("A saved DFT question cannot request unrelated recovery"),
+    )
 
     def workflow(**kwargs):
         calls.append(kwargs)
@@ -345,11 +358,146 @@ def test_chat_routes_actual_recovery_choice_without_approving_an_action(tmp_path
             },
         }
 
-    handler = RunWorkflowChatHandler({"state_path": str(path)}, workflow=workflow)
-    reply = handler([{"role": "user", "content": "否"}])
+    model = Mock(side_effect=AssertionError("An exact question reply needs no semantic model"))
+    handler = RunWorkflowChatHandler(
+        {"state_path": str(path), "agent_client": model}, workflow=workflow
+    )
+    reply = handler([{"role": "user", "content": message}])
     assert len(calls) == 1 and calls[0]["human_feedback"] is None
-    assert calls[0]["dft_recovery_decision"]["decision"] == "close"
-    assert "不再等待" in reply
+    assert calls[0]["dft_recovery_decision"]["decision"] == decision
+    assert (
+        calls[0]["dft_recovery_decision"]["question_id"]
+        == state["pending_dft_recovery_question"]["question_id"]
+    )
+    assert ("不再等待" if decision == "close" else "继续等待") in reply
+    model.assert_not_called()
+
+
+@pytest.mark.parametrize("blocker", ["new_archive", "other_scope", "unsettled_execution"])
+@pytest.mark.parametrize("message", ["否", "继续回收"])
+def test_bound_dft_reply_does_not_authorize_unrelated_recovery(
+    tmp_path, monkeypatch, blocker, message
+):
+    from phase_agent.tools.state.execution_receipts import begin_execution
+
+    state = update_dft_recovery_question(partial_state())
+    path = tmp_path / "state.json"
+    if blocker == "new_archive":
+        import zipfile
+
+        archive = tmp_path / "unverified-results.zip"
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("result.json", "{}")
+        state["tasks"][1]["result_path"] = str(archive)
+    elif blocker == "other_scope":
+        state["tasks"].append(task("E1", "completed", "other-operation"))
+        state["processed_task_ids"].append("E1")
+    else:
+        begin_execution(
+            path,
+            {
+                "tool": "pause_search",
+                "invocation_id": "unsettled",
+                "config_version": "c1",
+                "action_hash": "h",
+            },
+        )
+    path.write_text(json.dumps(state), encoding="utf-8")
+    before = path.read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("A bound DFT reply authorized unrelated recovery or execution")
+
+    monkeypatch.setattr(
+        "phase_agent.tools.workflows.recover_saved_results.recover_saved_results", forbidden
+    )
+    model = Mock(return_value={"recovery_intent": "approve"})
+    handler = RunWorkflowChatHandler(
+        {"state_path": str(path), "agent_client": model}, workflow=forbidden
+    )
+    assert handler([{"role": "user", "content": message}])
+    assert path.read_bytes() == before
+    model.assert_not_called()
+
+
+def competing_direction_state():
+    state = update_dft_recovery_question(partial_state())
+    state["remote_finetune_jobs"] = {
+        "j1": {
+            "training_handoff": {
+                "stage": "awaiting_direction_approval",
+                "direction_proposal": {"direction": "supplement_dft", "reason": "saved direction"},
+            }
+        }
+    }
+    return state
+
+
+@pytest.mark.parametrize("displayed", [False, True])
+@pytest.mark.parametrize("message", ["同意", "拒绝", "是", "否"])
+def test_generic_reply_cannot_choose_between_dft_question_and_direction_review(
+    tmp_path, displayed, message
+):
+    from phase_agent.graphs.dialogue.support import bind_presented_proposal
+
+    state = competing_direction_state()
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps(state), encoding="utf-8")
+    before = path.read_bytes()
+    workflow = Mock(side_effect=AssertionError("Ambiguous reply cannot enter DFT workflow"))
+    model = Mock(side_effect=AssertionError("Ambiguous approval cannot request a model"))
+    handler = RunWorkflowChatHandler(
+        {"state_path": str(path), "agent_client": model}, workflow=workflow
+    )
+    handler.review_pending = Mock(return_value={"result": {"status": "completed", "state": state}})
+    handler.conversation_id = "c"
+    if displayed:
+        bind_presented_proposal(handler, state)
+        assert handler.presented_plan_binding["plan_id"] == "review:training_direction:j1"
+    reply = handler([{"role": "user", "content": message}], conversation_id="c")
+    handler.review_pending.assert_not_called()
+    workflow.assert_not_called()
+    model.assert_not_called()
+    assert "DFT" in reply and "指定" in reply
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("displayed", [False, True])
+@pytest.mark.parametrize("message,decision", [("继续回收", "wait"), ("不再回收DFT", "close")])
+def test_explicit_dft_reply_cannot_review_a_competing_direction(
+    tmp_path, displayed, message, decision
+):
+    from phase_agent.graphs.dialogue.support import bind_presented_proposal
+
+    state = competing_direction_state()
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+    def workflow(**kwargs):
+        assert kwargs["human_feedback"] is None
+        assert kwargs["dft_recovery_decision"]["decision"] == decision
+        assert (
+            kwargs["dft_recovery_decision"]["question_id"]
+            == state["pending_dft_recovery_question"]["question_id"]
+        )
+        return {
+            "status": "completed",
+            "state": update_dft_recovery_question(state, kwargs["dft_recovery_decision"]),
+        }
+
+    run = Mock(side_effect=workflow)
+    model = Mock(side_effect=AssertionError("An exact DFT reply needs no semantic model"))
+    handler = RunWorkflowChatHandler({"state_path": str(path), "agent_client": model}, workflow=run)
+    handler.review_pending = Mock(
+        side_effect=AssertionError("DFT choice cannot review another object")
+    )
+    handler.conversation_id = "c"
+    if displayed:
+        bind_presented_proposal(handler, state)
+    assert handler([{"role": "user", "content": message}], conversation_id="c")
+    run.assert_called_once()
+    handler.review_pending.assert_not_called()
+    model.assert_not_called()
 
 
 def test_workflow_moves_to_llm_only_after_declining_partial_recovery(monkeypatch):

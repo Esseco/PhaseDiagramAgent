@@ -14,17 +14,26 @@ def retrieve_relevant_knowledge(
     phase=None,
     action=None,
     model_version=None,
+    project_id=None,
     limit=8,
     query="",
     token_budget=2000,
 ):
     if not 1 <= int(limit) <= 10:
         raise ValueError("knowledge limit must be between 1 and 10")
+    from phase_agent.persistence.memory.applicability import (
+        memory_scope,
+        applicability_errors,
+        project_scope_matches,
+    )
+
+    scope = memory_scope(state)
     context = {
         "system_id": system_id,
-        "phase": phase,
+        "phase": phase if phase is not None else scope["phase"],
         "action": action,
         "model_version": model_version,
+        "project_id": project_id or scope["project_id"],
     }
     ranked = []
     if type(token_budget) is not int or token_budget < 1:
@@ -56,6 +65,7 @@ def retrieve_relevant_knowledge(
         for old in by_id.get(identity, [])
         if all(row.get(key) == old.get(key) for key in ("scope", "system_id", "category"))
         and row.get("applicability", {}) == old.get("applicability", {})
+        and project_scope_matches(row, old)
     }
     for row in eligible:
         if row.get("knowledge_id") in superseded:
@@ -65,8 +75,26 @@ def retrieve_relevant_knowledge(
         if row.get("scope") in {"project", "system"} and row.get("system_id") != system_id:
             continue
         applicability = row.get("applicability") or {}
+        if applicability_errors(applicability):
+            continue
+        if row.get("scope") == "project" and not row.get("knowledge_id", "").startswith("LEGACY-"):
+            bound_project = (
+                row.get("project_id")
+                or applicability.get("project_id")
+                or row.get("source_project")
+            )
+            # Old inline records without provenance are local to this state file.
+            if bound_project and (
+                not context["project_id"] or bound_project != context["project_id"]
+            ):
+                continue
         if any(
-            value is not None and context.get(key) != value
+            value is not None
+            and (
+                value not in context[key]
+                if isinstance(context.get(key), (list, tuple, set))
+                else context.get(key) != value
+            )
             for key, value in applicability.items()
             if key in context
         ):

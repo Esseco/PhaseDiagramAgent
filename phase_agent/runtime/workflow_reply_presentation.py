@@ -1,6 +1,6 @@
 """Render workflow responses without HTTP, runtime assembly or state writes."""
 
-from phase_agent.decisions.agent.dialogue_contract import DIALOGUE_STATUSES
+from phase_agent.agents.common.dialogue_contract import DIALOGUE_STATUSES
 import os
 from pathlib import Path
 
@@ -21,13 +21,10 @@ def _current_completed_mc_recovery_line(state):
         ):
             continue
         members = [
-            row
-            for row in state.get("tasks") or []
-            if row.get("relax_mc_bundle_id") == bundle_id
+            row for row in state.get("tasks") or [] if row.get("relax_mc_bundle_id") == bundle_id
         ]
         if not members or any(
-            row.get("status") in {"pending", "running", "submitted", "unknown"}
-            for row in members
+            row.get("status") in {"pending", "running", "submitted", "unknown"} for row in members
         ):
             continue
         summary = batch.get("result_summary") or {}
@@ -118,7 +115,33 @@ def _is_model_failure_proposal(proposal):
 def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
     from phase_agent.runtime.response_preferences import detailed_response
 
-    proposal = result.get("agent_proposal") or {}
+    proposal = result.get("agent_proposal") or next(
+        (
+            event["agent_proposal"]
+            for event in reversed(result.get("events") or [])
+            if event.get("agent_proposal")
+        ),
+        {},
+    )
+    if result.get("status") == "awaiting_approval":
+        # Audit events omit large previews. Display the matching authoritative
+        # pending proposal, including its exact targets, cost and approval scope.
+        action = proposal.get("raw_action") or {}
+        task_key = action.get("task_key")
+        matches = [
+            row["agent_proposal"]
+            for row in (
+                (result.get("state") or {}).get("pending_execution_policies") or {}
+            ).values()
+            if task_key
+            and ((row.get("agent_proposal") or {}).get("raw_action") or {}).get("task_key")
+            == task_key
+            and ((row.get("agent_proposal") or {}).get("raw_action") or {}).get("tool")
+            == action.get("tool")
+        ]
+        if len(matches) == 1:
+            proposal = matches[0]
+            result = {**result, "agent_proposal": proposal}
     if result.get("status") == "awaiting_approval" and _is_model_failure_proposal(proposal):
         return "旧建议由模型回复失败产生，不是暂停决策。请说“继续”重新获取有效方案；未执行任务。"
     proposed_tool = proposal.get("recommended_action") or (proposal.get("raw_action") or {}).get(
@@ -270,6 +293,12 @@ def format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
 
 def _with_refresh_completion(result, reply):
     """Keep this turn's verified refresh facts beside its next approval."""
+    proposal = result.get("agent_proposal") or {}
+    if (proposal.get("strategic_review") or {}).get("status") == "awaiting_human_input":
+        reply = (
+            "方向审阅：请给 Strategic 提出建议；本次接受方向不执行计算，之后还需单独批准具体动作。\n"
+            + reply
+        )
     facts = result.get("completed_refresh") or next(
         (
             event["completed_refresh"]
@@ -319,9 +348,7 @@ def _with_refresh_completion(result, reply):
                 lines.append("确认范围：" + review_card(*match)["approval_boundary"])
     if not state.get("pending_execution_policies"):
         if result.get("followup_error") or result.get("followup_note"):
-            lines.append(
-                "方案说明：" + str(result.get("followup_note") or result["followup_error"])
-            )
+            lines.append("原因：" + str(result.get("followup_note") or result["followup_error"]))
             lines.append(
                 "下一步：下一步方案尚未准备成功，当前尚无待批准方案；请处理上述问题后重新请求下一步方案。"
             )
@@ -414,6 +441,7 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         if current_state:
             from phase_agent.tools.state.execution_receipts import recovery_report
             from phase_agent.tools.state.task_waiting import active_pending_tasks
+            from phase_agent.tools.workflows.recover_saved_results import recovery_candidate
 
             try:
                 current_report = recovery_report(state_path, current_state)
@@ -425,6 +453,13 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                 and not current_state.get("pending_execution_recoveries")
                 and active_pending_tasks(current_state.get("tasks") or [])
             ):
+                candidate = recovery_candidate(current_state)
+                if candidate.get("pending"):
+                    from phase_agent.graphs.dialogue.saved_control import (
+                        recovery_confirmation_reply,
+                    )
+
+                    return recovery_confirmation_reply(current_state)
                 from phase_agent.graphs.dialogue.saved_control import active_task_wait_reply
 
                 waiting = active_task_wait_reply(current_state)
@@ -519,16 +554,13 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
             f"当前：{preview['new_model_version']} 已激活，结构刷新待批准。\n"
             f"首批：弛豫 {relax}、单点 {len(rows) - relax}；暂缓 {preview['deferred']}。\n"
             "标准：<1 meV/atom弛豫，1–10单点，>10按Na×相抽样10%。\n"
-            f"预计相对成本 {preview['initial_cost']:.1f}；最多追加一轮弛豫 "
-            f"{preview['maximum_supplemental_count']} 个、成本上限 {preview['maximum_supplemental_cost']:.1f}。\n"
-            "补充标准：新Ehull<1，或1–10且最大原子力>0.1 eV/Å；已弛豫项不再追加。\n"
             f"未覆盖的分层 {len(preview['coverage_gaps'])} 个；{timing}，单点成本暂按弛豫上界。\n"
-            "同意仅批准首批输入生成；回收后若需补充，按具体目标另行审批。\n"
+            "同意仅批准首批输入生成；回收后直接展示新模型 branch 生成方案。\n"
             "仅生成超算输入；你提交GPU.sh并回传results。不本机计算。"
         )
     if refresh and refresh.get("status") != "completed":
         if refresh.get("status") == "waiting_results":
-            from phase_agent.analysis.state.workflow_blockers import (
+            from phase_agent.evidence.workflow_blockers import (
                 refresh_result_facts,
             )
 
@@ -560,18 +592,43 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                 reason = result.get("reason") or next(
                     (e.get("reason") for e in reversed(events) if e.get("reason")), None
                 )
-                return "\n".join([brief_chat_state(state), *([str(reason)] if reason else [])])
+                return "\n".join(
+                    [
+                        brief_chat_state(state),
+                        *(
+                            [
+                                "原因：" + str(reason),
+                                "下一步：补齐上述相图或结果证据后再核对；已有结果保留，不重复生成刷新输入。",
+                            ]
+                            if reason
+                            else []
+                        ),
+                    ]
+                )
             return "\n".join([brief_chat_state(state), *waiting_file_lines(state)])
         reason = result.get("reason") or next(
             (e.get("reason") for e in reversed(events) if e.get("reason")), None
         )
         if reason:
-            return "当前：新模型结构刷新。\n" + str(reason)
+            return (
+                "当前：新模型结构刷新。\n"
+                + ("" if str(reason).startswith(("结果：", "原因：")) else "原因：")
+                + str(reason)
+                + (
+                    ""
+                    if "\n下一步：" in str(reason)
+                    else "\n下一步：按上述原因补齐刷新条件，再恢复原方案；模型切换和已有结果保留。"
+                )
+            )
     text = _workflow_reply_body(result, state_path, verbose=verbose)
     if result.get("followup_error") or result.get("followup_note"):
-        text += "\n下一步方案暂未准备成功；已生成结果保留，未执行后续任务。"
-        if verbose:
-            text += "\n" + str(result.get("followup_error") or result.get("followup_note"))
+        text = "\n".join(
+            line for line in text.splitlines() if not line.startswith(("建议：", "下一步："))
+        )
+        text += "\n原因：下一步方案暂未准备成功：" + str(
+            result.get("followup_error") or result.get("followup_note")
+        )
+        text += "\n下一步：按上述原因补齐具体方案后再审批；已有生成结果保留，无需重做，当前没有待批准的后续方案。"
     if not result.get("post_dft_review") and result.get("status") in {
         "confirmation_required",
         "awaiting_remote_training",
@@ -593,6 +650,13 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
 
 def _with_post_dft_reply(result, text, *, verbose):
     """Reuse round-scoped analysis at the common presentation boundary."""
+    if result.get("status") == "awaiting_remote_training" or (
+        result.get("status") != "awaiting_approval"
+        and any(row.get("final_action") for row in [result, *(result.get("events") or [])])
+    ):
+        # A delivery/execution receipt supersedes its pre-approval review.
+        # A newly proposed follow-up retains its own scientific assessment.
+        return text
     from phase_agent.runtime.post_dft_presentation import (
         post_dft_lines,
         post_dft_review_lines,
@@ -850,8 +914,7 @@ def _dft_recovery_question_reply(result):
     expected = question.get("expected_tasks", 0)
     ratio = recovered / expected if expected else 0
     lines = [
-        f"{label}：DFT 有效回收 {recovered}/{expected}"
-        f"（{ratio:.1%}）。",
+        f"{label}：DFT 有效回收 {recovered}/{expected}（{ratio:.1%}）。",
         f"成功 {question.get('successful_tasks', 0)}、失败 {question.get('failed_tasks', 0)}；"
         f"未回传 {len(question.get('pending_task_ids') or [])} 个。",
     ]
@@ -885,7 +948,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
                 "请拒绝旧建议后重新提出；不会执行空动作。"
             )
         cost = proposal.get("estimated_cost") or {}
-        from phase_agent.tools.policy.training_input_action import (
+        from phase_agent.policies.training_input_action import (
             is_training_input_action,
         )
 
@@ -935,9 +998,7 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             ]
         if (
             proposed_tool == "prepare_local_batch_files"
-            and (params := (proposal.get("raw_action") or {}).get("parameters") or {}).get(
-                "mode"
-            )
+            and (params := (proposal.get("raw_action") or {}).get("parameters") or {}).get("mode")
             == "relax_mc_inputs"
         ):
             lines = _relax_mc_approval_context(result.get("state") or {}, proposal) + lines
@@ -1341,6 +1402,33 @@ def _format_workflow_reply_verbose(result: dict, state_path, *, verbose=False) -
             "mc_requires_current_phase_diagram_ehull_per_atom": "MC 派发缺少当前相图的 Ehull/atom 证据",
         }
         reason = reason_labels.get(str(reason), str(reason))
+        recovered = result.get("verified_recovery") or {}
+        recovery_recorded = bool(
+            result.get("recovered_count")
+            or (result.get("state") or {}).get("post_recovery_next_step_pending")
+            or any(counts.get("completed") or counts.get("failed") for counts in recovered.values())
+        )
+        if "llm_failed:" in reason and recovery_recorded:
+            mismatches = [
+                label
+                for code, label in (
+                    ("scientific_decision_point_mismatch", "决策阶段"),
+                    ("dft_selection_purposes_must_match_selected_candidates", "候选用途"),
+                )
+                if code in reason
+            ]
+            cause = (
+                "模型方案的" + "、".join(mismatches) + "与本轮事实不一致，校验未通过。"
+                if mismatches
+                else "模型未返回完整有效的下一步方案，具体原因见交互记录。"
+            )
+            return (
+                "结果：已回收并入账的结果保留；下一步建议未生成，未执行新的科学任务。\n"
+                f"原因：{cause}\n"
+                "下一步：重新分析下一步，仅生成待审建议，获你批准后才执行；"
+                "不重新回收、不重跑整批。若需补全，仅为失败项另提方案。\n"
+                f"模型校验详情：{reason}\n详细记录：`{detail_path}`"
+            )
         if "llm_failed:" in str(reason) and any(
             word in str(reason).lower() for word in ("timeout", "timed out", "超时")
         ):

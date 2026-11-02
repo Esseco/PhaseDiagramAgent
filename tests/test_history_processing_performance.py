@@ -37,7 +37,7 @@ class NoCopy(list):
             {"recovered_results": [], "manager": None},
             "state",
         ),
-        ("graphs.training_handoff_graph", "run_training_handoffs", {"config": {}}, 0),
+        ("graphs.recovery.training_handoff_graph", "run_training_handoffs", {"config": {}}, 0),
     ],
 )
 def test_owned_internal_state_does_not_copy_history(module, name, kwargs, index):
@@ -273,11 +273,18 @@ def test_history_directory_index_skips_settled_mc_but_keeps_dft(tmp_path):
 
 
 def test_owned_already_imported_mc_avoids_copy_but_rechecks_binding(tmp_path):
+    import zipfile
+
     from phase_agent.tools.relax_mc_batch.results import import_results
     from phase_agent.tools.remote.transfer_bundle import checksum
 
     archive = tmp_path / "results.zip"
-    archive.write_bytes(b"existing archive identity")
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("result_summary.json", json.dumps({"status": "completed", "task_count": 1}))
+        zipped.writestr(
+            "workflow_state.json",
+            json.dumps({"tasks": [{"task_id": "mc1", "status": "completed"}]}),
+        )
     state = {
         "active_model_version": "m1",
         "history": NoCopy([1]),

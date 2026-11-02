@@ -4,8 +4,8 @@ from copy import deepcopy
 import hashlib
 from pathlib import Path
 
-from phase_agent.tools.policy.region_sampling import CONTROLS, preview
-from phase_agent.tools.policy.adaptive_branch_count import configured_selection_guards
+from phase_agent.policies.region_sampling import CONTROLS, preview
+from phase_agent.policies.adaptive_branch_count import configured_selection_guards
 from phase_agent.tools.workflows.region_controller import sample_regions
 from phase_agent.tools.workflows.run_branch_generation import run_branch_generation
 from phase_agent.tools.workflows.region_review import write_result
@@ -22,6 +22,10 @@ def run_region_generation(*, action, context):
             raise ValueError("区域方案所依据的账本、模型、配置或保护规则已变化，需重新审阅")
     except (ValueError, KeyError) as error:
         return {"status": "rejected", "state": state, "reason": str(error)}
+    if params.get("replace_initial_pool"):
+        from phase_agent.tools.workflows.replace_initial_pool import replace_initial_pool
+
+        return replace_initial_pool(action=action, context=context, generate=run_region_generation)
     if not params["regions"]:
         _finish_review(state, action, "completed")
         return {
@@ -30,6 +34,17 @@ def run_region_generation(*, action, context):
             "registered": [],
             "summary": {"new_branch_count": 0, "defer_reason": params["defer_reason"]},
         }
+    from phase_agent.science.structures.inherit_near_hull_occupancy import (
+        verify_parent_matches_branch,
+    )
+
+    try:
+        for source in (fresh.get("near_hull_parent_evidence") or {}).get("parents") or []:
+            verify_parent_matches_branch(
+                source, manager.data["branches"][source["branch_id"]], manager.boundary, refs
+            )
+    except (OSError, ValueError, KeyError) as error:
+        return {"status": "rejected", "state": state, "reason": str(error)}
     candidates, report = sample_regions(
         manager,
         refs,
@@ -37,6 +52,16 @@ def run_region_generation(*, action, context):
         system_config=config.get("system_config"),
         strategy_options=config.get("generation_options"),
     )
+    initial = report.get("initial_coverage") or {}
+    if initial.get("required") and not initial.get("complete"):
+        _finish_review(state, action, "paused_for_review")
+        return {
+            "status": "paused_for_review",
+            "state": state,
+            "registered": [],
+            "reason": "initial_coverage_incomplete; no downstream inputs prepared",
+            "summary": {"sampling_report": report},
+        }
     before = set(manager.data["branches"])
     digest = hashlib.sha256(str(action["task_key"]).encode()).hexdigest()[:16]
     directory = Path(config["structure_directory"]) / f"RegionSampling-{digest}"
@@ -79,7 +104,14 @@ def run_region_generation(*, action, context):
         "structure_directory": str(directory),
     }
     state.setdefault("generation_history", []).append(history)
-    _finish_review(state, action, report.get("status", "completed"))
+    incomplete_initialization = initial.get("required") and bool(
+        result["summary"].get("initialization_failed_branches")
+    )
+    _finish_review(
+        state,
+        action,
+        "paused_for_review" if incomplete_initialization else report.get("status", "completed"),
+    )
     state["coverage"] = result["coverage"]
     artifacts = write_result(history, manager, result["registered"], state, action)
     history["artifacts"] = artifacts
@@ -93,7 +125,7 @@ def run_region_generation(*, action, context):
             ),
         }
     return {
-        "status": "completed",
+        "status": "paused_for_review" if incomplete_initialization else "completed",
         "state": state,
         "registered": result["registered"],
         "coverage": result["coverage"],

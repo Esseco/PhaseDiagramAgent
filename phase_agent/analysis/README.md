@@ -4,8 +4,8 @@
 
 ## 从哪里读
 
-- [state/build_decision_context.py](state/build_decision_context.py)
-- [state/post_dft_assessment.py](state/post_dft_assessment.py)
+- [state/build_decision_context.py](../evidence/build_decision_context.py)
+- [state/post_dft_assessment.py](../evidence/post_dft_assessment.py)
 - [phase/update_phase_diagram.py](phase/update_phase_diagram.py)
 
 职责和审批边界见 [Graph 架构](../../docs/architecture/graph.md#doc-graph_architecture)，使用说明见 [文档索引](../../docs/README.md)。

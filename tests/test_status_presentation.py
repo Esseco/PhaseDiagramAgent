@@ -31,7 +31,7 @@ def test_prepared_training_reports_submission_not_another_proposal():
     text = format_progress({"active_model_version": "test", "remote_finetune_jobs": {
         "job": {"original_model_version": "test", "status": "inputs_prepared",
                 "directory": "synthetic-training", "activated": False}}})
-    assert "微调输入已准备" in text
+    assert "微调输入已生成" in text
     assert "在inputs内提交 GPU.sh" in text
     assert "synthetic-training" in text
     assert "由 Agent 检查已有结果" not in text

@@ -3,11 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from phase_agent.tools.policy.model_generation import (
+from phase_agent.policies.model_generation import (
     new_model_generation_facts,
     new_model_search_errors,
 )
-from phase_agent.tools.policy.branch_conditions import branch_entry_errors
+from phase_agent.policies.branch_conditions import branch_entry_errors
 
 
 def switched():
@@ -172,7 +172,7 @@ def test_generation_records_only_genuinely_new_branch_ids(monkeypatch, tmp_path)
 
 def test_context_transport_and_cached_snapshot_keep_prerequisite():
     from phase_agent.tools.state.state_manager import agent_state_summary
-    from phase_agent.decisions.agent.deepagents_proposal import proposal_material
+    from phase_agent.models.deepagents_proposal import proposal_material
 
     s = switched()
     s["current_state_snapshot"] = {"decision_context": {}}

@@ -10,7 +10,7 @@ from tests.test_on_demand_branch import context, review
 
 @pytest.mark.parametrize("wire", ["tool", "action_type", "envelope", "operation"])
 def test_branch_correction_keeps_original_tool_contract(wire):
-    from phase_agent.decisions.agent.branch_review_repair import repair_branch_review
+    from phase_agent.agents.exploration.branch_review_repair import repair_branch_review
     from phase_agent.tools.dispatch.scientific_operations import with_operation_contracts
 
     valid = review()
@@ -51,7 +51,7 @@ def test_branch_correction_keeps_original_tool_contract(wire):
 
 @pytest.mark.parametrize("changed", ["prepare_local_batch_files", "pause_search", "dialogue"])
 def test_branch_correction_still_rejects_tool_change(changed):
-    from phase_agent.decisions.agent.branch_review_repair import repair_branch_review
+    from phase_agent.agents.exploration.branch_review_repair import repair_branch_review
 
     invalid = review()
     invalid["branch_pool_review"]["evidence_refs"] = ["invented"]

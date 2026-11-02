@@ -1,7 +1,7 @@
 """Read-only recovered-round metrics before the next scientific proposal."""
 
-from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
-from phase_agent.analysis.state.model_epoch import model_epoch_label
+from phase_agent.evidence.post_dft_assessment import post_dft_assessment
+from phase_agent.evidence.model_epoch import model_epoch_label
 
 
 def _metric_pair(metrics, unit):
@@ -127,7 +127,7 @@ def post_dft_review_lines(action, *, verbose=False, finetune_enabled=None):
         "revise_strategy": "修订执行配置",
     }.get(review.get("choice"))
     if choice:
-        from phase_agent.tools.policy.training_input_action import is_training_input_action
+        from phase_agent.policies.training_input_action import is_training_input_action
 
         if is_training_input_action(action):
             choice = "微调：生成超算训练提交文件"

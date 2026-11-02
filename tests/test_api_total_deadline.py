@@ -3,7 +3,7 @@ import threading
 import time
 from unittest.mock import patch
 
-from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client, DeepSeekResponseError
+from phase_agent.models.create_deepseek_client import create_deepseek_client, DeepSeekResponseError
 from phase_agent.runtime.turn_process import record_turn, render_process_panel
 
 

@@ -3,12 +3,12 @@ import json
 
 import pytest
 
-from phase_agent.decisions.agent.summary_request import (
+from phase_agent.evidence.requests import (
     summary_payload,
     request_summary_first,
     expand_topics,
 )
-from phase_agent.decisions.agent.prepare_llm_request import needs_deep_reasoning
+from phase_agent.models.prepare_llm_request import needs_deep_reasoning
 
 
 def fixture():
@@ -268,7 +268,7 @@ def test_provider_budget_follows_typed_model_scope_without_an_extra_planner_call
     reasoning, expected_thinking, expected_tokens
 ):
     from unittest.mock import patch
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
     from tests.test_deepseek_client import FakeResponse, completion
 
     p = fixture()
@@ -332,8 +332,8 @@ def test_default_history_does_not_hide_arbitrary_new_scientific_fields():
 
 
 def test_provider_analysis_scope_does_not_trim_human_constraints_or_dft_values():
-    from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
-    from phase_agent.decisions.agent.transport_tables import expand_evidence_tables
+    from phase_agent.models.prepare_llm_request import prepare_llm_request
+    from phase_agent.models.transport_tables import expand_evidence_tables
 
     p = fixture()
     p["analysis_plan"] = {
@@ -365,7 +365,7 @@ def test_current_instruction_scientific_reviews_and_reserved_budget_are_not_hidd
 
 
 def test_repeated_execution_snapshots_add_only_index_cost_after_transport_compaction():
-    from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
+    from phase_agent.models.prepare_llm_request import prepare_llm_request
 
     p = fixture()
 

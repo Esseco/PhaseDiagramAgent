@@ -1,8 +1,8 @@
 from copy import deepcopy
 import pytest
 
-from phase_agent.decisions.agent.dialogue_contract import dialogue_errors, dialogue_output_contract
-from phase_agent.decisions.agent.proposal_validation import proposal_errors
+from phase_agent.agents.common.dialogue_contract import dialogue_errors, dialogue_output_contract
+from phase_agent.agents.common.proposal_validation import proposal_errors
 from phase_agent.runtime.phase_diagram_chat import phase_diagram_reply
 from phase_agent.tools.step_runner.file_protocol import write_json, read_json
 from tests.test_unified_react_dialogue import make_handler

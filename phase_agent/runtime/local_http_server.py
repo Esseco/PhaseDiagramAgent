@@ -152,6 +152,7 @@ def create_local_http_server(
                 self.path
                 in {
                     "/phase/status",
+                    "/phase/codex/context",
                     "/phase/pending",
                     "/phase/tasks",
                     "/phase/charts",
@@ -165,6 +166,8 @@ def create_local_http_server(
                 name = (
                     "domain_skill_matches"
                     if self.path == "/phase/memory/skills"
+                    else "codex_context"
+                    if self.path == "/phase/codex/context"
                     else self.path.rsplit("/", 1)[-1]
                 )
                 try:
@@ -219,6 +222,9 @@ def create_local_http_server(
             if self.path in {
                 "/phase/operations/resolve",
                 "/phase/propose",
+                "/phase/codex/propose",
+                "/phase/codex/report",
+                "/phase/codex/plot",
                 "/phase/decision",
                 "/phase/recovery/propose",
                 "/phase/recovery/transaction/resume",
@@ -257,6 +263,17 @@ def create_local_http_server(
                             return local_control.propose(
                                 body.get("instruction", ""), conversation_id=conversation
                             )
+                        elif route == "/phase/codex/propose":
+                            return local_control.propose_codex(
+                                body.get("action"),
+                                context_version=body.get("context_version"),
+                                context_digest=body.get("context_digest"),
+                                conversation_id=conversation,
+                            )
+                        elif route == "/phase/codex/report":
+                            return local_control.codex_report(body["plan_id"])
+                        elif route == "/phase/codex/plot":
+                            return local_control.codex_plot()
                         elif route == "/phase/decision":
                             return local_control.decide(
                                 body.get("decision"),

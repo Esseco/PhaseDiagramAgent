@@ -1,7 +1,7 @@
 from copy import deepcopy
 import json
 import pytest
-from phase_agent.decisions.agent.summary_request import request_summary_first,summary_payload
+from phase_agent.evidence.requests import request_summary_first,summary_payload
 from phase_agent.runtime.token_usage import begin_api_call,finish_api_call,usage_summary,cached_request
 from phase_agent.runtime.turn_process import _current,record_turn
 

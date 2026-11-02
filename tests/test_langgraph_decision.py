@@ -1,13 +1,13 @@
 from unittest.mock import Mock, patch
 import pytest
 
-from phase_agent.graphs.proposal_graph import request_with_langgraph
+from phase_agent.graphs.decision_team.graph import request_with_langgraph
 
 
 def test_proposal_graph_preserves_output_and_calls_model_once():
     action = {"tool": "pause_search", "purpose": "review", "parameters": {}, "budget": 0}
     with patch(
-        "phase_agent.decisions.agent.post_dft_review.request_validated_action", return_value=action
+        "phase_agent.agents.common.post_dft_review.request_validated_action", return_value=action
     ) as model:
         result = request_with_langgraph(object(), {"allowed_tools": ["pause_search"]})
     assert result == action
@@ -23,7 +23,7 @@ def test_invalid_tool_is_not_executed_and_preserves_usage():
         "_llm_usage": {"total_tokens": 10},
     }
     with patch(
-        "phase_agent.decisions.agent.post_dft_review.request_validated_action", return_value=action
+        "phase_agent.agents.common.post_dft_review.request_validated_action", return_value=action
     ):
         with pytest.raises(ValueError, match="not allowed") as failure:
             request_with_langgraph(object(), {"allowed_tools": ["generate_branches"]})

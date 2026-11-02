@@ -29,6 +29,11 @@ def write_prediction(root, result, model, *, predictor=None):
         if expected and fingerprint != expected:
             raise ValueError("remote comparison model fingerprint mismatch")
         parameters = {"device": "cuda", "mace_default_dtype": "float64"}
+        for key in ("framework", "model_name"):
+            if model.get(key):
+                parameters[key] = model[key]
+        if model.get("remote_repo_path"):
+            parameters["local_repo_path"] = model["remote_repo_path"]
         if model.get("mace_head"):
             parameters["mace_head"] = model["mace_head"]
         evaluated = (predictor or run_mace_with_py_mace)(

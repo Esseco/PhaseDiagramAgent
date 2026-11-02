@@ -191,7 +191,7 @@ def refresh_combined_phase_diagram(state, directory):
             / "phase_diagrams"
             / "combined"
         )
-        from phase_agent.analysis.state.model_epoch import model_epoch
+        from phase_agent.evidence.model_epoch import model_epoch
 
         snapshot["epoch"] = model_epoch(state, snapshot["model_version"])
         history = root / "history"

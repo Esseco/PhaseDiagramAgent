@@ -92,7 +92,7 @@ def review_candidate_command(message, state, *, state_path=None):
         )
         if not proposal:
             return {"state": state, "reason": "请先继续，让Agent生成持久化方向方案；未执行。"}
-        from phase_agent.graphs.direction_review_graph import direction_checkpoint
+        from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
 
         checkpoint = direction_checkpoint(
             state_path, proposal, "approve" if command == "激活候选" else "reject"
@@ -117,5 +117,5 @@ def review_candidate_command(message, state, *, state_path=None):
     return {
         "state": updated,
         "reason": f"候选 {version}：{result['status']}。"
-        + ("下一步说“继续”，审阅新模型结构刷新方案。" if result["status"] == "activated" else ""),
+        + ("模型已切换，下一步审阅生成刷新文件方案。" if result["status"] == "activated" else ""),
     }

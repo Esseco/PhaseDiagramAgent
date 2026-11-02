@@ -116,7 +116,7 @@ CSV 内增加 epoch；误差与磁矩表同时保留模型版本、search group 
 
 训练方案状态必须与实际目录一致。旧目录缺失或同模型已有未完成方案而配置/数据变化时，返回 confirmation_required，明确请求核对或重生成，不通过记录数量直接追加训练轮次。不自动删除、恢复或重命名历史任务；提交过的作业也不自动取消。新轮次使用已有合法轮次最大编号加一，不以记录条数代替编号。
 
-[phase_agent/analysis/state/model_epoch.py](../../phase_agent/analysis/state/model_epoch.py)。
+[phase_agent/evidence/model_epoch.py](../../phase_agent/evidence/model_epoch.py)。
 
 <a id="doc-lightweight_result_transfer"></a>
 

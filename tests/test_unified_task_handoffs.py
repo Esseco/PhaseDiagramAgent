@@ -70,7 +70,7 @@ def test_dft_preparation_finishes_with_one_unified_package(tmp_path, monkeypatch
     assert len(result["handoffs"]) == 1
     assert result["handoffs"][0]["job_count"] == 1
     folder = Path(result["handoffs"][0]["folder"])
-    assert folder.parent == tmp_path / "submissions/epoch0/transfers"
+    assert folder.parent == tmp_path / "submissions/epoch0/delivery/transfers"
     assert all((folder / n).is_file() for n in ("inputs.zip", "submit_all.sh", "dispatch_tasks.py"))
     assert result["state"]["tasks"][0]["task_id"] == "D1"
     assert state["tasks"][0].get("slurm_batch_id") is None

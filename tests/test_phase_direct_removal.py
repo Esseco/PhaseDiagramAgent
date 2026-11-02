@@ -186,7 +186,7 @@ def test_human_restore_persists_through_existing_control_transaction(tmp_path):
     import json
     from phase_agent.analysis.phase.phase_quality_persistence import commit_human_quality_review
     from phase_agent.tools.step_runner.file_protocol import write_json
-    from phase_agent.decisions.agent.dialogue_contract import dialogue_errors
+    from phase_agent.agents.common.dialogue_contract import dialogue_errors
 
     state, manager, *_ = fixture()
     report = get_phase_quality_report(state)

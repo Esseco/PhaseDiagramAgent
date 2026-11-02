@@ -16,7 +16,14 @@ def test_pending_worker_evidence_survives_without_marking_completed(tmp_path):
     (worker / "pool/unreferenced.vasp").write_text("not referenced")
     (out / "mc_occupations.bin").write_bytes(b"occupation")
     (out / "result.json").write_text(
-        json.dumps({"outputs": {"pool_summary": [{"structure_file": "rank_0.vasp"}]}})
+        json.dumps(
+            {
+                "outputs": {
+                    "structure_path": str(worker / "pool/rank_0.vasp"),
+                    "pool_summary": [{"structure_file": "rank_0.vasp"}],
+                }
+            }
+        )
     )
     (out / "task.finished.json").write_text("{}")
     task = {

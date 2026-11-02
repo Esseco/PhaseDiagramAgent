@@ -24,7 +24,7 @@ from phase_agent.science.structures.boundary_utils import load_structure
 def _runtime_source_checksums():
     return {
         name: file_checksum(Path(__file__).with_name(name))
-        for name in ("run.py", "dependencies.py", "return_payload.py", "prepare.py")
+        for name in ("run.py", "dependencies.py", "analysis.py", "return_payload.py", "prepare.py")
     }
 
 

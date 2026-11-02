@@ -2,7 +2,7 @@
 
 from phase_agent.tools.budget.estimate_stage_cost import estimate_dft_cost
 from phase_agent.tools.budget.check_budget import check_budget, budget_is_hard
-from phase_agent.decisions.agent.dft_contracts import dft_contract_errors
+from phase_agent.agents.reliability.dft_contracts import dft_contract_errors
 
 
 def validate_dft_agent_decisions(
@@ -182,6 +182,8 @@ def validate_dft_agent_decisions(
     }
     if selected_ids and audit_ids and not (audit_ids & selected_ids):
         errors.append("independent_dft_audit_required")
+    if selected_ids:
+        errors.extend(_ground_state_selection_errors(state, selected_ids))
     for row in accepted:
         row["independent_audit"] = row["candidate_id"] in audit_ids
     global_action = proposal.get("global_action", "CONTINUE_DATA_COLLECTION")
@@ -251,3 +253,57 @@ def _relax_geometry_justified(metric, config):
         and tolerance > 0
         and residual > tolerance
     )
+
+
+def _ground_state_selection_errors(state, selected_ids):
+    """Require each unvalidated current GS and its actual frame in a DFT batch."""
+    from phase_agent.analysis.phase.phase_dft_candidates import bind_ground_state_frames
+    from phase_agent.analysis.convergence.independent_evidence import geometry_key
+    from phase_agent.analysis.feedback.dft_comparison_tables import build_comparison_tables
+
+    snapshot = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    if snapshot.get("status") != "completed" or snapshot.get("model_version") != state.get(
+        "active_model_version"
+    ):
+        return []
+    rows = [r for r in snapshot.get("entries") or [] if r.get("is_stable")]
+    if not rows:
+        return []
+    try:
+        bound = bind_ground_state_frames(state, state.get("qbc_candidates") or [])
+    except (ValueError, OSError) as error:
+        return [str(error)]
+    existing = {r.get("candidate_id"): r for r in state.get("qbc_candidates") or []}
+    records = [
+        r
+        for r in state.get("dft_dataset_records") or []
+        if r.get("checks_passed") is True
+        and r.get("model_version") == snapshot.get("model_version")
+    ]
+    energies, _ = build_comparison_tables(
+        records, state.get("dft_mlip_comparisons") or [], round_name="ground_state"
+    )
+    valid_tasks = {r["task_id"] for r in energies if r.get("comparison_status") == "completed"}
+    checked = {key for r in records if r.get("task_id") in valid_tasks if (key := geometry_key(r))}
+    errors = []
+    for row in bound:
+        if not row.get("ground_state_record_ids"):
+            continue
+        sid = row["candidate_id"]
+        if geometry_key({"structure": row["structure_path"]}) in checked:
+            continue
+        if sid not in selected_ids:
+            errors.append("ground_state_selection_required:" + sid)
+            continue
+        candidate = existing.get(sid) or {}
+        path = candidate.get("structure_path")
+        try:
+            from hashlib import sha256
+            from pathlib import Path
+
+            actual = sha256(Path(path).read_bytes()).hexdigest() if path else None
+        except OSError:
+            actual = None
+        if actual != row["ground_state_frame_sha256"]:
+            errors.append("ground_state_frame_binding_required:" + sid)
+    return errors

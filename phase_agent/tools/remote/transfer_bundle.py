@@ -6,6 +6,7 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
+import threading
 import zipfile
 from contextlib import contextmanager
 import time
@@ -14,6 +15,9 @@ MANIFEST = "transfer_manifest.json"
 MAX_ARCHIVE_FILES = 100000
 MAX_MANIFEST_BYTES = 64 * 1024**2
 MAX_ARCHIVE_BYTES = 8 * 1024**3
+
+# POSIX record locks are process-scoped; keep thread entry and descriptor close serialized.
+_ARCHIVE_THREAD_LOCK = threading.Lock()
 
 RESULT_NAMES = {
     "mc_occupations.bin",
@@ -107,9 +111,13 @@ def create_bundle(root, files, destination, *, kind, prefix="", payloads=None, b
     if set(payloads) - set(names):
         raise ValueError("Replacement payload must name an included archive file")
     validate_capacity(len(names) + 1, 0, expected_size)
-    temporary = destination.with_name(destination.name + ".part")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".part", dir=destination.parent
+    )
+    temporary = Path(temporary_name)
     rows, written = [], 0
     try:
+        os.close(descriptor)
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
             for source, name in zip(sources, names):
                 info = zipfile.ZipInfo.from_file(source, name)
@@ -209,7 +217,7 @@ def _result_files(directory):
 @contextmanager
 def _archive_lock(root):
     """Serialize parallel finishers without leaving locks after process death."""
-    with (root / ".transfer_archive.lock").open("a+b") as lock:
+    with _ARCHIVE_THREAD_LOCK, (root / ".transfer_archive.lock").open("a+b") as lock:
         if os.name == "nt":
             import msvcrt
 
@@ -235,11 +243,12 @@ def _archive_lock(root):
         else:
             import fcntl
 
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            # GPFS may scope BSD flock to one node; use POSIX byte-range locking.
+            fcntl.lockf(lock.fileno(), fcntl.LOCK_EX)
             try:
                 yield
             finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                fcntl.lockf(lock.fileno(), fcntl.LOCK_UN)
 
 
 def consolidate_results(results_directory):
@@ -612,6 +621,7 @@ def _archive_receipt(root, archive):
 
 
 def has_registered_return(state):
+    state = _pending_return_state(state)
     for batch in (state.get("relax_mc_batches") or {}).values():
         archive = Path(batch.get("expected_results_archive") or "")
         if archive.is_file() and batch.get("import_checksum") != checksum(archive):
@@ -640,6 +650,40 @@ def has_registered_return(state):
         for root in directories
         for archive in _registered_archives(root)
     )
+
+
+def _pending_return_state(state):
+    """Project return scanning onto batches owning unresolved tasks.
+
+    Historical archives remain available to explicit recovery/backlog paths,
+    but they should not be checksum-scanned on every read while a newer batch
+    is still waiting.  With no unresolved tasks, retain the legacy full scan.
+    """
+    from phase_agent.tools.state.task_waiting import awaiting_task_result
+
+    active_tasks = [row for row in state.get("tasks") or [] if awaiting_task_result(row)]
+    if not active_tasks:
+        return state
+    task_ids = {row.get("task_id") for row in active_tasks}
+    bundle_ids = {
+        row.get("relax_mc_bundle_id") for row in active_tasks if row.get("relax_mc_bundle_id")
+    }
+    batches = [
+        row
+        for row in state.get("slurm_batches") or []
+        if task_ids.intersection(row.get("task_ids") or [])
+        or row.get("batch_id") in bundle_ids
+        or row.get("relax_mc_bundle_id") in bundle_ids
+    ]
+    projected = dict(state)
+    projected["slurm_batches"] = batches
+    if bundle_ids:
+        projected["relax_mc_batches"] = {
+            key: row
+            for key, row in (state.get("relax_mc_batches") or {}).items()
+            if key in bundle_ids
+        }
+    return projected
 
 
 def publish_return(handoff_directory, results_relative):

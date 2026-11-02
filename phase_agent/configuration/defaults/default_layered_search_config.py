@@ -9,7 +9,7 @@ from phase_agent.configuration.defaults.default_dft_decision_config import (
     default_dft_decision_config,
 )
 from phase_agent.science.bohb.default_bohb_config import default_bohb_config
-from phase_agent.decisions.strategy.default_round_strategy_config import (
+from phase_agent.agents.strategic.strategy.default_round_strategy_config import (
     default_round_strategy_config,
 )
 from phase_agent.configuration.defaults.default_mace_committee_config import (
@@ -62,6 +62,9 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
         },
         "budgets": default_budget_rules(),
         "mlip": {
+            "framework": "mace",
+            "model_name": "mace-mh1",
+            "local_repo_path": None,
             "name": "mace-mh-1",
             "mace_head": "omat_pbe",
             "model_path": "/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model",
@@ -181,6 +184,9 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             "debug_requires_approval": True,
         },
         "workflow": {
+            "auto_approved_operations": [],
+            "auto_retry_limit": 1,
+            "human_review_relative_cost": None,
             "branch_batch_size": 900,
             "finetune_min_new_dft": 10,
             "finetune_max_new_dft": None,

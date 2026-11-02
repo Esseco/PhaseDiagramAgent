@@ -1,24 +1,65 @@
 """Activation barrier using the existing approval, task and budget interfaces."""
 
 from copy import deepcopy
-import hashlib
-from pathlib import Path
-
-from phase_agent.analysis.feedback.model_refresh_plan import (
-    supplemental_relaxation_required,
-)
 from phase_agent.tools.budget.release_budget import release_budget
-from phase_agent.tools.policy.execution_policy import (
+from phase_agent.policies.execution_policy import (
     apply_execution_policy,
     build_agent_proposal,
 )
-from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+from phase_agent.policies.validate_tool_action import validate_tool_action
 from phase_agent.tools.dispatch.execute_tool_action import execute_tool_action
 from phase_agent.tools.workflows.model_refresh_state import (
     refresh_active,
     refresh_preview,
     fingerprint,
 )
+
+
+def review_saved_input_authorization(state, human_feedback, *, pending_key=None):
+    """Withdraw or pause an uncompleted authorization, without replaying its tool."""
+    from phase_agent.tools.workflows.model_refresh_state import current_model_refresh
+
+    refresh = current_model_refresh(state)
+    authorization = refresh.get("input_authorization") or {}
+    decision = (
+        human_feedback.get("decision")
+        if isinstance(human_feedback, dict)
+        else str(human_feedback or "").lower()
+    )
+    if (
+        refresh.get("status") == "approval_required"
+        and authorization.get("plan")
+        and authorization.get("status", "approved") == "approved"
+        and decision in {"reject", "拒绝", "comment", "modify"}
+    ):
+        current = deepcopy(state)
+        refresh = current["model_refresh"]
+        authorization = refresh["input_authorization"]
+        rejecting = decision in {"reject", "拒绝"}
+        refresh["input_authorization"] = {
+            **authorization,
+            "status": "revoked" if rejecting else "revision_requested",
+            "review_comment": human_feedback.get("comment")
+            if isinstance(human_feedback, dict)
+            else str(human_feedback),
+        }
+        # The delivered old approval remains immutable in its checkpoint.
+        # A later proposal receives a fresh review identity, with task dedup unchanged.
+        refresh["approval_revision"] = int(refresh.get("approval_revision", 0)) + 1
+        if pending_key is not None:
+            current.setdefault("pending_execution_policies", {}).pop(pending_key, None)
+        return {
+            "status": "rejected_by_user" if rejecting else "confirmation_required",
+            "state": current,
+            "submitted": False,
+            "reason": (
+                "结果：已撤销尚未完成的刷新输入准备授权；已有文件和任务保留。"
+                if rejecting
+                else "结果：已暂停原刷新输入准备授权，收到的修改要求未作为批准执行。"
+            )
+            + "\n下一步：核对需要修改的设置后重新展示范围与预算；继续只会提出新方案，须另行批准。",
+        }
+    return None
 
 
 def advance_refresh(state, user_message=""):
@@ -29,6 +70,32 @@ def advance_refresh(state, user_message=""):
 
     current = reconcile_relaxation_quality(state)
     refresh = current["model_refresh"]
+    if refresh.get("status") == "supplement_ready" and not (
+        ((refresh.get("plan") or {}).get("policy") or {}).get("force_followup_version") == 1
+    ):
+        # Migrate checkpoints created by the retired supplemental-wave policy.
+        # The refreshed hull is already complete, so the next decision is the
+        # new-model branch proposal.  Release any unused reservation and drop
+        # the stale candidate list without creating inputs.
+        key = refresh.get("supplemental_reservation_key")
+        if key:
+            current = release_budget(
+                current,
+                task_key=key,
+                reason="retired supplemental refresh wave",
+            )["state"]
+            refresh = current["model_refresh"]
+        refresh["supplemental_candidates"] = []
+        refresh.pop("supplemental_available", None)
+        refresh.setdefault("refreshed", len(refresh.get("task_ids") or []))
+        refresh.setdefault("deferred", 0)
+        refresh.setdefault("partial", False)
+        refresh["status"] = "completed"
+        for pending_key, pending in list((current.get("pending_execution_policies") or {}).items()):
+            raw_action = (pending.get("agent_proposal") or {}).get("raw_action") or {}
+            if (raw_action.get("parameters") or {}).get("mode") == "model_refresh_inputs":
+                current["pending_execution_policies"].pop(pending_key, None)
+        return current, None
     if refresh.get("status") != "waiting_results":
         return current, None
     task_ids = refresh.get("task_ids") or []
@@ -67,7 +134,7 @@ def advance_refresh(state, user_message=""):
                 tasks[tid]["refresh_wait_waived"] = True
     unresolved = set(missing) - set(refresh.get("waived_task_ids", []))
     if unresolved:
-        from phase_agent.analysis.state.workflow_blockers import refresh_result_facts
+        from phase_agent.evidence.workflow_blockers import refresh_result_facts
 
         facts = refresh_result_facts(current)
         failed = sum(facts["status_counts"].get(s, 0) for s in ("failed", "timeout"))
@@ -120,6 +187,17 @@ def advance_refresh(state, user_message=""):
         for r in current.get("phase_records") or []
         if r.get("source_version") == refresh["new_model_version"]
     }
+    superseded_tasks = set()
+    if plan.get("energy_policy") == "latest_valid_per_structure_v1":
+        from phase_agent.analysis.phase.latest_mlip_lineage import resolve_latest_task_aliases
+
+        current_ids = {r.get("record_id") for r in new_records}
+        aliases = {k: v for k, v in (diagram.get("equivalent_record_aliases") or {}).items() if k in current_ids}
+        try:
+            resolved, superseded_tasks = resolve_latest_task_aliases(diagram_entries, new_records, aliases, refresh["new_model_version"])
+        except ValueError as error:
+            return current, f"刷新结果谱系无法核对：{error}；未完成刷新。"
+        phases.update(resolved)
     outside = set()
     records_by_task = {record.get("source_task_id"): record for record in new_records}
     for task in rows:
@@ -161,9 +239,10 @@ def advance_refresh(state, user_message=""):
             "下一步：先核对这些结构的相识别和能量证据，必要的处理方案须单独审阅；"
             "核对完成后先展示新branch生成方案，再审批生成。未新增计算，重复‘同意’不会解除此阻塞。",
         )
-    supplements = []
+    # The refresh phase ends after the new-model hull is rebuilt.  The first
+    # post-refresh action is branch generation; force flags from single-point
+    # predictions do not create a second relaxation wave here.
     if refresh["wave"] == 0:
-        original = {r["structure_sha256"]: r for r in plan["candidates"]}
         for task in rows:
             if (
                 not accepted(task)
@@ -177,23 +256,144 @@ def advance_refresh(state, user_message=""):
                     current,
                     f"刷新任务{task['task_id']}缺少唯一新版本Ehull证据，未追加计算。",
                 )
-            outputs = task["outputs"]
-            if supplemental_relaxation_required(float(entry["ehull"]), outputs.get("forces")):
-                path = Path(outputs["structure_path"])
-                source = original[task["input_structure_sha256"]]
-                supplements.append(
-                    {
-                        **source,
-                        "operation": "relax",
-                        "approved_input_structure_sha256": source["structure_sha256"],
-                        "structure_path": str(path),
-                        "structure_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                    }
+    if refresh["wave"] == 0 and (plan.get("policy") or {}).get("force_followup_version") == 2:
+        import math
+
+        by_hash = {row["structure_sha256"]: row for row in plan["candidates"]}
+        for task in rows:
+            if (
+                not accepted(task)
+                or task.get("task_id") in outside
+                or (task.get("parameters") or {}).get("model_refresh_operation") != "predict"
+            ):
+                continue
+            source = by_hash.get(task.get("input_structure_sha256"))
+            output = task.get("outputs") or {}
+            evidence = output.get("refresh_force_followup") or {}
+            threshold = (
+                0.1 if source and (source.get("ehull") is None or source["ehull"] <= 0.010) else 0.2
+            )
+            force = evidence.get("force_max_ev_per_angstrom")
+            initial = evidence.get("initial_prediction") or {}
+            valid_force = (
+                isinstance(force, (float, int))
+                and not isinstance(force, bool)
+                and math.isfinite(force)
+                and force >= 0
+            )
+            vectors = initial.get("forces")
+            try:
+                measured = max(math.sqrt(sum(float(x) ** 2 for x in vector)) for vector in vectors)
+                valid_vectors = (
+                    isinstance(vectors, list)
+                    and source is not None
+                    and len(vectors) == source["atom_count"]
+                    and all(
+                        isinstance(v, list)
+                        and len(v) == 3
+                        and all(
+                            isinstance(x, (int, float))
+                            and not isinstance(x, bool)
+                            and math.isfinite(x)
+                            for x in v
+                        )
+                        for v in vectors
+                    )
+                    and valid_force
+                    and math.isclose(measured, force, rel_tol=1e-12, abs_tol=1e-12)
                 )
-    refresh["supplemental_candidates"] = supplements
-    if supplements:
-        refresh.update(status="supplement_ready", wave=1)
-        return current, None
+            except (TypeError, ValueError, OverflowError):
+                valid_vectors = False
+            relaxed = evidence.get("relaxed")
+            if (
+                not valid_vectors
+                or not source
+                or not valid_force
+                or evidence.get("input_structure_sha256") != task.get("input_structure_sha256")
+                or evidence.get("threshold_ev_per_angstrom") != threshold
+                or not isinstance(relaxed, bool)
+                or relaxed != (force > threshold)
+                or initial.get("single_point_completed") is not True
+                or initial.get("forces_unit") != "eV/angstrom"
+                or initial.get("structure_checksum") != task.get("input_structure_sha256")
+                or initial.get("mlip_version") != refresh["new_model_version"]
+                or (
+                    relaxed
+                    and (
+                        output.get("optimizer_converged") is not True
+                        or task.get("converged") is not True
+                    )
+                )
+                or (not relaxed and output.get("single_point_completed") is not True)
+            ):
+                return (
+                    current,
+                    f"刷新任务{task['task_id']}缺少完整的同帧单点及条件弛豫证据；未完成刷新。",
+                )
+    if refresh["wave"] == 0 and (plan.get("policy") or {}).get("force_followup_version") == 1:
+        from phase_agent.analysis.feedback.model_refresh_plan import (
+            supplemental_relaxation_required,
+        )
+        import hashlib
+        from pathlib import Path
+
+        by_hash = {row["structure_sha256"]: row for row in plan["candidates"]}
+        supplemental = []
+        for task in rows:
+            if (
+                not accepted(task)
+                or task.get("task_id") in outside
+                or task.get("task_id") in superseded_tasks
+                or (task.get("parameters") or {}).get("model_refresh_operation") != "predict"
+            ):
+                continue
+            source = by_hash.get(task.get("input_structure_sha256"))
+            entry = phases.get(task["task_id"]) or {}
+            output = task.get("outputs") or {}
+            path = Path(output.get("structure_path") or "")
+            if (
+                not source
+                or not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest() != source["structure_sha256"]
+            ):
+                return current, f"刷新任务{task['task_id']}缺少同帧结构校验，未追加计算。"
+            forces = output.get("forces") or output.get("forces_ev_per_angstrom")
+            if (
+                output.get("forces_unit") not in ("eV/angstrom", "eV/Å", "eV/A")
+                or not isinstance(forces, list)
+                or len(forces) != source["atom_count"]
+            ):
+                return current, f"刷新任务{task['task_id']}缺少完整同帧受力，未追加计算。"
+            try:
+                new_ehull = float(entry["ehull"])
+                frozen_ehull = source.get("ehull")
+                threshold_ehull = new_ehull if frozen_ehull is None else float(frozen_ehull)
+                needed = new_ehull < 0.001 or supplemental_relaxation_required(
+                    threshold_ehull, forces
+                )
+            except (ValueError, TypeError, KeyError, OverflowError) as error:
+                return current, f"刷新任务{task['task_id']}受力或Ehull无效：{error}；未追加计算。"
+            if needed:
+                candidate = deepcopy(source)
+                candidate.update(
+                    operation="relax",
+                    structure_path=str(path),
+                    structure_sha256=source["structure_sha256"],
+                    approved_input_structure_sha256=source["structure_sha256"],
+                    source_task_id=task["task_id"],
+                    new_model_ehull=entry["ehull"],
+                )
+                supplemental.append(candidate)
+        if supplemental:
+            refresh.update(
+                status="supplement_ready",
+                wave=1,
+                supplemental_candidates=supplemental,
+                supplemental_available=len(supplemental),
+            )
+            return current, None
+    refresh["supplemental_candidates"] = []
+    refresh.pop("supplemental_available", None)
     key = refresh.get("supplemental_reservation_key")
     if key:
         current = release_budget(
@@ -218,6 +418,10 @@ def advance_refresh(state, user_message=""):
     current.setdefault("phase_diagrams_by_model", {}).setdefault(refresh["new_model_version"], {})[
         "refresh_coverage"
     ] = deepcopy(diagram["refresh_coverage"])
+    if current.get("analysis_output_directory"):
+        from phase_agent.analysis.feedback.export_dft_products import publish_output_catalog
+
+        publish_output_catalog(current, current["analysis_output_directory"])
     return current, None
 
 
@@ -291,7 +495,11 @@ def run_model_refresh_gate(
         not automatic
         and authorization.get("identity") == approval_identity
         and authorization.get("plan")
+        and authorization.get("status", "approved") == "approved"
     )
+    reviewed = review_saved_input_authorization(current, human_feedback, pending_key=pending_key)
+    if reviewed is not None:
+        return reviewed
     from phase_agent.tools.workflows.model_refresh_scope import (
         approved_refresh_scope,
         refresh_scope_errors,
@@ -336,6 +544,7 @@ def run_model_refresh_gate(
         "tool": "prepare_local_batch_files",
         "action_type": "prepare_local_batch_files",
         "task_key": f"refresh-plan:{plan['checksum']}:{refresh.get('wave', 0)}",
+        "config_version": session["confirmed_snapshot"]["config_version"],
         "stage": "relax_and_feature",
         "budget": (
             sum(r["relative_cost"] for r in refresh.get("supplemental_candidates", []))
@@ -360,6 +569,13 @@ def run_model_refresh_gate(
             "refresh_preview": plan,
         },
     }
+    if refresh.get("approval_revision"):
+        action["task_key"] += f":review:{refresh['approval_revision']}"
+        if authorization.get("status") == "revision_requested":
+            action["reason"] = (
+                "修改要求尚未通过配置修订；以下仍是当前确认配置的刷新方案，请核对后再批准。"
+                + action["reason"]
+            )
     if automatic:
         relax_parameters = deepcopy((config.get("mlip") or {}).get("relax_parameters") or {})
         action["parameters"]["supplemental_relax_parameters"] = relax_parameters
@@ -383,9 +599,14 @@ def run_model_refresh_gate(
     stored = (current.get("pending_execution_policies") or {}).get(key) or {}
     previous = ((stored.get("agent_proposal") or {}).get("raw_action") or {}).get("task_key")
     # A previous action's approval must never approve a new refresh or changed files.
-    if resume_approved:
+    if resume_approved and human_feedback is None:
         human_feedback = "同意"
-    elif previous != action["task_key"]:
+    elif not resume_approved and (
+        previous != action["task_key"]
+        or stored.get("config_version") != session["confirmed_snapshot"]["config_version"]
+    ):
+        # An unchanged numerical plan is not approval of a new configuration.
+        # Legacy unbound refresh proposals are re-presented without execution.
         human_feedback = None
     policy = apply_execution_policy(
         proposal,
@@ -393,7 +614,7 @@ def run_model_refresh_gate(
         human_feedback=human_feedback,
     )
     if not policy.get("execute"):
-        from phase_agent.tools.policy.native_approval import native_approval_gate
+        from phase_agent.policies.native_approval import native_approval_gate
 
         blocked = native_approval_gate(
             {
@@ -411,6 +632,7 @@ def run_model_refresh_gate(
     if policy["status"] == "awaiting_approval":
         current.setdefault("pending_execution_policies", {})[key] = {
             "agent_proposal": proposal,
+            "config_version": session["confirmed_snapshot"]["config_version"],
             "record_id": action["task_key"],
         }
         return {
@@ -423,7 +645,14 @@ def run_model_refresh_gate(
         }
     if not policy["execute"]:
         current.setdefault("pending_execution_policies", {}).pop(key, None)
+        if policy["status"] == "rejected_by_user":
+            refresh["approval_revision"] = int(refresh.get("approval_revision", 0)) + 1
         return {
+            "reason": (
+                "结果：已拒绝本次刷新文件方案，未生成输入。\n下一步：如需重新考虑，先展示新的范围与预算，再另行批准。"
+                if policy["status"] == "rejected_by_user"
+                else None
+            ),
             "status": policy["status"],
             "state": current,
             "agent_proposal": proposal,
@@ -454,7 +683,7 @@ def run_model_refresh_gate(
             "submitted": False,
         }
     if not resume_approved:
-        from phase_agent.tools.policy.native_approval import native_approval_gate
+        from phase_agent.policies.native_approval import native_approval_gate
 
         blocked = native_approval_gate(
             {
@@ -473,6 +702,7 @@ def run_model_refresh_gate(
         # Preserve a delivered approval before a budget preflight can block it.
         # No execution receipt or files exist until that preflight succeeds.
         refresh["input_authorization"] = {
+            "status": "approved",
             "identity": approval_identity,
             "config_version": session["confirmed_snapshot"]["config_version"],
             "plan": deepcopy(plan),

@@ -290,7 +290,7 @@ def test_evidence_changes_after_review_rejected(tmp_path):
 
 
 def test_pending_region_review_blocks_downstream_even_with_old_generated_branches():
-    from phase_agent.tools.policy.branch_conditions import branch_entry_errors
+    from phase_agent.policies.branch_conditions import branch_entry_errors
 
     state = {"branch_region_review": {"status": "awaiting_approval"}}
     errors = branch_entry_errors(
@@ -315,7 +315,7 @@ def test_region_approval_card_shows_regions_instead_of_zero_targets():
     )
     assert card["target_count"] is None and card["region_count"] == 2
     assert "重点区域 2" in card["scope"]
-    assert "不准备Relax/MC输入" in card["approval_boundary"]
+    assert "另行提案和审批" in card["approval_boundary"]
 
 
 def test_new_region_result_is_recoverable_and_proposal_does_not_dump_cell_matrices(tmp_path):

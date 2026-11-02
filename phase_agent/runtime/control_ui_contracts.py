@@ -95,6 +95,7 @@ class ConfigResponse(BaseModel):
 class MemoryResponse(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
     active: dict
+    decision_context: dict = Field(default_factory=dict)
     records: list[dict]
     candidate_count: Count
     review_queue: list[dict]

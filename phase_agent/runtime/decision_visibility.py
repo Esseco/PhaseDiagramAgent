@@ -35,6 +35,7 @@ def decision_summary(action):
             if dft.get(key)
         },
         "scientific_decision": scientific,
+        "research_plan": action.get("research_plan") or {},
         "alternatives": scientific.get("alternatives") or budget.get("alternatives") or [],
         "uncertainty": budget.get("uncertainty") or "",
         "evidence_refs": action.get("evidence_refs") or [],
@@ -47,7 +48,14 @@ def pending_decision(state):
         return {}
     proposal = records[0].get("agent_proposal") or {}
     action = proposal.get("raw_action") or {}
-    return decision_summary(action)
+    summary = decision_summary(action)
+    if not summary:
+        return {}
+    summary["strategic_review"] = proposal.get("strategic_review") or {}
+    summary["simulation_plan"] = (
+        proposal.get("simulation_plan") or action.get("_simulation_plan") or {}
+    )
+    return summary
 
 
 def render_decision_card(state):
@@ -63,18 +71,38 @@ def render_decision_card(state):
         k: v
         for k, v in decision.items()
         if k
-        in {"assessments", "alternatives", "uncertainty", "evidence_refs", "scientific_decision"}
+        in {
+            "assessments",
+            "alternatives",
+            "uncertainty",
+            "evidence_refs",
+            "scientific_decision",
+            "research_plan",
+        }
         and v
     }
     if brief != reason:
         detail["完整理由"] = reason
+    review = decision.get("strategic_review") or {}
+    waiting_direction = review.get("status") == "awaiting_human_input"
+    if decision.get("simulation_plan"):
+        detail["Simulation 执行计划"] = decision["simulation_plan"]
     return (
         "<p><b>推荐：</b>"
         + escape(str(decision["recommendation"]))
         + "</p>"
         + "<p><b>原因：</b>"
         + escape(brief)
-        + "</p><p><b>状态：</b>待批准，尚未执行。</p>"
+        + (
+            "</p><p><b>状态：</b>待审阅研究方向；可提出建议。接受方向后还需单独批准执行。</p>"
+            if waiting_direction
+            else "</p><p><b>状态：</b>待批准，尚未执行。</p>"
+        )
+        + (
+            '<p style="color:#616161"><b>Simulation：</b>执行计划已冻结，批准后按方案执行并检查结果。</p>'
+            if decision.get("simulation_plan")
+            else ""
+        )
         + (
             "<details><summary>备选取舍与依据</summary><pre>"
             + escape(json.dumps(detail, ensure_ascii=False, indent=2))

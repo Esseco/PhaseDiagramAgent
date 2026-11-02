@@ -1,4 +1,4 @@
-from phase_agent.tools.workflows.run_event_loop import _load_state
+from phase_agent.tools.workflows.run_action_turn import _load_state
 
 
 def test_public_state_remains_independent():

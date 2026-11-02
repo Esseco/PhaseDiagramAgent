@@ -2,12 +2,12 @@
 
 import json
 
-from phase_agent.analysis.state.build_decision_context import build_decision_context
-from phase_agent.tools.workflows.run_event_loop import run_event_loop
+from phase_agent.evidence.build_decision_context import build_decision_context
+from phase_agent.tools.workflows.run_action_turn import run_action_turn
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from tests.test_event_loop import _session
-from phase_agent.decisions.strategy.propose_round_strategy import propose_round_strategy
-from phase_agent.decisions.qbc_selection.decide_dft_actions import decide_dft_actions
+from phase_agent.agents.strategic.strategy.propose_round_strategy import propose_round_strategy
+from phase_agent.agents.reliability.selection.decide_dft_actions import decide_dft_actions
 from phase_agent.tools.state.state_manager import agent_state_summary, update_state_snapshot
 
 
@@ -30,14 +30,14 @@ def test_long_term_advice_revision_survives_restart_and_needs_new_approval(tmp_p
         state_path=path,
         approval_directory=approvals,
     )
-    first = run_event_loop({}, _session(), initial_long_term_advice=["优先 DFT-SP"], **kwargs)
+    first = run_action_turn({}, _session(), initial_long_term_advice=["优先 DFT-SP"], **kwargs)
     assert prompts[-1]["decision_context"]["long_term_human_advice"]["items"] == ["优先 DFT-SP"]
     folder = next(approvals.iterdir())
     decision_path = folder / "decision-r000.json"
     feedback = json.loads(decision_path.read_text(encoding="utf-8"))
     feedback.update(comment="同意", long_term_advice=["优先 DFT-SP", "Relax 必须解释理由"])
     decision_path.write_text(json.dumps(feedback, ensure_ascii=False), encoding="utf-8")
-    revised = run_event_loop(path, _session(), **kwargs)
+    revised = run_action_turn(path, _session(), **kwargs)
     assert revised["status"] == "awaiting_approval"
     assert calls == []
     assert (
@@ -48,11 +48,11 @@ def test_long_term_advice_revision_survives_restart_and_needs_new_approval(tmp_p
     feedback = json.loads(approval_path.read_text(encoding="utf-8"))
     feedback["comment"] = "同意"
     approval_path.write_text(json.dumps(feedback, ensure_ascii=False), encoding="utf-8")
-    finished = run_event_loop(path, _session(), **kwargs)
+    finished = run_action_turn(path, _session(), **kwargs)
     assert len(calls) == 1
     assert finished["state"]["decision_memory"]["version"] == 2
     # 下一 action 自动读取已保存建议，初始化参数不能覆盖人工修订。
-    run_event_loop(path, _session(), initial_long_term_advice=["过时初始化值"], **kwargs)
+    run_action_turn(path, _session(), initial_long_term_advice=["过时初始化值"], **kwargs)
     assert prompts[-1]["decision_context"]["long_term_human_advice"]["items"][0] == "优先 DFT-SP"
 
 

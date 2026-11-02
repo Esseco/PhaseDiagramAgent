@@ -28,7 +28,7 @@ LLM 综合持久人工建议、物理先验、冻结参数、搜索规则、已�
 
 ### 实现入口
 
-[phase_agent/analysis/state/build_decision_context.py](../../phase_agent/analysis/state/build_decision_context.py)。
+[phase_agent/evidence/build_decision_context.py](../../phase_agent/evidence/build_decision_context.py)。
 
 <a id="doc-deep_agents_analysis"></a>
 
@@ -40,7 +40,7 @@ LLM 综合持久人工建议、物理先验、冻结参数、搜索规则、已�
 
 本地假模型测试不能证明真实模型质量、提供商用量或超算可用性。配置中的步数/响应 token 限制也不等于总费用限额。
 
-[phase_agent/decisions/agent/deepagents_proposal.py](../../phase_agent/decisions/agent/deepagents_proposal.py)。
+[phase_agent/models/deepagents_proposal.py](../../phase_agent/models/deepagents_proposal.py)。
 
 <a id="doc-hybrid_proposal"></a>
 
@@ -52,7 +52,7 @@ LLM 综合持久人工建议、物理先验、冻结参数、搜索规则、已�
 
 `deepagents_max_tokens` 和 `deepagents_recursion_limit` 限制单响应规模及分析步数。分析结果继续进入同一 LangGraph proposal 校验和审批路径。真实项目是否启用取决于其运行时配置，本说明不修改项目配置。
 
-[phase_agent/decisions/agent/hybrid_proposal.py](../../phase_agent/decisions/agent/hybrid_proposal.py)。
+[phase_agent/models/hybrid_proposal.py](../../phase_agent/models/hybrid_proposal.py)。
 
 <a id="doc-token_policy"></a>
 
@@ -68,7 +68,7 @@ LLM 综合持久人工建议、物理先验、冻结参数、搜索规则、已�
 
 修改代码后重启本地 Agent 服务生效；无需改动已确认的科学配置。
 
-[phase_agent/decisions/agent/prepare_llm_request.py](../../phase_agent/decisions/agent/prepare_llm_request.py)。
+[phase_agent/models/prepare_llm_request.py](../../phase_agent/models/prepare_llm_request.py)。
 
 <a id="doc-decision_memory"></a>
 
@@ -144,7 +144,7 @@ initial_long_term_advice=[
 
 ## 参数、预算与结果经验
 
-`analysis/state/budget_experience.py` 提供纯读经验视图。普通科学动作也纳入，无须先具有 `round_budget_review`。只按任务ID或 parent_decision_id 关联任务，不用批次巧合、时间邻近或数组顺序猜测归因。保存参数、预算上限、完成/失败数、可追溯实际成本、耗时、GPU核时及带模型/能量基准版本的收益。
+`evidence/budget_experience.py` 提供纯读经验视图。普通科学动作也纳入，无须先具有 `round_budget_review`。只按任务ID或 parent_decision_id 关联任务，不用批次巧合、时间邻近或数组顺序猜测归因。保存参数、预算上限、完成/失败数、可追溯实际成本、耗时、GPU核时及带模型/能量基准版本的收益。
 
 耗时复用已有任务回收的 `runtime_observation` 和按任务ID关联的 `cost_history`；来源须为实际计时或可靠调度记录。GPU核时复用已有 accounting 接口；同一共享作业的总核时不按结构重复记账。相对成本、计时和GPU核时分别保留，缺失字段为null；估算和已申请预算不冒充实测，串行任务时间之和不等于并行批次墙钟时间。Slurm分区只是报告的硬件类别，不能证明具体GPU型号相同。
 

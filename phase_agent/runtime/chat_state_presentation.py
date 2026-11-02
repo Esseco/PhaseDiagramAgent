@@ -54,9 +54,7 @@ def _current_mc_partial_review_line(state):
         ):
             continue
         members = [
-            row
-            for row in state.get("tasks") or []
-            if row.get("relax_mc_bundle_id") == bundle_id
+            row for row in state.get("tasks") or [] if row.get("relax_mc_bundle_id") == bundle_id
         ]
         if not members:
             continue
@@ -65,11 +63,7 @@ def _current_mc_partial_review_line(state):
             for row in members
             if row.get("status") in {"pending", "running", "submitted", "unknown"}
         ]
-        failed = [
-            row
-            for row in members
-            if row.get("status") in {"failed", "timeout"}
-        ]
+        failed = [row for row in members if row.get("status") in {"failed", "timeout"}]
         successful = [row for row in members if row.get("status") == "completed"]
         summary = batch.get("result_summary") or {}
         failed_ids = set(summary.get("failed_task_ids") or []) | {
@@ -101,13 +95,10 @@ def _current_imported_mc_identity_review(state):
         ):
             continue
         members = [
-            row
-            for row in state.get("tasks") or []
-            if row.get("relax_mc_bundle_id") == bundle_id
+            row for row in state.get("tasks") or [] if row.get("relax_mc_bundle_id") == bundle_id
         ]
         if not members or any(
-            row.get("status") in {"pending", "running", "submitted", "unknown"}
-            for row in members
+            row.get("status") in {"pending", "running", "submitted", "unknown"} for row in members
         ):
             continue
         batch_branch_ids = set(batch.get("branch_ids") or [])
@@ -122,9 +113,7 @@ def _current_imported_mc_identity_review(state):
         summary = batch.get("result_summary") or {}
         total = summary.get("task_count") or len(members)
         failed = summary.get("failed_task_ids") or [
-            row.get("task_id")
-            for row in members
-            if row.get("status") in {"failed", "timeout"}
+            row.get("task_id") for row in members if row.get("status") in {"failed", "timeout"}
         ]
         candidates.append((bundle_id, total, len(failed), len(missing_branch_ids)))
     if not candidates:
@@ -150,6 +139,13 @@ def brief_chat_state(state, *, configuring=False):
         if any((row or {}).get("status") == "metadata_required" for row in returned):
             return "当前：微调结果已回收，模型清单待补齐；未激活。"
         return "当前：微调完成，仍在使用旧模型。"
+    training = waiting_training_job(state)
+    if training and not state.get("pending_execution_policies"):
+        if training.get("status") == "inputs_prepared":
+            return "当前：微调输入已生成，超算提交状态尚未登记。"
+        if training.get("status") == "submitted":
+            return "当前：微调已提交，等待训练结果回传。"
+        return "当前：微调训练运行中，等待结果回传。"
     dft_review = _current_dft_review_line(state)
     if dft_review:
         return dft_review
@@ -159,7 +155,7 @@ def brief_chat_state(state, *, configuring=False):
     refresh = state.get("model_refresh") or {}
     if refresh and refresh.get("status") != "completed":
         if refresh.get("status") == "waiting_results":
-            from phase_agent.analysis.state.workflow_blockers import (
+            from phase_agent.evidence.workflow_blockers import (
                 refresh_result_facts,
             )
 
@@ -187,6 +183,10 @@ def brief_chat_state(state, *, configuring=False):
                 return "当前：刷新结果已全部回收，正在核对新相图及补充条件。"
             return "当前：用微调模型重新计算已有结构，输入已生成，等待结果。"
         authorization = refresh.get("input_authorization") or {}
+        if authorization.get("status") == "revoked":
+            return "当前：已撤销原刷新输入准备授权，等待新的具体方案与审批。"
+        if authorization.get("status") == "revision_requested":
+            return "当前：刷新输入修改要求待核对，原授权已暂停，尚未重新批准。"
         if (
             authorization.get("config_version") == state.get("confirmed_config_version")
             and authorization.get("approved_by")
@@ -198,7 +198,7 @@ def brief_chat_state(state, *, configuring=False):
             if refresh.get("status") == "approval_required"
             else f"当前：新模型结构刷新第{int(refresh.get('wave', 0)) + 1}批，等待输入准备或结果回传。"
         )
-    from phase_agent.tools.policy.model_generation import new_model_generation_facts
+    from phase_agent.policies.model_generation import new_model_generation_facts
 
     generation = new_model_generation_facts(state)
     active = active_pending_tasks(state.get("tasks") or [])
@@ -263,13 +263,6 @@ def brief_chat_state(state, *, configuring=False):
                 return "当前：已有branch复用方案待确认。"
             return f"当前：{names.get(tool, '操作方案')}待确认。"
         return f"当前：{len(pending)} 个方案待确认。"
-    training = waiting_training_job(state)
-    if training:
-        return (
-            "当前：微调输入已准备，等待超算提交与训练结果。"
-            if training.get("status") == "inputs_prepared"
-            else "当前：微调训练等待结果回传。"
-        )
     if state.get("pending_mc_regeneration"):
         return "当前：MC 重生成计划待确认。"
     tasks = state.get("tasks") or []
@@ -297,7 +290,7 @@ def brief_chat_state(state, *, configuring=False):
             + "、".join(f"{name} {count} {label}" for (name, label), count in counts.items())
             + "。"
         )
-    from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+    from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
     assessment = post_dft_assessment(state, state.get("confirmed_config") or {})
     if assessment:
@@ -319,7 +312,7 @@ def brief_chat_state(state, *, configuring=False):
 
 def epoch_stage_line(state, *, configuring=False):
     """Display model epoch independently of MC/DFT sub-rounds."""
-    from phase_agent.analysis.state.model_epoch import model_epoch
+    from phase_agent.evidence.model_epoch import model_epoch
 
     version = state.get("active_model_version") or (state.get("active_model") or {}).get("version")
     epoch = model_epoch(state, version) or ("epoch0" if not version else "epoch未登记")

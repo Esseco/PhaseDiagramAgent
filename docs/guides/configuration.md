@@ -45,7 +45,7 @@ DFT分析后选择搜索时，LLM必须提出generation_plan：每项包含strat
 
 对话显示中文策略与目标小清单、候选数、最终入选上限、det(H)与初态上限。旧DFT后通用方案无plan需刷新，批准不转移。首次尚无父branch时仍只支持coverage；现有初态初始化、筛选、计算预算和审批均保留。
 
-[phase_agent/decisions/agent/generation_plan.py](../../phase_agent/decisions/agent/generation_plan.py)。
+[phase_agent/agents/exploration/generation_plan.py](../../phase_agent/agents/exploration/generation_plan.py)。
 
 <a id="doc-generation_cost_preflight"></a>
 

@@ -135,7 +135,7 @@ def diagnose(
     max_concurrent_jobs=None,
     phase_references=None,
 ):
-    from phase_agent.tools.policy.model_generation import new_model_search_errors
+    from phase_agent.policies.model_generation import new_model_search_errors
 
     prerequisite_errors = new_model_search_errors(state, branch_ids)
     if prerequisite_errors:

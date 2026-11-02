@@ -1,7 +1,7 @@
 import json
 from unittest.mock import patch
 from tests.test_deepseek_client import FakeResponse, completion
-from phase_agent.decisions.agent.create_deepseek_client import (
+from phase_agent.models.create_deepseek_client import (
     create_deepseek_client,
     DeepSeekResponseError,
 )
@@ -11,7 +11,7 @@ import pytest
 def run(payload, **kwargs):
     client = create_deepseek_client(api_key="fake-no-network", thinking="disabled", **kwargs)
     with patch(
-        "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+        "phase_agent.models.create_deepseek_client.urllib.request.urlopen",
         return_value=FakeResponse(completion('{"tool":"generate_branches"}')),
     ) as request:
         result = client(payload)
@@ -54,7 +54,7 @@ def test_small_dialogue_keeps_small_initial_output():
 def test_nonreasoning_truncation_never_returns_partial_action_or_retries(content):
     client = create_deepseek_client(api_key="fake-no-network", thinking="disabled")
     with patch(
-        "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+        "phase_agent.models.create_deepseek_client.urllib.request.urlopen",
         return_value=FakeResponse(completion(content, finish_reason="length")),
     ) as request:
         with pytest.raises(DeepSeekResponseError) as caught:
@@ -65,7 +65,7 @@ def test_nonreasoning_truncation_never_returns_partial_action_or_retries(content
 
 
 def test_scientific_request_does_not_ask_for_duplicate_explanation():
-    from phase_agent.decisions.agent.scientific_decisions import attach_decision_contract
+    from phase_agent.agents.strategic.scientific_decisions import attach_decision_contract
 
     payload = {
         "instruction": "choose",

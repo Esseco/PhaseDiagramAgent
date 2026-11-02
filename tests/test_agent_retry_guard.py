@@ -1,8 +1,8 @@
 import unittest
 
-from phase_agent.analysis.state.build_decision_context import build_decision_context
-from phase_agent.decisions.agent.propose_tool_action import propose_agent_tool_action
-from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+from phase_agent.evidence.build_decision_context import build_decision_context
+from phase_agent.agents.strategic.propose_tool_action import propose_agent_tool_action
+from phase_agent.policies.validate_tool_action import validate_tool_action
 from phase_agent.tools.workflows.run_tool_step import _apply_execution_result
 from phase_agent.runtime.agent_api import _drop_finished_pending, format_workflow_reply
 

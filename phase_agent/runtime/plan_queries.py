@@ -50,7 +50,10 @@ def pending_plan_reply(state):
         card = row["review_card"]
         import os
 
-        approval = "核对后可回复‘同意’或‘拒绝’。"
+        approval = "下一步：核对以上方案后回复‘同意’或‘拒绝’。"
+        if row.get("review_kind") == "model_activation":
+            next_epoch = card["title"].split("：", 1)[0]
+            approval = f"下一步：是否{next_epoch}？回复‘同意’批准切换，或回复‘拒绝’。"
         if card.get("sensitive"):
             page = (
                 "请在本机审批页核对并批准："
@@ -61,7 +64,7 @@ def pending_plan_reply(state):
             )
         return (
             "已保存方案：\n"
-            f"{card['title']}：{card['scope']}\n依据：{row['reason']}\n"
+            f"本次：{card['title']}：{card['scope']}\n依据：{row['reason']}\n"
             f"审批边界：{card['approval_boundary']}\n{approval}\n本次仅查看，未批准或执行。"
         )
     if regeneration:
@@ -74,7 +77,7 @@ def pending_plan_reply(state):
 
     plan_id, record = next(iter(pending.items()))
     proposal = record.get("agent_proposal") or {}
-    from phase_agent.analysis.state.project_authority import project_identity
+    from phase_agent.evidence.project_authority import project_identity
 
     identity = record.get("project_identity")
     if identity and identity != project_identity(state):
@@ -85,8 +88,21 @@ def pending_plan_reply(state):
     if not proposal:
         return "待确认记录缺少具体方案，暂不可批准；请检查方案记录。未执行任务。"
     raw = proposal.get("raw_action") or {}
-    from phase_agent.tools.policy.branch_conditions import branch_entry_errors
+    from phase_agent.policies.branch_conditions import branch_entry_errors
 
+    from phase_agent.policies.recovery_transition import (
+        post_recovery_tools,
+        legacy_post_recovery_plan_ids,
+    )
+
+    allowed = post_recovery_tools(state)
+    if plan_id in legacy_post_recovery_plan_ids(state) or (
+        allowed is not None and (raw.get("tool") or raw.get("action_type")) not in allowed
+    ):
+        return (
+            "已保存方案：\n暂不可批准：原方案不属于当前回收后的科学阶段，原记录保留。\n"
+            "下一步：按已回收结果重新展示当前阶段的具体方案、范围和预算，再批准；本次未执行。"
+        )
     prerequisites = branch_entry_errors(raw, state)
     if (
         "new_model_branch_generation_required" in prerequisites

@@ -1,6 +1,6 @@
 from copy import deepcopy
 import pytest
-from phase_agent.decisions.agent.dialogue_contract import dialogue_errors, dialogue_result
+from phase_agent.agents.common.dialogue_contract import dialogue_errors, dialogue_result
 from tests.test_unified_react_dialogue import make_handler
 
 

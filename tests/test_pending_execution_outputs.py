@@ -121,12 +121,12 @@ def test_completed_result_missing_cannot_be_reconciled_as_pending(tmp_path):
 
 
 def test_langgraph_early_barrier_defers_full_artifact_scan_until_wait(tmp_path, monkeypatch):
-    from phase_agent.graphs.batch_recovery_graph import build_batch_recovery_graph
-    from phase_agent.graphs.execution_recovery_graph import (
+    from phase_agent.graphs.recovery.batch_recovery_graph import build_batch_recovery_graph
+    from phase_agent.graphs.recovery.execution_recovery_graph import (
         build_execution_recovery_graph,
         execution_recovery_report,
     )
-    from phase_agent.graphs.recovery_observation_graph import build_recovery_observation_graph
+    from phase_agent.graphs.recovery.recovery_observation_graph import build_recovery_observation_graph
     from phase_agent.tools.state import execution_recovery_evidence as module
 
     path, identity, state = prepared(tmp_path)

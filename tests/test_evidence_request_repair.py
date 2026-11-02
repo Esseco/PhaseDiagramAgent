@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from phase_agent.decisions.agent.summary_request import TOPICS, request_summary_first
+from phase_agent.evidence.requests import TOPICS, request_summary_first
 from tests.test_operation_evidence_layers import fixture
 
 
@@ -158,7 +158,7 @@ def test_correction_allowance_is_not_reset_after_a_successful_read():
 
 
 def test_hybrid_client_metadata_does_not_invalidate_valid_evidence_request():
-    from phase_agent.decisions.agent.hybrid_proposal import create_hybrid_client
+    from phase_agent.models.hybrid_proposal import create_hybrid_client
 
     seen = []
 
@@ -180,7 +180,7 @@ def test_hybrid_client_metadata_does_not_invalidate_valid_evidence_request():
 
 
 def test_hybrid_metadata_exception_does_not_allow_other_private_fields():
-    from phase_agent.decisions.agent.hybrid_proposal import create_hybrid_client
+    from phase_agent.models.hybrid_proposal import create_hybrid_client
 
     calls = []
 

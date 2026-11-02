@@ -36,7 +36,7 @@ def create_lifecycle_nodes(
 
         return node
 
-    from phase_agent.graphs.training_handoff_graph import build_training_handoff_graph
+    from phase_agent.graphs.recovery.training_handoff_graph import build_training_handoff_graph
 
     training_graph = build_training_handoff_graph()
 
@@ -54,13 +54,15 @@ def create_lifecycle_nodes(
             context.frame = _advance_training_workflow(context.frame, graph=training_graph)
         return {"phase": "training_checked"}
 
-    from phase_agent.graphs.batch_recovery_graph import build_batch_recovery_graph
+    from phase_agent.graphs.recovery.batch_recovery_graph import build_batch_recovery_graph
 
     batch_graph = build_batch_recovery_graph()
-    from phase_agent.graphs.execution_recovery_graph import build_execution_recovery_graph
+    from phase_agent.graphs.recovery.execution_recovery_graph import build_execution_recovery_graph
 
     recovery_graph = build_execution_recovery_graph()
-    from phase_agent.graphs.recovery_observation_graph import build_recovery_observation_graph
+    from phase_agent.graphs.recovery.recovery_observation_graph import (
+        build_recovery_observation_graph,
+    )
 
     recovery_observation = build_recovery_observation_graph(batch_graph, recovery_graph)
 

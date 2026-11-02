@@ -64,7 +64,7 @@ def run_branch_generation(
     if prepared_candidates is not None:
         proposed = prepared_candidates
     elif generation_plan:
-        from phase_agent.decisions.agent.generation_plan import validate_generation_plan
+        from phase_agent.agents.exploration.generation_plan import validate_generation_plan
 
         validate_generation_plan(
             {

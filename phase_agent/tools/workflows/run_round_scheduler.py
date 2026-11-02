@@ -2,13 +2,15 @@
 
 from copy import deepcopy
 
-from phase_agent.decisions.strategy.choose_rule_round_strategy import choose_rule_round_strategy
+from phase_agent.agents.strategic.strategy.choose_rule_round_strategy import (
+    choose_rule_round_strategy,
+)
 from phase_agent.tools.workflows.create_round_strategy_snapshot import (
     create_round_strategy_snapshot,
 )
-from phase_agent.decisions.strategy.propose_round_strategy import propose_round_strategy
+from phase_agent.agents.strategic.strategy.propose_round_strategy import propose_round_strategy
 from phase_agent.persistence.ledger.register_effective_decisions import register_effective_decisions
-from phase_agent.decisions.strategy.validate_round_strategy import validate_round_strategy
+from phase_agent.agents.strategic.strategy.validate_round_strategy import validate_round_strategy
 from phase_agent.science.bohb.run_bohb_iteration import run_bohb_iteration
 from phase_agent.tools.state.state_manager import agent_state_summary, update_state_snapshot
 

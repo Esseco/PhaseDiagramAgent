@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+from phase_agent.models.create_deepseek_client import create_deepseek_client
 from phase_agent.runtime.runtime_client_settings import search_client_settings
 from tests.test_deepseek_client import FakeResponse, completion
 

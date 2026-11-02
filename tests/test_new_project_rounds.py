@@ -105,7 +105,7 @@ def test_empty_project_reaches_first_saved_approval_without_old_round_evidence(t
                         "phase": "O3",
                         "min_det_H": 1,
                         "max_det_H": 1,
-                        "na_min": 0.5,
+                        "na_min": 0.0,
                         "na_max": 1.0,
                         "reason": "No energy evidence exists yet",
                         "evidence_refs": [],

@@ -24,6 +24,11 @@ def knowledge_record(value):
         raise ValueError("knowledge category is required")
     if not isinstance(row.get("applicability", {}), dict):
         raise ValueError("applicability must be an object")
+    from phase_agent.persistence.memory.applicability import applicability_errors
+
+    errors = applicability_errors(row.get("applicability", {}))
+    if errors:
+        raise ValueError("; ".join(errors))
     refs = row.get("evidence_refs", [])
     if not isinstance(refs, list) or any(
         not isinstance(ref, str) or not ref.strip() for ref in refs
@@ -46,6 +51,7 @@ def knowledge_record(value):
             "category",
             "statement",
             "source_project",
+            "project_id",
             "system_id",
             "applicability",
         )

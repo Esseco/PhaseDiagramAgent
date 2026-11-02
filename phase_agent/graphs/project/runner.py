@@ -4,20 +4,7 @@ from phase_agent.graphs.runtime_context import WorkflowRuntime
 
 
 def _stale_lifecycle_recovery(graph, config, thread, invocation_id, snapshot):
-    """Inspect an isolated recovery thread without replaying the old graph."""
-    import hashlib
-
-    recovery_thread = (
-        f"{thread}:recovery:{hashlib.sha256(str(invocation_id).encode()).hexdigest()[:16]}"
-    )
-    recovery_config = {
-        **config,
-        "configurable": {**config.get("configurable", {}), "thread_id": recovery_thread},
-    }
-    recovered = graph.get_state(recovery_config, subgraphs=True)
-    completed = (recovered.values or {}).get("completed_response")
-    if completed is not None:
-        return completed
+    """Report the current block; legacy reply caches cannot prove completion."""
     old_request = (snapshot.values or {}).get("request_id")
     return {
         "status": "execution_reconciliation_required",
@@ -32,8 +19,7 @@ def _stale_lifecycle_recovery(graph, config, thread, invocation_id, snapshot):
                     },
                     "reason": "unsafe_inflight_checkpoint",
                     "next_action": (
-                        "核对旧生命周期检查点、动作审批及执行回执后再提出新方案；"
-                        "本轮未重放原动作。"
+                        "核对旧生命周期检查点、动作审批及执行回执后再提出新方案；本轮未重放原动作。"
                     ),
                 }
             ],
@@ -54,15 +40,27 @@ def _read_business_state(state_path):
     return state if isinstance(state, dict) else None
 
 
-def _business_state_is_clean_for_stale_checkpoint(
-    state_path, *, pending_plan_id=None, state=None
-):
+def _settle_completed_input_delivery(state_path):
+    """Canonicalize proven local delivery before examining old lifecycle frames."""
+    state = _read_business_state(state_path)
+    if state is None:
+        return None
+    from phase_agent.tools.workflows.training_input_settlement import settle_saved_training_inputs
+    from phase_agent.tools.step_runner.file_protocol import write_json
+
+    settled = settle_saved_training_inputs(state)
+    if settled is not state:
+        write_json(state_path, settled)
+    return settled
+
+
+def _business_state_is_clean_for_stale_checkpoint(state_path, *, pending_plan_id=None, state=None):
     """Allow a fresh request only when current business facts are settled.
 
     A stale graph checkpoint may contain an old action/approval frame.  We do
     not replay that frame.  If the authoritative business state has a clear
-    receipt report, no pending approval/recovery, no active reservation and no
-    running task, the old frame can be isolated and a new request can start
+    receipt report, no pending approval/recovery, no active execution reservation
+    and no running task, the old frame can be isolated and a new request can start
     from current facts.  Missing or incomplete evidence keeps the conservative
     reconciliation block.
     """
@@ -75,6 +73,49 @@ def _business_state_is_clean_for_stale_checkpoint(
     recovery = state.get("execution_recovery_report") or {}
     if recovery.get("status") != "clear" or recovery.get("unsettled"):
         return False
+    from phase_agent.tools.state.execution_receipts import recovery_report
+
+    import sqlite3
+
+    try:
+        current_receipts = recovery_report(state_path, state)
+    except (OSError, ValueError, TypeError, sqlite3.Error):
+        return False
+    unsettled = current_receipts.get("unsettled") or []
+    if current_receipts.get("status") != "clear" or unsettled:
+        # A newly approved plan claims its invocation before the durable
+        # runner can isolate an old unsafe checkpoint.  Permit that exact
+        # handoff only when evidence proves the claim has produced no effect;
+        # any file, task, phase record, or registered output keeps the fence.
+        if not pending_plan_id or len(unsettled) != 1:
+            return False
+        identity = unsettled[0].get("identity") or {}
+        if identity.get("invocation_id") != pending_plan_id:
+            return False
+        from phase_agent.tools.state.execution_recovery_evidence import inspect_execution
+
+        try:
+            checks = inspect_execution(state, unsettled[0], state_path=state_path)
+        except (OSError, ValueError, TypeError, sqlite3.Error):
+            return False
+        registered_effects = [
+            row
+            for row in checks.get("registered_branch_outputs") or []
+            if row.get("status") != "invalid"
+            or row.get("registered_branch_count", 0)
+            or row.get("registered_structure_count", 0)
+            or row.get("new_branch_ids")
+            or row.get("structure_ids")
+        ]
+        if (
+            checks.get("task_count")
+            or checks.get("phase_record_ids")
+            or registered_effects
+            or any(row.get("status") == "file" for row in checks.get("artifact_checks") or [])
+            or (checks.get("preparation_progress") or {}).get("boundary")
+            in {"effects_possible", "complete"}
+        ):
+            return False
     pending = state.get("pending_execution_policies") or {}
     if pending:
         # A reviewed plan is the one safe exception to the normal pending
@@ -87,10 +128,17 @@ def _business_state_is_clean_for_stale_checkpoint(
         return False
     active_reservations = {"reserved", "submitted", "running", "unknown"}
     current_config = state.get("confirmed_config_version")
-    for reservation in (state.get("budget_reservations") or {}).values():
+    from phase_agent.tools.workflows.model_refresh_scope import is_refresh_planning_hold
+
+    for key, reservation in (state.get("budget_reservations") or {}).items():
         if not isinstance(reservation, dict):
             return False
-        if reservation.get("reconciliation_required") or reservation.get("status") in active_reservations:
+        if is_refresh_planning_hold(state, key, reservation):
+            continue  # Keep the allowance; fresh analysis decides its next use.
+        if (
+            reservation.get("reconciliation_required")
+            or reservation.get("status") in active_reservations
+        ):
             # A reservation from an older confirmed configuration is an
             # accounting record for a superseded action.  It must not fence a
             # fresh request after the authoritative recovery report is clear;
@@ -111,47 +159,6 @@ def _business_state_is_clean_for_stale_checkpoint(
     return True
 
 
-def _start_fresh_lifecycle_request(
-    graph, config, thread, invocation_id, stages, *, initial_state=None
-):
-    """Run the current request on an isolated thread after stale-frame fencing."""
-    import hashlib
-
-    fresh_thread = (
-        f"{thread}:fresh:{hashlib.sha256(str(invocation_id).encode()).hexdigest()[:16]}"
-    )
-    fresh_config = {
-        **config,
-        "configurable": {**config.get("configurable", {}), "thread_id": fresh_thread},
-    }
-    from phase_agent.graphs.runtime_context import WorkflowRuntime
-
-    context = WorkflowRuntime(stages={**stages, "durable": True}, expose_response=False)
-    graph.invoke(
-        initial_state
-        or {
-            "request_id": invocation_id,
-            "response": None,
-            "completed_response": None,
-            "business_frame": {},
-        },
-        fresh_config,
-        context=context,
-    )
-    if context.response is None:
-        raise RuntimeError("Fresh lifecycle request did not return a response")
-    from phase_agent.runtime.turn_process import process_event
-
-    process_event(
-        "隔离旧生命周期检查点并启动当前请求",
-        {
-            "old_thread": thread,
-            "fresh_thread": fresh_thread,
-            "old_checkpoint_replayed": False,
-            "business_state_recovery": "clear",
-        },
-    )
-    return context.response
 def _rebind_pending_subgraphs(graph, snapshot, request_id):
     """Bind a safe retry through every pending child before it runs.
 
@@ -218,112 +225,160 @@ def run_search_workflow_graph(
 
         path = Path(checkpoint_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        from phase_agent.tools.state.workflow_control import current_revision
+        from phase_agent.persistence.lifecycle_routes import (
+            lifecycle_base_thread,
+            current_lifecycle_thread,
+            fresh_lifecycle_thread,
+            activate_lifecycle_thread,
+        )
 
-        revision = current_revision(business_state_path)
-        thread = project_thread or invocation_id
-        if revision:
-            # Keep old checkpoints intact; an audited control revision starts a fresh lifecycle.
-            thread += ":control:" + revision
+        base_thread = lifecycle_base_thread(project_thread or invocation_id, business_state_path)
+        thread = base_thread
         config = {
             "configurable": {"thread_id": thread},
             "recursion_limit": 32,
             "max_concurrency": 1,
         }
         with FileLock(str(path) + ".lock", timeout=10):
+            business_state = _settle_completed_input_delivery(business_state_path)
             # The project lifecycle only needs the latest checkpoint and its
             # immediate parent to resume safely.  A generic eight-entry window
             # multiplied large business frames across every chat thread.
-            with SqliteSaver.from_conn_string(
-                str(path), history_keep=3, namespace_keep=8
-            ) as saver:
+            with SqliteSaver.from_conn_string(str(path), history_keep=3, namespace_keep=8) as saver:
                 graph = copy(workflow_graph)
                 graph.checkpointer = saver
+                thread = current_lifecycle_thread(saver.conn, base_thread)
+                config["configurable"]["thread_id"] = thread
                 snapshot = graph.get_state(config, subgraphs=True)
+                if thread != base_thread:
+                    if not snapshot.values:
+                        raise ValueError(
+                            "当前生命周期路由缺少检查点，请核对持久化数据库；未重放动作。"
+                        )
+                    activate_lifecycle_thread(saver.conn, base_thread, thread)
+                approval_state = business_state if human_feedback is not None else None
+                pending_approval = _pending_approval_for_request(
+                    business_state_path, invocation_id, human_feedback, state=approval_state
+                )
                 if (
                     not snapshot.next
+                    and not pending_approval
                     and snapshot.values.get("completed_response") is not None
                     and (not project_thread or snapshot.values.get("request_id") == invocation_id)
                 ):
                     return snapshot.values["completed_response"]
                 if (
                     snapshot.next
+                    and not pending_approval
                     and any(task.interrupts for task in snapshot.tasks)
                     and snapshot.values.get("request_id") == invocation_id
                 ):
                     return snapshot.values["completed_response"]
                 context = WorkflowRuntime(stages={**stages, "durable": True}, expose_response=False)
-                # A native project wait is a completed request boundary. The
-                # resume command below enters initialize with fresh facts; it
-                # must not restore the old request's configuration/frame.
-                new_request_at_wait = (
-                    bool(project_thread)
-                    and tuple(snapshot.next) == ("wait_for_project_input",)
-                    and any(task.interrupts for task in snapshot.tasks)
-                    and (
-                        snapshot.values.get("request_id") != invocation_id
-                        or human_feedback is not None
+
+                # A native wait completed its prior request. All subsequent
+                # input resumes this same selected lifecycle, even with active tasks.
+                def at_project_wait():
+                    return (
+                        bool(project_thread)
+                        and tuple(snapshot.next) == ("wait_for_project_input",)
+                        and any(task.interrupts for task in snapshot.tasks)
+                        and (
+                            snapshot.values.get("request_id") != invocation_id
+                            or human_feedback is not None
+                        )
                     )
-                )
-                approval_state = (
-                    _read_business_state(business_state_path) if human_feedback is not None else None
-                )
-                pending_approval = _pending_approval_for_request(
-                    business_state_path,
-                    invocation_id,
-                    human_feedback,
-                    state=approval_state,
-                )
+
+                new_request_at_wait = at_project_wait()
                 different_inflight_request = (
                     bool(snapshot.next)
                     and not new_request_at_wait
                     and snapshot.values.get("request_id") != invocation_id
                 )
-                if snapshot.next and not new_request_at_wait:
-                    if human_feedback is not None:
-                        if pending_approval and _business_state_is_clean_for_stale_checkpoint(
+                from phase_agent.runtime.studio_recovery import (
+                    safe_read_checkpoint,
+                    initial_checkpoint,
+                )
+
+                needs_isolation = (
+                    bool(snapshot.next)
+                    and not new_request_at_wait
+                    and (
+                        (
+                            human_feedback is not None
+                            and not (
+                                snapshot.values.get("request_id") == invocation_id
+                                and safe_read_checkpoint(snapshot)
+                            )
+                        )
+                        or (different_inflight_request and not safe_read_checkpoint(snapshot))
+                    )
+                )
+                if needs_isolation:
+                    clean = (human_feedback is None or pending_approval) and (
+                        _business_state_is_clean_for_stale_checkpoint(
                             business_state_path,
                             pending_plan_id=pending_approval,
-                            state=approval_state,
-                        ):
-                            return _start_fresh_lifecycle_request(
-                                graph,
-                                config,
-                                thread,
-                                invocation_id,
-                                stages,
-                                initial_state={
-                                    "request_id": invocation_id,
-                                    "response": None,
-                                    "completed_response": None,
-                                    "business_frame": {},
-                                },
-                            )
-                        raise ValueError(
-                            "Cannot apply new human feedback to an in-flight lifecycle invocation"
+                            state=business_state,
                         )
-                    if different_inflight_request:
-                        from phase_agent.runtime.studio_recovery import safe_read_checkpoint
-
-                        if not safe_read_checkpoint(snapshot):
-                            if _business_state_is_clean_for_stale_checkpoint(business_state_path):
-                                return _start_fresh_lifecycle_request(
-                                    graph,
-                                    config,
-                                    thread,
-                                    invocation_id,
-                                    stages,
-                                )
-                            return _stale_lifecycle_recovery(
-                                graph,
-                                config,
-                                thread,
-                                invocation_id,
-                                snapshot,
+                    )
+                    if not clean:
+                        if human_feedback is not None:
+                            raise ValueError(
+                                "Cannot apply new human feedback to an in-flight lifecycle invocation"
                             )
-                        # The root Command below updates the parent. Bind the
-                        # pending child checkpoints first so their completion
-                        # cannot restore the old request ID.
+                        return _stale_lifecycle_recovery(
+                            graph, config, thread, invocation_id, snapshot
+                        )
+                    previous_thread = thread
+                    thread = fresh_lifecycle_thread(base_thread, invocation_id)
+                    config["configurable"]["thread_id"] = thread
+                    snapshot = graph.get_state(config, subgraphs=True)
+                    if snapshot.values:
+                        # A prior interrupted retry may have persisted a
+                        # partial fresh checkpoint.  The business-state
+                        # evidence above has already proved that it has no
+                        # registered effect, so allocate one more deterministic
+                        # retry thread instead of replaying that checkpoint.
+                        from time import time_ns
+
+                        thread = fresh_lifecycle_thread(
+                            base_thread, f"{invocation_id}:retry:{time_ns()}"
+                        )
+                        config["configurable"]["thread_id"] = thread
+                        snapshot = graph.get_state(config, subgraphs=True)
+                        if snapshot.values:
+                            raise ValueError("隔离请求已有检查点，不能重新初始化未完成动作。")
+                    # Persist the ordinary graph start before committing its route.
+                    # A hard crash between the two is adopted from the newest
+                    # root checkpoint; no business callback has run at this point.
+                    graph.update_state(
+                        config,
+                        {
+                            "request_id": invocation_id,
+                            "response": None,
+                            "completed_response": None,
+                            "business_frame": {},
+                        },
+                        as_node="__start__",
+                    )
+                    snapshot = graph.get_state(config, subgraphs=True)
+                    activate_lifecycle_thread(saver.conn, base_thread, thread)
+                    from phase_agent.runtime.turn_process import process_event
+
+                    process_event(
+                        "隔离旧生命周期检查点并接续当前请求",
+                        {
+                            "old_thread": previous_thread,
+                            "fresh_thread": thread,
+                            "old_checkpoint_replayed": False,
+                            "business_state_recovery": "clear",
+                        },
+                    )
+                    new_request_at_wait = False
+                    different_inflight_request = False
+                if snapshot.next and not new_request_at_wait and not initial_checkpoint(snapshot):
+                    if different_inflight_request:
                         _rebind_pending_subgraphs(graph, snapshot, invocation_id)
                     prepared = stages["initialize"]()
                     if not prepared.get("_workflow_prepared"):

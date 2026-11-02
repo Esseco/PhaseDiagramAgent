@@ -2,7 +2,7 @@ import json
 import pytest
 from phase_agent.tools.local.rebuild_relax_inputs import (
     is_relax_rebuild_request, plan_relax_rebuild, rebuild_relax_inputs)
-from phase_agent.tools.policy.execution_policy import apply_execution_policy
+from phase_agent.policies.execution_policy import apply_execution_policy
 
 
 def fixture_state(tmp_path):

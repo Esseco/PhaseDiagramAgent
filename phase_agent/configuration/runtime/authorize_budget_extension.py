@@ -573,7 +573,7 @@ def _supercell_revision(state, snapshot):
     if not old or not changed or not changed <= allowed:
         return None
     current = deepcopy(state)
-    from phase_agent.tools.policy.workflow_policy import active_tasks
+    from phase_agent.policies.workflow_policy import active_tasks
 
     if active_tasks(current) or current.get("pending_execution_policies"):
         current["pending_supercell_revision"] = deepcopy(snapshot)

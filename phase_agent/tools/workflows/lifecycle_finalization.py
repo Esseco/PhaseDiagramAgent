@@ -1,6 +1,6 @@
 """Action invocation and prepared-input finalization."""
 
-from phase_agent.decisions.agent.dialogue_contract import DIALOGUE_STATUSES
+from phase_agent.agents.common.dialogue_contract import DIALOGUE_STATUSES
 from copy import deepcopy
 from phase_agent.tools.workflows.lifecycle_support import _save_runner_state
 
@@ -20,7 +20,7 @@ def prepare_workflow_actions(frame, *, event_loop):
     effective_config = frame["effective_config"]
     approval_directory = frame["approval_directory"]
     initial_long_term_advice = frame["initial_long_term_advice"]
-    from phase_agent.tools.workflows.run_event_loop import run_action_turn
+    from phase_agent.tools.workflows.run_action_turn import run_action_turn
 
     # Transfer only the private frame already detached by lifecycle loading.
     # Never add private keywords to injected or legacy event-loop interfaces.

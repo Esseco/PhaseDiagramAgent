@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 
 
 def execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict:
@@ -31,6 +31,7 @@ def _execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict
             "error": str(error),
         }
     state = context.get("event_state") or {}
+    original_training_jobs = set(state.get("remote_finetune_jobs") or {})
     model = state.get("active_model") or (context.get("effective_config") or {}).get("mlip") or {}
     errors = operation_binding_errors(
         action,
@@ -52,6 +53,23 @@ def _execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict
     if blocked:
         return {"status": "blocked", "tool": action.get("tool"), "result": None, "error": blocked}
     item = registry.get(action.get("tool")) or {}
+    role = context.get("executor_role")
+    from phase_agent.agents.permissions import execution_role_allowed
+
+    if role is not None and not execution_role_allowed(role):
+        return {
+            "status": "rejected",
+            "tool": action.get("tool"),
+            "result": None,
+            "error": "agent_execution_permission_denied",
+        }
+    if role is not None and role not in item.get("execution_roles", ("simulation",)):
+        return {
+            "status": "rejected",
+            "tool": action.get("tool"),
+            "result": None,
+            "error": "agent_execution_permission_denied",
+        }
     handler = item.get("handler")
     tool = action.get("tool")
     if handler is None:
@@ -97,6 +115,18 @@ def _execute_tool_action(action: dict, *, registry: dict, context: dict) -> dict
             ):
                 preparation_progress("started", {"protocol": 1, "mode": "relax_mc_inputs"})
             result = handler(action=deepcopy(action), context=context)
+        if (
+            action.get("_training_handoff_authorization")
+            and isinstance(result, dict)
+            and isinstance(result.get("state"), dict)
+        ):
+            from phase_agent.policies.training_handoff_scope import bind_job
+
+            for key, job in (result["state"].get("remote_finetune_jobs") or {}).items():
+                if key not in original_training_jobs:
+                    job["handoff_authorization"] = bind_job(
+                        action["_training_handoff_authorization"], key, job
+                    )
         if tool == "check_convergence":
             from phase_agent.analysis.convergence.normalize_convergence_result import (
                 normalize_convergence_result,

@@ -1,13 +1,13 @@
 from copy import deepcopy
 import json
 from unittest.mock import patch
-from phase_agent.decisions.agent.summary_request import summary_payload, request_summary_first
-from phase_agent.decisions.agent.prepare_llm_request import (
+from phase_agent.evidence.requests import summary_payload, request_summary_first
+from phase_agent.models.prepare_llm_request import (
     prepare_llm_request,
     needs_deep_reasoning,
 )
-from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
-from phase_agent.decisions.agent.transport_tables import (
+from phase_agent.models.create_deepseek_client import create_deepseek_client
+from phase_agent.models.transport_tables import (
     table_rows,
     expand_evidence_tables,
     evidence_row_count,
@@ -118,7 +118,7 @@ def test_provider_uses_two_phases_and_records_finish_reasons():
     try:
         client = create_deepseek_client(api_key="fake", thinking="enabled", max_tokens=2400)
         with patch(
-            "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+            "phase_agent.models.create_deepseek_client.urllib.request.urlopen",
             side_effect=provider,
         ):
             result = request_summary_first(client, payload())

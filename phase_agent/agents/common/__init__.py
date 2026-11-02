@@ -1,0 +1,1 @@
+"""agents common responsibilities."""

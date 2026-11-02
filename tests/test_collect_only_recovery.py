@@ -194,3 +194,23 @@ def test_marker_status_disagreement_is_rejected(tmp_path):
     marker.write_text(json.dumps(m))
     with pytest.raises(ValueError, match="marker_result_status_mismatch"):
         build(tmp_path, archive, evidence, job)
+
+
+def test_collect_only_export_uses_same_required_files_boundary(tmp_path):
+    import zipfile
+
+    archive, evidence, job = fixture(tmp_path)
+    worker = evidence / "jobs/inputs/gpu1/00000-t1"
+    (worker / "pool").mkdir(parents=True)
+    (worker / "pool/unused.vasp").write_text("unused remote geometry")
+    (worker / "trace.json.gz").write_bytes(b"trace")
+    (worker / "mc_occupations.bin").write_bytes(b"occupation evidence")
+    result = build(tmp_path, archive, evidence, job)
+    with zipfile.ZipFile(result["archive"]) as z:
+        names = z.namelist()
+        assert not any("unused.vasp" in n or "trace.json.gz" in n for n in names)
+        assert any(n.endswith("final.vasp") for n in names)
+        assert any(n.endswith("result.json") for n in names)
+        assert any(n.endswith("task.finished.json") for n in names)
+        assert "jobs/results/00000-t1/mc_occupations.bin" in names
+        assert "jobs/inputs/gpu1/00000-t1/mc_occupations.bin" not in names

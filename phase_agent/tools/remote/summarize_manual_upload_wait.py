@@ -79,6 +79,6 @@ def summarize_manual_upload_wait(state, *, recovered_count=0):
 
 
 def _dft_recovery_rounds(state):
-    from phase_agent.analysis.state.dft_round_status import dft_recovery_rounds
+    from phase_agent.evidence.dft_round_status import dft_recovery_rounds
 
     return dft_recovery_rounds(state)

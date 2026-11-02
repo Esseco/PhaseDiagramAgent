@@ -17,8 +17,10 @@ def test_main_prediction_not_committee_average_and_geometry_cache_preserved(tmp_
         def calculate(self, atoms=None, properties=None, system_changes=all_changes):
             super().calculate(atoms, properties, system_changes)
             self.results = {"energy": self.value, "forces": np.full((len(atoms), 3), self.value)}
-    monkeypatch.setitem(sys.modules, "mace", SimpleNamespace())
-    monkeypatch.setitem(sys.modules, "mace.calculators", SimpleNamespace(MACECalculator=FakeCalculator))
+    monkeypatch.setattr(
+        "phase_agent.science.mlip.model_interface.create_calculator",
+        lambda model, *, model_path: FakeCalculator(model_paths=model_path),
+    )
     path = tmp_path / "initial.vasp"
     write(path, Atoms("Na", positions=[[0,0,0]], cell=[5,5,5], pbc=True), format="vasp")
     output = tmp_path / "output"

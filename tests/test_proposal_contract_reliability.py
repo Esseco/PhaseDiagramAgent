@@ -9,14 +9,14 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
-from phase_agent.decisions.agent.deepagents_proposal import (
+from phase_agent.models.deepagents_proposal import (
     create_proposal_client,
     proposal_material,
 )
-from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
-from phase_agent.decisions.agent.revise_tool_proposal import revise_tool_proposal
-from phase_agent.decisions.agent.transport_tables import expand_evidence_tables
-from phase_agent.graphs.proposal_graph import request_with_langgraph
+from phase_agent.models.prepare_llm_request import prepare_llm_request
+from phase_agent.agents.strategic.revise_tool_proposal import revise_tool_proposal
+from phase_agent.models.transport_tables import expand_evidence_tables
+from phase_agent.graphs.decision_team.graph import request_with_langgraph
 
 
 @pytest.fixture(autouse=True)
@@ -291,7 +291,7 @@ def test_real_deep_harness_transmits_contract_feedback_without_parameter_pruning
 
 
 def test_saved_review_validation_never_reasks_the_model():
-    from phase_agent.decisions.agent.post_dft_review import request_review_repair
+    from phase_agent.agents.common.post_dft_review import request_review_repair
 
     client = Mock(side_effect=AssertionError("saved review cannot call a model"))
     with pytest.raises(ValueError, match="post_dft_review"):
@@ -301,7 +301,7 @@ def test_saved_review_validation_never_reasks_the_model():
 
 def test_review_choice_consistency_is_not_a_schema_retry():
     from tests.test_post_dft_review import review
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     client = Mock(return_value={"tool": "update_mlip", "post_dft_review": review()})
     with pytest.raises(ValueError, match="finetune"):
@@ -317,7 +317,7 @@ def test_review_choice_consistency_is_not_a_schema_retry():
 
 def test_existing_review_wire_alias_is_validated_on_a_copy_without_extra_call():
     from tests.test_post_dft_review import review
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     original = {
         "tool": "update_mlip",
@@ -340,7 +340,7 @@ def test_existing_review_wire_alias_is_validated_on_a_copy_without_extra_call():
 
 @pytest.mark.parametrize("harness", [None, "deepagents"])
 def test_contract_correction_keeps_the_existing_hybrid_harness(harness):
-    from phase_agent.decisions.agent.hybrid_proposal import create_hybrid_client
+    from phase_agent.models.hybrid_proposal import create_hybrid_client
 
     legacy = Mock(side_effect=[action(budget="30"), action()])
     deep = Mock(side_effect=[action(budget="30"), action()])
@@ -378,8 +378,8 @@ def test_valid_generation_plan_derives_only_missing_totals_without_extra_model_c
 
 @pytest.mark.parametrize("by_policy", [False, True])
 def test_generation_count_schema_correction_never_handles_region_mode(by_policy):
-    from phase_agent.decisions.agent.proposal_schema_repair import repair_proposal_schema
-    from phase_agent.tools.policy.region_sampling import MODE, VERSION
+    from phase_agent.agents.common.proposal_schema_repair import repair_proposal_schema
+    from phase_agent.policies.region_sampling import MODE, VERSION
 
     original = {
         "tool": "generate_branches",

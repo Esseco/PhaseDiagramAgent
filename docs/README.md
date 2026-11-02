@@ -1,20 +1,27 @@
 # 文档导航
 
-先按目的选一份指南，不需要逐份阅读所有说明。
+当前目录只区分 guides（使用）与 architecture（维护）；被取代的开发日志与旧验收已外置备份。
 
-| 目的 | 阅读入口 |
+| 目的 | 入口 |
 | --- | --- |
-| 启动项目、对话、定位报错 | [启动与调试](guides/start.md) |
-| 服务未启动时诊断、修复后继续运行 | [检查与恢复](guides/recovery.md) |
-| 设置体系、环境、边界和预算 | [配置](guides/configuration.md) |
-| 找输入、回传结果和备份 | [项目目录](guides/workspace.md) |
-| 理解搜索、DFT选择和模型刷新 | [搜索](guides/search.md) |
-| 查看相图与误差产物 | [分析](guides/analysis.md) |
-| 准备DFT、检查结果与重新生成 | [DFT](guides/dft.md) |
-| 微调、独立验证与恢复 | [训练](guides/training.md) |
-| 理解上下文与记忆 | [记忆](guides/memory.md) |
-| 修改图、节点或审批 | [Graph架构](architecture/graph.md) |
-| 定位代码、开发约定 | [源码指南](architecture/development.md) |
-| 查看实际编译图 | [流程图](architecture/flow.md) |
+| 仓库文件在哪里、哪些必须保留 | [目录架构](architecture/repository-layout.md) |
+| 四个 Agent 如何协作 | [四 Agent](architecture/four-agents.md) |
+| 新材料与两个 epoch 怎样运行 | [科研生命周期](architecture/workflow.md) |
+| 启动、对话与调试 | [启动指南](guides/start.md) |
+| 科学配置、边界与预算 | [配置](guides/configuration.md) |
+| 输入、回传、模型和 epoch 文件 | [项目文件](guides/project-files.md) |
+| 搜索、DFT 路线与模型刷新 | [搜索](guides/search.md) |
+| DFT 输入与回收 | [DFT](guides/dft.md) |
+| 训练、独立验证和模型激活 | [训练](guides/training.md) |
+| 相图、误差与分析结果 | [分析](guides/analysis.md) |
+| 状态诊断与恢复 | [恢复](guides/recovery.md) |
+| Codex 接管与原生团队 | [Codex 四 Agent](guides/codex-team.md) |
+| Codex 命令和控制协议 | [控制入口](guides/codex-control.md) |
+| 短期事实与审核知识 | [记忆](guides/memory.md) |
+| 研究提案与执行范围契约 | [科研决策](architecture/scientific-decisions.md) |
+| 实际节点、审批和恢复 | [Graph 架构](architecture/graph.md) |
+| 源码定位、修改约束 | [开发指南](architecture/development.md) |
+| 实际编译图 | [流程图](architecture/flow.md) |
+| 四 Agent 架构重构验收 | [验收记录](architecture/four-agents-validation.md) |
 
-guides 面向使用与科学流程；architecture 面向代码维护。各源码包只保留简短 README，详细说明在这里归并。源码总览见 [项目README](../README.md)。
+默认本地环境 py1。真实项目独立于应用源码；开发验证使用假模型、假超算和最小合成数据。源码总入口见 [README](../README.md)。

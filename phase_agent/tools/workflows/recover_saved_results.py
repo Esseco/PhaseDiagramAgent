@@ -3,6 +3,7 @@
 from copy import deepcopy
 import hashlib
 import json
+from threading import RLock
 from phase_agent.runtime.turn_process import timed_call
 from phase_agent.interface_compatibility import call_with_optimizations
 from pathlib import Path
@@ -26,12 +27,53 @@ from phase_agent.tools.workflows.lifecycle_support import (
 )
 
 
-def recovery_candidate_fingerprint(state):
+_RECOVERY_CACHE = {}
+_RECOVERY_CACHE_LOCK = RLock()
+
+
+def _training_return_paths(job):
+    handoff = job.get("handoff") or {}
+    roots = {handoff.get("return_directory"), handoff.get("results_directory")}
+    if job.get("directory"):
+        roots.update({job["directory"], str(Path(job["directory"]) / "results")})
+    return sorted(str(root) for root in roots if root)
+
+
+def _training_return_facts(state):
+    from phase_agent.tools.remote.transfer_bundle import _registered_archives
+
+    facts = []
+    for key, job in sorted((state.get("remote_finetune_jobs") or {}).items()):
+        artifacts = set()
+        for value in _training_return_paths(job):
+            root = Path(value)
+            paths = [
+                *_registered_archives(root),
+                root / "training.finished.json",
+                root / "models.json",
+                root / "remote_artifacts.json",
+            ]
+            for path in paths:
+                try:
+                    if path.is_file():
+                        stat = path.stat()
+                        artifacts.add((str(path), stat.st_size, stat.st_mtime_ns))
+                except OSError:
+                    continue
+        if artifacts:
+            facts.append({"job_id": key, "artifacts": sorted(artifacts)})
+    return facts
+
+
+def recovery_candidate_fingerprint(state, *, legacy_training_metadata=False):
     """Return a cheap identity for the currently registered return sources."""
     from phase_agent.tools.remote.transfer_bundle import (
         _registered_archives,
         dispatch_failure,
+        _pending_return_state,
     )
+
+    state = _pending_return_state(state)
 
     # Prepared input batches can add many slurm rows without adding a return.
     # Fingerprint only actual result archives/dispatch diagnostics; otherwise a
@@ -95,7 +137,12 @@ def recovery_candidate_fingerprint(state):
         except OSError:
             continue
         task_returns.append(
-            {"task_id": row.get("task_id"), "path": str(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+            {
+                "task_id": row.get("task_id"),
+                "path": str(path),
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
         )
     payload = {
         "relax_mc": [
@@ -118,16 +165,23 @@ def recovery_candidate_fingerprint(state):
                 "activated": row.get("activated"),
             }
             for key, row in sorted((state.get("remote_finetune_jobs") or {}).items())
-        ],
+        ]
+        if legacy_training_metadata
+        else _training_return_facts(state),
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
     ).hexdigest()
 
 
-def _legacy_acknowledgement_is_safe(state, *, backlog):
+def _legacy_acknowledgement_is_safe(state, *, backlog, returned=False):
     """Accept pre-input-preparation recovery acks without reopening old returns."""
     if backlog:
+        return False
+    # A legacy acknowledgement has no binding to a newly observed return
+    # archive.  Exact fingerprints are handled by the caller; any mismatched
+    # current return must go through the normal explicit recovery gate.
+    if returned:
         return False
     ack = state.get("recovery_acknowledgement") or {}
     if ack.get("scope") != "explicit_user_recovery_approval":
@@ -143,8 +197,84 @@ def _legacy_acknowledgement_is_safe(state, *, backlog):
     )
 
 
-def recovery_candidate(state):
+def _return_watch_signature(state):
+    from stat import S_ISDIR
+
+    paths = set()
+    for task in state.get("tasks") or []:
+        if awaiting_task_result(task) and isinstance(task.get("result_path"), str):
+            paths.add(task["result_path"])
+    for row in state.get("slurm_batches") or []:
+        handoff = row.get("handoff") or {}
+        for key in ("return_directory", "return_archive", "results_directory"):
+            value = handoff.get(key) or row.get(key)
+            if value:
+                paths.add(str(value))
+    for row in (state.get("relax_mc_batches") or {}).values():
+        if row.get("expected_results_archive"):
+            paths.add(str(row["expected_results_archive"]))
+        if row.get("return_directory"):
+            paths.add(str(row["return_directory"]))
+    for job in (state.get("remote_finetune_jobs") or {}).values():
+        for root in _training_return_paths(job):
+            paths.add(root)
+            paths.update(
+                str(Path(root) / name)
+                for name in ("training.finished.json", "models.json", "remote_artifacts.json")
+            )
+    signature = []
+    for value in sorted(paths):
+        path = Path(value)
+        try:
+            stat = path.stat()
+            signature.append((value, stat.st_mtime_ns, stat.st_size))
+            if S_ISDIR(stat.st_mode):
+                # Directory timestamps can lag new files on Windows. Inspect
+                # only immediate archives, without opening or walking them.
+                for archive in sorted(path.glob("*.zip")):
+                    try:
+                        archive_stat = archive.stat()
+                    except OSError:
+                        continue
+                    signature.append((str(archive), archive_stat.st_mtime_ns, archive_stat.st_size))
+        except OSError:
+            signature.append((value, None, None))
+    return tuple(signature)
+
+
+def _recovery_cache_key(state, state_path):
+    path = Path(state_path).resolve()
+    try:
+        stat = path.stat()
+        state_file = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        state_file = (None, None)
+    pending_tasks = tuple(
+        (row.get("task_id"), row.get("status"), row.get("result_path"))
+        for row in state.get("tasks") or []
+        if awaiting_task_result(row)
+    )
+    return (
+        str(path),
+        state_file,
+        state.get("active_model_version"),
+        state.get("confirmed_config_version"),
+        (state.get("recovery_acknowledgement") or {}).get("fingerprint"),
+        tuple(sorted(state.get("processed_task_ids") or [])),
+        tuple(sorted(state.get("feedback_processed_task_ids") or [])),
+        pending_tasks,
+        _return_watch_signature(state),
+    )
+
+
+def recovery_candidate(state, *, state_path=None):
     """Read-only detection of returns that still need explicit approval."""
+    cache_key = _recovery_cache_key(state, state_path) if state_path else None
+    if cache_key is not None:
+        with _RECOVERY_CACHE_LOCK:
+            cached = _RECOVERY_CACHE.get(cache_key)
+        if cached is not None:
+            return deepcopy(cached)
     processed = set(state.get("processed_task_ids") or [])
     feedback_processed = set(state.get("feedback_processed_task_ids") or [])
     backlog = [
@@ -163,16 +293,44 @@ def recovery_candidate(state):
     )
     fingerprint = recovery_candidate_fingerprint(state)
     acknowledged = state.get("recovery_acknowledgement") or {}
-    already_reviewed = bool(returned) and not backlog and (
-        acknowledged.get("fingerprint") == fingerprint
-        or _legacy_acknowledgement_is_safe(state, backlog=backlog)
+    legacy_training_ack = False
+    if (
+        returned
+        and not backlog
+        and acknowledged.get("scope") == "explicit_user_recovery_approval"
+        and acknowledged.get("fingerprint") != fingerprint
+    ):
+        # Upgrade acknowledgements written before prepared-job metadata was
+        # removed. Never use this compatibility path to hide an active return.
+        active_returns = any(
+            not ((state.get("remote_finetune_jobs") or {}).get(row["job_id"]) or {}).get(
+                "activated"
+            )
+            for row in _training_return_facts(state)
+        )
+        legacy_training_ack = not active_returns and acknowledged.get("fingerprint") == (
+            recovery_candidate_fingerprint(state, legacy_training_metadata=True)
+        )
+    already_reviewed = (
+        bool(returned)
+        and not backlog
+        and (
+            acknowledged.get("fingerprint") == fingerprint
+            or legacy_training_ack
+            or _legacy_acknowledgement_is_safe(state, backlog=backlog, returned=returned)
+        )
     )
-    return {
+    result = {
         "returned": bool(returned),
         "backlog_count": len(backlog),
         "fingerprint": fingerprint,
         "pending": bool((returned or backlog) and not already_reviewed),
     }
+    if cache_key is not None:
+        with _RECOVERY_CACHE_LOCK:
+            _RECOVERY_CACHE.clear()
+            _RECOVERY_CACHE[cache_key] = deepcopy(result)
+    return result
 
 
 def recover_saved_results(state, **dependencies):
@@ -183,7 +341,7 @@ def recover_saved_results(state, **dependencies):
     version = state.get("confirmed_config_version")
     if collector is None or manager is None or not bound or not version:
         return state
-    candidate = recovery_candidate(state)
+    candidate = recovery_candidate(state, state_path=dependencies.get("state_path"))
     if not candidate["pending"]:
         return state
     processed = set(state.get("processed_task_ids") or [])
@@ -227,8 +385,16 @@ def recover_saved_results(state, **dependencies):
         *(row for row in backlog if row.get("task_id") not in incoming_ids),
     ]
     current = deepcopy(state)
+    report = _classify_transfer_diagnostics(report, state)
     current["result_collection"] = deepcopy(report)
     if not results:
+        # A soft collector failure is not successful observation. The results
+        # already include saved feedback backlog, so valid partial evidence is
+        # never blocked here. Training returns have their own validation graph.
+        failure = _empty_collection_failure(report, state)
+        if failure:
+            current["result_collection"]["recovery_error"] = failure
+            return current
         return _complete_saved_comparisons(current, evaluator, manager, config, dependencies)
     reconciled = call_with_optimizations(
         reconcile_task_results, current, results, _optimizations={"_owned": True}
@@ -297,3 +463,78 @@ def _complete_saved_comparisons(state, evaluator, manager, config, dependencies)
         export_dft_products(updated, config.get("phase_diagram_directory"))
         _save_runner_state(updated, dependencies.get("state_path") or config.get("state_path"))
     return updated
+
+
+def _empty_collection_failure(report, state):
+    failures = {
+        key: report[key]
+        for key in (
+            "invalid_count",
+            "missing_structure_count",
+            "missing_marker_count",
+            "transfer_errors",
+        )
+        if report.get(key)
+    }
+    if not failures:
+        return None
+    jobs = state.get("remote_finetune_jobs") or {}
+    pending_training = any(
+        not (job := jobs[row["job_id"]]).get("activated")
+        and job.get("status") not in {"abandoned", "cancelled", "superseded"}
+        and job.get("original_model_version") == state.get("active_model_version")
+        for row in _training_return_facts(state)
+    )
+    if pending_training:
+        return None
+    return "没有通过本次回收核验的有效结果：" + str(failures)[:350]
+
+
+def _classify_transfer_diagnostics(report, state):
+    """Retain dispatch diagnostics without blocking already reconciled tasks."""
+    if not report.get("transfer_errors"):
+        return report
+    from phase_agent.tools.remote.legacy_recovery import recovery_handoffs
+
+    scopes = {}
+    for batch in state.get("slurm_batches") or []:
+        folder = (batch.get("handoff") or {}).get("return_directory")
+        if folder:
+            scopes.setdefault(str(Path(folder).resolve()), set()).update(
+                batch.get("task_ids") or []
+            )
+    for handoff in recovery_handoffs(state):
+        scopes.setdefault(str(Path(handoff["return_directory"]).resolve()), set()).update(
+            handoff.get("task_ids") or []
+        )
+    processed = set(state.get("processed_task_ids") or [])
+    tasks = {row.get("task_id"): row for row in state.get("tasks") or []}
+    current, historical = [], []
+    for error in report["transfer_errors"]:
+        archive = Path(error.get("archive") or "") if isinstance(error, dict) else None
+        ids = scopes.get(str(archive.parent.resolve()), set()) if archive else set()
+        if not ids and isinstance(error, dict):
+            # Older diagnostics may outlive their handoff metadata. Recover
+            # the task identity from the bounded dispatch error text so a
+            # settled task cannot keep reopening the recovery gate.
+            import re
+
+            reason = str(error.get("reason", ""))
+            ids = set(re.findall(r'"task_id"\s*:\s*"([^"]+)"', reason))
+        settled = (
+            bool(ids)
+            and ids.issubset(processed)
+            and all(
+                tasks.get(tid, {}).get("status") in {"completed", "failed", "timeout", "cancelled"}
+                for tid in ids
+            )
+        )
+        if (
+            settled
+            and archive.name == "diagnostics.zip"
+            and str(error.get("reason", "")).startswith("remote_dispatch_failed:")
+        ):
+            historical.append(error)
+        else:
+            current.append(error)
+    return {**report, "transfer_errors": current, "historical_transfer_errors": historical}

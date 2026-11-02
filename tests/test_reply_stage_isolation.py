@@ -47,7 +47,7 @@ def test_actual_dft_recovery_keeps_metrics_and_only_matching_round_magnetism(tmp
         tmp_path / "state.json",
         verbose=True,
     )
-    assert "本轮 DFT：回收 1/1" in text
+    assert "本轮 DFT：有效回收 1/1，合格配对 1。" in text
     assert "磁矩：已回收 1 个结果" in text
     assert "能量 MAE/RMSE" in text and "受力" in text
     assert state == original
@@ -126,7 +126,7 @@ def test_current_region_approval_retains_boundaries_without_count_targets(tmp_pa
 
 
 def test_invalid_review_is_not_preserved_as_valid_evidence():
-    from phase_agent.decisions.agent.post_dft_review import request_review_repair
+    from phase_agent.agents.common.post_dft_review import request_review_repair
     from tests.test_post_dft_review import review
     from tests.test_region_sampling import params
 

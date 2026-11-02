@@ -15,7 +15,7 @@ from phase_agent.runtime.chat_application import RunWorkflowChatHandler
 from phase_agent.runtime.local_agent_control import LocalAgentControl
 from phase_agent.tools.state.execution_receipts import begin_execution, recovery_report
 from phase_agent.tools.step_runner.file_protocol import read_json, write_json
-from phase_agent.tools.workflows.run_event_loop import run_event_loop
+from phase_agent.tools.workflows.run_action_turn import run_action_turn
 from phase_agent.tools.workflows.run_tool_step import run_tool_step
 from tests.test_studio_storage import checkpoint
 from tests.test_studio_thread_deletion import native  # noqa: F401
@@ -154,7 +154,7 @@ def test_deleted_origin_chat_can_review_original_project_plan_once(native, tmp_p
     path = tmp_path / "project/workflow_state/state.json"
     setup = setup_policy()
     invocation = "old-chat:" + str(n.ids[0])
-    first = run_event_loop(
+    first = run_action_turn(
         {},
         setup.session,
         registry=setup.registry,
@@ -172,7 +172,7 @@ def test_deleted_origin_chat_can_review_original_project_plan_once(native, tmp_p
         pytest.fail("Restoring an original approval must not request a new model decision")
 
     def workflow(**kw):
-        return run_event_loop(
+        return run_action_turn(
             kw["state_path"],
             kw["config_session"],
             registry=setup.registry,

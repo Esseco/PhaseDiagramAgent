@@ -57,7 +57,7 @@ def export_dft_products(state, directory):
             if _scope_key(row["round_scope"]) == key
         ]
         energies, forces = build_comparison_tables(records, comparisons, round_name=root.name)
-        from phase_agent.analysis.state.model_epoch import model_epoch
+        from phase_agent.evidence.model_epoch import model_epoch
 
         epoch = model_epoch(state, scope.get("model_version") or "unknown-model")
         for row in energies + forces:
@@ -155,7 +155,7 @@ def export_dft_products(state, directory):
             ),
         )
     state["dft_result_exports"] = exports
-    from phase_agent.analysis.state.summarize_model_rounds import (
+    from phase_agent.evidence.summarize_model_rounds import (
         summarize_model_rounds,
         ROUND_SUMMARY_FIELDS,
     )
@@ -168,8 +168,12 @@ def export_dft_products(state, directory):
 
 
 def publish_output_catalog(state, directory):
+    """Refresh complete analysis bundles and publish navigation after a verified update."""
     if directory is None:
         return
+    from phase_agent.analysis.feedback.analysis_publication import publish_analysis_products
+
+    publish_analysis_products(state, directory)
     from phase_agent.analysis.feedback.output_catalog import output_catalog, catalog_markdown
 
     path = Path(directory) / "output_index.md"

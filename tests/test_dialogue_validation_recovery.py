@@ -21,7 +21,7 @@ def test_invalid_dialogue_action_is_repaired_once_without_error(tmp_path):
     from phase_agent.graphs.dialogue.decision import decide_from_saved_facts
 
     with patch(
-        "phase_agent.decisions.agent.decision_backend.request_decision_action",
+        "phase_agent.graphs.decision_team.backend.request_decision_action",
         side_effect=request,
     ):
         result = decide_from_saved_facts(handler, {}, "继续", lambda: None)

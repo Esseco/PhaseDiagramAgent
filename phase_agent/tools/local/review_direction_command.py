@@ -1,7 +1,7 @@
 """Resume the exact pending non-activation scientific direction."""
 
 from copy import deepcopy
-from phase_agent.graphs.direction_review_graph import direction_checkpoint
+from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
 
 
 def review_direction_command(message, state, state_path):

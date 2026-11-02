@@ -72,7 +72,7 @@ def record_action_direction(state, action, state_path, decision):
     errors = direction_action_errors(action, state)
     if errors:
         raise ValueError(";".join(errors))
-    from phase_agent.graphs.direction_review_graph import direction_checkpoint
+    from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
 
     # Evidence changes require a fresh proposal, even when a saved action still exists.
     from phase_agent.tools.local.recover_remote_training import inspect_training_results

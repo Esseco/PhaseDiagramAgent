@@ -5,8 +5,8 @@ import pytest
 from phase_agent.configuration.defaults.default_dft_decision_config import (
     default_dft_decision_config,
 )
-from phase_agent.decisions.qbc_selection.dft_round_policy import dft_task_limit, round_dft_tasks
-from phase_agent.decisions.qbc_selection.recommend_post_mc_dft import recommend_post_mc_dft
+from phase_agent.agents.reliability.selection.dft_round_policy import dft_task_limit, round_dft_tasks
+from phase_agent.agents.reliability.selection.recommend_post_mc_dft import recommend_post_mc_dft
 from phase_agent.tools.workflows.preview_dft_inputs import preview_dft_inputs
 
 
@@ -167,7 +167,7 @@ def tool_validation(*, existing, selected=1, direct_stage=None):
     from phase_agent.configuration.defaults.default_layered_search_config import (
         default_layered_search_config,
     )
-    from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+    from phase_agent.policies.validate_tool_action import validate_tool_action
 
     settings = default_layered_search_config()
     settings["budgets"]["enforcement"] = "advisory"

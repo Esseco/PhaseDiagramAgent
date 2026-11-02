@@ -94,6 +94,9 @@ def import_results(*, action, context, _owned=False):
         )
     if recovery is not None:
         validate_recovery_scope(archive, record, state)
+    from phase_agent.tools.relax_mc_batch.completion_gate import require_complete_archive
+
+    require_complete_archive(archive)
     digest = checksum(archive)
     if record.get("import_checksum") == digest:
         current = state if _owned else deepcopy(state)
@@ -283,6 +286,7 @@ def import_results(*, action, context, _owned=False):
     state["qbc_candidates"] = list(by_id.values())
     state["relax_mc_batches"][bundle_id].update(
         status=summary["status"],
+        formal_recovery_status="accepted",
         import_checksum=digest,
         result_summary=summary,
         return_directory=str(destination),

@@ -9,7 +9,7 @@ from phase_agent.science.mc.schedule_tiered_mc import schedule_tiered_mc
 from phase_agent.configuration.runtime.validate_energy_conventions import (
     validate_energy_conventions,
 )
-from phase_agent.decisions.scoring.rank_branch_relax_prescreen import rank_branch_relax_prescreen
+from phase_agent.analysis.scoring.rank_branch_relax_prescreen import rank_branch_relax_prescreen
 
 
 POLICY = {

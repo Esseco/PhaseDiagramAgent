@@ -8,7 +8,7 @@ def refresh_dft_evidence(state, decision_state, config):
     decision_state.setdefault("decision_context", {})["qbc_candidates"] = deepcopy(
         state["qbc_candidates"]
     )
-    from phase_agent.decisions.qbc_selection.recommend_post_mc_dft import (
+    from phase_agent.agents.reliability.selection.recommend_post_mc_dft import (
         recommend_post_mc_dft,
     )
 

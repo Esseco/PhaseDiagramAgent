@@ -10,7 +10,19 @@ def transport_view(value):
         result = {}
         changed = False
         for key, item in value.items():
-            if key == "facts" and isinstance(item, dict):
+            scientific_snapshot = (
+                key in {"state", "loaded_state"}
+                and isinstance(item, dict)
+                and any(
+                    field in item
+                    for field in (
+                        "active_model_version",
+                        "remote_finetune_jobs",
+                        "pending_execution_policies",
+                    )
+                )
+            )
+            if isinstance(item, dict) and (key == "facts" or scientific_snapshot):
                 projected = {
                     "_studio_view": "Full scientific facts retained in project state and checkpoints",
                     "field_count": len(item),
@@ -63,6 +75,17 @@ async def guarded_studio_stream(original, run=None, *args, **kwargs):
         graph == "phase_chat" and options.get("input") is None and options.get("command") is None
     )
     requested = options.get("stream_mode") or []
+    last_root_checkpoint = None
+    if graph == "phase_chat":
+        observer = kwargs.get("on_checkpoint", lambda checkpoint: None)
+
+        def observe(checkpoint):
+            nonlocal last_root_checkpoint
+            if checkpoint is not None and root_checkpoint(checkpoint):
+                last_root_checkpoint = checkpoint
+            observer(checkpoint)
+
+        kwargs = {**kwargs, "on_checkpoint": observe}
     # The phase_chat graph keeps the short reply on the internal ``agent``
     # update and emits the same text as a single AIMessage from ``respond``.
     # When callers explicitly request updates, forwarding both makes Studio
@@ -96,6 +119,24 @@ async def guarded_studio_stream(original, run=None, *args, **kwargs):
         raise ValueError(
             "没有可恢复节点，本次未处理新消息。请在 Studio 的 Input/messages 中发送新的用户消息；仅修改历史消息后空续跑不会触发结果回收。"
         )
+    # Debug snapshots are not a terminal chat update. Publish authoritative messages
+    # last so the client replaces its old view without another run or manual refresh.
+    if (
+        graph == "phase_chat"
+        and not ((options.get("config") or {}).get("configurable") or {}).get(
+            "__event_streaming_v2"
+        )
+        and "values" not in requested
+        and last_root_checkpoint is not None
+        and not last_root_checkpoint.get("next")
+        and not any(
+            task.get("interrupts") or task.get("error")
+            for task in last_root_checkpoint.get("tasks") or []
+        )
+    ):
+        messages = (last_root_checkpoint.get("values") or {}).get("messages")
+        if messages:
+            yield "values", {"messages": messages}
 
 
 def install_studio_payload_views():

@@ -3,6 +3,7 @@
 from copy import deepcopy
 import os
 from pathlib import Path
+from phase_agent.persistence.memory.transaction import memory_transaction
 
 from phase_agent.analysis.visualization.build_webui_charts import build_webui_charts
 from phase_agent.configuration.runtime.path_mapping import validate_path_mappings
@@ -17,7 +18,7 @@ from phase_agent.persistence.memory.build_system_signature import build_system_s
 from phase_agent.persistence.memory.load_matching_domain_skills import load_matching_domain_skills
 from phase_agent.persistence.memory.propose_domain_skill_import import propose_domain_skill_import
 from phase_agent.persistence.memory.publish_domain_skill import publish_domain_skill
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 from phase_agent.tools.step_runner.build_status_summary import build_status_summary
 from phase_agent.tools.step_runner.file_protocol import read_json, write_json
 from phase_agent.runtime.control_ui_contracts import (
@@ -45,12 +46,23 @@ class LocalAgentControl:
         self.operations = UIOperations(
             self.state_path, getattr(chat_handler, "lock", threading.RLock())
         )
+        self._codex_context_cache = None
 
     def resolve_operation(self, body):
         validate_control_request("/phase/operations/resolve", body)
         from phase_agent.runtime.operation_resolution import resolve_operation
 
         return resolve_operation(self, body)
+
+    def hpc_startup_recovery(self):
+        from phase_agent.tools.relax_mc_batch.hpc_failure import startup_recovery_options
+
+        return {"recovery_options": startup_recovery_options(read_json(self.state_path, {}) or {})}
+
+    def review_relax_mc_return(self, bundle_id, *, quarantine=False):
+        from phase_agent.runtime.relax_mc_return_review import review_return
+
+        return review_return(self, bundle_id, quarantine=quarantine)
 
     def diagnostics(self):
         from phase_agent.runtime.project_diagnostics import inspect_project
@@ -70,7 +82,7 @@ class LocalAgentControl:
     @read_only_view
     def status(self):
         state = read_json(self.state_path, {}) or {}
-        from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
+        from phase_agent.policies.workflow_policy import normalize_workflow_state
 
         state = normalize_workflow_state(state)
         from phase_agent.runtime.scientific_progress import project_progress
@@ -178,10 +190,13 @@ class LocalAgentControl:
 
     @read_only_view
     def memory(self):
+        from phase_agent.persistence.memory.decision_context import decision_memory_context
+
         state = read_json(self.state_path, {}) or {}
         return validate_control_response(
             MemoryResponse,
             {
+                "decision_context": decision_memory_context(state),
                 "active": deepcopy((state.get("decision_memory") or {}).get("long_term") or {}),
                 "records": deepcopy((state.get("decision_memory") or {}).get("records") or []),
                 "candidate_count": len(state.get("memory_candidates") or []),
@@ -189,6 +204,7 @@ class LocalAgentControl:
             },
         )
 
+    @memory_transaction
     def propose_memory(self, record):
         validate_control_request("/phase/memory/propose", {"record": record})
         state = read_json(self.state_path, {}) or {}
@@ -216,6 +232,7 @@ class LocalAgentControl:
         signature = build_system_signature(config.get("system") or config.get("system_config"))
         return {"matches": load_matching_domain_skills(self._knowledge_root(), signature)}
 
+    @memory_transaction
     def propose_skill_import(self):
         config = (self.config().get("confirmed_snapshot") or {}).get("config") or {}
         signature = build_system_signature(config.get("system") or config.get("system_config"))
@@ -265,6 +282,275 @@ class LocalAgentControl:
                 [{"role": "user", "content": str(instruction)}], conversation_id=conversation_id
             )
         }
+
+    def codex_context(self):
+        from phase_agent.runtime.codex.context import build_codex_context
+
+        try:
+            stat = self.state_path.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            signature = None
+        cached = self._codex_context_cache
+        if cached and cached[0] == signature:
+            return deepcopy(cached[1])
+        context = build_codex_context(self.chat_handler)
+        self._codex_context_cache = (signature, deepcopy(context))
+        return context
+
+    def refresh_dft_candidates(self):
+        """Refresh factual MC candidate bindings without selecting or creating tasks."""
+        from filelock import FileLock
+        from phase_agent.science.qbc.post_mc_candidates import post_mc_candidates
+        from phase_agent.tools.workflows.lifecycle_support import _save_runner_state
+
+        with self.chat_handler.lock:
+            with FileLock(
+                str(Path(self.state_path).parent / "langgraph_lifecycle.sqlite") + ".lock",
+                timeout=10,
+            ):
+                state = read_json(self.state_path, {}) or {}
+                if state.get("pending_execution_policies"):
+                    raise ValueError("pending_execution_policy_blocks_candidate_refresh")
+                diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+                model = state.get("active_model_version")
+                if (
+                    not model
+                    or diagram.get("status") != "completed"
+                    or diagram.get("model_version") != model
+                ):
+                    raise ValueError("current_model_phase_diagram_required")
+                candidates = post_mc_candidates(state, model)
+                if not candidates:
+                    raise ValueError("candidate_refresh_empty")
+                state["qbc_candidates"] = candidates
+                _save_runner_state(state, self.state_path)
+                self._codex_context_cache = None
+                return {
+                    "status": "refreshed",
+                    "candidate_count": len(candidates),
+                    "model_version": model,
+                    "hull_version": diagram.get("version"),
+                    "tasks_created": 0,
+                }
+
+    def codex_plot(self, *, refresh_analysis=False):
+        """Render the currently recorded MLIP diagram through Agent's plotter."""
+        from phase_agent.runtime.phase_diagram_chat import phase_diagram_reply
+
+        with self.chat_handler.lock:
+            state = read_json(self.state_path, {}) or {}
+            if not isinstance(refresh_analysis, bool):
+                raise ValueError("refresh_analysis must be boolean")
+            if refresh_analysis:
+                from phase_agent.analysis.feedback.export_dft_products import publish_output_catalog
+
+                directory = state.get("analysis_output_directory")
+                if not directory:
+                    raise ValueError(
+                        "No registered analysis output directory; recover saved results first"
+                    )
+                publish_output_catalog(state, directory)
+                return {
+                    "reply": "已刷新已登记数据的分析归档和 latest；科学状态未修改。",
+                    "analysis_publications": state.get("analysis_publications") or {},
+                    "phase_epoch_publications": state.get("phase_epoch_publications") or {},
+                    "dft_epoch_publications": state.get("dft_epoch_publications") or {},
+                    "output_index_path": state.get("output_index_path"),
+                }
+            return {"reply": phase_diagram_reply(state, operation="plot", method="mlip")}
+
+    def codex_report(self, plan_id):
+        """Render an existing pending plan; never approve or replay it."""
+        from phase_agent.runtime.codex.reports import save_codex_report
+
+        with self.chat_handler.lock:
+            state = read_json(self.state_path, {}) or {}
+            record = (state.get("pending_execution_policies") or {}).get(plan_id)
+            if not isinstance(record, dict) or not record.get("agent_proposal"):
+                raise ValueError("pending_plan_not_found")
+            result = {
+                "status": "awaiting_approval",
+                "agent_proposal": record["agent_proposal"],
+                "state": state,
+            }
+            return {"plan_id": plan_id, "report_path": save_codex_report(self.state_path, result)}
+
+    def propose_codex(
+        self, action, *, context_version, context_digest=None, conversation_id="codex-control"
+    ):
+        from phase_agent.agents.strategic.codex_team import guarded_submission
+
+        if not isinstance(action, dict) or not action:
+            raise ValueError("Codex structured proposal action must be a nonempty object")
+        return guarded_submission(
+            self,
+            action,
+            lambda on_dispatch: self._propose_codex(
+                action,
+                context_version=context_version,
+                context_digest=context_digest,
+                conversation_id=conversation_id,
+                _on_dispatch=on_dispatch,
+            ),
+        )
+
+    def _propose_codex(
+        self,
+        action,
+        *,
+        context_version,
+        context_digest=None,
+        conversation_id="codex-control",
+        _on_dispatch=None,
+    ):
+        """Submit a Codex-built action to the existing proposal workflow.
+
+        The adapter supplies only the candidate action.  The normal workflow
+        still performs proposal normalization, validation, budget checks,
+        project binding, human approval and execution.
+        """
+        validate_control_request(
+            "/phase/codex/propose",
+            {
+                "action": action,
+                "context_version": context_version,
+                "context_digest": context_digest,
+                "conversation_id": conversation_id,
+            },
+        )
+        if not isinstance(action, dict) or not action:
+            raise ValueError("Codex structured proposal action must be a nonempty object")
+        from copy import deepcopy
+        from phase_agent.graphs.invocation_context import new_invocation
+        from phase_agent.runtime.codex.context import (
+            build_codex_rule_audit,
+            ensure_codex_post_dft_review,
+            ensure_codex_round_budget_review,
+        )
+
+        snapshot = self.codex_context()
+        if context_version != snapshot["context_version"]:
+            raise ValueError("codex_context_stale; refresh /phase/codex/context")
+        if context_digest is not None and context_digest != snapshot["context_digest"]:
+            raise ValueError("codex_context_digest_mismatch; refresh /phase/codex/context")
+        candidate = deepcopy(action)
+        candidate.setdefault("decision_source", "codex")
+        tool = candidate.get("tool") or candidate.get("action_type")
+        if tool not in snapshot["allowed_tools"]:
+            raise ValueError("tool_not_allowed_in_current_codex_context")
+        required_tool = snapshot.get("required_next_tool")
+        if required_tool and tool != required_tool:
+            raise ValueError(
+                f"codex_stage_requires_{required_tool}; {snapshot.get('required_next_reason', '')}"
+            )
+        candidate = ensure_codex_round_budget_review(candidate, snapshot["decision_context"])
+        candidate = ensure_codex_post_dft_review(candidate, snapshot["decision_context"])
+        audit = build_codex_rule_audit(
+            candidate, snapshot.get("state") or {}, snapshot["decision_context"]
+        )
+        candidate["codex_rule_audit"] = audit
+        preflight_errors = []
+        if audit.get("status") == "invalid":
+            preflight_errors.extend(
+                "codex_rule_audit:" + str(error) for error in audit.get("errors", [])
+            )
+        from phase_agent.agents.common.action_contracts import action_contract_errors
+
+        preflight_errors.extend(action_contract_errors(candidate))
+        from phase_agent.agents.strategic.round_budget_review import round_budget_review_errors
+
+        preflight_errors.extend(round_budget_review_errors(candidate, snapshot["decision_context"]))
+        if tool == "generate_branches":
+            from phase_agent.agents.exploration.branch_pool_review import review_errors
+
+            preflight_errors.extend(review_errors(candidate, snapshot["decision_context"]))
+        if (snapshot.get("required_contracts") or {}).get("scientific_decision"):
+            from phase_agent.agents.strategic.scientific_decisions import scientific_decision_errors
+
+            preflight_errors.extend(
+                scientific_decision_errors(
+                    candidate,
+                    {
+                        "config_version": snapshot.get("config_version"),
+                        "model_version": snapshot.get("model_version")
+                        or (snapshot.get("project") or {}).get("initial_model_version"),
+                    },
+                    snapshot["decision_context"],
+                )
+            )
+        if preflight_errors:
+            raise ValueError("codex_preflight_invalid: " + "; ".join(preflight_errors))
+        candidate["decision_context"] = deepcopy(snapshot["decision_context"])
+
+        class CodexAction:
+            _validates_original_facts = True
+            _decision_source = "codex"
+            _codex_structured = True
+            _failed_retry_target = (
+                (candidate.get("target_ids") or [None])[0]
+                if tool == "restart_failed_task"
+                and (candidate.get("parameters") or {}).get("prepare_inputs_after_approval")
+                else None
+            )
+
+            def __call__(self, _payload):
+                return deepcopy(candidate)
+
+        sentinel = object()
+        previous = self.chat_handler.workflow_kwargs.get("agent_client", sentinel)
+        with self.chat_handler.lock:
+            self.chat_handler.workflow_kwargs["agent_client"] = CodexAction()
+            self.chat_handler.conversation_id = conversation_id
+            try:
+                if _on_dispatch is not None:
+                    _on_dispatch()
+                result = self.chat_handler._run(
+                    new_invocation(),
+                    None,
+                    "Codex 结构化提案：提交到原有验证与审批流程。",
+                )
+            finally:
+                if previous is sentinel:
+                    self.chat_handler.workflow_kwargs.pop("agent_client", None)
+                else:
+                    self.chat_handler.workflow_kwargs["agent_client"] = previous
+        # Do not send the full durable state through the control response.
+        # Callers can fetch it through the existing status/pending endpoints.
+        response = {
+            "reply": {
+                key: deepcopy(result.get(key))
+                for key in (
+                    "status",
+                    "reason",
+                    "record_id",
+                    "agent_proposal",
+                    "human_feedback",
+                    "validation",
+                    "execution",
+                    "execution_result",
+                    "submitted",
+                    "steps_executed",
+                    "execution_authorization",
+                    "simulation_report",
+                )
+                if key in result
+            }
+        }
+        for event in reversed(result.get("events") or []):
+            for key in ("execution_authorization", "simulation_report"):
+                if key in event:
+                    response["reply"].setdefault(key, deepcopy(event[key]))
+        if result.get("status") == "awaiting_approval":
+            from phase_agent.runtime.codex.reports import save_codex_report
+
+            try:
+                response["report_path"] = save_codex_report(self.state_path, result)
+            except Exception as error:
+                response["report_error"] = (
+                    f"记录保存失败：{type(error).__name__}；方案仍保留，勿重复提交。"
+                )
+        return response
 
     def decide(
         self,
@@ -371,6 +657,7 @@ class LocalAgentControl:
             "readiness": (readiness_fn(updated) if callable(readiness_fn) else None),
         }
 
+    @memory_transaction
     def review_memory(self, proposal_id, *, approved):
         validate_control_request(
             "/phase/memory/review", {"proposal_id": proposal_id, "approved": approved}

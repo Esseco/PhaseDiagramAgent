@@ -18,12 +18,10 @@ def test_multiple_or_invalid_action_limits_fail_before_any_write(limit, tmp_path
 
 
 def test_single_action_persists_once_without_invoking_loop_graph(monkeypatch, tmp_path):
-    module = importlib.import_module("phase_agent.tools.workflows.run_event_loop")
+    module = importlib.import_module("phase_agent.tools.workflows.run_action_turn")
 
-    def forbidden(*args, **kwargs):
-        raise AssertionError("Production must not enter a multi-step graph")
-
-    monkeypatch.setattr(module, "run_event_loop_graph", forbidden)
+    assert not hasattr(module, "run_event_loop")
+    assert importlib.util.find_spec("phase_agent.graphs.actions.iteration") is None
     calls = []
     handlers = create_workflow_handlers()
     state_path = tmp_path / "state.json"

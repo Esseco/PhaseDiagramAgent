@@ -1,8 +1,8 @@
 """Validate an Agent-authored follow-up without choosing a scientific direction."""
 
 from copy import deepcopy
-from phase_agent.decisions.agent.action_contracts import action_contract_errors
-from phase_agent.decisions.agent.post_dft_review import post_dft_review_errors
+from phase_agent.agents.common.action_contracts import action_contract_errors
+from phase_agent.agents.common.post_dft_review import post_dft_review_errors
 from phase_agent.tools.state.approved_direction import TOOLS
 
 

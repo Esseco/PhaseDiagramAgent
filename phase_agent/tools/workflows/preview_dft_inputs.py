@@ -3,7 +3,10 @@
 from copy import deepcopy
 import math
 from phase_agent.science.qbc.build_candidate_metrics import build_qbc_candidate_metrics
-from phase_agent.decisions.qbc_selection.dft_round_policy import dft_task_limit, round_dft_tasks
+from phase_agent.agents.reliability.selection.dft_round_policy import (
+    dft_task_limit,
+    round_dft_tasks,
+)
 from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
 
 
@@ -31,6 +34,12 @@ def preview_dft_inputs(action, state, config):
     selected = [row for row in decisions if row.get("action") in {"DFT_RELAX", "DFT_SINGLE_POINT"}]
     if not selected:
         return None, "未选择实际 DFT 结构；不能生成输入文件。"
+    from phase_agent.tools.workflows.create_dft_selection_handler import registered_retry_input_ids
+
+    try:
+        retry_inputs = registered_retry_input_ids(action, state)
+    except ValueError as error:
+        return None, str(error)
     try:
         max_tasks = dft_task_limit(config)
     except ValueError as error:
@@ -105,6 +114,8 @@ def preview_dft_inputs(action, state, config):
     return {
         "schema_version": 2,
         "task_count": len(accepted),
+        "registered_retry_input_ids": retry_inputs,
+        "total_input_task_count": len(accepted) + len(retry_inputs),
         "relative_cost": total,
         "warnings": warnings,
         "workload": [

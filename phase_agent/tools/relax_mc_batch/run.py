@@ -35,10 +35,12 @@ class SchedulerQueryError(RuntimeError):
 class SlurmIO:
     """Thin I/O adapter; existing runner owns tasks/batches, no second scheduler."""
 
-    def submit(self, path, *, dependency=None):
+    def submit(self, path, *, dependency=None, exclude_nodes=()):
         command = ["sbatch", "--parsable"]
         if dependency:
             command.append("--dependency=" + dependency)
+        if exclude_nodes:
+            command.append("--exclude=" + ",".join(exclude_nodes))
         command.append(str(path))
         result = subprocess.run(
             command,
@@ -119,7 +121,7 @@ class SlurmIO:
             "--parsable2",
             "--jobs",
             ",".join(ids),
-            "--format=JobIDRaw,State,ExitCode,Reason",
+            "--format=JobIDRaw,State,ExitCode,Reason,ElapsedRaw,NodeList",
         ]
         rows = {job: {"state": "UNKNOWN", "exit_code": None} for job in ids}
         try:
@@ -137,6 +139,10 @@ class SlurmIO:
                     "state": cells[1].split()[0].rstrip("+") if cells[1].strip() else "UNKNOWN",
                     "exit_code": cells[2] or None,
                     "reason": cells[3],
+                    "elapsed_seconds": int(cells[4])
+                    if len(cells) > 4 and cells[4].strip().isdigit()
+                    else None,
+                    "nodes": cells[5].strip() if len(cells) > 5 else None,
                 }
         return rows
 
@@ -384,6 +390,32 @@ def publish(root, state, manifest, status, reason=None):
     )
 
 
+def validate_frozen_inputs(root):
+    from concurrent.futures import ThreadPoolExecutor
+
+    root = Path(root).resolve()
+    rows = read(root / "transfer_manifest.json")["files"]
+    # Deep GPFS resolve() calls dominate startup; resolve each shared directory
+    # once while retaining every file's containment and SHA256 checks.
+    parents = {str((root / row["path"]).parent) for row in rows}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        resolved = dict(zip(parents, pool.map(lambda p: Path(p).resolve(), parents)))
+
+        def validate(row):
+            source = root / row["path"]
+            path = resolved[str(source.parent)] / source.name
+            if path.is_symlink():
+                path = path.resolve()
+            if (
+                not path.is_relative_to(root)
+                or not path.is_file()
+                or file_checksum(path) != row["sha256"]
+            ):
+                raise ValueError("input_package_integrity_failed; no jobs submitted")
+
+        list(pool.map(validate, rows))
+
+
 def run_batch(
     root,
     *,
@@ -393,6 +425,7 @@ def run_batch(
     batch_executor=None,
     poll_seconds=30,
     phase=None,
+    recollect_final=False,
 ):
     root = Path(root).resolve()
     manifest = rebase(read(root / "batch.json"), root)
@@ -402,21 +435,18 @@ def run_batch(
             "submitted": False,
             "workload": manifest["workload"],
         }
-    for row in read(root / "transfer_manifest.json")["files"]:
-        path = (root / row["path"]).resolve()
-        if (
-            not path.is_relative_to(root)
-            or not path.is_file()
-            or file_checksum(path) != row["sha256"]
-        ):
-            raise ValueError("input_package_integrity_failed; no jobs submitted")
+    validate_frozen_inputs(root)
     if (
         manifest["workload"].get("submission_policy") == "phase_dependencies"
         and batch_executor is None
     ):
         from phase_agent.tools.relax_mc_batch.dependencies import advance
 
-        return advance(root, manifest, io or SlurmIO(), phase=phase)
+        return advance(
+            root, manifest, io or SlurmIO(), phase=phase, recollect_final=recollect_final
+        )
+    if recollect_final:
+        raise ValueError("recollect_final_requires_phase_dependencies")
     with _archive_lock(root):
         state_file = root / "workflow_state.json"
         state = (

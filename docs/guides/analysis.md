@@ -11,7 +11,7 @@
 
 ## DFT 校正综合相图（历史与离线诊断）
 
-生产流程仅构建当前模型的 MLIP 相图；DFT 用于同帧误差、相竞争验证及训练，不自动生成纯 DFT 或校正综合凸包。科学规则以 [已确认流程](../workflow-agent-rules-and-source-audit-2026-10-16.md) 为准。以下描述保留的历史或显式离线诊断能力，不表示 Agent 默认回收会生成这些文件。
+生产流程仅构建当前模型的 MLIP 相图；DFT 用于同帧误差、相竞争验证及训练，不自动生成纯 DFT 或校正综合凸包。科学规则以 [当前科研生命周期](../architecture/workflow.md) 为准。以下描述保留的历史或显式离线诊断能力，不表示 Agent 默认回收会生成这些文件。
 
 使用项目已经校验的同帧、同模型能量配对及合格自旋数据。按相与TM/O2组分分组，计算ΔE=(E_DFT-E_MLIP)/(O数/2)。同Na锚点取均值；至少两个不同Na锚点之间线性插值，不外推、不跨相借用。校正是经验估计，不代表DFT精度证明，CSV必须区分来源。
 
@@ -67,7 +67,7 @@ energy_parity为每原子能量；force_parity为每个原子的x/y/z分量，�
 受力RMS尺度比低于0.1只提示核查，不证明接口有误、不排除数据、不直接决定微调。
 该提醒及图表信息进入本轮LLM分析上下文。历史已生成图保留，不更改原始数据。
 
-[phase_agent/analysis/state/post_dft_assessment.py](../../phase_agent/analysis/state/post_dft_assessment.py)。
+[phase_agent/evidence/post_dft_assessment.py](../../phase_agent/evidence/post_dft_assessment.py)。
 
 <a id="doc-output_layout"></a>
 

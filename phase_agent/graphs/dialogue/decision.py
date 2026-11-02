@@ -3,8 +3,8 @@
 from copy import deepcopy
 import hashlib
 import json
-from phase_agent.decisions.agent.dialogue_contract import is_dialogue, dialogue_result
-from phase_agent.analysis.state.build_state_snapshot import build_state_snapshot
+from phase_agent.agents.common.dialogue_contract import is_dialogue, dialogue_result
+from phase_agent.evidence.build_state_snapshot import build_state_snapshot
 from phase_agent.runtime.turn_process import timed_call, process_event
 
 
@@ -73,7 +73,7 @@ def decide_from_saved_facts(
     if not callable(client) or not handler.workflow_kwargs.get("config_session"):
         return run_scientific()
     from phase_agent.runtime.project_context import current_config_session, handler_project_context
-    from phase_agent.analysis.state.project_authority import confirmed_configuration, AUTHORITY_RULE
+    from phase_agent.evidence.project_authority import confirmed_configuration, AUTHORITY_RULE
 
     session = current_config_session(handler)
     config = confirmed_configuration(facts, session)
@@ -82,7 +82,7 @@ def decide_from_saved_facts(
 
     project_card = handler_project_context(handler, facts)
     summary = conversation_facts(facts, project_card)
-    from phase_agent.decisions.agent.summary_request import project_summary
+    from phase_agent.evidence.requests import project_summary
 
     summary["current_project"] = project_summary(summary["current_project"])
     refresh = summary.get("refresh_result_facts") or {}
@@ -116,12 +116,25 @@ def decide_from_saved_facts(
             else "本轮已核对可发现的回传文件并更新结果事实。回传通知应进入原科学流程完成分析和下一步方案；缺失结果具体说明，不反复要求用户先同意读取或分析。"
         ),
     }
-    if facts.get("_recovery_just_approved") or facts.get("post_recovery_next_step_pending"):
-        summary["decision_context"]["post_recovery_choice"] = (
-            "结果回收刚获得明确批准并已完成。现在必须基于回收证据判断下一步优先是 "
-            "select_dft_candidates（DFT）还是 generate_branches（生成新 branch），"
-            "只提出其中一项具体待审批方案；本轮不得执行、提交或把建议当作批准。"
+    from phase_agent.policies.recovery_transition import post_recovery_tools
+
+    stage_tools = post_recovery_tools(facts)
+    recovery_instruction = ""
+    if stage_tools:
+        choices = (
+            "微调训练、补充 DFT、新 branch 搜索及收敛/停止"
+            if "update_mlip" in stage_tools
+            else "补充 DFT 或生成新 branch"
         )
+        recovery_instruction = (
+            f"结果回收已经完成。基于本轮证据比较{choices}，只提出一项具体待审批方案；"
+            f"可建议动作：{'、'.join(sorted(stage_tools))}。本轮不得执行这些动作。"
+            "不再次回收，不提交计算，不把建议当作批准。"
+            "此前的提案错误属于历史，当前待办是生成新建议；没有已保存方案时不能审核虚构方案。"
+            "用户要求推进或同意你提出建议时用advance，不再要求批准读取、分析或再次发送继续。"
+            "用户仅询问原因或状态时直接answer，不能把答疑升级成科研执行。"
+        )
+        summary["decision_context"]["post_recovery_choice"] = recovery_instruction
     allowed = (
         []
         if recovery_limited
@@ -132,16 +145,13 @@ def decide_from_saved_facts(
         ]
     )
     post_recovery_only = bool(
-        facts.get("post_recovery_next_step_pending")
-        or facts.get("_recovery_just_approved")
+        facts.get("post_recovery_next_step_pending") or facts.get("_recovery_just_approved")
     )
     if post_recovery_only and not recovery_limited:
         # This is a phase transition boundary, not a wording preference.
-        # Relax/MC input preparation is a later action and must not be
-        # available until the user approves a DFT/branch choice first.
-        allowed = [
-            name for name in allowed if name in {"select_dft_candidates", "generate_branches"}
-        ]
+        # Only the recovered stage's next-step choices may be proposed;
+        # preparation/approval for later steps cannot be inherited.
+        allowed = [name for name in allowed if name in stage_tools]
 
     def request(payload):
         turn = getattr(handler, "turn_context", {})
@@ -184,8 +194,13 @@ def decide_from_saved_facts(
             mode=payload.get("mode"),
         )
 
-    from phase_agent.decisions.agent.decision_backend import request_decision_action
-    from phase_agent.decisions.agent.dialogue_contract import dialogue_output_contract
+    from phase_agent.models.capabilities import copy_model_capabilities
+
+    copy_model_capabilities(client, request)
+    request._semantic_dialogue = True
+
+    from phase_agent.graphs.decision_team.backend import request_decision_action
+    from phase_agent.agents.common.dialogue_contract import dialogue_output_contract
 
     payload = {
         "mode": "autonomous_search",
@@ -203,13 +218,7 @@ def decide_from_saved_facts(
             "change policy, call tools or prepare science. Make the recovery error visible."
             if recovery_limited
             else "Understand the current conversation. Return answer, inspect_evidence, inspect_configuration, configure, advance, review or cancel_waits, or phase_diagram (plot/locate/export_csv existing current diagram files), phase_quality_policy (audited H/D cutoff changes only; manual fixed values take precedence; no deletion or science in this turn), or phase_quality_review (explicit human retain/remove/restore of bound review IDs). Answer the question first; read only needed evidence for detailed questions. Advance is for a requested scientific next step, never an ordinary question. Use recent_turns to resolve follow-ups. A known blocker requires cause, concrete remedy and what happens after repair; do not repeat approval/continue questions that cannot fix it. Reading and planning need no separate permission. Historical tool outcomes remain compatible but are rechecked by the original scientific workflow. Conversation memory confers no authority."
-            + (
-                "刚完成结果回收：必须在 DFT 与 generate_branches 中择一提出单项方案，"
-                "先展示方案并等待人工批准，禁止直接执行。"
-                if facts.get("_recovery_just_approved")
-                or facts.get("post_recovery_next_step_pending")
-                else ""
-            )
+            + recovery_instruction
         ),
     }
 
@@ -227,8 +236,7 @@ def decide_from_saved_facts(
             return None
         feedback = {
             "code": "dialogue_proposal_validation_failed",
-            "errors": list(getattr(error, "validation_errors", ()) or ())
-            or [message[:1000]],
+            "errors": list(getattr(error, "validation_errors", ()) or ()) or [message[:1000]],
             "allowed_tools": list(allowed),
             "instruction": (
                 "上一版输出不是合法对话结果。请严格返回当前对话协议允许的 kind；"
@@ -240,9 +248,7 @@ def decide_from_saved_facts(
         corrected_context = deepcopy(corrected.get("decision_context") or {})
         corrected_context["proposal_validation_feedback"] = feedback
         corrected["decision_context"] = corrected_context
-        corrected["instruction"] = (
-            corrected.get("instruction", "") + " " + feedback["instruction"]
-        )
+        corrected["instruction"] = corrected.get("instruction", "") + " " + feedback["instruction"]
         return corrected
 
     try:
@@ -284,17 +290,14 @@ def decide_from_saved_facts(
     action.pop("_llm_usage", None)
     if post_recovery_only and action.get("kind") == "advance":
         # The dialogue envelope is only a request to enter the scientific
-        # planner; the planner still receives the hard DFT/branch allow-list.
+        # planner; it still enforces this recovered stage's next-step scope.
         return (defer_scientific or run_scientific)()
-    if post_recovery_only and action.get("tool") not in {
-        "select_dft_candidates",
-        "generate_branches",
-    }:
+    if post_recovery_only and not is_dialogue(action) and action.get("tool") not in stage_tools:
         return {
             "status": "answered",
             "answer": (
-                "回收已完成；下一步只能先提出 DFT 或生成 branch 方案。"
-                "本轮未生成 Relax/MC 输入、未提交计算，请再次发送‘继续’重新提出单项方案。"
+                "回收已完成；下一步建议尚未符合本轮阶段的审批范围。"
+                "本轮未执行新任务；原结果已保留，仅需重新分析下一步建议。"
             ),
             "state": facts,
             "submitted": False,
@@ -446,7 +449,7 @@ def decide_from_saved_facts(
     if action.get("tool") not in {"check_convergence", "pause_search"} and not evidence:
         return (defer_scientific or run_scientific)()
     if evidence and action.get("tool") not in {"check_convergence", "pause_search"}:
-        from phase_agent.decisions.agent.summary_request import required_topics
+        from phase_agent.evidence.requests import required_topics
 
         missing = required_topics(action) - set(evidence.get("_loaded_topics") or [])
         if missing:
@@ -474,12 +477,18 @@ def decide_from_saved_facts(
             return deepcopy(action)
         process_event("重新分析最新事实", {"原因": "回收事实变化或原流程要求修正"})
         reuse_or_refresh.last_call_reused = False
-        from phase_agent.decisions.agent.summary_request import request_summary_first
+        from phase_agent.evidence.requests import request_summary_first
 
-        response = request_summary_first(client, payload)
+        if getattr(client, "supports_expert_advice", False):
+            from phase_agent.graphs.decision_team.graph import request_with_langgraph
+
+            response = request_with_langgraph(client, payload)
+        else:
+            response = request_summary_first(client, payload)
         used = True
         return response
 
+    copy_model_capabilities(client, reuse_or_refresh)
     reuse_or_refresh.decision_backend = handler.decision_backend
     reuse_or_refresh._validates_original_facts = True
     if defer_scientific is not None:

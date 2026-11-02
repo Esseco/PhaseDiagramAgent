@@ -48,39 +48,20 @@ round_budget_review记录choice、两方案预期收益和相对成本依据、r
 
 预算经验按明确任务ID或parent_decision_id归因。记录所选路径的预期、实际完成情况、完整实测相对成本及可归因收益；成本缺失或任务未结束保持未知。保留模型与配置版本，不把未执行路径记作实测结果，不跨能量基准直接比较收益。自动生成training_report和round_budget_outcome记忆候选，经现有审阅机制再成为长期建议；后续决策可读取近期预算结果。
 
-验证：py1中新增路径比较、报告一致性、幂等、来源核对、未知成本和任务归因测试；回归DFT后决策、LangGraph与记忆流程。当前项目只读回放识别27结构报告和82个尚无QBC的候选。没有提交计算、激活模型或修改实际工作流状态。运行中的Python服务需重载代码后生效。
+相关回归覆盖路径比较、报告一致性、幂等、来源核对、未知成本和任务归因。模型/API/HPC 的现场有效性需独立验证，源码更新由用户手动重启服务后加载。
 
-[phase_agent/decisions/agent/round_budget_review.py](../../phase_agent/decisions/agent/round_budget_review.py)。
+[phase_agent/agents/strategic/round_budget_review.py](../../phase_agent/agents/strategic/round_budget_review.py)。
 
 <a id="doc-model_refresh_implementation"></a>
 
-## 新模型结构刷新：实施状态
+## 新模型结构刷新
 
-### 已实现并测试
+候选模型经独立验证和明确激活后，先保留旧相图，再通过 prepare_model_refresh 审阅结构清单、模型/参数、校验和与成本，准备远端 Relax/Single-point 输入。实际范围以冻结方案为准，不因继续消息自动提交或扩大。
 
-- 远端微调输入选用累计合格 DFT 记录，保留层状 Fe/Mn 自旋检查。
-- 只合并累计队列与新增队列中同一 data_id 的镜像记录；不增加 DFT 科学去重。
-- committee 继续全量训练；分组五折继续保留，增加本轮新增子集 OOF 统计。
-- XYZ 与逐结构/逐力分量误差输出携带 data_id、task_id、is_current_round。
-- 纯规则模块 phase_agent/analysis/feedback/model_refresh_plan.py：旧版本 Ehull <1 meV/atom 弛豫，1–10 单点，>10 按 Na×相分层抽取总量10%（向上取整）。
-- 历史 near-hull 标记、未评估结构保留；同结构哈希合并；异版本排序能量拒绝。
-- 补充弛豫判据：新 Ehull <1，或1–10且最大原子力范数 >0.05 eV/Å。
+选择复用 analysis/feedback/model_refresh_plan.py：按旧模型正式相图 EHull（eV/atom）冻结首批分层；小于 0.001 的结构全部弛豫，0.001–0.010（含两端）全部单点，大于 0.010 的结构按组分与相分层抽取 10%（总数向上取整）做单点。没有可用 EHull 的已登记结构保留单点，不将其假定为远凸包。刷新后只用新模型结果构建其凸包，暂缓和缺失项标记 partial；不能以 partial 相图单独宣称全局收敛。
 
-### 已接通的工作流
+新方案在同一远端刷新任务中先做单点，再按首批冻结分层检查最大原子力模长：0.001–0.010 eV/atom 严格大于 0.1 eV/Å，>0.010 eV/atom 的抽样点严格大于 0.2 eV/Å 时立即弛豫；无旧 EHull 的结构保守使用 0.1 eV/Å。单点先保存与输入结构和模型身份绑定的受力缓存，弛豫失败后在同一任务目录恢复时复用，不重新计算已完成单点。刷新交付包携带必要的受控执行器；一批审批及一次提交覆盖该条件弛豫范围。回收后校验逐原子受力、阈值、结构身份和弛豫收敛，全部有效后更新本地凸包、版本归档及 latest；缺力、身份不符或失败时保持等待并保留结果，不宣称完成。旧冻结方案按原语义恢复。
 
-1. 激活后刷新门控、旧相图快照和跨代潜力结构证据提取。
-2. 基于实测成本的首批及补充上限预览、审批和预算预留。
-3. Model-refresh 目录下远端 Relax/Single-point 输入生成、committee 预测与结果回收。
-4. 最多一轮补充弛豫的授权与自动准备，失败/缺结果等待处理。
-5. 新版本相图 partial/覆盖标记、旧能量隔离和搜索/收敛决策门控。
+刷新完成后，若新模型没有有效新增 Branch，先生成并展示实际数量和分布，再单独审批 Relax/MC；后续比较旧 Branch 在新模型下续搜、新 Branch 和 DFT。详见 [epoch 工作流](../architecture/workflow.md)。
 
-上述五项现已接通。激活后先单独审批刷新，不本机自动重算。复用现有预算、ManualUploadBatchRunner、回收校验和相识别缓存；预算不足不静默截断。
-
-目录为 submissions/epochN_模型/Model-refresh-0001/Relax 和 Single-point，各阶段批次共享父目录 results。初始批准同时授权所展示数量和成本上限内最多一轮补充输入生成；缺少批准记录或预算预留不得自动追加，不授权本机计算或自动提交。
-
-成本复用规模估计与历史成本校准，单点暂按弛豫上界；有同类实测时估计串行耗时，否则明确未知。失败/缺结果可以继续等待或明确回复“不再等待刷新”，不把缺失任务标为完成。新相图CSV标注已刷新、暂缓与partial，不能单独据partial宣称全局收敛。
-
-没有处理实际工作区数据、运行真实MACE训练或提交作业。超算仍需更新项目代码并配置正确的模型路径、环境和调度模板。
-
-[phase_agent/analysis/feedback/model_refresh_plan.py](../../phase_agent/analysis/feedback/model_refresh_plan.py)。
-
+实现：[model_refresh_plan.py](../../phase_agent/analysis/feedback/model_refresh_plan.py)、[model_refresh_gate.py](../../phase_agent/tools/workflows/model_refresh_gate.py)、[training_context.py](../../phase_agent/evidence/training_context.py)。

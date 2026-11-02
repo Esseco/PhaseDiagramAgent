@@ -86,8 +86,30 @@ def prepare_cv_review(state, job, result):
             "K折评估训练方法，不是最终全数据模型的独立测试。",
             "未匹配旧模型同帧预测的结构不用于改善幅度计算；未评估近凸包排序。",
         ],
-        "next_proposal": "按已确认路线申请切换本轮新模型，刷新结构与MLIP相图；交付前使用未参与当前模型训练的新DFT独立检验。",
+        "next_proposal": "按已确认路线申请切换本轮新模型，刷新结构与MLIP相图，进入下一轮科学决策。独立验证不因切换或刷新而自动完成。",
     }
+    source_epoch = (job.get("report") or {}).get("epoch") or (
+        result.get("kfold_metrics") or {}
+    ).get("epoch")
+    import re
+
+    epoch_match = re.fullmatch(r"epoch(\d+)", str(source_epoch or ""))
+    next_epoch = f"epoch{int(epoch_match[1]) + 1}" if epoch_match else "下一 epoch"
+    report.update(
+        source_epoch=source_epoch,
+        next_epoch=next_epoch,
+        report_path=str(root / "finetuning_results.md"),
+        all_out_of_fold={
+            "structures": len(energies),
+            "force_components": len(forces),
+            "energy_per_atom": stats(
+                [float(r["E_MLIP_eV_per_atom"]) - float(r["E_DFT_eV_per_atom"]) for r in energies]
+            ),
+            "forces": stats(
+                [float(r["F_MLIP_eV_per_A"]) - float(r["F_DFT_eV_per_A"]) for r in forces]
+            ),
+        },
+    )
     path = root / "cv_baseline_review.json"
     content = json.dumps(report, ensure_ascii=False, indent=2)
     if not path.exists() or path.read_text(encoding="utf-8") != content:
@@ -100,8 +122,68 @@ def prepare_cv_review(state, job, result):
             else "缺少匹配数据"
         )
 
+    markdown = "\n".join(
+        [
+            f"# {source_epoch or '本轮'} 微调结果",
+            "",
+            f"原模型：`{job['original_model_version']}`",
+            "",
+            "## 本轮分组 K 折评估",
+            "",
+            f"训练回传结构 {len(energies)}；力分量 {len(forces)}。下表为折外误差。",
+            "",
+            "| 证据范围 | 能量 MAE/RMSE (meV/atom) | 力 MAE/RMSE (meV/Å) |",
+            "| --- | --- | --- |",
+            "| 全部折外样本 | "
+            + metric(report["all_out_of_fold"]["energy_per_atom"], "")
+            + " | "
+            + metric(report["all_out_of_fold"]["forces"], "")
+            + " |",
+            "| 匹配样本：旧模型 | "
+            + metric(report["old"]["energy_per_atom"], "")
+            + " | "
+            + metric(report["old"]["forces"], "")
+            + " |",
+            "| 匹配样本：折外模型 | "
+            + metric(report["new"]["energy_per_atom"], "")
+            + " | "
+            + metric(report["new"]["forces"], "")
+            + " |",
+            "",
+            f"可比范围：匹配结构 {len(matched)}/{len(energies)}；匹配力分量 {len(force_errors)}/{len(forces)}。",
+            "仅同帧、同标签和同分量的新旧指标可用于改善幅度比较。",
+            "",
+            "## 证据限制",
+            "",
+            *["- " + text for text in report["limitations"]],
+            "",
+            "## 下一步审批",
+            "",
+            f"候选结果交接及前置核对通过后，请批准是否进入 {next_epoch}（切换本轮新模型）。",
+            "当前模型保持不变；只有批准已展示的候选方案后才执行切换。",
+            "切换后展示已有结构与 MLIP 相图刷新的范围和成本，计算输入另行审批。",
+            "",
+            "## 原始证据",
+            "",
+            *[
+                f"- `{root / name}`"
+                for name in (
+                    "training.finished.json",
+                    "models.json",
+                    "kfold_metrics.csv",
+                    "energy_comparison.csv",
+                    "force_comparison.csv",
+                    "cv_baseline_review.json",
+                )
+            ],
+            "",
+        ]
+    )
+    markdown_path = Path(report["report_path"])
+    if not markdown_path.exists() or markdown_path.read_text(encoding="utf-8") != markdown:
+        markdown_path.write_text(markdown, encoding="utf-8")
     message = (
-        f"K折对比报告已生成：{path}。匹配结构 {len(matched)}/{len(energies)}，力分量 {len(force_errors)}。"
+        f"本轮微调结果报告已生成：{markdown_path}。匹配结构 {len(matched)}/{len(energies)}，力分量 {len(force_errors)}。"
         + "\n旧模型→折外模型：能量MAE/RMSE "
         + metric(report["old"]["energy_per_atom"], "meV/atom")
         + " → "
@@ -129,7 +211,7 @@ def register_cv_candidate(current, key, job, result, report, handoff):
         for name in ("energy_per_atom", "forces")
         for metric in ("mae", "rmse")
     )
-    if not complete:
+    if report["structures"] <= 0 or report["force_components"] <= 0:
         return False
     from copy import deepcopy
     from phase_agent.tools.local.training_handoff import digest_file
@@ -147,13 +229,23 @@ def register_cv_candidate(current, key, job, result, report, handoff):
         "status": "completed",
         "passed": True,
         "evaluation_type": "grouped_cross_validation_review",
+        "evidence_status": "research_candidate",
         "independent_test_completed": False,
         "checks": {"fully_matched": complete},
         "energy_and_force_improved": improved,
         "old_metrics": report["old"],
         "new_metrics": report["new"],
         "validation_data_version": "cv-" + result["fingerprint"],
-        "limitations": report["limitations"],
+        "limitations": [
+            *report["limitations"],
+            *(
+                []
+                if complete
+                else [
+                    f"同帧新旧模型比较仅覆盖 {report['structures']}/{report['returned_structures']} 个结构；其余样本不用于改善判断。"
+                ]
+            ),
+        ],
         "activate_new_model": False,
     }
     stored = current.setdefault("candidate_models", {}).get(version)
@@ -167,6 +259,7 @@ def register_cv_candidate(current, key, job, result, report, handoff):
         "dft_data_version": model["dataset_version"],
         "validation_data_version": validation["validation_data_version"],
         "status": "validated_candidate",
+        "evidence_status": "research_candidate",
     }
     if stored and stored.get("validation") == validation and stored.get("model") == model:
         for field in ("agent_review", "agent_review_diagnostic", "superseded_agent_reviews"):
@@ -177,7 +270,10 @@ def register_cv_candidate(current, key, job, result, report, handoff):
         stage="awaiting_activation_approval",
         candidate_model_version=version,
         evidence_type="grouped_cross_validation_review",
+        training_report_path=report.get("report_path"),
+        source_epoch=report.get("source_epoch"),
+        next_epoch=report.get("next_epoch"),
         review_sha256=digest_file(artifact),
-        reason=f"本轮微调已完成，K折同帧评估已完成，改善情况见指标。按已确认路线切换候选 {version}，随后刷新已有结构与凸包，再判断收敛、针对关键结构补DFT或下一轮搜索。K折不等同最终模型独立测试。\n如同意，回复：激活候选 {version} 原因：本轮训练完成，采用新模型刷新凸包后评估收敛与DFT缺口。",
+        reason=f"本轮微调已完成，K折同帧评估已完成，改善情况见指标。按已确认路线切换候选 {version}，随后刷新已有结构与凸包，进入下一轮科学决策。K折不等同最终模型独立测试。\n如同意，回复：激活候选 {version} 原因：本轮训练完成，采用新模型刷新凸包后评估收敛与DFT缺口。",
     )
     return True

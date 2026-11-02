@@ -15,7 +15,17 @@ SAFE_NODES = {
 }
 
 
+def initial_checkpoint(snapshot):
+    return (
+        tuple(snapshot.next) == ("initialize",)
+        and not (snapshot.values or {}).get("business_frame")
+        and (snapshot.values or {}).get("completed_response") is None
+    )
+
+
 def safe_read_checkpoint(snapshot):
+    if initial_checkpoint(snapshot):
+        return True
     if not snapshot.next or any(task.interrupts for task in snapshot.tasks):
         return False
     if set(snapshot.next) <= SAFE_NODES:
@@ -44,9 +54,14 @@ def can_resume_message(config_path, message_identity):
     try:
         graph = copy(scientific_graph())
         graph.checkpointer = SqliteSaver(connection)
-        snapshot = graph.get_state(
-            {"configurable": {"thread_id": "project-scientific-lifecycle-v2"}}, subgraphs=True
+        from phase_agent.persistence.lifecycle_routes import (
+            lifecycle_base_thread,
+            current_lifecycle_thread,
         )
+
+        base = lifecycle_base_thread("project-scientific-lifecycle-v2", state_path)
+        thread = current_lifecycle_thread(connection, base)
+        snapshot = graph.get_state({"configurable": {"thread_id": thread}}, subgraphs=True)
         # The receipt identity proves this gateway message already started.
         # A safe checkpoint may still carry the previous request ID after an
         # interrupted read-only node; the durable runner rebinds it before

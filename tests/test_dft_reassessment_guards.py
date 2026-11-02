@@ -60,3 +60,22 @@ def test_prediction_failure_preserves_valid_dft_and_original_failure(candidate):
     assert revised['status']=='completed' and revised['outputs']['energy']==row['outputs']['energy']
     assert (dest/'original_result.json').read_bytes()==original_bytes
     assert revised['recovery_provenance']['original_status']=='failed'
+
+
+def test_vasp_initial_frame_needs_no_filename_format_inference(candidate, monkeypatch):
+    from pymatgen.core import Structure
+
+    source, worker, dest, expected, row, structure, options, work = candidate
+
+    def reject_inference(*args, **kwargs):
+        raise AssertionError("VASP recovery must explicitly select POSCAR format")
+
+    monkeypatch.setattr(Structure, "from_file", reject_inference)
+    transform = reassessment_transform(
+        work, options, validator=lambda *args: structure,
+        predictor=lambda *args, **kwargs: {"status": "failed", "error": "synthetic GPU failure"},
+    )
+    report = transform(dest, source, {"input_directory": "worker", "expected": expected}, row)
+    assert report["status"] == "prediction_failed"
+    assert json.loads((dest / "result.json").read_text())["status"] == "completed"
+    assert json.loads((dest / "original_result.json").read_text())["status"] == "failed"

@@ -212,7 +212,7 @@ def test_geometry_change_is_observation_not_error_or_score_boost(monkeypatch):
 
 
 def test_decision_context_exposes_joint_evidence():
-    from phase_agent.analysis.state.build_decision_context import build_decision_context
+    from phase_agent.evidence.build_decision_context import build_decision_context
     from phase_agent.graphs.dialogue.evidence import conversation_facts
 
     state = sample()

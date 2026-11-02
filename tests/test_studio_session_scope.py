@@ -112,7 +112,7 @@ def test_continue_cannot_reoffer_delivered_approval_without_execution_receipt(tm
     from tests.test_unified_react_dialogue import make_handler
     from phase_agent.tools.step_runner.file_protocol import read_json
     from phase_agent.graphs.approval_graph import durable_approval
-    from phase_agent.tools.policy.file_approval import proposal_hash
+    from phase_agent.policies.file_approval import proposal_hash
 
     first = make_handler(
         tmp_path,

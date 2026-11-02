@@ -47,6 +47,23 @@ def branch_lines(record):
         return ["计划新增 branch：0"]
     allocations = regions if regions is not None else plan.get("allocations") or []
     lines = ["Branch 计划（尚未生成）"]
+    initial = (params.get("region_preview") or {}).get("initial_coverage") or {}
+    if initial.get("required"):
+        lines.extend(
+            [
+                "首轮仅用 coverage：先选择扩胞，再覆盖这些扩胞下全部合法相与整数 Na 组分；端点按确认边界过滤，TM 排列按确认设置。",
+                f"本次选择 {value(initial.get('selected_supercells'))} 种扩胞矩阵，应覆盖 {value(initial.get('expected_cells'))} 个合法相/H/x 组合；Na 数量=x×氧数量/2，不按候选Na位点数归一化。",
+                "达到保护阈值或初始化失败时报告覆盖未完成，不自动准备 Relax–MC 输入；branch/结构两级去重后才封装。",
+            ]
+        )
+    selected_h = {
+        str(matrix): matrix for row in allocations for matrix in (row.get("supercells") or [])
+    }
+    if selected_h:
+        from phase_agent.science.structures.boundary_utils import det_H
+
+        lines.append("选定扩胞矩阵（相对各自母结构）：")
+        lines.extend(f"det(H)={det_H(matrix)}：H={matrix}" for matrix in selected_h.values())
     if plan.get("candidate_quota") is not None:
         lines.append(
             f"候选配额：{value(plan['candidate_quota'])}；branch上限：{value(plan.get('selected_branch_upper'))}"

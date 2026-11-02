@@ -61,7 +61,7 @@ def setup_direction():
 def test_single_approval_executes_saved_action_and_replay_is_safe(tmp_path, monkeypatch, unified):
     from tests.test_execution_policy import ExecutionPolicyTest
     from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
-    from phase_agent.graphs.direction_review_graph import direction_checkpoint
+    from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
     import phase_agent.tools.local.recover_remote_training as recovery
 
     setup = ExecutionPolicyTest()
@@ -156,7 +156,7 @@ def test_changed_plan_requires_new_review(tmp_path):
 
 def test_rejection_is_persisted_and_does_not_represent_the_plan(tmp_path, monkeypatch):
     from phase_agent.tools.state.approved_direction import record_action_direction
-    from phase_agent.graphs.direction_review_graph import direction_checkpoint
+    from phase_agent.graphs.recovery.direction_review_graph import direction_checkpoint
     import phase_agent.tools.local.recover_remote_training as recovery
 
     state = setup_direction()

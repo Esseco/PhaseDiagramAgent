@@ -193,8 +193,11 @@ def test_actual_coordinator_and_local_recovery_from_named_output(tmp_path, monke
     executor, calls = helpers.fake_executor(monkeypatch)
     monkeypatch.setenv("SLURM_JOB_ID", "fake-test-job")
 
+    outcomes = []
+
     def compute(*args, **kw):
         outcome = run_batch(kw["cwd"], submit=True, batch_executor=executor)
+        outcomes.append(outcome)
         assert outcome["status"] in {"completed", "paused"}, outcome
         return 0
 
@@ -208,5 +211,10 @@ def test_actual_coordinator_and_local_recovery_from_named_output(tmp_path, monke
     )
     recovered = recover_available(incoming, context)
     record = recovered["relax_mc_batches"][result["bundle_id"]]
-    assert record["status"] in {"completed", "paused"} and "return_error" not in record
-    assert recovered["qbc_candidates"]
+    if outcomes[0]["status"] == "completed":
+        assert record["status"] == "completed" and "return_error" not in record
+        assert recovered["qbc_candidates"]
+    else:
+        assert "relax_mc_formal_recovery_blocked" in record["return_error"]
+        assert not record.get("import_checksum")
+        assert recovered["tasks"] == incoming["tasks"]

@@ -1,4 +1,4 @@
-from phase_agent.decisions.qbc_selection.select_dft_candidates import select_dft_candidates
+from phase_agent.agents.reliability.selection.select_dft_candidates import select_dft_candidates
 from phase_agent.tools.workflows.preview_dft_inputs import preview_dft_inputs
 from phase_agent.configuration.defaults.default_dft_decision_config import (
     default_dft_decision_config,

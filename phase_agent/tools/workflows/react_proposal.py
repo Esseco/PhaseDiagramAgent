@@ -3,7 +3,7 @@
 from phase_agent.interface_compatibility import call_with_optimizations
 
 from copy import deepcopy
-from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+from phase_agent.policies.validate_tool_action import validate_tool_action
 from phase_agent.tools.state.state_manager import agent_state_summary
 
 
@@ -39,7 +39,7 @@ def prepare_react_proposal(frame):
             agent_state_summary, current, _optimizations={"_approval_only": True}
         )
         if context.get("saved_input_only")
-        else agent_state_summary(current)
+        else agent_state_summary(current, manager=context.get("manager"))
     )
     summary["user_message"] = str(context.get("user_message") or "")
     if stored:
@@ -164,7 +164,7 @@ def stale_proposal_error(proposal, current, context, config):
 
     if action.get("tool") == "update_mlip" and training_pending_validation(current):
         return "训练结果已回收；旧训练方案不可再次执行。"
-    from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+    from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
     assessment = post_dft_assessment(current, context.get("effective_config") or config)
     if action.get("_post_dft_scope_key") and (

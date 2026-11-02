@@ -40,7 +40,8 @@ def prune_history(conn, keep=8, *, limit_namespaces=False, namespace_keep=32):
         if limit_namespaces:
             # Keep recent subgraph executions and every interrupted/pending one.
             # Root threads are never retired. Native recovery uses their latest IDs.
-            conn.execute("""DELETE FROM checkpoints WHERE checkpoint_ns <> ''
+            conn.execute(
+                """DELETE FROM checkpoints WHERE checkpoint_ns <> ''
                 AND (thread_id, checkpoint_ns) IN (
                     SELECT thread_id, checkpoint_ns FROM (
                         SELECT thread_id, checkpoint_ns, max(checkpoint_id) AS latest,
@@ -54,7 +55,9 @@ def prune_history(conn, keep=8, *, limit_namespaces=False, namespace_keep=32):
                         AND (w.channel='__interrupt__' OR w.channel='__pregel_tasks'
                              OR w.channel LIKE 'branch:to:%')
                     )
-                )""", (namespace_keep,))
+                )""",
+                (namespace_keep,),
+            )
         conn.execute(
             """DELETE FROM checkpoints WHERE rowid IN (
             SELECT rowid FROM (SELECT rowid, row_number() OVER (

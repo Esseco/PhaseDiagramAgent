@@ -8,7 +8,7 @@ import zipfile
 
 
 def batch_label(directory, state, version, operation, sequence):
-    from phase_agent.analysis.state.model_epoch import model_epoch
+    from phase_agent.evidence.model_epoch import model_epoch
 
     directory = Path(directory)
     project = next(
@@ -122,12 +122,17 @@ def package_folder(parent, label, fingerprint):
             occupied = True
             archive = existing / "inputs.zip"
             if archive.is_file():
-                with zipfile.ZipFile(archive) as bundle:
-                    rows = json.loads(bundle.read("transfer_manifest.json"))["files"]
-                identity = hashlib.sha256()
-                for row in rows:
-                    identity.update(row["path"].encode())
-                    identity.update(bytes.fromhex(row["sha256"]))
+                try:
+                    with zipfile.ZipFile(archive) as bundle:
+                        rows = json.loads(bundle.read("transfer_manifest.json"))["files"]
+                    identity = hashlib.sha256()
+                    for row in rows:
+                        identity.update(row["path"].encode())
+                        identity.update(bytes.fromhex(row["sha256"]))
+                except (zipfile.BadZipFile, KeyError, ValueError, TypeError):
+                    # An invalid old delivery still occupies its name. Preserve
+                    # its evidence and allocate a new package, never overwrite it.
+                    continue
                 if identity.hexdigest()[:16] == fingerprint:
                     return existing  # Existing handed-off inputs are immutable.
         if not occupied and not label_root.with_name(label_root.name + "_output").exists():

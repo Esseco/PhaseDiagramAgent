@@ -1,4 +1,4 @@
-from phase_agent.analysis.state.summarize_phase_coverage import summarize_phase_coverage
+from phase_agent.evidence.summarize_phase_coverage import summarize_phase_coverage
 
 
 def test_each_phase_has_own_representative():

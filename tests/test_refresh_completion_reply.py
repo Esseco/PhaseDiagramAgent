@@ -195,7 +195,7 @@ def test_pending_refresh_does_not_claim_completion():
 def test_real_single_action_runner_stops_at_next_approval(tmp_path):
     from tests.test_event_loop import _session
     from phase_agent.tools.workflows.lifecycle_finalization import _run_workflow_actions
-    from phase_agent.tools.workflows.run_event_loop import run_action_turn
+    from phase_agent.tools.workflows.run_action_turn import run_action_turn
 
     executed, calls = [], []
 

@@ -130,6 +130,47 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 _bundle_mc_backend(directory)
             _portable_transfer_worker(directory, "run_mlip_batch", "_handoff_mlip_batch")
             executor = _executor_reference(self.worker_command)
+            inline_refresh = any(
+                (
+                    json.loads((directory / entry["input_path"]).read_text(encoding="utf8")).get(
+                        "parameters"
+                    )
+                    or {}
+                ).get("refresh_force_threshold")
+                is not None
+                for entry in manifest
+            )
+            if inline_refresh:
+                executor = "_handoff_refresh_executor:execute_mlip_task"
+                from phase_agent.science.mlip import slurm_executor, mace_worker, refresh_inline
+
+                executor_source = (
+                    Path(slurm_executor.__file__)
+                    .read_text(encoding="utf8")
+                    .replace(
+                        "from phase_agent.science.mlip.mace_worker import run_mace_worker",
+                        "from _handoff_refresh_worker import run_mace_worker",
+                    )
+                )
+                worker_source = (
+                    Path(mace_worker.__file__)
+                    .read_text(encoding="utf8")
+                    .replace(
+                        "from phase_agent.science.mlip.refresh_inline import run_inline_refresh",
+                        "from _handoff_refresh_inline import run_inline_refresh",
+                    )
+                )
+                for entry in manifest:
+                    task_directory = directory / Path(entry["input_path"]).parent
+                    (task_directory / "_handoff_refresh_executor.py").write_text(
+                        executor_source, encoding="utf8"
+                    )
+                    (task_directory / "_handoff_refresh_worker.py").write_text(
+                        worker_source, encoding="utf8"
+                    )
+                    (task_directory / "_handoff_refresh_inline.py").write_bytes(
+                        Path(refresh_inline.__file__).read_bytes()
+                    )
             (directory / "run_mlip_batch.py").write_text(
                 "from pathlib import Path\n"
                 "from _handoff_mlip_batch import main\n"

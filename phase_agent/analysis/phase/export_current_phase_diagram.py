@@ -7,6 +7,11 @@ from phase_agent.analysis.phase.phase_snapshot_paths import phase_snapshot_direc
 
 
 def export_current_phase_diagram(state, *, directory=None, method="mlip"):
+    if method == "mlip":
+        from phase_agent.tools.relax_mc_batch.completion_gate import require_complete_imports
+
+        require_complete_imports(state)
+
     if method not in {"mlip", "dft", "combined"}:
         raise ValueError("相图方法只能是 mlip、dft 或 combined")
     snapshot = (state.get("phase_diagrams") or {}).get(method) or {}

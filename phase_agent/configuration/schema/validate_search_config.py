@@ -10,12 +10,18 @@ def validate_search_config(config: dict, *, stage="full") -> dict:
     if shape_errors:
         return _report([], shape_errors, [], stage)
     missing, conflicts, ambiguities = [], [], []
+    refresh_policy = (config.get("model_refresh") or {}).get("energy_policy")
+    if refresh_policy not in (None, "single_model", "latest_valid_per_structure_v1"):
+        conflicts.append("model_refresh.energy_policy_invalid")
     if (config.get("budgets") or {}).get("enforcement", "advisory") not in ("advisory", "hard"):
         conflicts.append("budgets.enforcement_invalid")
     try:
-        from phase_agent.tools.policy.workflow_policy import settings
+        from phase_agent.policies.workflow_policy import settings
 
         settings(config)
+        from phase_agent.agents.strategic.human_review import authorization_settings
+
+        authorization_settings(config)
     except (ValueError, TypeError) as error:
         conflicts.append(str(error))
     required = [
@@ -63,6 +69,12 @@ def validate_search_config(config: dict, *, stage="full") -> dict:
     calculation = config.get("calculation") or {}
     if not calculation.get("mlip_version"):
         missing.append("calculation.mlip_version")
+    try:
+        from phase_agent.science.mlip.model_interface import validate_model_selection
+
+        conflicts.extend(validate_model_selection(config))
+    except (TypeError, ValueError) as error:
+        conflicts.append(f"mlip.selection_invalid:{error}")
     dft = config.get("dft") or {}
     if not dft.get("parameters") and dft.get("parameter_source") != "atomate_defaults":
         missing.append("dft.parameters")
@@ -208,6 +220,7 @@ def _shape_errors(config):
         "qbc",
         "qbc.retrain",
         "mc_policy",
+        "model_refresh",
         "mlip_finetune",
         "mlip_finetune.training",
         "mlip_finetune.validation",

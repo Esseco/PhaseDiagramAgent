@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from phase_agent.tools.relax_mc_batch.files import write, read
 from phase_agent.tools.workflows.branch_review_view import readable_view, raw_record
-from phase_agent.tools.policy.adaptive_branch_count import configured_selection_guards
+from phase_agent.policies.adaptive_branch_count import configured_selection_guards
 from phase_agent.tools.workflows.compact_review import review_artifacts
 
 
@@ -26,7 +26,7 @@ def artifact_path(state, task_key, params, directory=None):
 
 
 def proposal_artifacts(proposal, state):
-    from phase_agent.tools.policy.region_sampling import is_region
+    from phase_agent.policies.region_sampling import is_region
     from phase_agent.tools.workflows.region_review import write_proposal
 
     if is_region(proposal.get("raw_action") or {}):
@@ -272,7 +272,7 @@ def determinant(matrix):
 
 
 def result_artifacts(directory, history, manager, registered, state, action):
-    from phase_agent.tools.policy.region_sampling import is_region
+    from phase_agent.policies.region_sampling import is_region
 
     if is_region(action):
         from phase_agent.tools.workflows.region_review import write_result

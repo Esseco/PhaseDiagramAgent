@@ -8,8 +8,8 @@ import math
 def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026):
     """Candidates carry registered IDs, content hashes and old-version evidence.
 
-    Missing energies are evaluated, not silently discarded. Historical near-hull
-    evidence can promote a structure, but cannot supply a new-version energy.
+    Missing energies are evaluated, not silently discarded. Historical structures
+    without current energy remain unassessed; known far structures use the audit sample.
     """
     if not old_version or not new_version or old_version == new_version:
         raise ValueError("refresh requires two distinct explicit model versions")
@@ -34,8 +34,6 @@ def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026)
             if energy is None
             else "near_hull"
             if energy <= 0.010
-            else "historical_near_hull"
-            if row.get("historical_near_hull")
             else "far_audit"
         )
         previous = unique.get(key)
@@ -43,7 +41,6 @@ def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026)
             "ground_state": 0,
             "unassessed": 1,
             "near_hull": 2,
-            "historical_near_hull": 3,
             "far_audit": 4,
         }
         if (
@@ -84,6 +81,8 @@ def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026)
             "predict_through": 0.010,
             "audit_fraction": 0.10,
             "force_threshold": 0.1,
+            "far_force_threshold": 0.2,
+            "force_followup_version": 2,
             "maximum_supplemental_waves": 1,
             "seed": seed,
         },
@@ -91,7 +90,7 @@ def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026)
         "total_unique": len(unique),
         "deferred": len(unique) - len(selected),
         "coverage_gaps": gaps,
-        "maximum_supplemental_count": sum(r["operation"] == "predict" for r in selected),
+        "maximum_supplemental_count": 0,
     }
 
 
@@ -101,10 +100,9 @@ def supplemental_relaxation_required(ehull, forces):
         raise ValueError("invalid new-model Ehull")
     if ehull < 0.001:
         return True
-    if ehull > 0.010:
-        return False
     if not forces or any(
         len(vector) != 3 or not all(math.isfinite(x) for x in vector) for vector in forces
     ):
         raise ValueError("new-model atomic force vectors missing or invalid")
-    return max(math.sqrt(sum(x * x for x in vector)) for vector in forces) > 0.1
+    threshold = 0.1 if ehull <= 0.010 else 0.2
+    return max(math.sqrt(sum(x * x for x in vector)) for vector in forces) > threshold

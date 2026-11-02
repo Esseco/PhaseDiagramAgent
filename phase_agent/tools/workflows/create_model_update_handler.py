@@ -86,7 +86,7 @@ def create_model_update_handler(
                 "state": activation["state"],
                 "validation": stored["validation"],
             }
-        from phase_agent.tools.policy.workflow_policy import active_tasks
+        from phase_agent.policies.workflow_policy import active_tasks
 
         if active_tasks(current):
             return {
@@ -178,6 +178,7 @@ def create_model_update_handler(
                 "status": "completed" if artifacts_valid else "invalid_training_artifacts",
                 "passed": artifacts_valid,
                 "evaluation_type": "training_artifact_integrity",
+                "evidence_status": "research_candidate",
                 "independent_test_completed": False,
                 "validation_data_version": "artifacts-" + dataset_version,
                 "diagnostic_validation": validation,

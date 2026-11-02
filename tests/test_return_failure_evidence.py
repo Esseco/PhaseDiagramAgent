@@ -91,21 +91,30 @@ def test_missing_receipt_keeps_task_pending_and_preserves_collection_cause(
     assert not current["slurm_batches"][0].get("relax_mc_wave_done")
 
 
-def test_slurm_exit_code_is_returned_without_interpreting_it_as_task_completion(monkeypatch):
+@pytest.mark.parametrize(
+    "accounting,elapsed,nodes",
+    [
+        ("123|OUT_OF_MEMORY|0:9|MemoryLimit\n", None, None),
+        ("123|OUT_OF_MEMORY|0:9|MemoryLimit|75|gpu-a\n", 75, "gpu-a"),
+    ],
+)
+def test_slurm_exit_code_is_returned_without_interpreting_it_as_task_completion(
+    monkeypatch, accounting, elapsed, nodes
+):
     monkeypatch.setattr(
         "subprocess.run",
-        lambda *a, **k: SimpleNamespace(
-            returncode=0, stdout="123|OUT_OF_MEMORY|0:9|MemoryLimit\n", stderr=""
-        ),
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=accounting, stderr=""),
     )
     assert SlurmIO().evidence(["123"])["123"] == {
         "state": "OUT_OF_MEMORY",
         "exit_code": "0:9",
         "reason": "MemoryLimit",
+        "elapsed_seconds": elapsed,
+        "nodes": nodes,
     }
 
 
-def returned_archive(tmp_path):
+def returned_archive(tmp_path, status="failed"):
     root = tmp_path / "remote"
     root.mkdir()
     summary = {
@@ -113,7 +122,7 @@ def returned_archive(tmp_path):
         "plan_checksum": "plan",
         "model_version": "m1",
         "config_version": "c1",
-        "status": "failed",
+        "status": status,
     }
     write(root / "result_summary.json", summary)
     write(root / "workflow_state.json", {"tasks": [{"task_id": "t", "status": "pending"}]})
@@ -138,10 +147,27 @@ def returned_archive(tmp_path):
     return archive, destination, state, context
 
 
+def completed_returned_archive(tmp_path):
+    archive, destination, state, context = returned_archive(tmp_path)
+    root = tmp_path / "remote"
+    summary = {
+        **state["relax_mc_batches"]["b"]["result_summary"],
+        "status": "completed",
+        "task_count": 1,
+    }
+    write(root / "result_summary.json", summary)
+    write(root / "workflow_state.json", {"tasks": [{"task_id": "t", "status": "completed"}]})
+    create_bundle(root, list(root.glob("*.json")), archive, kind="results")
+    state["relax_mc_batches"]["b"].update(
+        status="completed", result_summary=summary, import_checksum=checksum(archive)
+    )
+    return archive, destination, state, context
+
+
 def test_same_archive_repairs_missing_local_extraction_without_compute_or_readmission(
     tmp_path, monkeypatch
 ):
-    archive, destination, state, context = returned_archive(tmp_path)
+    archive, destination, state, context = completed_returned_archive(tmp_path)
     monkeypatch.setattr(
         "phase_agent.tools.relax_mc_batch.results.reconcile_task_results",
         Mock(side_effect=AssertionError("must not readmit")),
@@ -152,7 +178,7 @@ def test_same_archive_repairs_missing_local_extraction_without_compute_or_readmi
     record = result["state"]["relax_mc_batches"]["b"]
     assert record["local_recovery"]["restored_file_count"] == 3
     assert record["remote_diagnostics"]["controller"]["error"] == "squeue query failed"
-    assert record["remote_diagnostics"]["unverified_task_ids"] == ["t"]
+    assert record["remote_diagnostics"]["unverified_task_ids"] == []
     assert state == context["event_state"] and not state["relax_mc_batches"]["b"].get(
         "local_recovery"
     )
@@ -165,8 +191,46 @@ def test_same_archive_repairs_missing_local_extraction_without_compute_or_readmi
     )
 
 
+@pytest.mark.parametrize("status", ["failed", "partial"])
+def test_historical_incomplete_return_keeps_unverified_tasks_in_diagnostics(tmp_path, status):
+    archive, destination, state, context = returned_archive(tmp_path, status)
+    before = deepcopy(state)
+    root = tmp_path / "remote"
+    summary = state["relax_mc_batches"]["b"]["result_summary"]
+    diagnostic = read_return_diagnostics(root, summary, [{"task_id": "t", "status": "pending"}])
+    assert diagnostic["controller"]["origin"] == "remote_controller"
+    assert diagnostic["controller"]["error"] == "squeue query failed"
+    assert diagnostic["unverified_task_ids"] == ["t"]
+    with pytest.raises(ValueError, match="formal_recovery_blocked:batch_status_not_completed"):
+        import_results(action={"parameters": {"bundle_id": "b"}}, context=context)
+    assert state == before
+    assert state["relax_mc_batches"]["b"]["import_checksum"] == checksum(archive)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("status", ["failed", "partial"])
+@pytest.mark.parametrize("previous_checksum", [None, "older-checksum"])
+def test_unadmitted_incomplete_archive_never_extracts_or_changes_state(
+    tmp_path, monkeypatch, status, previous_checksum
+):
+    archive, destination, state, context = returned_archive(tmp_path, status)
+    record = state["relax_mc_batches"]["b"]
+    record["import_checksum"] = previous_checksum
+    original = deepcopy(state)
+    original_archive = archive.read_bytes()
+    monkeypatch.setattr(
+        "phase_agent.tools.relax_mc_batch.results.import_bundle",
+        Mock(side_effect=AssertionError("incomplete formal return must not extract")),
+    )
+    with pytest.raises(ValueError, match="formal_recovery_blocked:batch_status_not_completed"):
+        import_results(action={"parameters": {"bundle_id": "b"}}, context=context)
+    assert state == original
+    assert archive.read_bytes() == original_archive
+    assert not destination.exists()
+
+
 def test_corrupt_local_files_are_not_overwritten_when_repairing_missing_files(tmp_path):
-    archive, destination, state, context = returned_archive(tmp_path)
+    archive, destination, state, context = completed_returned_archive(tmp_path)
     destination.mkdir()
     (destination / "failure.json").write_text("keep this conflicting evidence")
     result = recover_available(state, context)

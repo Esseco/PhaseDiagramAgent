@@ -7,7 +7,7 @@ import shutil
 from uuid import uuid4
 from filelock import FileLock
 
-BUILD_VERSION = "collect-only-v2"
+BUILD_VERSION = "collect-only-v3"
 
 from phase_agent.tools.remote.transfer_bundle import (
     import_bundle,
@@ -173,6 +173,14 @@ def _build_recovery_return(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(item, target)
         result_path = root / relative
+        # The existing occupation-history consumer reads beside result.json.
+        delta = root / worker / "mc_occupations.bin"
+        canonical_delta = result_path.parent / delta.name
+        if delta.is_file() and delta != canonical_delta:
+            if canonical_delta.exists() and canonical_delta.read_bytes() != delta.read_bytes():
+                raise ValueError("recovery_existing_artifact_conflict:" + str(canonical_delta))
+            if not canonical_delta.exists():
+                shutil.copy2(delta, canonical_delta)
         payload = resolve_local_relax_structure(checked["result"], result_path.parent)
         if checked["result"].get("status") == "completed" and payload is None:
             raise ValueError("recovery_final_structure_missing:" + tid)
@@ -256,21 +264,18 @@ def _build_recovery_return(
     write(root / "candidate_pool.json", rebase(candidates, root, portable=True))
     write(root / "result_summary.json", summary)
     write(root / "recovery_evidence.json", report)
+    from phase_agent.tools.relax_mc_batch.return_payload import result_files
+
     files = [
-        f
-        for f in root.rglob("*")
-        if f.is_file()
-        and (
-            f.is_relative_to(root / "jobs")
-            or f.name
-            in {
-                "workflow_state.json",
-                "candidate_pool.json",
-                "result_summary.json",
-                "recovery_evidence.json",
-            }
+        root / name
+        for name in (
+            "workflow_state.json",
+            "candidate_pool.json",
+            "result_summary.json",
+            "recovery_evidence.json",
         )
     ]
+    files.extend(result_files(root, state, candidates, remote_root=remote_root))
     archive = create_bundle(root, files, root / "recovered.results.zip", kind="results")
     return {
         "status": summary["status"],

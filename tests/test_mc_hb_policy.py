@@ -321,9 +321,9 @@ def test_high_and_weak_protected_are_both_mandatory_and_medium_only_fills_remain
 def test_mc_dry_run_calls_no_handlers_and_creates_no_tasks(mode, tmp_path, monkeypatch):
     import subprocess
     from tests.test_relax_mc_handoff import _completed_relax_fixture
-    from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+    from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
     from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
-    from phase_agent.tools.workflows.run_event_loop import run_event_loop
+    from phase_agent.tools.workflows.run_action_turn import run_action_turn
 
     calls = []
 
@@ -346,7 +346,7 @@ def test_mc_dry_run_calls_no_handlers_and_creates_no_tasks(mode, tmp_path, monke
         "actions": [{"id": "mc", "kind": "MC", "depends_on": [], "action": action}],
     }
     registry = create_tool_registry({name: forbidden for name in create_tool_registry()})
-    result = run_event_loop(
+    result = run_action_turn(
         state,
         {"status": "confirmed", "confirmed_snapshot": {"config_version": "v1", "config": config}},
         registry=registry,
@@ -421,7 +421,7 @@ def test_prepared_mc_payload_omits_inherited_threshold_and_is_not_submitted(tmp_
     import json
     from pathlib import Path
     from tests.test_relax_mc_handoff import _completed_relax_fixture
-    from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+    from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
     from phase_agent.tools.workflows.create_active_learning_handlers import _allocate_mc_bohb
 
     manager, state, config = _completed_relax_fixture(tmp_path)

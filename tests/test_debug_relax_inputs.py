@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
-from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
 from phase_agent.tools.local.prepare_relax_upload_batches import prepare_relax_upload_batches
 from phase_agent.tools.remote.manual_upload_runner import ManualUploadBatchRunner
 from phase_agent.tools.workflows.run_tool_step import _prepare_debug_relax_screen_action

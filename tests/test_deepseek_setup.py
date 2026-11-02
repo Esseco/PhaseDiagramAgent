@@ -19,7 +19,7 @@ class DeepSeekSetupTest(unittest.TestCase):
     def test_valid_key_is_tested_then_saved_and_activated(self):
         activated = []
         client = lambda _payload: {"_llm_usage": {"calls": 1}}
-        with patch("phase_agent.decisions.agent.create_deepseek_client.create_deepseek_client", return_value=client) as factory,\
+        with patch("phase_agent.models.create_deepseek_client.create_deepseek_client", return_value=client) as factory,\
                 patch("phase_agent.runtime.deepseek_credentials.save_deepseek_api_key") as save:
             result = _test_and_save_api_key(
                 "sk-test-secret-value",
@@ -33,7 +33,7 @@ class DeepSeekSetupTest(unittest.TestCase):
 
     def test_failed_key_test_does_not_save_or_activate(self):
         activated = []
-        with patch("phase_agent.decisions.agent.create_deepseek_client.create_deepseek_client", return_value=lambda _payload: {}),\
+        with patch("phase_agent.models.create_deepseek_client.create_deepseek_client", return_value=lambda _payload: {}),\
                 patch("phase_agent.runtime.deepseek_credentials.save_deepseek_api_key") as save:
             with self.assertRaisesRegex(RuntimeError, "密钥未保存"):
                 _test_and_save_api_key(

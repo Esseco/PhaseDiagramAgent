@@ -3,7 +3,7 @@
 from copy import deepcopy
 from phase_agent.tools.budget.check_budget import budget_is_hard
 from phase_agent.tools.budget.record_budget_usage import record_budget_usage
-from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.policies.execution_policy import build_agent_proposal
 from phase_agent.tools.state.state_manager import update_state_snapshot
 from phase_agent.tools.workflows.tool_outcomes import _audit_record, _upsert_record
 
@@ -35,7 +35,7 @@ def revise_pending_proposal(
         refresh_dft_evidence(
             current, decision_state, (context or {}).get("effective_config") or config
         )
-    from phase_agent.decisions.agent.resolve_mc_budget_feedback import (
+    from phase_agent.agents.strategic.resolve_mc_budget_feedback import (
         resolve_mc_budget_feedback,
         resolve_mc_full_plan_steps,
     )
@@ -80,7 +80,7 @@ def revise_pending_proposal(
             "state": current,
             "idempotent_replay": False,
         }
-    from phase_agent.decisions.agent.resolve_explicit_generation_request import (
+    from phase_agent.agents.exploration.resolve_explicit_generation_request import (
         _requested_branch_batch_size,
     )
 
@@ -95,7 +95,7 @@ def revise_pending_proposal(
             int(run.get("total_quota", 0)), int(strategy.get("generation_quota_total", 0))
         )
         # Current user policy supersedes historical run/config batch defaults.
-        from phase_agent.tools.policy.adaptive_branch_count import VERSION
+        from phase_agent.policies.adaptive_branch_count import VERSION
 
         if ((proposal.get("decision_context") or {}).get("branch_count_policy") or {}).get(
             "version"
@@ -125,7 +125,7 @@ def revise_pending_proposal(
         for name in (config.get("agent") or {}).get("allowed_tools") or []
         if callable((registry.get(name) or {}).get("handler"))
     ]
-    from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+    from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
 
     original_action = proposal.get("raw_action") or {}
     safe_next = (
@@ -264,6 +264,36 @@ def revise_pending_proposal(
     except ValueError as error:
         return {"status": "rejected", "state": current, "reason": str(error)}
     proposal = build_agent_proposal(revised_action, decision_state, runtime_state=current)
+    from phase_agent.agents.simulation.agent import prepare_proposal
+
+    try:
+        proposal["raw_action"].pop("_simulation_plan", None)
+        proposal = prepare_proposal(
+            proposal,
+            agent_client,
+            state=current,
+            config=(context or {}).get("effective_config") or config,
+            registry=registry,
+        )
+        if getattr(agent_client, "supports_strategic_review", False) is True:
+            from phase_agent.agents.strategic.human_review import direction_review, review_reasons
+
+            reasons = review_reasons(
+                proposal["raw_action"],
+                config,
+                estimated_cost=(proposal.get("estimated_cost") or {}).get("estimated_total_cost"),
+            )
+            if reasons:
+                proposal["strategic_review"] = {
+                    **direction_review(proposal["raw_action"]),
+                    "reasons": reasons,
+                }
+    except (ValueError, TypeError, OSError, RuntimeError) as error:
+        return {
+            "status": "rejected",
+            "state": current,
+            "reason": "Simulation planning: " + str(error),
+        }
     history = deepcopy(stored.get("feedback_history") or [])
     history.append(
         {
@@ -274,7 +304,7 @@ def revise_pending_proposal(
         }
     )
     revision_number = int(stored.get("revision", 0)) + 1
-    from phase_agent.analysis.state.project_authority import project_identity
+    from phase_agent.evidence.project_authority import project_identity
 
     current["pending_execution_policies"][pending_key] = {
         "project_identity": project_identity(current),

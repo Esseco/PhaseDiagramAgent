@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from phase_agent.graphs.contracts import ExecutionIdentity
-from phase_agent.tools.policy.file_approval import proposal_hash
+from phase_agent.policies.file_approval import proposal_hash
 from phase_agent.tools.state.execution_recovery_evidence import inspect_execution
 from phase_agent.tools.state.execution_receipts import recovery_report
 
@@ -51,11 +51,12 @@ def _validate_checks(checks, resolution, attestation):
     if resolution == "verified_no_effect":
         import math
 
-        if (checks.get("preparation_progress") or {}).get("boundary") in {
-            "effects_possible",
-            "complete",
-        }:
+        if (checks.get("preparation_progress") or {}).get("boundary") == "complete":
             raise ValueError("输入准备已进入文件写入；先核对并恢复产出，不能声明无副作用")
+        if (checks.get("preparation_progress") or {}).get("boundary") == "effects_possible":
+            note = str(attestation.get("evidence_note") or "")
+            if "归档" not in note and "清理" not in note:
+                raise ValueError("部分输入已写入；请先归档或清理现场并在核对依据中说明")
         if checks.get("preparation_progress") and any(
             row["status"] == "directory" for row in checks["artifact_checks"]
         ):
@@ -88,7 +89,7 @@ def _validate_checks(checks, resolution, attestation):
             checks["task_count"]
             or branch_outputs
             or checks["phase_record_ids"]
-            or any(row["status"] == "file" for row in checks["artifact_checks"])
+            or any(row["status"] in {"file", "directory"} for row in checks["artifact_checks"])
         ):
             raise ValueError("存在已登记任务或文件，不能声明无副作用；应核对并复用现有工作")
         if (

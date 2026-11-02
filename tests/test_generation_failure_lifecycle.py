@@ -1,6 +1,6 @@
 from phase_agent.tools.workflows.tool_outcomes import _apply_execution_result
 from phase_agent.tools.budget.reserve_action_budget import reserve_action_budget
-from phase_agent.tools.policy.validate_tool_action import validate_tool_action
+from phase_agent.policies.validate_tool_action import validate_tool_action
 
 
 def test_exception_keeps_budget_and_requires_reconciliation():

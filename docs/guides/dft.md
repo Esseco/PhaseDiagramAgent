@@ -111,15 +111,15 @@ adjust_strategy可请求配置修订：request_configuration_revision=true、pat
 
 旧配置缺少remote_mlip时，训练入口只复用实际远端GPU模板唯一明确的conda activate环境（现有mace），记录remote_environment.source；绝不从本机模型环境推断。明确remote_mlip配置优先，不修改确认配置。
 
-run_training.sh训练后自动运行便携collect_training_results.py。results/kfold_metrics.csv包含各折与合并留出样本能量/atom和逐分量力MAE/RMSE；energy_comparison.csv和force_comparison.csv保存eV单位逐点对比，力每原子3行。最终主模型与committee复制到results/models，models.json记录相对路径；training.finished.json只在完整评估和导出后写入。下载完整results即可取得模型和误差。缺失或歧义模型不伪造结果；本地模型回收/激活接口仍需独立审批。
-用户自行将完整目录上传，在目录内sbatch GPU.sh一次；复用现有集群资源模板，不提交作业、不本机训练。
+新生成的微调包使用 Slurm 作业数组：4个committee与5个分组CV训练各占1张GPU，默认最多4个训练同时运行，日志与完成记录按数组成员分开。主模型复用所选committee成员，不增加一次主模型训练。`collect_results.sh`沿用GPU环境，在整个数组结束后通过`afterany`依赖启动，另用1张GPU评估汇总；部分训练失败或缺失完成记录时返回失败清单，不把部分模型当作成功结果。既有已生成包保持原调度方式。
+用户仅上传登记的`*_input`文件夹并执行一次`sbatch submit_all.sh`，无需逐个提交内部脚本。results/kfold_metrics.csv包含各折与合并留出样本能量/atom和逐分量力MAE/RMSE；energy_comparison.csv和force_comparison.csv保存eV单位逐点对比，力每原子3行。模型留在超算，models.json记录远端绝对路径、大小与SHA256；全部训练和评估成功后才写成功完成标记。将配对`*_output`文件夹回传后另行批准回收，模型激活仍需独立验证与审批。
 路径使用相对数据路径及已确认远端原模型/环境。模型回传后仍需独立验证适配器和单独激活审批。
 已有mlip_trainer/model_update_handler适配器继续沿用训练→验证→候选→审批链。
 没有远端模型回收/独立验证适配器时，不声称已完成训练或自动切换模型；这属于明确执行条件。
 
 补DFT只有成功产生新任务才消费来源DFT轮次，参数失败不消费；新结果进入其自己的轮次分析。
 
-[phase_agent/analysis/state/post_dft_assessment.py](../../phase_agent/analysis/state/post_dft_assessment.py)。
+[phase_agent/evidence/post_dft_assessment.py](../../phase_agent/evidence/post_dft_assessment.py)。
 
 <a id="doc-rebuild_inputs"></a>
 

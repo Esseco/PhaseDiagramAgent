@@ -14,7 +14,7 @@ from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
 from phase_agent.runtime.configuration_chat import ConfigurationChatHandler
 from phase_agent.runtime.local_agent_control import LocalAgentControl
 from phase_agent.runtime.local_project_launcher import create_project
-from phase_agent.tools.policy.region_sampling import preview
+from phase_agent.policies.region_sampling import preview
 
 
 IDENTITY = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
@@ -161,8 +161,9 @@ def test_imported_tm_ratio_filters_incommensurate_supercells(tmp_path):
     config = build_effective_run_config(handler.workflow_kwargs["config_session"])
     manager = PhaseDataManager(boundary, system_config=config["system_config"])
     requested = {**region("O3"), "max_det_H": 3}
+    competing = {**region("P3"), "max_det_H": 3}
     result = preview(
-        {"sampling_mode": "region_adaptive", "regions": [requested]},
+        {"sampling_mode": "region_adaptive", "regions": [requested, competing]},
         manager,
         references,
         config,
@@ -171,6 +172,14 @@ def test_imported_tm_ratio_filters_incommensurate_supercells(tmp_path):
     cells = result["regions"][0]["cells"]
     assert {cell["det_H"] for cell in cells} == {3}
     assert {cell["x"] for cell in cells} == {"1/6", "1/3", "1/2", "2/3", "5/6", "1"}
+    competing_cells = result["regions"][1]["cells"]
+    assert {cell["det_H"] for cell in competing_cells} == {3}
+    assert {cell["x"] for cell in competing_cells} == {"0", "1/6", "1/3", "1/2", "2/3", "5/6"}
+    assert result["initial_coverage"] == {
+        "required": True,
+        "expected_cells": 12,
+        "selected_supercells": 1,
+    }
     assert not manager.data["branches"] and not manager.data["structures"]
 
 
@@ -204,7 +213,14 @@ def test_negative_determinant_supercell_remains_legal(tmp_path):
     config = build_effective_run_config(session)
     manager = PhaseDataManager(boundary, system_config=config["system_config"])
     result = preview(
-        {"sampling_mode": "region_adaptive", "regions": [region("O3", 1, 1)]},
+        {
+            "sampling_mode": "region_adaptive",
+            "regions": [
+                region("O3", 1, 1),
+                {**region("O3", 0, 0.5), "region_id": "O3-intermediate"},
+                region("P3"),
+            ],
+        },
         manager,
         references,
         config,
@@ -213,6 +229,15 @@ def test_negative_determinant_supercell_remains_legal(tmp_path):
     assert result["regions"][0]["cells"] == [
         {"H": NEGATIVE, "det_H": 1, "x": "1", "covered": False}
     ]
+    assert result["initial_coverage"] == {
+        "required": True,
+        "expected_cells": 4,
+        "selected_supercells": 1,
+    }
+    assert {cell["x"] for cell in result["regions"][1]["cells"]} == {"1/2"}
+    assert {cell["x"] for cell in result["regions"][2]["cells"]} == {"0", "1/2"}
+    assert all(cell["H"] == NEGATIVE for row in result["regions"] for cell in row["cells"])
+    assert not manager.data["branches"] and not manager.data["structures"]
 
 
 @pytest.mark.parametrize(

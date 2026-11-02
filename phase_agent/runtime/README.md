@@ -25,3 +25,5 @@ python -m phase_agent.runtime.studio_service --runtime-config '项目目录/agen
 - [chat_application.py](chat_application.py)
 
 职责和审批边界见 [Graph 架构](../../docs/architecture/graph.md#doc-graph_architecture)，使用说明见 [文档索引](../../docs/README.md)。
+
+Codex 实现集中在 [codex/](codex/README.md)，三个原 -m 命令文件仅保留入口；项目选择、Studio 和 HTTP 生命周期仍由本包现有模块管理。

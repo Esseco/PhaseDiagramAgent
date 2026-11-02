@@ -3,13 +3,13 @@
 from copy import deepcopy
 from unittest.mock import patch
 import pytest
-from phase_agent.analysis.state.scientific_decision_brief import decision_brief
-from phase_agent.decisions.agent.scientific_decisions import (
+from phase_agent.evidence.scientific_decision_brief import decision_brief
+from phase_agent.agents.strategic.scientific_decisions import (
     ScientificDecision,
     attach_decision_contract,
     scientific_decision_errors,
 )
-from phase_agent.analysis.state.decision_feedback import recent_decision_feedback
+from phase_agent.evidence.decision_feedback import recent_decision_feedback
 from phase_agent.tools.workflows.scientific_module_scope import (
     attach_module_scope,
     prepare_generated_module,
@@ -138,9 +138,9 @@ def test_feedback_matches_child_ids_and_parent_keys_once():
     assert result["measured_cost"] == 2
 
 
-def test_scope_not_added_to_legacy_or_stepwise():
+def test_scope_added_by_default_but_not_stepwise():
     a = action()
-    assert "module_execution_scope" not in attach_module_scope(deepcopy(a), {}, {})["parameters"]
+    assert "module_execution_scope" in attach_module_scope(deepcopy(a), {}, {})["parameters"]
     s = state()
     s["scientific_decision_policy"]["mlip_execution"] = "stepwise"
     assert "module_execution_scope" not in attach_module_scope(deepcopy(a), s, {})["parameters"]
@@ -214,7 +214,7 @@ def test_scoped_module_prepares_once_without_new_model_or_approval():
             side_effect=lambda a, *x: {**a, "budget": 10},
         ),
         patch(
-            "phase_agent.tools.policy.validate_tool_action.validate_tool_action",
+            "phase_agent.policies.validate_tool_action.validate_tool_action",
             return_value={"valid": True},
         ),
         patch(
@@ -237,7 +237,7 @@ def test_scoped_module_prepares_once_without_new_model_or_approval():
 
 
 def test_one_repair_then_invalid_reasoning_stops_before_execution():
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     calls = []
     payload = {
@@ -257,7 +257,7 @@ def test_one_repair_then_invalid_reasoning_stops_before_execution():
 
 
 def test_valid_reasoning_requires_no_extra_model_call():
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     calls = []
 
@@ -278,7 +278,7 @@ def test_valid_reasoning_requires_no_extra_model_call():
 
 
 def test_stale_scientific_decision_gets_one_current_version_correction():
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     calls = []
     stale = action()
@@ -309,7 +309,7 @@ def test_stale_scientific_decision_gets_one_current_version_correction():
 
 
 def test_stale_correction_refreshes_the_brief_from_current_state():
-    from phase_agent.decisions.agent.post_dft_review import request_validated_action
+    from phase_agent.agents.common.post_dft_review import request_validated_action
 
     calls = []
     current_state = state()
@@ -340,6 +340,162 @@ def test_stale_correction_refreshes_the_brief_from_current_state():
     assert len(calls) == 2
 
 
+def dft_direction_action():
+    a = action()
+    a.update(tool="select_dft_candidates", task_key="dft-next")
+    a["parameters"] = {
+        "decisions": [
+            {"candidate_id": "s1", "action": "DFT_SINGLE_POINT"},
+            {"candidate_id": "s2", "action": "DEFER"},
+        ]
+    }
+    a["scientific_decision"] = review("round_direction")
+    a["scientific_decision"]["selection_purposes"] = [
+        {"candidate_id": "s1", "purpose": "coverage"}
+    ]
+    a["post_dft_review"] = {
+        "choice": "supplement_dft",
+        "stop_status": "continue",
+        "finetune_recommendation": "defer",
+        **{
+            key: "Synthetic coverage evidence requires one more representative before training."
+            for key in (
+                "error_assessment", "coverage_assessment", "finetune_assessment",
+                "search_assessment", "reference_assessment", "round_findings",
+                "limitations", "dft_assessment", "convergence_assessment",
+            )
+        },
+    }
+    return a
+
+
+def dft_direction_payload():
+    return {
+        "instruction": "Choose one proposal; no execution.",
+        "allowed_tools": ["select_dft_candidates"],
+        "decision_context": {
+            "post_dft_assessment": {"status": "evaluated"},
+            "scientific_decision_brief": decision_brief(state()),
+        },
+    }
+
+
+def test_post_dft_scientific_bindings_get_one_precise_model_correction():
+    from phase_agent.agents.common.post_dft_review import request_validated_action
+
+    original = dft_direction_action()
+    original["scientific_decision"].update(point="dft_sampling", selection_purposes=[])
+    before = deepcopy(original)
+    calls = []
+
+    def model(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return original
+        assert request["mode"] == "scientific_decision_repair"
+        assert set(request["validation_errors"]) == {
+            "scientific_decision_point_mismatch",
+            "dft_selection_purposes_must_match_selected_candidates",
+        }
+        assert request["scientific_decision_binding"] == {
+            "point": "round_direction", "selected_candidate_ids": ["s1"]
+        }
+        assert "state" not in request
+        assert "irrelevant_history" not in request["decision_context"]
+        assert request["decision_context"]["qbc_candidates"] == [
+            {"candidate_id": "s1", "phase": "O3", "predicted_Ehull": 0.005,
+             "qbc": {"energy_std_per_atom": 0.01}}
+        ]
+        assert request["decision_context"]["independent_audit_candidate_ids"] == ["s1"]
+        return dft_direction_action()
+
+    payload = dft_direction_payload()
+    payload["state"] = {"irrelevant_history": "unused" * 1000}
+    payload["state"]["qbc_candidates"] = [
+        {"candidate_id": "s1", "phase": "O3", "predicted_Ehull": 0.005,
+         "qbc": {"energy_std_per_atom": 0.01, "per_atom_values": [1] * 1000},
+         "structure": {"sites": ["unused"] * 1000}},
+        {"candidate_id": "s2", "phase": "P2"},
+    ]
+    payload["decision_context"]["independent_audit_candidate_ids"] = ["s1", "s2"]
+    payload["decision_context"]["irrelevant_history"] = "unused" * 1000
+    result = request_validated_action(model, payload)
+
+    assert result == dft_direction_action()
+    assert len(calls) == 2
+    assert original == before
+
+
+@pytest.mark.parametrize("mutation", ["still_invalid", "candidate", "tool", "budget", "internal_scope"])
+def test_scientific_correction_is_bounded_and_preserves_action_scope(mutation):
+    from phase_agent.agents.common.post_dft_review import request_validated_action
+
+    original = dft_direction_action()
+    original["scientific_decision"].update(point="dft_sampling", selection_purposes=[])
+    corrected = dft_direction_action()
+    if mutation == "still_invalid":
+        corrected = deepcopy(original)
+    elif mutation == "candidate":
+        corrected["parameters"]["decisions"][0]["candidate_id"] = "different"
+        corrected["scientific_decision"]["selection_purposes"][0]["candidate_id"] = "different"
+    elif mutation == "tool":
+        corrected["tool"] = "pause_search"
+    elif mutation == "budget":
+        corrected["parameters"]["cost_upper"] = 100
+    elif mutation == "internal_scope":
+        corrected["_approval_granted"] = True
+    calls = []
+
+    def model(request):
+        calls.append(request)
+        return original if len(calls) == 1 else corrected
+
+    with pytest.raises(ValueError):
+        request_validated_action(model, dft_direction_payload())
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "tool,choice,recommendation,stop",
+    [
+        ("generate_branches", "search", "defer", "continue"),
+        ("update_mlip", "finetune", "now", "continue"),
+        ("pause_search", "stop", "defer", "scientifically_converged"),
+    ],
+)
+def test_three_post_dft_directions_accept_bound_proposals(tool, choice, recommendation, stop):
+    from phase_agent.agents.common.post_dft_review import request_validated_action
+
+    proposed = dft_direction_action()
+    proposed["tool"] = tool
+    proposed["scientific_decision"]["selection_purposes"] = []
+    proposed["post_dft_review"].update(
+        choice=choice, finetune_recommendation=recommendation, stop_status=stop
+    )
+    proposed["parameters"] = (
+        {"quotas": {"coverage": 2}, "total_quota": 2,
+         "generation_plan": [
+             {"strategy": "coverage", "quota": 2, "phase": "all", "reason": "Synthetic gap"}
+         ]} if tool == "generate_branches"
+        else {"action": "RETRAIN_MLIP", "prepare_inputs_only": True}
+        if tool == "update_mlip" else {}
+    )
+    calls = []
+
+    def model(request):
+        calls.append(request)
+        assert "THREE main directions" in request["instruction"]
+        return deepcopy(proposed)
+
+    payload = dft_direction_payload()
+    payload["allowed_tools"] = [tool]
+    result = request_validated_action(model, payload)
+
+    assert result == proposed
+    assert len(calls) == 1
+    assert result["scientific_decision"]["point"] == "round_direction"
+
+
 def test_explicit_stepwise_override_prevents_automatic_packaging():
     a = action()
     a["scientific_decision"]["module_execution"] = "stepwise"
@@ -360,7 +516,7 @@ def test_missing_record_identity_cannot_match_unrelated_tasks():
 
 
 def test_revised_model_request_does_not_copy_program_approval_scope():
-    from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
+    from phase_agent.models.prepare_llm_request import prepare_llm_request
 
     payload = {
         "state": {},
@@ -412,7 +568,7 @@ def test_real_module_preview_and_validator_prepare_only_fake_fixture(tmp_path):
 
 
 def test_three_point_policy_survives_unified_workflow_migration():
-    from phase_agent.tools.policy.workflow_policy import normalize_workflow_state
+    from phase_agent.policies.workflow_policy import normalize_workflow_state
 
     s = state()
     s["search_mode"] = "Sequential"

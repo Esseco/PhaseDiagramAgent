@@ -183,7 +183,7 @@ def test_duplicate_propose_is_idempotent_and_revised_evidence_changes_hash(tmp_p
 
 def test_tool_return_is_journaled_before_business_save_and_never_replayed(tmp_path):
     from phase_agent.tools.dispatch.execute_tool_action import execute_tool_action
-    from phase_agent.graphs.execution_recovery_graph import execution_recovery_report
+    from phase_agent.graphs.recovery.execution_recovery_graph import execution_recovery_report
 
     path = tmp_path / "state.json"
     artifact = tmp_path / "prepared.json"

@@ -9,11 +9,11 @@ from phase_agent.analysis.phase.branch_relax_hull import build_relax_hull
 from phase_agent.configuration.defaults.default_layered_search_config import (
     default_layered_search_config,
 )
-from phase_agent.decisions.agent.choose_debug_next_action import choose_debug_next_action
+from phase_agent.agents.strategic.choose_debug_next_action import choose_debug_next_action
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from phase_agent.tools.local.prepare_mc_upload_batches import prepare_mc_upload_batches
 from phase_agent.tools.local.prepare_relax_upload_batches import prepare_relax_upload_batches
-from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.policies.execution_policy import build_agent_proposal
 from phase_agent.tools.remote.resolve_local_relax_structure import resolve_local_relax_structure
 from phase_agent.tools.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
 from phase_agent.tools.workflows.create_active_learning_handlers import _allocate_mc_bohb
@@ -667,7 +667,7 @@ def test_unverified_old_relax_result_does_not_skip_relax(tmp_path):
 
 
 def test_budget_preview_is_read_only_and_exposes_full_plan(tmp_path):
-    from phase_agent.decisions.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
+    from phase_agent.agents.strategic.strategy.estimate_branch_mc_budget import estimate_branch_mc_budget
 
     manager, state, config = _completed_relax_fixture(tmp_path)
     config["budgets"]["enforcement"] = "hard"

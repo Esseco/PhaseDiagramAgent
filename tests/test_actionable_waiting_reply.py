@@ -9,7 +9,7 @@ def detailed_existing_checks():
         yield
 
 
-from phase_agent.decisions.agent.dialogue_contract import dialogue_output_contract
+from phase_agent.agents.common.dialogue_contract import dialogue_output_contract
 from phase_agent.runtime.configuration_chat import CONFIG_AGENT_SYSTEM_PROMPT
 from phase_agent.runtime.status_presentation import format_progress
 from phase_agent.runtime.waiting_files_presentation import waiting_file_lines

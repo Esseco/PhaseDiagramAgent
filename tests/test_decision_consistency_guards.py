@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch
 from phase_agent.runtime.agent_api import RunWorkflowChatHandler
 from phase_agent.analysis.cost.predict_runtime import predict_runtime
-from phase_agent.analysis.state.build_decision_context import build_decision_context
+from phase_agent.evidence.build_decision_context import build_decision_context
 
 
 @pytest.mark.parametrize("steps", [None, 0, -1, True, float("nan")])

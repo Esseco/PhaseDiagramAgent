@@ -3,16 +3,16 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import pytest
-from phase_agent.decisions.agent.transport_references import (
+from phase_agent.models.transport_references import (
     compact_transport_references,
     expand_transport_references,
 )
-from phase_agent.decisions.agent.transport_tables import (
+from phase_agent.models.transport_tables import (
     compact_evidence_tables,
     expand_evidence_tables,
 )
-from phase_agent.decisions.agent.prepare_llm_request import prepare_llm_request
-from phase_agent.decisions.agent.hybrid_proposal import create_hybrid_client, choose_harness
+from phase_agent.models.prepare_llm_request import prepare_llm_request
+from phase_agent.models.hybrid_proposal import create_hybrid_client, choose_harness
 from phase_agent.runtime.token_usage import cached_request
 from phase_agent.runtime.turn_process import _current
 
@@ -131,7 +131,7 @@ def test_hybrid_topic_planning_does_not_build_complex_agent_then_preserves_analy
 
 
 def test_two_legacy_clients_never_share_cached_responses_for_different_models():
-    from phase_agent.decisions.agent.create_deepseek_client import create_deepseek_client
+    from phase_agent.models.create_deepseek_client import create_deepseek_client
 
     class Response:
         def __enter__(self):
@@ -155,7 +155,7 @@ def test_two_legacy_clients_never_share_cached_responses_for_different_models():
     token = _current.set({"id": "fake", "events": [], "timings": []})
     try:
         with patch(
-            "phase_agent.decisions.agent.create_deepseek_client.urllib.request.urlopen",
+            "phase_agent.models.create_deepseek_client.urllib.request.urlopen",
             return_value=Response(),
         ) as provider:
             a({"mode": "configuration_dialogue"})
@@ -169,7 +169,7 @@ def test_two_legacy_clients_never_share_cached_responses_for_different_models():
 def test_actual_deep_client_reuses_only_identical_successful_call():
     from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
     from langchain_core.messages import AIMessage
-    from phase_agent.decisions.agent.deepagents_proposal import create_proposal_client
+    from phase_agent.models.deepagents_proposal import create_proposal_client
 
     class OfflineModel(FakeMessagesListChatModel):
         def bind_tools(self, *args, **kwargs):
@@ -204,7 +204,7 @@ def test_human_constraints_and_instructions_never_turn_into_aliases():
 
 
 def test_alias_candidate_count_preserves_output_headroom():
-    from phase_agent.decisions.agent.transport_tables import evidence_row_count
+    from phase_agent.models.transport_tables import evidence_row_count
 
     rows = [{"candidate_id": str(i), "ehull": i / 100} for i in range(175)]
     encoded = compact_transport_references(
@@ -221,7 +221,7 @@ def test_alias_candidate_count_preserves_output_headroom():
 
 def test_deep_approved_knowledge_is_sent_once_and_memory_keeps_the_source_pointer():
     from langchain_core.messages import AIMessage
-    from phase_agent.decisions.agent.deepagents_proposal import create_proposal_client
+    from phase_agent.models.deepagents_proposal import create_proposal_client
 
     agent = Mock()
     agent.invoke.return_value = {"messages": [AIMessage(content='{"tool":"check_convergence"}')]}

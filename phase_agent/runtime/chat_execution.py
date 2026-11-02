@@ -17,6 +17,38 @@ def _stale_lifecycle_reconciliation(handler, invocation_id, error):
     of surfacing an uncaught exception (or attempting a second invocation).
     """
     state = read_json(handler.state_path, {}) or {}
+    from phase_agent.tools.state.execution_receipts import recovery_report
+    from phase_agent.runtime.chat_state_presentation import waiting_training_job
+    from phase_agent.runtime.review_requests import pending_reviews
+    from phase_agent.tools.workflows.recover_saved_results import _training_return_facts
+
+    report = recovery_report(handler.state_path, state)
+    training = waiting_training_job(state)
+    training_returns = (
+        any(
+            (state.get("remote_finetune_jobs") or {}).get(row["job_id"]) is training
+            for row in _training_return_facts(state)
+        )
+        if training
+        else False
+    )
+    if (
+        report.get("status") == "clear"
+        and not report.get("unsettled")
+        and training
+        and not training_returns
+        and not pending_reviews(state)
+    ):
+        # The input-generation action already settled. A checkpoint refusing
+        # replay is not evidence of an interrupted business action. Report the
+        # registered handoff without re-entering the runner or claiming work.
+        return {
+            "status": "awaiting_remote_training",
+            "state": state,
+            "submitted": False,
+            "steps_executed": 0,
+            "checkpoint_replay_skipped": True,
+        }
     identity = {
         "invocation_id": invocation_id,
         "tool": "scientific_lifecycle",
@@ -30,8 +62,7 @@ def _stale_lifecycle_reconciliation(handler, invocation_id, error):
                     "identity": identity,
                     "reason": "stale_lifecycle_checkpoint",
                     "next_action": (
-                        "核对旧生命周期检查点、动作审批及执行回执后再提出新方案；"
-                        "本轮未重放原动作。"
+                        "核对旧生命周期检查点、动作审批及执行回执后再提出新方案；本轮未重放原动作。"
                     ),
                 }
             ],
@@ -54,7 +85,7 @@ def run_workflow_turn(
     explicit_branch_request=False,
 ):
     if isinstance(human_feedback, dict) and human_feedback.get("decision") == "approve":
-        from phase_agent.analysis.state.project_authority import project_identity
+        from phase_agent.evidence.project_authority import project_identity
 
         state = read_json(handler.state_path, {}) or {}
         if not project_identity(state)["model_consistent"]:
@@ -112,7 +143,7 @@ def run_workflow_turn(
 
         kwargs["agent_client"] = reject_new_decision
     base_agent_client = kwargs.get("agent_client")
-    from phase_agent.decisions.agent.resolve_explicit_generation_request import (
+    from phase_agent.agents.exploration.resolve_explicit_generation_request import (
         resolve_explicit_generation_request,
     )
     from phase_agent.tools.local.rebuild_relax_inputs import (
@@ -127,6 +158,12 @@ def run_workflow_turn(
     ):
 
         def user_contextualized_agent(payload):
+            # Codex structured proposals already contain the validated action and
+            # decision context. Re-running the Agent summary model would duplicate
+            # generation and can mutate a plan that is meant to follow the saved
+            # Agent memory verbatim.
+            if getattr(base_agent_client, "_codex_structured", False):
+                return base_agent_client(payload)
             if not getattr(handler, "unified_dialogue", False) and is_relax_rebuild_request(
                 user_message
             ):
@@ -179,7 +216,7 @@ def run_workflow_turn(
                     "draft": actual["draft"],
                     "editable_file": actual.get("editable_file"),
                 }
-                from phase_agent.decisions.agent.summary_request import request_summary_first
+                from phase_agent.evidence.requests import request_summary_first
 
                 response = request_summary_first(
                     base_agent_client,
@@ -222,8 +259,20 @@ def run_workflow_turn(
                     },
                 )
 
+        from phase_agent.models.capabilities import copy_model_capabilities
+
+        copy_model_capabilities(base_agent_client, user_contextualized_agent)
         kwargs["agent_client"] = user_contextualized_agent
+        user_contextualized_agent._failed_retry_target = getattr(
+            base_agent_client, "_failed_retry_target", None
+        )
         user_contextualized_agent.decision_backend = handler.decision_backend
+        user_contextualized_agent._decision_source = getattr(
+            base_agent_client, "_decision_source", None
+        )
+        user_contextualized_agent._codex_structured = getattr(
+            base_agent_client, "_codex_structured", False
+        )
     try:
         return workflow(
             **kwargs,

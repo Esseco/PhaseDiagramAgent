@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from phase_agent.graphs.execution_recovery_graph import execution_recovery_report
+from phase_agent.graphs.recovery.execution_recovery_graph import execution_recovery_report
 from phase_agent.tools.state.execution_receipts import begin_execution, recovery_report
 from phase_agent.tools.workflows.model_refresh_scope import (
     approved_refresh_scope,

@@ -3,7 +3,7 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from phase_agent.tools.workflows.attach_dft_preview import attach_dft_preview
-from phase_agent.tools.policy.execution_policy import build_agent_proposal
+from phase_agent.policies.execution_policy import build_agent_proposal
 from phase_agent.tools.budget.record_budget_usage import record_budget_usage
 
 

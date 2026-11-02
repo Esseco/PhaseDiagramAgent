@@ -4,7 +4,7 @@
 def is_sensitive_proposal(proposal):
     action = proposal.get("raw_action") or {}
     tool = action.get("tool") or action.get("stage")
-    from phase_agent.tools.policy.training_input_action import is_training_input_action
+    from phase_agent.policies.training_input_action import is_training_input_action
 
     if is_training_input_action(action):
         return False

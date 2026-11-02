@@ -18,7 +18,7 @@ from phase_agent.tools.remote.transfer_bundle import import_bundle
 from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
 from phase_agent.tools.state.reconcile_task_results import reconcile_task_results
 from phase_agent.analysis.feedback.dft_result_products import record_dft_products
-from phase_agent.analysis.state.post_dft_assessment import post_dft_assessment
+from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 from phase_agent.tools.workflows.create_dft_comparison_evaluator import create_dft_comparison_evaluator
 from phase_agent.tools.workflows.create_workflow_handlers import _update_mlip
 from Process_Vasp.workflows import atomate_runner

@@ -70,7 +70,11 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
         calculation = safe(worker, entry["directory"])
         # Read and validate complete existing XML/OUTCAR/CONTCAR. Never run_workflow.
         final = validate(calculation, "static")
-        initial = Structure.from_file(initial_path)
+        initial = (
+            Structure.from_str(initial_path.read_text(encoding="utf-8"), fmt="poscar")
+            if initial_path.suffix.lower() == ".vasp"
+            else Structure.from_file(initial_path)
+        )
         saved = Structure.from_dict(outputs["structure"])
         if not _same_structure(initial, final) or not _same_structure(saved, final):
             raise ValueError("reassessment_static_geometry_really_changed")

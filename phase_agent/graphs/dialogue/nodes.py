@@ -1,4 +1,4 @@
-"""Dialogue graph nodes; scientific decisions delegate to one model call."""
+"""Dialogue nodes; scientific proposals use the bounded decision-team graph."""
 
 from langgraph.runtime import Runtime
 from phase_agent.graphs.dialogue.state import TurnRuntime
@@ -20,6 +20,8 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
         return {"reply": metadata, "operation": "done"}
     if handler.conversation_id not in {None, context.conversation_id}:
         raise OpenWebUIRequestError("此运行时已绑定另一个会话。")
+    # Early return/review paths must persist bindings for this conversation too.
+    handler.conversation_id = context.conversation_id
     missing = object()
     from phase_agent.runtime.turn_process import presentation_signature, remember_presentation_state
 
@@ -38,48 +40,64 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
             )
         facts = {}
     facts = facts or {}
-    # A legacy process could persist an unapproved plan after recovery. Once
-    # the return source is acknowledged, old Relax/MC plans and old combined
-    # DFT-input plans are stale; the next turn must propose the new decision
-    # boundary before any input generation.
-    if (
-        handler.config_delegate is None
-        and facts.get("recovery_acknowledgement")
-        and (
-            not facts.get("post_recovery_next_step_pending")
-            or any(
-                not (
-                    ((row.get("agent_proposal") or {}).get("raw_action") or {})
-                    .get("parameters", {})
-                    .get("prepare_inputs_after_approval")
-                )
-                for row in (facts.get("pending_execution_policies") or {}).values()
-                if ((row.get("agent_proposal") or {}).get("raw_action") or {}).get("tool")
-                == "select_dft_candidates"
-            )
+    dft_question_reply = None
+    if handler.config_delegate is None:
+        from phase_agent.runtime.read_only_queries import read_only_reply
+
+        # Queries cannot collect returns or alter the facts being displayed.
+        # Approval/rejection still uses the recovery-aware control boundary below.
+        answer = read_only_reply(
+            handler, message, facts, context.conversation_id, include_review_controls=False
         )
-    ):
+        if answer is not None:
+            handler.last_turn_outcome = "answered"
+            remember_presentation_state(handler.state_path, facts, signature)
+            return {"reply": answer, "operation": "done"}
+        from phase_agent.tools.state.dft_recovery_decision import classify_dft_recovery_reply
+
+        dft_question_reply = classify_dft_recovery_reply(message, facts)
+        if facts.get("pending_dft_recovery_question"):
+            from phase_agent.runtime.review_requests import pending_reviews
+            from phase_agent.graphs.dialogue.commands import classify_user_decision
+
+            if pending_reviews(facts, state_path=handler.state_path):
+                explicit_dft_reply = classify_dft_recovery_reply(
+                    message, facts, allow_short_replies=False
+                )
+                if explicit_dft_reply is None and (
+                    dft_question_reply is not None
+                    or classify_user_decision(message) in {"approve", "reject"}
+                ):
+                    handler.last_turn_outcome = "answered"
+                    remember_presentation_state(handler.state_path, facts, signature)
+                    return {
+                        "reply": (
+                            "当前同时存在 DFT 回收问题和待审批方案，请指定回复对象。"
+                            "本次未批准、拒绝或执行任何操作。"
+                            "DFT 可明确回复‘继续回收’或‘不再回收DFT’；"
+                            "方案请在审批页指定具体对象。"
+                        ),
+                        "operation": "done",
+                    }
+                dft_question_reply = explicit_dft_reply
+    from phase_agent.tools.workflows.compact_action_history import compact_state_history_once
+
+    if compact_state_history_once(facts):
+        write_json(handler.state_path, facts)
+    from phase_agent.policies.recovery_transition import legacy_post_recovery_plan_ids
+
+    if handler.config_delegate is None:
         pending = facts.get("pending_execution_policies") or {}
-        stale_plan_ids = []
-        for plan_id, row in pending.items():
-            action = (row.get("agent_proposal") or {}).get("raw_action") or {}
-            parameters = action.get("parameters") or {}
-            if action.get("tool") in {
-                "prepare_local_batch_files",
-                "prepare_relax_mc_inputs",
-                "select_dft_candidates",
-            } and not parameters.get("prepare_inputs_after_approval") or (
-                action.get("mode") == "relax_mc_inputs"
-                or parameters.get("mode") == "relax_mc_inputs"
-            ):
-                stale_plan_ids.append(plan_id)
+        stale_plan_ids = legacy_post_recovery_plan_ids(facts)
         if stale_plan_ids:
             for plan_id in stale_plan_ids:
                 for record in facts.get("action_records") or []:
                     if record.get("record_id") == plan_id:
                         record["status"] = "superseded"
                         record["superseded_reason"] = "回收后旧方案未经过当前决策门禁"
-            facts["pending_execution_policies"] = {}
+            facts["pending_execution_policies"] = {
+                key: row for key, row in pending.items() if key not in stale_plan_ids
+            }
             facts.setdefault("superseded_pending_plans", []).extend(
                 {
                     "plan_id": plan_id,
@@ -108,38 +126,109 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
     from phase_agent.runtime.turn_process import process_event
 
     statuses = {row.get("task_id"): row.get("status") for row in facts.get("tasks") or []}
-    recovery_error = None
+    from phase_agent.runtime.recovery_diagnostics import (
+        saved_recovery_error,
+        record_recovery_error,
+        clear_recovery_error,
+    )
+
+    recovery_error = saved_recovery_error(handler.state_path)
     recovery_just_approved = False
+    bound_dft_reply = False
     if handler.config_delegate is None:
         from phase_agent.tools.workflows.recover_saved_results import (
             recovery_candidate,
             recover_saved_results,
         )
 
-        recovery = recovery_candidate(facts)
+        recovery = recovery_candidate(facts, state_path=handler.state_path)
+        if (
+            dft_question_reply is not None
+            and not recovery_error
+            and not facts.get("pending_execution_recoveries")
+            and not (recovery["pending"] and recovery["returned"])
+        ):
+            from phase_agent.evidence.dft_round_status import DFT_STAGES, dft_round_scope
+            from phase_agent.tools.state.execution_receipts import recovery_report
+
+            pending_feedback = set(facts.get("processed_task_ids") or []) - set(
+                facts.get("feedback_processed_task_ids") or []
+            )
+            backlog = [
+                row
+                for row in facts.get("tasks") or []
+                if row.get("task_id") in pending_feedback
+                and row.get("stage") in {"relax_and_feature", "deep_search", *DFT_STAGES}
+                and row.get("status") in {"completed", "failed", "timeout", "cancelled"}
+            ]
+            question_scope = facts["pending_dft_recovery_question"]["scope"]
+            receipts = recovery_report(handler.state_path, facts)
+            bound_dft_reply = (
+                receipts["status"] == "clear"
+                and not receipts["unsettled"]
+                and len(backlog) == recovery["backlog_count"]
+                and all(
+                    row.get("stage") in DFT_STAGES and dft_round_scope(row) == question_scope
+                    for row in backlog
+                )
+            )
+        if not recovery["pending"] and not bound_dft_reply:
+            from phase_agent.graphs.dialogue.saved_control import unavailable_review_reply
+
+            unavailable = unavailable_review_reply(handler, message, facts)
+            if unavailable is not None:
+                handler.last_turn_outcome = "answered"
+                return {"reply": unavailable, "operation": "done"}
         normalized_message = message.strip().lower()
-        recovery_approved = normalized_message in {
-            "同意回收",
-            "批准回收",
-            "开始回收",
-            "继续回收",
-            "approve recovery",
-            "recover",
+        from phase_agent.graphs.dialogue.saved_control import semantic_recovery_intent
+
+        recovery_intent = (
+            "question"
+            if dft_question_reply is not None
+            else semantic_recovery_intent(
+                handler, facts, normalized_message, pending=recovery["pending"]
+            )
+        )
+        if recovery["pending"]:
+            process_event(
+                "回收授权判定",
+                {"pending_return": True, "intent": recovery_intent, "scientific_execution": False},
+            )
+        recovery_approved = recovery_intent == "approve"
+        recovery_rejected = recovery_intent == "reject"
+        from phase_agent.tools.state.training_pending_validation import training_pending_validation
+
+        training_analysis_requested = recovery_approved and training_pending_validation(facts)
+        return_notice = normalized_message.rstrip("。.!！") in {
+            "已回收",
+            "回收完毕",
+            "回收完成",
+            "已回传",
+            "结果已回传",
+            "回传完成",
         }
-        recovery_rejected = normalized_message in {
-            "拒绝回收",
-            "暂不回收",
-            "不回收",
-            "不再回收",
-            "reject recovery",
-        }
-        if recovery_approved and not recovery["pending"]:
+        if return_notice and not recovery["pending"]:
+            from phase_agent.runtime.review_requests import pending_reviews
+
+            if pending_reviews(facts):
+                from phase_agent.runtime.plan_queries import pending_plan_reply
+                from phase_agent.graphs.dialogue.support import bind_presented_proposal
+
+                bind_presented_proposal(handler, facts)
+                handler.last_turn_outcome = "answered"
+                return {"reply": pending_plan_reply(facts), "operation": "done"}
+        if (
+            recovery_approved
+            and not recovery["pending"]
+            and not training_analysis_requested
+            and not return_notice
+        ):
             handler.last_turn_outcome = "answered"
             return {
                 "reply": "当前没有待回收的未核对结果；本轮未批准或执行任何科学方案。",
                 "operation": "done",
             }
-        if recovery["pending"] and not recovery_approved:
+        if recovery["pending"] and not recovery_approved and not bound_dft_reply:
             if recovery_rejected:
                 handler.last_turn_outcome = "answered"
                 return {
@@ -150,15 +239,35 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
                     "operation": "done",
                 }
             handler.last_turn_outcome = "answered"
+            from phase_agent.graphs.dialogue.saved_control import recovery_confirmation_reply
+
             return {
-                "reply": (
-                    "检测到可回收的返回结果或待核对任务；本轮尚未回收、未入账、未分析。"
-                    "请明确回复‘同意回收’执行回收，或回复‘拒绝回收’保持当前状态。"
-                ),
+                "reply": recovery_confirmation_reply(facts),
                 "operation": "done",
             }
         try:
-            facts = recover_saved_results(facts, **handler.workflow_kwargs)
+            # Existing question choices are administrative, not consent to read
+            # new returns. Their maintenance handler retains the bound scope.
+            recovered = (
+                facts
+                if bound_dft_reply
+                else recover_saved_results(facts, **handler.workflow_kwargs)
+            )
+            report = recovered.get("result_collection") or {}
+            if report.get("recovery_error"):
+                raise ValueError(report["recovery_error"])
+            # A newly completed collection report proves this attempt ran.
+            # Object identity alone cannot distinguish a valid return from
+            # a collector's zero-result validation/transfer failure.
+            if (
+                recovery["pending"]
+                and recovered is not facts
+                and report
+                and report is not facts.get("result_collection")
+            ):
+                clear_recovery_error(handler.state_path)
+                recovery_error = None
+            facts = recovered
         except Exception as error:
             # Recovery may have committed a subset of reconciled facts before
             # discovering an invalid return. Reload that committed snapshot so
@@ -168,23 +277,37 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
                 raise
             facts = committed or {}
             recovery_error = str(error)[:500] or error.__class__.__name__
+            record_recovery_error(handler.state_path, recovery_error, recovery.get("fingerprint"))
             process_event(
                 "结果回收失败，进入只读答疑",
                 {"error": recovery_error, "scientific_execution": False},
             )
-        if recovery_approved and recovery["pending"]:
+        if (
+            not recovery_error
+            and recovery_approved
+            and (recovery["pending"] or training_analysis_requested)
+        ):
             # Recovery approval authorizes observation only.  Once observation
             # succeeds, immediately continue through the normal planning path
             # so the next action is proposed and held for a separate approval.
             # Any older unapproved plan was based on pre-recovery facts and must
-            # not become an implicit approval or hide the fresh DFT/branch choice.
+            # not become an implicit approval or hide the new scientific choice.
             pending = facts.get("pending_execution_policies") or {}
             facts["recovery_acknowledgement"] = {
                 "fingerprint": recovery.get("fingerprint"),
                 "scope": "explicit_user_recovery_approval",
+                "source_stages": sorted(
+                    {
+                        row["stage"]
+                        for row in facts.get("tasks") or []
+                        if row.get("stage")
+                        and row.get("status") in {"completed", "failed", "timeout", "cancelled"}
+                        and row.get("status") != statuses.get(row.get("task_id"))
+                    }
+                ),
             }
             # This marker survives a reload.  It is consumed only after a
-            # DFT/branch proposal is presented, so an old Relax/MC proposal
+            # next-step proposal is approved, so an old Relax/MC proposal
             # cannot become the next action by saved-plan routing.
             facts["post_recovery_next_step_pending"] = True
             if pending:
@@ -205,9 +328,7 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
                             "prepared",
                         }:
                             record["status"] = "superseded"
-                            record["superseded_reason"] = (
-                                "结果回收完成后按新证据重新提出下一步方案"
-                            )
+                            record["superseded_reason"] = "结果回收完成后按新证据重新提出下一步方案"
                 facts["pending_execution_policies"] = {}
                 facts.setdefault("superseded_pending_plans", []).extend(superseded)
             write_json(handler.state_path, facts)
@@ -248,13 +369,15 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
     from phase_agent.runtime.turn_process import timed_call
 
     answer = timed_call(
-        "read_only_query", read_only_reply, handler, message, facts, context.conversation_id
+        "read_only_query",
+        read_only_reply,
+        handler,
+        message,
+        facts,
+        context.conversation_id,
+        include_review_controls=not bound_dft_reply,
     )
     if answer is not None:
-        if recovery_error:
-            from phase_agent.graphs.dialogue.decision import recovery_notice
-
-            answer = recovery_notice(recovery_error) + "\n" + answer
         handler.last_turn_outcome = "answered"
         remember_presentation_state(handler.state_path, facts, signature)
         return {"reply": answer, "operation": "done"}
@@ -300,6 +423,23 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
     from phase_agent.runtime.review_requests import pending_reviews
 
     reviews = pending_reviews(state["facts"])
+    from phase_agent.tools.workflows.model_refresh_state import current_model_refresh
+
+    if (
+        not reviews
+        and command in {"同意", "approve"}
+        and current_model_refresh(state["facts"]).get("status")
+        in {"approval_required", "supplement_ready"}
+    ):
+        from phase_agent.graphs.invocation_context import new_invocation
+
+        runtime.context.scientific_call = lambda: handler._run(
+            new_invocation(),
+            None,
+            "当前新模型刷新阶段缺少已保存的待审方案。请重新展示生成刷新文件的具体范围和预算并等待批准；"
+            "本次同意没有对应的有效方案，不作为新方案的批准，不生成输入或提交计算。",
+        )
+        return {"operation": "scientific_workflow"}
     # Resolve references to saved work before invoking scientific planning.
     from phase_agent.graphs.dialogue.saved_control import route_saved_control
     from phase_agent.tools.step_runner.file_protocol import write_json
@@ -314,7 +454,9 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
     )
     if post_recovery_gate:
         pending = state["facts"].get("pending_execution_policies") or {}
-        allowed_tools = {"select_dft_candidates", "generate_branches"}
+        from phase_agent.policies.recovery_transition import post_recovery_tools
+
+        allowed_tools = post_recovery_tools(state["facts"])
         stale_ids = []
         for plan_id, row in pending.items():
             action = (row.get("agent_proposal") or {}).get("raw_action") or {}
@@ -329,7 +471,7 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
                     {
                         "plan_id": plan_id,
                         "tool": action.get("tool") or action.get("action_type"),
-                        "reason": "post_recovery_next_step_requires_dft_or_branch",
+                        "reason": "post_recovery_next_step_requires_stage_decision",
                     }
                 )
                 for record in state["facts"].get("action_records") or []:
@@ -339,9 +481,7 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
                         "prepared",
                     }:
                         record["status"] = "superseded"
-                        record["superseded_reason"] = (
-                            "回收后下一步只能提出 DFT 或 branch 方案"
-                        )
+                        record["superseded_reason"] = "回收后下一步须按本轮结果重新提出科学方案"
             state["facts"]["pending_execution_policies"] = pending
             state["facts"].setdefault("superseded_pending_plans", []).extend(superseded)
             write_json(handler.state_path, state["facts"])
@@ -413,7 +553,7 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
                 )
                 return {"operation": "scientific_workflow"}
             from phase_agent.graphs.approval_graph import durable_approval
-            from phase_agent.tools.policy.file_approval import proposal_hash
+            from phase_agent.policies.file_approval import proposal_hash
 
             approval = durable_approval(
                 handler.state_path,
@@ -530,6 +670,15 @@ def decide(state, runtime: Runtime[TurnRuntime]):
         runtime.context.scientific_call = execute
         return {"status": "scientific_requested"}
 
+    if state.get("recovery_just_approved") and not state.get("recovery_error"):
+        # Recovery approval permits this observation, followed by a new proposal;
+        # it cannot approve that proposal or execute the next scientific action.
+        from phase_agent.runtime.turn_process import process_event
+
+        process_event("回收后进入下一步规划", {"new_action_approval": False})
+        request_scientific()
+        return {"operation": "scientific_workflow"}
+
     # Known continuation enters observation/planning directly, not semantic routing.
     if (
         state["message"].strip().lower().rstrip("。.!！")
@@ -537,6 +686,7 @@ def decide(state, runtime: Runtime[TurnRuntime]):
             "继续",
             "continue",
             "继续原运行",
+            "已回收",
             "回收完毕",
             "回收完成",
             "回传完成",
@@ -641,7 +791,7 @@ def present(state, runtime: Runtime[TurnRuntime]):
 
     handler = runtime.context.handler
     handler.last_turn_outcome = state["result"].get("status")
-    if state["result"].get("status") == "awaiting_approval":
+    if state["result"].get("status") in {"awaiting_approval", "training_handoff"}:
         bind_presented_proposal(handler, read_json(handler.state_path, {}) or {})
     result = {**state["result"], "verified_recovery": state.get("verified_recovery") or {}}
     return {"reply": format_workflow_reply(result, handler.state_path)}

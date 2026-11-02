@@ -2,7 +2,7 @@ from phase_agent.graphs.runtime_context import WorkflowRuntime
 import json
 from concurrent.futures import ThreadPoolExecutor
 import pytest
-from phase_agent.graphs.actions.iteration import run_event_loop_graph
+from phase_agent.tools.workflows import run_action_turn as action_module
 from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from phase_agent.graphs.project.graph import build_react_lifecycle_graph as build_search_workflow_graph
 from phase_agent.graphs.actions.graph import build_tool_action_graph
@@ -108,28 +108,30 @@ def test_low_level_graph_requires_explicit_runtime_context():
         graph.invoke({})
 
 
-def test_event_graph_persists_each_step_and_stops_at_bound():
+def test_single_turn_persists_outcome_before_return(tmp_path, monkeypatch):
     calls = []
+    def execute(**kwargs):
+        calls.append(("execute", kwargs["state"]["event_index"]))
+        return {"status": "completed", "state": kwargs["state"]}
+    save = action_module._save_state
+    def persist(state, path):
+        calls.append(("persist", state["event_index"]))
+        save(state, path)
+    monkeypatch.setattr(action_module, "run_tool_step", execute)
+    monkeypatch.setattr(action_module, "_save_state", persist)
+    path = tmp_path / "state.json"
+    first = action_module.run_action_turn({}, {}, registry={}, state_path=path)
+    assert first["steps_executed"] == 1
+    assert calls == [("persist", 0), ("execute", 0), ("persist", 1)]
+    second = action_module.run_action_turn(path, {}, registry={}, state_path=path)
+    assert second["steps_executed"] == 1 and second["state"]["event_index"] == 2
+    assert calls[-3:] == [("persist", 1), ("execute", 1), ("persist", 2)]
 
-    def execute(state):
-        calls.append(("execute", state["offset"]))
-        return {"step_id": str(state["offset"]), "response": {"status": "completed"}}
 
-    def persist(state):
-        calls.append(("persist", state["offset"]))
-        return {"offset": state["offset"] + 1}
-
-    result = run_event_loop_graph(
-        max_steps=2, execute=execute, persist=persist,
-        route=lambda state: "__end__" if state["offset"] >= 2 else "execute_validated_action")
-    assert result["offset"] == 2
-    assert calls == [("execute", 0), ("persist", 0), ("execute", 1), ("persist", 1)]
-
-
-@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
-def test_event_graph_rejects_invalid_bound_before_any_callback(limit):
-    def forbidden(state):
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5, 2])
+def test_single_turn_rejects_invalid_bound_before_any_callback(limit, monkeypatch):
+    def forbidden(**kwargs):
         raise AssertionError("Must not execute")
-
-    with pytest.raises(ValueError, match="正整数"):
-        run_event_loop_graph(max_steps=limit, execute=forbidden, persist=forbidden, route=forbidden)
+    monkeypatch.setattr(action_module, "run_tool_step", forbidden)
+    with pytest.raises(ValueError, match="exactly one action"):
+        action_module.run_action_turn({}, {}, registry={}, max_steps=limit)

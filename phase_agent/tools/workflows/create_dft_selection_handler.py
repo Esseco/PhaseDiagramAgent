@@ -12,12 +12,40 @@ from phase_agent.tools.budget.reserve_dft_actions import reserve_dft_actions
 from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
 
 
+def registered_retry_input_ids(action, state):
+    """Validate explicit input-only scope; never create or re-reserve retries."""
+    ids = (action.get("parameters") or {}).get("registered_retry_input_ids", [])
+    if (
+        not isinstance(ids, list)
+        or any(not isinstance(x, str) for x in ids)
+        or len(ids) != len(set(ids))
+    ):
+        raise ValueError("invalid_registered_retry_input_ids")
+    tasks = {row.get("task_id"): row for row in state.get("tasks") or []}
+    for task_id in ids:
+        task = tasks.get(task_id) or {}
+        if not (
+            task.get("retry_of")
+            and task.get("stage") in {"dft_single_point", "dft_relax"}
+            and task.get("status") == "pending"
+            and not task.get("slurm_batch_id")
+            and task.get("model_version") == state.get("active_model_version")
+            and task.get("config_version") == state.get("confirmed_config_version")
+        ):
+            raise ValueError("registered_retry_not_eligible_for_inputs:" + task_id)
+    return list(ids)
+
+
 def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None):
     """Return the default handler without introducing a second policy gate."""
 
     def handler(*, action, context):
         state = _input_working_state(context)
         parameters = action.get("parameters") or {}
+        try:
+            retry_input_ids = registered_retry_input_ids(action, state)
+        except ValueError as error:
+            return {"status": "rejected", "state": state, "tasks": [], "reason": str(error)}
         prepare_after_approval = bool(parameters.get("prepare_inputs_after_approval"))
         if context.get("execution_mode") == "interactive" and not (
             parameters.get("dft_input_preview") or prepare_after_approval
@@ -170,7 +198,7 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
 
             prepared = call_with_optimizations(
                 prepare_dft_upload_batches,
-                action={"target_ids": [row["task_id"] for row in tasks]},
+                action={"target_ids": [row["task_id"] for row in tasks] + retry_input_ids},
                 context={**context, "event_state": state},
                 _optimizations={"_owned": True},
             )
