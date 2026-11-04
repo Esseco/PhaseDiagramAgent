@@ -36,12 +36,15 @@ def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026)
             if energy <= 0.010
             else "far_audit"
         )
+        if row.get("hd_required") is True:
+            row["selection_reason"] = "high_hd"
         previous = unique.get(key)
         priority = {
             "ground_state": 0,
             "unassessed": 1,
             "near_hull": 2,
             "far_audit": 4,
+            "high_hd": -1,
         }
         if (
             previous is None

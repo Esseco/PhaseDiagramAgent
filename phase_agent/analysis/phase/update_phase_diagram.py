@@ -26,14 +26,23 @@ def update_phase_diagram(
     output_state: dict | None = None,
     include_dft: bool = False,
     latest_per_structure: bool = False,
+    latest_only: bool = False,
 ) -> dict[str, Any]:
     """分别构建 mlip/dft 相图，保留原能量并保存可追踪版本。"""
     if energy_basis not in {"total", "per_atom", "per_formula_unit"}:
         raise ValueError("energy_basis 必须是 total/per_atom/per_formula_unit")
+    if latest_only and (not latest_per_structure or output_directory is not None):
+        raise ValueError("latest_only 仅支持不写文件的最新能量预览")
     output = {"energy_basis": energy_basis, "diagrams": {}, "mlip_by_version": {}}
     refresh_plan = ((output_state or {}).get("model_refresh") or {}).get("plan") or {}
     latest_mode = (
-        latest_per_structure or refresh_plan.get("energy_policy") == "latest_valid_per_structure_v1"
+        latest_per_structure
+        or (output_state or {}).get("mlip_energy_policy") == "latest_valid_per_structure_v1"
+        or refresh_plan.get("energy_policy") == "latest_valid_per_structure_v1"
+    )
+    # Freeze the registry before output paths can register a model.
+    latest_rounds = dict(
+        ((output_state or {}).get("upload_layout") or {}).get("model_rounds") or {}
     )
     latest_normalized = []
     from phase_agent.analysis.phase.phase_boundary import (
@@ -114,6 +123,8 @@ def update_phase_diagram(
                 rejected.append({"record_id": item.get("record_id"), "reason": str(error)})
         if method == "mlip" and latest_mode:
             latest_normalized.extend(normalized)
+            if latest_only:
+                continue
         snapshot = _build_snapshot(
             method,
             normalized,
@@ -156,7 +167,9 @@ def update_phase_diagram(
                 "deferred": max(0, plan["total_unique"] - refreshed_count),
                 "partial": refreshed_count < plan["total_unique"],
             }
-        if output_directory is not None:
+        if output_directory is not None and not (
+            latest_mode and method == "mlip" and model_version not in latest_rounds
+        ):
             root = Path(output_directory)
             output_version = (
                 model_version
@@ -223,10 +236,13 @@ def update_phase_diagram(
     if latest_mode:
         from phase_agent.analysis.phase.latest_mlip_lineage import latest_mlip_records
 
-        rounds = ((output_state or {}).get("upload_layout") or {}).get("model_rounds") or {}
+        rounds = latest_rounds
         try:
             latest, issues, aliases = latest_mlip_records(
-                latest_normalized, (output_state or {}).get("tasks") or [], rounds, return_aliases=True
+                latest_normalized,
+                (output_state or {}).get("tasks") or [],
+                rounds,
+                return_aliases=True,
             )
         except (OSError, ValueError, TypeError) as error:
             latest, issues, aliases = [], [{"reason": str(error)}], {}
@@ -276,7 +292,7 @@ def update_phase_diagram(
                 mixed_model_versions=len(sources) > 1,
                 independent_model_comparability="not_established",
             )
-        if output_directory is not None:
+        if output_directory is not None and chosen in latest_rounds:
             directory = phase_snapshot_directory(
                 Path(output_directory), "mlip", chosen, state=output_state
             )

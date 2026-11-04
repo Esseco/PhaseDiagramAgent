@@ -6,6 +6,9 @@ from copy import deepcopy
 def require_structure_refresh(state, old_version, new_version):
     if old_version == new_version:
         return
+    # A new epoch carries forward each structure's most recent valid MLIP result.
+    # Preserve provenance; never rewrite the previously approved refresh plan.
+    state["mlip_energy_policy"] = "latest_valid_per_structure_v1"
     rounds = state.setdefault("upload_layout", {}).setdefault("model_rounds", {})
     if old_version and old_version not in rounds:
         rounds[old_version] = max(rounds.values(), default=0) + 1

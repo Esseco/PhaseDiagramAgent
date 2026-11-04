@@ -9,6 +9,61 @@ from phase_agent.analysis.feedback.model_refresh_plan import build_model_refresh
 from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
 
 
+def _hd_reference(snapshot, report):
+    from math import isfinite
+    from phase_agent.analysis.phase.phase_quality import _hull, _at, snapshot_evidence_digest
+
+    if (
+        report.get("hull_version") != snapshot.get("version")
+        or report.get("model_version") != snapshot.get("model_version")
+        or report.get("snapshot_evidence_digest") != snapshot_evidence_digest(snapshot)
+    ):
+        raise ValueError("refresh_HD_report_snapshot_mismatch")
+    limits = report["screening_policy"]
+    from phase_agent.analysis.phase.phase_quality_preview import build_quality_preview
+
+    excluded_keys = set(report.get("preview_excluded_geometry_keys") or [])
+    selected = [r for r in report.get("structures") or [] if r.get("geometry_key") in excluded_keys]
+    preview = build_quality_preview(snapshot, report, review_ids=[r["review_id"] for r in selected])
+    high = set(preview["excluded_record_ids"])
+    for row in report.get("structures") or []:
+        if row.get("analysis_layer", 0) != 0:
+            continue
+        h, d = row.get("hull_lift_mev_per_O2"), row.get("D_mev_per_O2")
+        if (
+            isinstance(h, (float, int))
+            and not isinstance(h, bool)
+            and isfinite(h)
+            and h > limits["hull_shift_mev_per_O2"]
+        ) or (
+            isinstance(d, (float, int))
+            and not isinstance(d, bool)
+            and isfinite(d)
+            and d > limits["outlier_gap_mev_per_O2"]
+        ):
+            high.update(row.get("record_ids") or [])
+    entries = snapshot.get("entries") or []
+    removed = set(preview["excluded_record_ids"])
+    remaining = [row for row in entries if row.get("record_id") not in removed]
+    if not entries or not remaining:
+        raise ValueError("refresh_HD_reference_empty")
+    points = [(float(r["x_Na_per_O2"]), float(r["energy_per_O2"])) for r in remaining]
+    hull = _hull(points)
+    result = {}
+    for row in entries:
+        if row.get("record_id") in high:
+            continue
+        baseline = _at(hull, float(row["x_Na_per_O2"]))
+        total_atoms = sum(float(v) for v in row["composition"].values())
+        oxygen = float(row["composition"].get("O", 0))
+        if baseline is None or total_atoms <= 0 or oxygen <= 0:
+            raise ValueError("refresh_HD_reference_invalid_composition")
+        result[row["record_id"]] = max(
+            0.0, (float(row["energy_per_O2"]) - baseline) * oxygen / (2 * total_atoms)
+        )
+    return high, result
+
+
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -20,7 +75,7 @@ def refresh_preview(state, manager, config):
     represented = set()
     structures = manager.data.get("structures") or {}
 
-    def append(entry, *, historical=False, mixed=False):
+    def append(entry, *, historical=False, mixed=False, hd_required=False):
         sid = entry.get("structure_id")
         if sid not in structures:
             raise ValueError(f"刷新结构未登记：{sid}")
@@ -59,6 +114,7 @@ def refresh_preview(state, manager, config):
                 "source_version": old,
                 "energy_source_version": entry.get("source_version") if mixed else old,
                 "historical_near_hull": historical,
+                "hd_required": hd_required,
             }
         )
         represented.add(sid)
@@ -66,25 +122,47 @@ def refresh_preview(state, manager, config):
     diagram = refresh.get("old_diagram") or {}
     if diagram.get("model_version") not in {None, old}:
         raise ValueError("刷新旧相图版本不一致")
-    latest_policy = (config.get("model_refresh") or {}).get(
-        "energy_policy"
+    latest_policy = (
+        state.get("mlip_energy_policy") or (config.get("model_refresh") or {}).get("energy_policy")
     ) == "latest_valid_per_structure_v1"
     if latest_policy:
         from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
 
+        if not state.get("phase_records"):
+            raise ValueError("新 epoch 刷新缺少可核验的历史相图记录；不能用单模型或空数据替代")
         latest = update_phase_diagram(
             state["phase_records"],
             active_model_version=old,
             output_state=state,
             latest_per_structure=True,
+            latest_only=True,
         )["diagrams"]["mlip"]
         if latest.get("status") != "completed":
             raise ValueError(
                 "最新结构能量谱系未解决，不能生成刷新预览："
                 + str(latest.get("issues") or latest.get("reason"))
             )
+        from phase_agent.analysis.phase.phase_quality_reports import get_phase_quality_report
+
+        review_state = {
+            **state,
+            "active_model_version": old,
+            "phase_diagrams": {**(state.get("phase_diagrams") or {}), "mlip": latest},
+        }
+        report = get_phase_quality_report(review_state, snapshot=latest)
+        high, reference_ehull = _hd_reference(latest, report)
         for entry in latest.get("entries") or []:
-            append(entry, mixed=True)
+            is_high = entry.get("record_id") in high
+            selected_entry = (
+                entry
+                if is_high
+                else {
+                    **entry,
+                    "ehull": reference_ehull[entry["record_id"]],
+                    "ehull_unit": "eV/atom",
+                }
+            )
+            append(selected_entry, mixed=True, hd_required=is_high)
     else:
         for entry in diagram.get("entries") or []:
             append(entry)
@@ -94,7 +172,8 @@ def refresh_preview(state, manager, config):
             for entry in prior.get("entries") or []:
                 if entry.get("ehull") is not None and float(entry["ehull"]) <= 0.010:
                     append(entry, historical=True)
-    for sid in sorted(set(structures) - represented):
+    missing = sorted(set(structures) - represented)
+    for sid in missing:
         append({"structure_id": sid})
     plan = build_model_refresh_plan(
         candidates, old_version=old, new_version=refresh["new_model_version"]
@@ -103,6 +182,13 @@ def refresh_preview(state, manager, config):
         plan["energy_policy"] = "latest_valid_per_structure_v1"
         plan["energy_source_models"] = latest.get("source_model_versions", [])
         plan["mixed_model_versions"] = latest.get("mixed_model_versions", False)
+        plan["hd_refresh_reference"] = {
+            "hull_version": latest["version"],
+            "report_digest": report["snapshot_evidence_digest"],
+            "thresholds": report["screening_policy"],
+            "high_record_ids": sorted(high),
+            "reference_scope": "counterfactual_selection_only",
+        }
     if not plan["candidates"]:
         raise ValueError("累计结构池为空，不能生成刷新方案")
     from phase_agent.analysis.cost.calibrate_relative_cost import calibrate_relative_cost

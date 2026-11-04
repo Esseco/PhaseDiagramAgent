@@ -75,6 +75,9 @@ def setup(tmp_path):
         },
     }
     require_structure_refresh(state, "old", "new")
+    # Historical single-structure checkpoint: no phase-record hull was saved.
+    # These tests exercise legacy approval and recovery, not the new HD policy.
+    state.pop("mlip_energy_policy", None)
     session = {
         "status": "confirmed",
         "confirmed_snapshot": {
