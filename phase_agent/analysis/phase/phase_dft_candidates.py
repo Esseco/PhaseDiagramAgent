@@ -15,12 +15,12 @@ def phase_review_candidates(state, candidates, *, report=None):
     snapshot = (state.get("phase_diagrams") or {}).get("mlip") or {}
     model = state.get("active_model_version")
     if snapshot.get("status") != "completed" or snapshot.get("model_version") != model:
-        return deepcopy(candidates)
+        return extrapolation_dft_candidates(state, candidates)
     report = report if report is not None else get_phase_quality_report(state)
     if report.get("model_version") != model or report.get("hull_version") != snapshot.get(
         "version"
     ):
-        return bind_ground_state_frames(state, candidates)
+        return extrapolation_dft_candidates(state, bind_ground_state_frames(state, candidates))
     eligible = {
         digest
         for row in report.get("structures") or []
@@ -102,7 +102,69 @@ def phase_review_candidates(state, candidates, *, report=None):
             }
         )
         ids.add(sid)
-    return candidate_quality_evidence(state, bind_ground_state_frames(state, result), report=report)
+    return candidate_quality_evidence(state, extrapolation_dft_candidates(state, bind_ground_state_frames(state, result)), report=report)
+
+
+def extrapolation_dft_candidates(state, candidates):
+    """Expose exact recovered failure frames for review; never infer hull energy."""
+    result = deepcopy(candidates)
+    ids = {row.get('candidate_id') or row.get('structure_id') for row in result}
+    model = state.get('active_model_version')
+    for task in state.get('tasks') or []:
+        evidence = task.get('extrapolation_review') or {}
+        outputs = task.get('outputs') or {}
+        monitor = outputs.get('extrapolation_monitor') or {}
+        if task.get('model_version') == model:
+            for index, failure in enumerate(outputs.get('extrapolation_failures') or []):
+                path = failure.get('structure_path')
+                digest = failure.get('structure_checksum')
+                cid = f"EXTRAP-{task.get('task_id')}-{index}"
+                if not path or not digest or not task.get('structure_id') or cid in ids:
+                    continue
+                try:
+                    from pymatgen.core import Structure
+                    if sha256(Path(path).read_bytes()).hexdigest() != digest:
+                        continue
+                    structure = Structure.from_file(path)
+                except (OSError, ValueError):
+                    continue
+                result.append({'candidate_id': cid, 'structure_id': task['structure_id'],
+                    'source_task_id': task.get('task_id'), 'branch_id': task.get('branch_id'),
+                    'candidate_origin': 'extrapolation_failure', 'extrapolation_failure': True,
+                    'extrapolation_evidence': deepcopy(failure.get('extrapolation_monitor') or {}),
+                    'structure_path': path, 'structure_sha256': digest, 'model_version': model,
+                    'composition': structure.composition.as_dict(), 'atom_count': len(structure),
+                    'predicted_Ehull': None, 'qbc': {'status': 'not_available_exact_current_geometry'},
+                    'input_frame_kind': 'recovered_extrapolation_failure_frame'})
+                ids.add(cid)
+        if (outputs.get('extrapolation_failures') or task.get('model_version') != model or
+                not (evidence.get('status') == 'extrapolation_failure' or monitor.get('extrapolation_failure') is True)):
+            continue
+        tid, sid = task.get('task_id'), task.get('structure_id')
+        path, digest = outputs.get('structure_path'), outputs.get('structure_checksum')
+        if not tid or not sid or not path or not digest:
+            continue
+        try:
+            if sha256(Path(path).read_bytes()).hexdigest() != digest:
+                continue
+        except OSError:
+            continue
+        cid = 'EXTRAP-' + tid
+        if cid in ids:
+            continue
+        composition = deepcopy(outputs.get('composition') or {})
+        result.append({'candidate_id': cid, 'structure_id': sid, 'source_task_id': tid,
+                       'branch_id': task.get('branch_id'), 'candidate_origin': 'extrapolation_failure',
+                       'extrapolation_failure': True, 'extrapolation_evidence': deepcopy(evidence or monitor),
+                       'structure_path': path, 'structure_sha256': digest,
+                       'model_version': model, 'composition': composition,
+                       'atom_count': outputs.get('atom_count') or sum(composition.values()),
+                       'phase': outputs.get('actual_phase') or outputs.get('source_phase'),
+                       'predicted_Ehull': None, 'qbc': deepcopy(outputs.get('qbc') or {'status': 'not_available_exact_current_geometry'}),
+                       'input_frame_kind': 'recovered_extrapolation_failure_frame',
+                       'optimizer_converged': outputs.get('optimizer_converged')})
+        ids.add(cid)
+    return result
 
 
 def bind_ground_state_frames(state, candidates):

@@ -80,9 +80,15 @@ def test_cached_prediction_identity_change_is_rejected(tmp_path):
 
 def test_failed_optimizer_does_not_report_completion(tmp_path):
     calls = []
-    with pytest.raises(ValueError, match="converged"):
-        run_inline_refresh(
+    result = run_inline_refresh(
             job(tmp_path),
             predictor(0.2, calls),
-            lambda _: {"status": "completed", "optimizer_converged": False},
+            lambda _: {"status": "completed", "optimizer_converged": False, "structure_path": "final",
+                       "extrapolation_monitor": {"extrapolation_failure": True}},
         )
+    assert result['converged'] is False and result['structure_path'] == 'final'
+    assert result['extrapolation_monitor']['extrapolation_failure'] is True
+    from phase_agent.analysis.convergence.mlip_relaxation import relaxation_failure
+    assert relaxation_failure({'status': 'completed', 'stage': 'relax_and_feature',
+                               'parameters': {'model_refresh_operation': 'predict'},
+                               'outputs': result}) == 'extrapolation_failure'

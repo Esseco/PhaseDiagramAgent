@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import inspect
 import json
+import os
 from pathlib import Path
 
 
@@ -76,6 +77,26 @@ def _qbc_from_summary(best: dict, member_count: int) -> dict:
     }
 
 
+def _extrapolation_monitor_factory():
+    """Use the audited formation-energy embedding; fail closed on missing weights."""
+    import importlib.util
+    if os.environ.get('TF_USE_LEGACY_KERAS', '1') != '1':
+        raise ValueError('extrapolation_monitor_requires_legacy_keras')
+    os.environ['TF_USE_LEGACY_KERAS'] = '1'
+    spec = importlib.util.find_spec('maml')
+    if not spec or not spec.submodule_search_locations:
+        raise RuntimeError('extrapolation_monitor_maml_unavailable')
+    path = Path(next(iter(spec.submodule_search_locations))) / 'describers/data/m3gnet_models/matbench_mp_e_form/0/m3gnet'
+    from Process_MLIP.direct_sampling.features import M3GNetEmbedding
+    from Process_MLIP.collapse_monitor import CollapseMonitor
+    import tensorflow as tf
+    tf.config.set_visible_devices([], 'GPU')
+    encoder = M3GNetEmbedding(path)
+    if encoder.metadata['model_sha256'] != '87db513eeb8c346d667677f3041982c5fd0a4304d8e5071d9c6c22fded04eb0d':
+        raise ValueError('extrapolation_monitor_model_checksum_mismatch')
+    return lambda atoms: CollapseMonitor(atoms, encoder, stop_on_extrapolation=False)
+
+
 def run_mace_worker(job: dict) -> dict:
     output = Path(job["output_directory"])
     output.mkdir(parents=True, exist_ok=True)
@@ -124,17 +145,22 @@ def run_mace_worker(job: dict) -> dict:
                 model_path=model_path,
             )
             optimizer = BFGS(atoms, logfile=None)
+            monitor = _extrapolation_monitor_factory()(atoms)
+            optimizer.attach(lambda: monitor(atoms), interval=1)
             optimizer.run(
                 fmax=float(parameters.pop("fmax", 0.05)),
                 steps=int(parameters.pop("relax_steps", 500)),
             )
             structure_path = output / "initial_relaxed.vasp"
             write(structure_path, atoms, format="vasp", direct=True)
+            final_difference = monitor.check_final(atoms)
             from phase_agent.tools.remote.integrity import file_checksum
 
             return {
                 "status": "completed",
                 "optimizer": "BFGS",
+                "extrapolation_monitor": {"final_feature_difference": final_difference,
+                    "extrapolation_failure": bool(monitor.failures), "failures": monitor.failures},
                 "structure_path": str(structure_path),
                 "structure_checksum": file_checksum(structure_path),
                 "composition": {
@@ -157,6 +183,10 @@ def run_mace_worker(job: dict) -> dict:
             if "mace-mh-1" in identity or "mh-1" in identity or "mh_1" in identity:
                 mace_head = "omat_pbe"
         structure_path = output / "initial_relaxed.vasp"
+        from ase.io import read as read_atoms
+        source = Path(job['structure_path'])
+        initial_atoms = read_atoms(source, format='vasp' if source.suffix.lower() == '.vasp' else None)
+        monitor = _extrapolation_monitor_factory()(initial_atoms)
         result = relax_structure_mace(
             job["structure_path"],
             model_path,
@@ -167,6 +197,7 @@ def run_mace_worker(job: dict) -> dict:
             fmax=parameters.pop("fmax", 0.05),
             steps=parameters.pop("relax_steps", 500),
             relax_cell=parameters.pop("relax_cell", True),
+            step_callback=monitor,
         )
         from pymatgen.core import Structure
 
@@ -252,13 +283,27 @@ def run_mace_worker(job: dict) -> dict:
         "max_steps": max_steps,
         **parameters,
     }
+    if framework != 'mace':
+        raise ValueError('extrapolation_monitor_mc_requires_mace_backend')
+    constructor['relaxation_monitor_factory'] = _extrapolation_monitor_factory()
     if model_paths:
         constructor["model_paths"] = model_paths
     accepted = inspect.signature(LayeredOxide_MCOrderingClass).parameters
+    if ('relaxation_monitor_factory' not in accepted and
+            not any(item.kind == inspect.Parameter.VAR_KEYWORD for item in accepted.values())):
+        raise RuntimeError('mc_extrapolation_monitor_not_supported_by_installed_Process_AL_MC')
     if not any(item.kind == inspect.Parameter.VAR_KEYWORD for item in accepted.values()):
         constructor = {key: value for key, value in constructor.items() if key in accepted}
     runner = LayeredOxide_MCOrderingClass(**constructor)
-    returned = runner.run(structure=job["structure_path"], mode=mode, out_dir=output)
+    from Process_AL_MC.MC_sample import InitialExtrapolationFailure
+    try:
+        returned = runner.run(structure=job["structure_path"], mode=mode, out_dir=output)
+    except InitialExtrapolationFailure as error:
+        item = error.evidence
+        return {'status': 'failed', 'error': 'initial_relaxation_extrapolation_failure',
+                'structure_path': item['structure_path'], 'structure_checksum': item['structure_checksum'],
+                'extrapolation_monitor': item['extrapolation_monitor'],
+                'extrapolation_failures': [item], 'mlip_version': job.get('model_version')}
 
     summary = _read_json(output / "pool" / "pool_summary.json", []) or []
     for row in summary:
@@ -333,6 +378,7 @@ def run_mace_worker(job: dict) -> dict:
         "stop_reason": reported_stop or ("unknown" if operation == "mc" else None),
         "actual_gpu_core_hours": None,
         "actual_cost": None,
+        "extrapolation_failures": list(getattr(runner, 'extrapolation_failures', [])),
     }
 
 

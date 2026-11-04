@@ -32,6 +32,13 @@ def export_batch_result(task_directory, results_directory, *, create_archive=Tru
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "task.finished.json").unlink(missing_ok=True)
     outputs = result.get("outputs") or {}
+    for item in outputs.get('extrapolation_failures') or []:
+        source = Path(str(item.get('structure_path') or '')).resolve()
+        if (source.parent != task_dir or not source.name.startswith('extrapolation_')
+                or source.suffix.lower() != '.vasp' or not source.is_file()
+                or file_checksum(source) != item.get('structure_checksum')):
+            raise ValueError('invalid_extrapolation_failure_frame')
+        _copy(source, destination / source.name)
     # Small occupancy deltas are required for cross-round/model de-duplication.
     # Do not transfer the per-worker SQLite database or structure history.
     occupation_delta = task_dir / "mc_occupations.bin"

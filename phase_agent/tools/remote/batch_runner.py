@@ -360,7 +360,8 @@ class RemoteBatchRunner:
                             continue
                 if (
                     task.get("stage") in {"relax_and_feature", "deep_search"}
-                    and payload.get("status") == "completed"
+                    and (payload.get("status") == "completed" or
+                         (payload.get("outputs") or {}).get("extrapolation_failures"))
                 ):
                     from phase_agent.tools.remote.resolve_local_relax_structure import (
                         resolve_local_relax_structure,

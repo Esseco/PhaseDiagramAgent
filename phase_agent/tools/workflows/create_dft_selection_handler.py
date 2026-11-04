@@ -6,6 +6,7 @@ from phase_agent.interface_compatibility import call_with_optimizations
 
 from copy import deepcopy
 import hashlib
+from pathlib import Path
 
 from phase_agent.science.qbc.build_candidate_metrics import build_qbc_candidate_metrics
 from phase_agent.tools.budget.reserve_dft_actions import reserve_dft_actions
@@ -100,6 +101,12 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 "reason": "批准后候选或预算变化；请重新确认方案。",
                 "tasks": [],
             }
+        from phase_agent.tools.workflows.dft_selection_plot import require_dft_selection_plot
+        plot_state = {**state, "qbc_candidates": candidates}
+        try:
+            require_dft_selection_plot(plot_state, validation["accepted"])
+        except (ValueError, OSError, TypeError, KeyError, ImportError) as error:
+            return {"status": "rejected", "state": state, "tasks": [], "reason": "dft_selection_plot_required: " + str(error)}
         reviewed_settings = None
         review = action.get("dft_template_review")
         if context.get("execution_mode") == "interactive" and not prepare_after_approval:
@@ -113,6 +120,41 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             row["candidate_id"]: row["purpose"]
             for row in (action.get("scientific_decision") or {}).get("selection_purposes") or []
         }
+        candidates_by_id = {
+            row.get("candidate_id") or row.get("structure_id"): row for row in candidates
+        }
+        existing_task_ids = {
+            row.get("task_id")
+            for row in (state.get("tasks") or []) + (state.get("pending_tasks") or [])
+        }
+        input_structure_sha256 = {}
+        try:
+            for decision in validation["accepted"]:
+                if decision["action"] not in {"DFT_SINGLE_POINT", "DFT_RELAX"}:
+                    continue
+                sid = decision["candidate_id"]
+                selected = candidates_by_id.get(sid) or {}
+                path = selected.get("structure_path")
+                if not path:
+                    raise ValueError("dft_input_structure_missing:" + sid)
+                actual = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                expected = decision.get("input_structure_sha256")
+                candidate_sha = selected.get("structure_sha256")
+                if (expected is not None and actual != expected) or (
+                    candidate_sha is not None
+                    and (not isinstance(candidate_sha, str) or actual != candidate_sha.lower())
+                ):
+                    raise ValueError("dft_input_structure_sha256_mismatch:" + sid)
+                task_id = "DFT-" + hashlib.sha256(decision["task_key"].encode()).hexdigest()[:12]
+                if task_id in existing_task_ids:
+                    raise ValueError("duplicate_dft_task_id:" + task_id)
+                existing_task_ids.add(task_id)
+                input_structure_sha256[decision["task_key"]] = actual
+        except (ValueError, OSError, TypeError) as error:
+            return {
+                "status": "rejected", "state": state, "tasks": [],
+                "metrics": metrics_result, "validation": validation, "reason": str(error),
+            }
         state = call_with_optimizations(
             reserve_dft_actions, state, validation["accepted"], _optimizations={"_owned": True}
         )
@@ -129,8 +171,9 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             task = {
                 "task_id": "DFT-" + hashlib.sha256(decision["task_key"].encode()).hexdigest()[:12],
                 "task_key": decision["task_key"],
+                "input_structure_sha256": input_structure_sha256[decision["task_key"]],
                 "object_id": decision["candidate_id"],
-                "structure_id": decision["candidate_id"],
+                "structure_id": (candidates_by_id.get(decision["candidate_id"]) or {}).get("structure_id") or decision["candidate_id"],
                 "branch_id": decision.get("branch_id")
                 or next(
                     (

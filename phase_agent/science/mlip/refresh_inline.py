@@ -77,6 +77,7 @@ def run_inline_refresh(job, predictor, relaxer):
     if maximum <= threshold:
         return {**prediction, "refresh_force_followup": {**evidence, "relaxed": False}}
     relaxed = relaxer({**job, "operation": "relax"})
-    if relaxed.get("status") != "completed" or relaxed.get("optimizer_converged") is not True:
-        raise ValueError("refresh_relaxation_not_converged")
-    return {**relaxed, "converged": True, "refresh_force_followup": {**evidence, "relaxed": True}}
+    if relaxed.get("status") != "completed" or not isinstance(relaxed.get("optimizer_converged"), bool):
+        raise ValueError("refresh_relaxation_result_incomplete")
+    return {**relaxed, "converged": relaxed['optimizer_converged'],
+            "refresh_force_followup": {**evidence, "relaxed": True}}

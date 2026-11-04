@@ -5,6 +5,8 @@ from math import isfinite
 
 DISCARDED = "discarded_unconverged"
 EXCLUDED = "excluded_unconverged_relaxation"
+EXTRAPOLATION_DISCARDED = "excluded_extrapolation_failure"
+EXTRAPOLATION_EXCLUDED = "excluded_extrapolation_failure"
 
 
 def relaxation_failure(result, *, require_optimizer=False):
@@ -13,10 +15,16 @@ def relaxation_failure(result, *, require_optimizer=False):
     if result.get("stage") != "relax_and_feature" or result.get("energy_method") == "dft":
         return None
     output = result.get("outputs") or result
+    monitor = output.get("extrapolation_monitor") or {}
+    review = result.get("extrapolation_review") or {}
+    if (result.get("result_disposition") == EXTRAPOLATION_DISCARDED
+            or monitor.get("extrapolation_failure") is True
+            or review.get("status") == "extrapolation_failure"):
+        return "extrapolation_failure"
     operation = (result.get("worker_job") or {}).get("operation") or (
         result.get("parameters") or {}
     ).get("model_refresh_operation")
-    if operation == "predict" or (
+    if (operation == "predict" and "optimizer_converged" not in output) or (
         output.get("single_point_completed") is True and "optimizer_converged" not in output
     ):
         return None
@@ -47,6 +55,11 @@ def relaxation_failure(result, *, require_optimizer=False):
 
 
 def reject_relaxation(result, reason):
+    if reason == "extrapolation_failure":
+        disposition = DISCARDED if result.get("result_disposition") == DISCARDED else EXTRAPOLATION_DISCARDED
+        result.update(checks_passed=False, result_disposition=disposition)
+        result["relaxation_quality"] = {"status": "rejected", "reason": reason}
+        return
     result.update(converged=False, checks_passed=False, result_disposition=DISCARDED)
     result["relaxation_quality"] = {"status": "rejected", "reason": reason}
 
@@ -67,7 +80,11 @@ def reconcile_relaxation_quality(state, *, _owned=False):
     for record in current.get("phase_records") or []:
         task = rejected.get(record.get("source_task_id"))
         if task is not None:
-            record.update(status=EXCLUDED, converged=False, checks_passed=False)
+            reason = task["relaxation_quality"]["reason"]
+            record.update(status=EXTRAPOLATION_EXCLUDED if reason == "extrapolation_failure" else EXCLUDED,
+                          checks_passed=False)
+            if reason != "extrapolation_failure":
+                record["converged"] = False
             record["relaxation_quality"] = deepcopy(task["relaxation_quality"])
             records.append(record.get("record_id"))
     if not rejected:

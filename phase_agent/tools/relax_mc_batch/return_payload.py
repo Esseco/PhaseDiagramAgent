@@ -95,6 +95,16 @@ def result_files(root, state, candidates, *, remote_root=None):
         # Read worker-relative pointers against that result, without modifying
         # signed result bytes. Portable task/candidate pointers are batch-relative.
         raw_outputs = raw.get("outputs") or {}
+        for item in raw_outputs.get('extrapolation_failures') or []:
+            from hashlib import sha256
+            name = Path(str(item.get('structure_path') or '').replace('\\', '/')).name
+            if not name.startswith('extrapolation_') or not name.endswith('.vasp'):
+                raise ValueError('invalid_extrapolation_failure_frame')
+            frame = next((folder / name for folder in (directory, worker)
+                          if (folder / name).is_file()), None)
+            if frame is None or sha256(frame.read_bytes()).hexdigest() != item.get('structure_checksum'):
+                raise ValueError('missing_or_invalid_extrapolation_failure_frame')
+            include(str(frame), root, required=True)
         # Canonical collector paths in task.outputs replace worker-side geometry
         # pointers. Preserve signed raw JSON, but do not copy both geometries.
         referenced(

@@ -53,7 +53,7 @@ def ensure_phase_identification(
     for index, task in enumerate(tasks):
         if task.get("task_id") in (current.get("scientific_feedback_errors") or {}):
             continue
-        if task.get("result_disposition") == DISCARDED:
+        if task.get("result_disposition") in {DISCARDED, "excluded_extrapolation_failure"}:
             continue
         if task.get("stage") not in STAGES or task.get("status") != "completed":
             continue
@@ -92,7 +92,7 @@ def ensure_phase_identification(
 
     records = current.setdefault("phase_records", [])
     for index, record in enumerate(records):
-        if record.get("status") in {
+        if str(record.get("status", "")).startswith("excluded_") or record.get("status") in {
             EXCLUDED,
             "excluded_invalid_result",
             "excluded_phase_quality_review",

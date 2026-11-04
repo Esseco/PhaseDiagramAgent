@@ -31,6 +31,9 @@ def filter_excluded_candidates(state, candidates):
         for r in (state.get("phase_records") or [])
         + (state.get("phase_quality_archived_records") or [])
         if str(r.get("status", "")).startswith("excluded_")
+        and r.get("status") != "excluded_extrapolation_failure"
+        and (r.get("phase_quality_review") or {}).get("source") != "extrapolation_review"
+        and (r.get("relaxation_quality") or {}).get("reason") != "extrapolation_failure"
         and (r.get("model_version") or r.get("source_version")) == model
     ]
     paths = {r.get("structure_path") for r in records} - {None}
