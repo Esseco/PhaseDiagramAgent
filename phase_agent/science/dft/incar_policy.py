@@ -1,9 +1,10 @@
 """Confirmed INCAR overrides for the layered-oxide search project."""
 
 
-def layered_oxide_incar(settings=None):
+def layered_oxide_incar(settings=None, *, static=False):
     return {
         **(settings or {}),
+        **({"NELM": 120, "ENCUT": 520} if static else {}),
         "ALGO": "Normal",
         "AMIX": 0.2,
         "BMIX": 0.0001,

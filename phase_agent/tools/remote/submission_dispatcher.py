@@ -72,7 +72,7 @@ def preflight_models(root, jobs):
             paths = worker.get("model_paths") or (
                 [worker["model_path"]] if worker.get("model_path") else []
             )
-            if worker and task.get("stage") in {"relax_and_feature", "deep_search"} and not paths:
+            if worker and task.get("stage") in {"relax_and_feature", "deep_search", "parent_first_sampling"} and not paths:
                 raise ValueError("MLIP model path missing; no child jobs submitted: " + str(source))
             for name in paths:
                 path = Path(name)
@@ -206,8 +206,11 @@ def _run(root):
                     if task.get("worker_job") and task.get("stage") in {
                         "relax_and_feature",
                         "deep_search",
+                        "parent_first_sampling",
                     }:
                         modules.update(("numpy", "scipy", "pymatgen", "ase", "torch", "mace"))
+                        if task.get("stage") == "parent_first_sampling":
+                            modules.update(("maml", "tensorflow", "h5py", "Process_MLIP", "Process_AL_MC", "phase_agent"))
             preflight_models(
                 root,
                 [job for job in jobs if receipt["jobs"].get(job, {}).get("status") != "submitted"],

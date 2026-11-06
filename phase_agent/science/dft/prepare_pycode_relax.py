@@ -20,7 +20,7 @@ def prepare_pycode_relax(task, *, manager, generator=None, comparison_model=None
     incar = dict(parameters.get("incar_settings") or {})
     if any(stage not in {"relax", "static"} for stage in incar):
         raise ValueError("仅允许 relax/static 阶段 INCAR 参数")
-    incar = {calculation: {**layered_oxide_incar(incar.get(calculation)), "GGA": None}}
+    incar = {calculation: {**layered_oxide_incar(incar.get(calculation), static=calculation == "static"), "GGA": None}}
     if calculation == "static":
         incar[calculation].update({"NSW": 0, "IBRION": -1})
     kpoints = dict(parameters.get("kpoints_settings") or {})
@@ -40,6 +40,15 @@ def prepare_pycode_relax(task, *, manager, generator=None, comparison_model=None
         kpoints_settings=kpoints,
         job_name=f"DFT-{calculation}",
     )
+    if calculation == "static":
+        import json
+
+        workflow_config = directory / "workflow.json"
+        settings = json.loads(workflow_config.read_text(encoding="utf-8"))
+        settings["run_vasp_kwargs"] = {"static": {
+            "max_errors": 2, "custodian_kwargs": {"max_errors_per_job": 2}
+        }}
+        workflow_config.write_text(json.dumps(settings, indent=2), encoding="utf-8")
     if comparison_model:
         import json
 
