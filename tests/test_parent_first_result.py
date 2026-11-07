@@ -36,10 +36,10 @@ def test_hpc_return_binds_inputs_model_and_selected_frames(tmp_path):
                 'structure_checksum':sha(final),'extrapolation_monitor':{'extrapolation_failure':False,
                 'failures':[],'final_feature_difference':0.2}}
     def extract(inputs, encoder, cache):
-        paths.extend(inputs);cache.write_text('fake',encoding='utf8')
+        paths.extend(inputs);_fake_features(inputs, cache)
     def sample(cache, output, target, reference_count):
         assert reference_count==1
-        output.mkdir();(output/'selected_indices.json').write_text(json.dumps([{'source':paths[1],'frame':0}]),encoding='utf8')
+        output.mkdir();(output/'selected_indices.json').write_text(json.dumps([{'source':paths[2],'frame':0}]),encoding='utf8')
         return {'n_samples':1}
     class Encoder:
         metadata={'model_sha256':'b'*64}
@@ -53,3 +53,15 @@ def test_hpc_return_binds_inputs_model_and_selected_frames(tmp_path):
     (output/'selected_0000.vasp').write_text('tampered',encoding='utf8')
     with pytest.raises(ValueError,match='selected_binding_invalid'):
         validate_parent_first_result(inp,output)
+
+
+def _fake_features(inputs, cache):
+    import h5py
+    import numpy as np
+    from ase.io import read
+    indices = [(source, frame) for source, path in enumerate(inputs)
+               for frame, _ in enumerate(read(path, index=':'))]
+    with h5py.File(cache, 'x') as h:
+        h.create_dataset('features', data=np.zeros((len(indices), 2), dtype='f4'), maxshape=(None, 2))
+        h.create_dataset('indices', data=np.array(indices, dtype='i8'))
+

@@ -172,7 +172,49 @@ def run_parent_first_sampling(parents, references, output_dir, *, model_path, mo
         feature_model = getattr(encoder, 'metadata', {}) or {}
         if feature_model_sha256 and feature_model.get('model_sha256') != feature_model_sha256:
             raise ValueError('parent_first_feature_model_sha256_mismatch')
-        extract_fn(reference_paths + candidate_paths, encoder, cache)
+        # Compute each relaxed parent and its perturbations in the same feature
+        # cache, then remove parents and out-of-range perturbations before DIRECT.
+        import h5py
+        import numpy as np
+        parent_paths = [str(Path(final).resolve()) for _, final, _ in relaxed_parents]
+        extract_fn(reference_paths + parent_paths + candidate_paths, encoder, cache)
+        with h5py.File(cache, 'r+') as h:
+            features = h['features'][:]
+            indices = h['indices'][:]
+            nref, nparent = len(reference_paths), len(parent_paths)
+            parent_features = {}
+            for source, frame in indices:
+                if nref <= source < nref + nparent:
+                    if frame != 0 or int(source) in parent_features:
+                        raise ValueError('parent_first_parent_feature_invalid')
+                    parent_features[int(source)] = None
+            for position, (source, frame) in enumerate(indices):
+                if nref <= source < nref + nparent:
+                    parent_features[int(source)] = features[position]
+            if len(parent_features) != nparent:
+                raise ValueError('parent_first_parent_feature_missing')
+            kept, differences = [], {}
+            for position, (source, frame) in enumerate(indices):
+                source, frame = int(source), int(frame)
+                if source < nref:
+                    kept.append(position)
+                elif source >= nref + nparent:
+                    parent_index = source - nref - nparent
+                    if not 0 <= parent_index < nparent:
+                        raise ValueError('parent_first_feature_source_invalid')
+                    delta = float(np.linalg.norm(features[position] - parent_features[nref + parent_index]))
+                    if not math.isfinite(delta):
+                        raise ValueError('parent_first_perturbation_feature_invalid')
+                    differences[(candidate_paths[parent_index], frame)] = delta
+                    if delta <= 1.0:
+                        kept.append(position)
+            accepted = len(kept) - nref
+            if accepted < target:
+                raise ValueError('parent_first_insufficient_candidates_after_feature_filter')
+            h['features'].resize((len(kept), features.shape[1]))
+            h['features'][:] = features[kept]
+            del h['indices']
+            h.create_dataset('indices', data=indices[kept])
         selection_dir = work / 'direct'
         report = sample_fn(cache, selection_dir, target, reference_count=len(reference_paths))
         selected = json.loads((selection_dir / 'selected_indices.json').read_text(encoding='utf8'))
@@ -191,14 +233,19 @@ def run_parent_first_sampling(parents, references, output_dir, *, model_path, mo
             if key in seen:
                 raise ValueError('parent_first_selected_duplicate')
             seen.add(key)
+            if differences.get(key, float('inf')) > 1.0:
+                raise ValueError('parent_first_selected_feature_filter_invalid')
             path = exported / ('selected_%04d.vasp' % index)
             write(path, read(source, index=frame), format='vasp', direct=True)
-            rows.append({'path': path.name, 'sha256': _sha(path), **identities[source][frame]})
+            rows.append({'path': path.name, 'sha256': _sha(path), **identities[source][frame],
+                         'perturbation_feature_difference': differences[key]})
         output = {'schema': 'parent-first-perturbation-direct-v1', 'target': target,
                   'binding': binding or {},
                   'model_sha256': model_sha256, 'feature_model': feature_model, 'references': references,
                   'parent_relaxations': relaxations, 'candidate_count': candidate_count,
-                  'selected': rows, 'direct_report': report}
+                  'selected': rows, 'direct_report': report,
+                  'perturbation_feature_filter': {'threshold': 1.0, 'accepted': accepted,
+                      'rejected': candidate_count - accepted}}
         (exported / 'result.json').write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding='utf8')
         exported.rename(out)
     return {'status': 'completed', 'output_dir': str(out), 'selected_count': len(rows),

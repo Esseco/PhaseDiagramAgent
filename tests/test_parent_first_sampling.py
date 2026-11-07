@@ -40,16 +40,16 @@ def test_parent_relaxation_precedes_perturbation_and_only_selected_are_exported(
     def extract(inputs, encoder, cache):
         events.append('extract')
         paths.extend(inputs)
-        cache.write_text('fake', encoding='utf8')
+        _fake_features(inputs, cache)
 
     def sample(cache, output, target, reference_count):
         events.append('direct')
         assert reference_count == 1 and target == 2
-        assert len(read(paths[1], index=':')) == 3
-        assert read(paths[1], index=0).positions[0, 2] == pytest.approx(0.25)
+        assert len(read(paths[2], index=':')) == 3
+        assert read(paths[2], index=0).positions[0, 2] == pytest.approx(0.25)
         output.mkdir()
         (output / 'selected_indices.json').write_text(json.dumps([
-            {'source': paths[1], 'frame': 0}, {'source': paths[1], 'frame': 1}]), encoding='utf8')
+            {'source': paths[2], 'frame': 0}, {'source': paths[2], 'frame': 1}]), encoding='utf8')
         return {'n_samples': 2}
 
     out = tmp_path / 'result'
@@ -130,12 +130,12 @@ def test_resume_after_direct_failure_does_not_repeat_completed_relaxation(tmp_pa
                 'failures':[], 'final_feature_difference':0.1}}
     sources = []
     def extract(inputs, encoder, cache):
-        sources[:] = inputs; cache.write_text('fake', encoding='utf8')
+        sources[:] = inputs; _fake_features(inputs, cache)
     def failed(*args, **kwargs):
         raise RuntimeError('direct failed')
     def success(cache, output, target, reference_count):
         output.mkdir(); (output/'selected_indices.json').write_text(
-            json.dumps([{'source':sources[0], 'frame':0}]), encoding='utf8')
+            json.dumps([{'source':sources[-1], 'frame':0}]), encoding='utf8')
         return {'n_samples':1}
     args = ([{'record_id':'r','path':str(parent),'sha256':sha(parent)}], [], tmp_path/'out')
     kwargs = dict(model_path=model, model_sha256=sha(model), feature_model_path='unused', target=1,
@@ -167,10 +167,10 @@ def test_all_parents_relax_before_any_perturbation(tmp_path, monkeypatch):
                 'structure_checksum':sha(final), 'extrapolation_monitor':{'extrapolation_failure':False,
                 'failures':[], 'final_feature_difference':0.1}}
     def extract(inputs, encoder, cache):
-        events.append('extract'); sources[:] = inputs; cache.write_text('fake', encoding='utf8')
+        events.append('extract'); sources[:] = inputs; _fake_features(inputs, cache)
     def sample(cache, output, target, reference_count):
         events.append('direct'); output.mkdir(); (output/'selected_indices.json').write_text(
-            json.dumps([{'source':sources[0], 'frame':0}]), encoding='utf8'); return {'n_samples':1}
+            json.dumps([{'source':sources[-1], 'frame':0}]), encoding='utf8'); return {'n_samples':1}
     run_parent_first_sampling([{'record_id':'r0','path':str(first),'sha256':sha(first)},
         {'record_id':'r1','path':str(second),'sha256':sha(second)}], [], tmp_path/'out',
         model_path=model, model_sha256=sha(model), feature_model_path='unused', target=1,
@@ -223,3 +223,50 @@ def test_real_direct_pipeline_with_synthetic_feature_encoder(tmp_path):
         model_path=model,model_sha256=sha(model),feature_model_path='unused',feature_model_sha256='b'*64,
         target=2,frames_per_parent=5,relax_fn=relax,encoder_factory=lambda _:Encoder())
     assert result['status']=='completed' and result['selected_count']==2
+
+
+def _fake_features(inputs, cache):
+    import h5py
+    import numpy as np
+    from ase.io import read
+    indices = [(source, frame) for source, path in enumerate(inputs)
+               for frame, _ in enumerate(read(path, index=':'))]
+    with h5py.File(cache, 'x') as h:
+        h.create_dataset('features', data=np.zeros((len(indices), 2), dtype='f4'), maxshape=(None, 2))
+        h.create_dataset('indices', data=np.array(indices, dtype='i8'))
+
+
+
+def test_perturbation_feature_filter_applies_before_direct(tmp_path):
+    import h5py
+    import numpy as np
+    atoms = Atoms('NaCoNiO2', positions=[[0,0,0],[2,0,0],[0,2,0],[2,2,0],[0,0,2]], cell=[6,6,6], pbc=True)
+    parent = tmp_path/'parent.vasp'; write(parent, atoms, format='vasp')
+    model = tmp_path/'model'; model.write_bytes(b'model')
+    def relax(job):
+        final=Path(job['output_directory'])/'initial_relaxed.vasp'; final.parent.mkdir()
+        write(final,read(parent),format='vasp')
+        return {'status':'completed','optimizer_converged':True,'structure_path':str(final),
+                'structure_checksum':sha(final),'extrapolation_monitor':{'extrapolation_failure':False,
+                'failures':[], 'final_feature_difference':0.1}}
+    sources=[]
+    def extract(inputs, encoder, cache):
+        sources.extend(inputs)
+        with h5py.File(cache,'x') as h:
+            h.create_dataset('features',data=np.array([[0.0],[1.0],[1.01]],dtype='f4'),maxshape=(None,1))
+            h.create_dataset('indices',data=np.array([[0,0],[1,0],[1,1]],dtype='i8'))
+    def sample(cache, output, target, reference_count):
+        with h5py.File(cache) as h:
+            assert h['indices'][:].tolist()==[[1,0]]
+        output.mkdir(); (output/'selected_indices.json').write_text(json.dumps([{'source':sources[1],'frame':0}]))
+        return {'n_samples':1}
+    args=([{'record_id':'r','path':str(parent),'sha256':sha(parent)}],[],tmp_path/'out')
+    kw=dict(model_path=model,model_sha256=sha(model),feature_model_path='unused',frames_per_parent=2,
+            relax_fn=relax,encoder_factory=lambda _:None,extract_fn=extract,sample_fn=sample)
+    run_parent_first_sampling(*args,target=1,**kw)
+    result=json.loads((tmp_path/'out'/'result.json').read_text())
+    assert result['perturbation_feature_filter']=={'threshold':1.0,'accepted':1,'rejected':1}
+    assert result['selected'][0]['perturbation_feature_difference']==1.0
+    sources.clear()
+    with pytest.raises(ValueError,match='insufficient_candidates_after_feature_filter'):
+        run_parent_first_sampling(args[0],[],tmp_path/'out2',target=2,**kw)
