@@ -112,6 +112,28 @@ def supplement_results(directory, model, *, predictor=None):
     return reports
 
 
+def batch_predictor(model, *, calculator_factory=None):
+    """Load one calculator per process, and reuse it for every validated frame."""
+    from phase_agent.science.mlip.model_interface import create_calculator
+    from pymatgen.io.ase import AseAtomsAdaptor
+    import numpy as np
+    options = {"framework": model.get("framework", "mace"), "device": "cuda",
+               "mace_default_dtype": "float64", "mace_head": model.get("mace_head")}
+    calculator = (calculator_factory or create_calculator)(options, model_path=model["model_path"])
+
+    def predict(structure, **kwargs):
+        atoms = AseAtomsAdaptor.get_atoms(structure)
+        atoms.calc = calculator
+        energy = float(atoms.get_potential_energy())
+        forces = np.asarray(atoms.get_forces(), dtype=float)
+        if not np.isfinite(energy) or forces.shape != (len(atoms), 3) or not np.isfinite(forces).all():
+            raise ValueError("nonfinite batch prediction")
+        return {"status": "completed", "energy": energy, "forces": forces.tolist(),
+                "energy_unit": "eV", "forces_unit": "eV/angstrom"}
+
+    return predict
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", required=True)
@@ -120,15 +142,10 @@ def main():
     parser.add_argument("--head", default="omat_pbe")
     parser.add_argument("--environment", required=True, help="confirmed HPC conda name, or current")
     args = parser.parse_args()
-    reports = supplement_results(
-        args.results,
-        {
-            "version": args.model_version,
-            "model_path": args.model_path,
-            "mace_head": args.head,
-            "environment": args.environment,
-        },
-    )
+    model = {"version": args.model_version, "model_path": args.model_path,
+             "mace_head": args.head, "environment": args.environment}
+    predictor = batch_predictor(model) if args.environment == "current" else None
+    reports = supplement_results(args.results, model, predictor=predictor)
     print(json.dumps(reports, ensure_ascii=False, indent=2))
     return 1 if any(row["status"] == "failed" for row in reports) else 0
 
