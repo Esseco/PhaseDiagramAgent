@@ -5,11 +5,67 @@ from phase_agent.agents.strategic.context import with_advice
 from phase_agent.agents.strategic.prompts import CONSULTATION
 
 
+def _consultation_snapshot(evidence_snapshot):
+    """Keep identity, stage overview and blockers for consultation routing; omit heavy pools."""
+    facts = evidence_snapshot.get("facts") or {}
+    state = facts.get("state") or {}
+    dc = facts.get("decision_context") or {}
+    light_state = {
+        k: state[k]
+        for k in (
+            "current_status",
+            "active_model_version",
+            "confirmed_config_version",
+            "current_project",
+            "task_counts",
+            "post_recovery_next_step_pending",
+        )
+        if k in state
+    }
+    light_dc = {
+        k: dc[k]
+        for k in (
+            "stage_snapshot",
+            "scientific_overview",
+            "new_model_generation",
+            "round_budget_review_required",
+            "branch_pool_review_required",
+        )
+        if k in dc
+    }
+    if isinstance(dc.get("mc_entry_conditions"), dict):
+        light_dc["mc_entry_conditions"] = {
+            k: dc["mc_entry_conditions"][k]
+            for k in ("required", "ready", "status", "reason")
+            if k in dc["mc_entry_conditions"]
+        }
+    if isinstance(dc.get("extrapolation_recovery"), dict):
+        light_dc["extrapolation_recovery"] = {
+            k: dc["extrapolation_recovery"][k]
+            for k in ("status", "reason")
+            if k in dc["extrapolation_recovery"]
+        }
+    if "post_dft_assessment" in dc:
+        light_dc["post_dft_assessment"] = bool(dc["post_dft_assessment"])
+    light_facts = {
+        k: facts[k]
+        for k in ("user_instruction", "user_message", "current_project", "allowed_tools")
+        if k in facts
+    }
+    light_facts["state"] = light_state
+    light_facts["decision_context"] = light_dc
+    return {**evidence_snapshot, "facts": light_facts}
+
+
 def plan_consultation(client, snapshot, draft=None):
+    from phase_agent.evidence.snapshot import role_context
+
+    ctx = role_context(snapshot, "strategic")
+    ctx["evidence_snapshot"] = _consultation_snapshot(ctx["evidence_snapshot"])
     request = {
         "mode": "team_consultation",
         "agent_role": "strategic",
-        "evidence_snapshot": snapshot,
+        **ctx,
         "allowed_tools": [],
         "instruction": CONSULTATION,
         "output_contracts": {"consultation_plan": ConsultationPlan.model_json_schema()},

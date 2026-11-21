@@ -2,7 +2,7 @@
 
 import numpy as np
 
-PLOT_RULE_VERSION = "retained-endpoint-relative-visible-v2"
+PLOT_RULE_VERSION = "retained-endpoint-single-hd-v4"
 
 
 def endpoint_relative_energies(x, energy, *, reference=None):

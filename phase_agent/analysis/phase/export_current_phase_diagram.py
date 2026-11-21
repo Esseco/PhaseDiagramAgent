@@ -53,7 +53,9 @@ def export_current_phase_diagram(state, *, directory=None, method="mlip"):
         if not snapshot.get("path"):
             raise ValueError("未配置相图输出目录")
         parent = Path(snapshot["path"]).parent
-        if parent.name == "history":
+        if parent.name == "history" and parent.parent.parent.name == "_internal":
+            directory = parent.parents[4]
+        elif parent.name == "history":
             directory = (
                 parent.parent.parent.parent
                 if parent.parent.name == "phase_diagrams"

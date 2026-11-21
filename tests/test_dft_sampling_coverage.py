@@ -6,6 +6,39 @@ from phase_agent.configuration.defaults.default_dft_decision_config import (
 from phase_agent.runtime.agent_api import format_workflow_reply
 
 
+def monitored_state(tmp_path):
+    import hashlib
+
+    frame = tmp_path / "frame.vasp"
+    frame.write_bytes(b"known frame")
+    digest = hashlib.sha256(frame.read_bytes()).hexdigest()
+    return {
+        "active_model_version": "m",
+        "qbc_candidates": [
+            {
+                "candidate_id": "s",
+                "atom_count": 40,
+                "structure_path": str(frame),
+                "structure_sha256": digest,
+            }
+        ],
+        "tasks": [
+            {
+                "status": "completed",
+                "model_version": "m",
+                "outputs": {
+                    "structure_checksum": digest,
+                    "extrapolation_monitor": {
+                        "final_feature_difference": 0.2,
+                        "extrapolation_failure": False,
+                        "failures": [],
+                    },
+                },
+            }
+        ],
+    }
+
+
 def test_phase_coverage_includes_competing_phase():
     candidates = [
         {
@@ -42,12 +75,12 @@ def test_qbc_when_available_affects_rank():
     assert result["selected_candidates"][0]["candidate_id"] == "high"
 
 
-def test_legacy_round_cost_cap_is_advisory():
+def test_legacy_round_cost_cap_is_advisory(tmp_path):
     config = {
         "qbc": default_dft_decision_config(),
         "dft": {"selection": {"single_point_cost_per_round": 10}},
     }
-    state = {"qbc_candidates": [{"candidate_id": "s", "atom_count": 40}]}
+    state = monitored_state(tmp_path)
     preview, error = preview_dft_inputs(
         {
             "parameters": {
@@ -85,6 +118,9 @@ def test_saved_inventory_keeps_grounded_values_and_chat_short(tmp_path):
         "reasons": ["long explanation"],
     }
     state = {"workspace_layout": {"workspace_root": str(tmp_path)}, "qbc_candidates": [candidate]}
+    from tests.dft_plot_fixture import add_dft_plot_evidence
+
+    add_dft_plot_evidence(state, tmp_path)
     proposal = {
         "recommended_action": "select_dft_candidates",
         "raw_action": {
@@ -114,3 +150,22 @@ def test_saved_inventory_keeps_grounded_values_and_chat_short(tmp_path):
         row["Ehull_unit"],
     ) == ("S-x", "O3", 0.5, 0.001, "eV/atom")
     assert "S-x | O3 | 0.5" in Path(artifacts["text"]).read_text(encoding="utf-8")
+
+
+def test_direct_preview_uses_same_coverage_exemption_as_decision(monkeypatch, tmp_path):
+    from phase_agent.tools.workflows import dft_coverage_review, validate_dft_agent_decisions
+
+    state = monitored_state(tmp_path)
+    action = {"parameters": {"decisions": [{"candidate_id": "s", "action": "DFT_SINGLE_POINT"}]}}
+    config = {"qbc": default_dft_decision_config()}
+    monkeypatch.setattr(dft_coverage_review, "coverage_errors", lambda *args: ["old_dh_issue"])
+    monkeypatch.setattr(
+        validate_dft_agent_decisions, "_is_direct_recovery_selection", lambda *args: True
+    )
+    preview, error = preview_dft_inputs(action, state, config)
+    assert error is None and preview["task_count"] == 1
+    monkeypatch.setattr(
+        validate_dft_agent_decisions, "_is_direct_recovery_selection", lambda *args: False
+    )
+    preview, error = preview_dft_inputs(action, state, config)
+    assert preview is None and "old_dh_issue" in error

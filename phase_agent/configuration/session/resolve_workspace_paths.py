@@ -22,6 +22,21 @@ DEFAULT_WORKSPACE_PATHS = {
     "new_runs": "open_webui_runs",
 }
 
+CLEAN_WORKSPACE_PATHS = {
+    "config_snapshots": ".phase/config_snapshots",
+    "state": ".phase/state.json",
+    "ledger": ".phase/ledger.json",
+    "branch_energy_pool_ledger": ".phase/branch_energy_pools.json",
+    "structures": "inputs/structures",
+    "phase_diagrams": "outputs",
+    "qbc_results": ".phase/cache/qbc/qbc_results.json",
+    "work": ".phase/work",
+    "approvals": ".phase/approvals",
+    "approved_batches": ".phase/approved_batches",
+    "upload_batches": "runs",
+    "new_runs": "runs",
+}
+
 
 def default_workspace_storage(workspace_root, *, path_overrides=None, base_directory=None) -> dict:
     """Return the editable storage section; paths are relative to one root."""

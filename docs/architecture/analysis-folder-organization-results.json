@@ -1,0 +1,146 @@
+[
+  {
+    "project": "O3-1ele-NaCoO2",
+    "seconds": 3.22,
+    "returncode": 0,
+    "state_unchanged": true,
+    "checkpoint_files_unchanged": true,
+    "tool_error": false,
+    "status": "incomplete",
+    "epochs": [
+      "epoch0",
+      "epoch1"
+    ],
+    "protected": [],
+    "legacy": [
+      "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch1\\phase_diagrams"
+    ],
+    "unavailable": [
+      {
+        "epoch": "epoch1",
+        "reason": "ValueError: relax_mc_formal_publication_blocked:relax-mc-956d83315a920acf"
+      }
+    ],
+    "report": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\workflow_state\\analysis\\analysis_organization.json",
+    "navigation": true
+  },
+  {
+    "project": "NaNiO2-phase",
+    "seconds": 30.05,
+    "returncode": 0,
+    "state_unchanged": true,
+    "checkpoint_files_unchanged": true,
+    "status": "incomplete",
+    "epochs": [
+      "epoch0",
+      "epoch1",
+      "epoch2"
+    ],
+    "protected": [],
+    "legacy": [
+      "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\phase_diagrams"
+    ],
+    "unavailable": [
+      {
+        "epoch": "epoch2",
+        "reason": "ValueError: Current model epoch or verified complete MLIP hull is unavailable"
+      }
+    ],
+    "report": "E:\\0-PhaseDiagram\\NaNiO2-phase\\workflow_state\\analysis\\analysis_organization.json",
+    "navigation": true
+  },
+  {
+    "project": "O3-1ele-NaCrO2",
+    "seconds": 18.0,
+    "returncode": 0,
+    "state_unchanged": true,
+    "checkpoint_files_unchanged": true,
+    "status": "completed_with_legacy",
+    "epochs": [
+      "epoch0",
+      "epoch1",
+      "epoch2",
+      "epoch3",
+      "epoch4"
+    ],
+    "protected": [],
+    "legacy": [
+      "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\phase_diagrams"
+    ],
+    "unavailable": [],
+    "report": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\workflow_state\\analysis\\analysis_organization.json",
+    "navigation": true
+  },
+  {
+    "project": "O3-2ele-NaFeMn",
+    "seconds": 5.22,
+    "returncode": 0,
+    "state_unchanged": true,
+    "checkpoint_files_unchanged": true,
+    "status": "completed_with_legacy",
+    "epochs": [
+      "epoch0",
+      "epoch1"
+    ],
+    "protected": [],
+    "legacy": [
+      "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\phase_diagrams"
+    ],
+    "unavailable": [],
+    "report": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\workflow_state\\analysis\\analysis_organization.json",
+    "navigation": true
+  },
+  {
+    "project": "O3-NaCo-3phase",
+    "seconds": 11.2,
+    "returncode": 0,
+    "state_unchanged": true,
+    "checkpoint_files_unchanged": true,
+    "status": "completed_with_legacy",
+    "epochs": [
+      "epoch0",
+      "epoch1"
+    ],
+    "protected": [],
+    "legacy": [
+      "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch1\\phase_diagrams"
+    ],
+    "unavailable": [],
+    "report": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\workflow_state\\analysis\\analysis_organization.json",
+    "navigation": true
+  },
+  {
+    "project": "O3-NiCo",
+    "seconds": 9.2,
+    "returncode": 0,
+    "state_unchanged": true,
+    "checkpoint_files_unchanged": true,
+    "status": "incomplete",
+    "epochs": [
+      "epoch0",
+      "epoch1"
+    ],
+    "protected": [
+      {
+        "path": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\latest\\Historical_Reports",
+        "reference": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\latest\\Historical_Reports\\endpoint_supplements\\supplement-254e047021604247\\frames\\REFRESH-0e3e7118a25d.vasp",
+        "reason": "referenced_by_saved_state"
+      }
+    ],
+    "legacy": [
+      "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\phase_diagrams",
+      "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\phase_diagrams"
+    ],
+    "unavailable": [],
+    "report": "E:\\0-PhaseDiagram\\O3-NiCo\\workflow_state\\analysis\\analysis_organization.json",
+    "navigation": true
+  }
+]

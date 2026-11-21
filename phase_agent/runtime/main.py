@@ -92,6 +92,7 @@ def run_workflow(
         business_state_path=state_path or run_config.get("state_path"),
         invocation_id=lifecycle_request_id(invocation_id, human_feedback),
         human_feedback=human_feedback,
+        resume_verified_checkpoint=runtime_adapters.pop("resume_verified_checkpoint", None),
         project_thread="project-scientific-lifecycle-v2" if checkpoint_path else None,
         initialize=lambda: _initialize_workflow(
             manager,

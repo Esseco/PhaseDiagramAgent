@@ -175,9 +175,7 @@ def validate_search_config(config: dict, *, stage="full") -> dict:
     frozen = config.get("frozen_parameters") or []
     if len(frozen) != len(set(frozen)):
         conflicts.append("duplicate_frozen_parameter")
-    if (config.get("budgets") or {}).get("total_relative_cost") is None:
-        ambiguities.append("budgets.total_relative_cost")
-    else:
+    if (config.get("budgets") or {}).get("total_relative_cost") is not None:
         total = config["budgets"]["total_relative_cost"]
         if not _number(total) or float(total) < 0:
             conflicts.append("budgets.total_relative_cost_must_be_nonnegative")

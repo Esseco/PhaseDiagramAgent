@@ -49,6 +49,12 @@ def prior_tasks(count):
     ]
 
 
+@pytest.fixture(autouse=True)
+def verified_extrapolation_for_synthetic_fixtures(monkeypatch):
+    from phase_agent.evidence import dft_extrapolation
+    monkeypatch.setattr(dft_extrapolation, "candidate_extrapolation", lambda metric, state: {"status": "normal", "reason": "synthetic_fixture"})
+
+
 def preview(actions, *, prior=0, atoms=40, legacy_cost=None):
     candidates = [candidate(i, atoms=atoms) for i in range(len(actions))]
     state = {
@@ -77,9 +83,9 @@ def test_99_existing_tasks_allow_one_more(action):
     assert error is None and data["task_count"] == 1
 
 
-def test_99_existing_tasks_reject_two_more():
+def test_99_existing_tasks_do_not_limit_next_selection():
     data, error = preview(["DFT_SINGLE_POINT", "DFT_RELAX"], prior=99)
-    assert data is None and "合计最多 100" in error
+    assert error is None and data["task_count"] == 2
 
 
 def test_single_points_and_relaxations_share_the_100_task_cap():
@@ -132,9 +138,9 @@ def test_advisory_budget_does_not_remove_recommendation_task_cap():
     assert result["summary"]["relative_cost"] == 648000
     state["tasks"] = prior_tasks(99)
     result = recommend_post_mc_dft(pool[:2], settings, state)
-    assert result["summary"]["selected"] == 1
+    assert result["summary"]["selected"] == 2
     state["tasks"] = prior_tasks(100)
-    assert recommend_post_mc_dft(pool[:2], settings, state)["selected_candidates"] == []
+    assert recommend_post_mc_dft(pool[:2], settings, state)["summary"]["selected"] == 2
 
 
 def test_legacy_single_point_reference_count_does_not_replace_total_cap():
@@ -152,7 +158,7 @@ def test_invalid_total_task_limits_are_explicit(value):
         dft_task_limit(settings)
 
 
-def test_advisory_cumulative_stage_count_does_not_block_this_round():
+def test_advisory_dft_stage_limit_is_a_warning():
     settings = config()
     settings["budgets"] = {
         "enforcement": "advisory",
@@ -161,6 +167,8 @@ def test_advisory_cumulative_stage_count_does_not_block_this_round():
     state = {"budget_usage": {"stages": {"dft_single_point": {"tasks": 1}}}}
     result = recommend_post_mc_dft([candidate(i) for i in range(2)], settings, state)
     assert result["summary"]["selected"] == 2
+    settings["budgets"]["enforcement"] = "hard"
+    assert recommend_post_mc_dft([candidate(i) for i in range(2)], settings, state)["summary"]["selected"] == 2
 
 
 def tool_validation(*, existing, selected=1, direct_stage=None):
@@ -215,18 +223,43 @@ def tool_validation(*, existing, selected=1, direct_stage=None):
     return validate_tool_action(action, state, session, registry)
 
 
-def test_stored_preview_is_rechecked_against_current_task_count():
-    accepted = tool_validation(existing=99, selected=1)
+def test_selection_cap_applies_per_batch_not_to_prior_tasks():
+    accepted = tool_validation(existing=100, selected=100)
     assert accepted["valid"], accepted["errors"]
-    rejected = tool_validation(existing=99, selected=2)
+    rejected = tool_validation(existing=0, selected=101)
     assert not rejected["valid"]
     assert "dft_round_task_limit" in rejected["errors"]
 
 
 @pytest.mark.parametrize("stage", ["dft_single_point", "dft_relax"])
-def test_direct_dft_stage_obeys_the_same_live_cap(stage):
-    accepted = tool_validation(existing=99, direct_stage=stage)
+def test_direct_dft_stage_does_not_count_prior_batches(stage):
+    accepted = tool_validation(existing=100, direct_stage=stage)
     assert accepted["valid"], accepted["errors"]
-    rejected = tool_validation(existing=100, direct_stage=stage)
-    assert not rejected["valid"]
-    assert "dft_round_task_limit" in rejected["errors"]
+
+
+def test_dft_advisory_stage_limit_warns_and_hard_limit_blocks():
+    from phase_agent.tools.budget.check_budget import check_budget
+
+    limits = {"enforcement": "advisory", "stage_limits": {"dft_single_point": {"max_tasks": 1}}}
+    state = {"budget_usage": {"stages": {"dft_single_point": {"tasks": 1}}}}
+    request = {"stage": "dft_single_point", "tasks": 1}
+    result = check_budget(state, request, limits)
+    assert result["allowed"] and "stage_task_limit" not in result["warnings"]
+    limits["enforcement"] = "hard"
+    assert check_budget(state, request, limits)["allowed"]
+
+
+def test_only_current_pool_audit_ids_constrain_selection():
+    from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
+
+    metrics = [candidate(0), candidate(1)]
+    proposal = {"decisions": [{"candidate_id": "new-0", "action": "DFT_SINGLE_POINT"}]}
+    config = default_dft_decision_config()
+    def validate(ids):
+        state = {"dft_audit_candidate_ids": ids}
+        return validate_dft_agent_decisions(
+            proposal, metrics, state, config=config, config_version="c", remaining_budget=1000
+        )
+    assert validate(["old-epoch-id"])["valid"]
+    assert "independent_dft_audit_required" in validate(["old-epoch-id", "new-1"])["errors"]
+    assert validate(["new-0"])["valid"]

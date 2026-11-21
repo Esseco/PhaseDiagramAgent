@@ -52,21 +52,22 @@ def post_dft_lines(state, *, assessment=None):
             else ""
         ),
     ]
-    if assessment.get("failed_tasks"):
+    gs_metrics = assessment.get("gs_metrics") or {}
+    sample_metrics = assessment.get("sample_metrics") or {}
+    if gs_metrics or sample_metrics:
+        gs_e = gs_metrics.get("energy_per_atom") or {}
+        gs_f = gs_metrics.get("forces") or {}
+        sp_e = sample_metrics.get("energy_per_atom") or {}
+        sp_f = sample_metrics.get("forces") or {}
         lines.append(
-            "选择：回复‘继续’使用已回收子集并标记部分覆盖，或回复‘补全’只为失败任务生成重试方案；不会重跑整批。"
+            f"本轮 GS 帧（{assessment.get('gs_paired_structures', 0)} 对）：能量 MAE/RMSE {_metric_pair(gs_e, 'meV/atom')}；受力 MAE/RMSE {_metric_pair(gs_f, 'meV/Å')}。"
         )
-    export = next(
-        (
-            row
-            for row in (state.get("dft_result_exports") or {}).values()
-            if all(
-                row.get("round_scope", {}).get(key) == value
-                for key, value in assessment["scope"].items()
-            )
-        ),
-        None,
-    )
+        lines.append(
+            f"本轮采样数据（{assessment.get('sample_paired_structures', 0)} 对）：能量 MAE/RMSE {_metric_pair(sp_e, 'meV/atom')}；受力 MAE/RMSE {_metric_pair(sp_f, 'meV/Å')}。"
+        )
+    if assessment.get("failed_tasks"):
+        lines.append("失败的 DFT 不参与分析；保留失败记录，未自动重试。")
+    export = _round_export(state, assessment["scope"])
     if export:
         lines.append(
             f"数据：`{export['directory']}`（comparisons：对角线与误差；training：训练数据；diagnostics：磁矩）。"
@@ -143,3 +144,42 @@ def post_dft_review_lines(action, *, verbose=False, finetune_enabled=None):
             "执行条件：批准后仅生成超算训练提交文件；当前未训练，不修改模型启用或激活配置。"
         )
     return "本轮总结：\n" + "\n".join(lines)
+
+
+def _round_export(state, scope):
+    return next(
+        (
+            row
+            for row in (state.get("dft_result_exports") or {}).values()
+            if all(row.get("round_scope", {}).get(key) == value for key, value in scope.items())
+        ),
+        None,
+    )
+
+
+def magnetic_distribution_lines(state, scope):
+    """Render the saved round analysis without reading task files."""
+    export = _round_export(state, scope) or {}
+    plots = export.get("magnetic_plots") or {}
+    if not plots:
+        return ""
+    if plots.get("status") != "completed":
+        return "过渡金属磁矩分析：暂不可用（" + str(plots.get("reason") or "缺少绘图证据") + "）。"
+    summaries = []
+    for item in (plots.get("element_summaries") or {}).values():
+        kind = "矢量模" if item["moment_kind"] == "vector_norm" else "绝对值"
+        summaries.append(
+            f"{item['element']}（{kind}）{item['site_count']} 个位点，"
+            f"中位数 {item['median_mu_B']:.3g}，范围 {item['min_mu_B']:.3g}–{item['max_mu_B']:.3g} μB"
+        )
+    if not summaries:
+        return ""
+    lines = ["过渡金属磁矩分析：" + "；".join(summaries) + "。"]
+    if plots.get("excluded_sites"):
+        lines.append(f"缺失或无效磁矩 {plots['excluded_sites']} 个位点，未纳入分布。")
+    if plots.get("files"):
+        from pathlib import Path
+
+        folder = Path(next(iter(plots["files"].values()))).parent
+        lines.append(f"磁矩分布图：`{folder}`。")
+    return "\n".join(lines)

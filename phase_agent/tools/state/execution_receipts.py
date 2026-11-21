@@ -99,9 +99,23 @@ def recovery_report(state_path, state):
     owner = os.path.normcase(str(Path(state_path).resolve()))
     connection = sqlite3.connect(readonly_uri(path), uri=True)
     try:
-        rows = connection.execute(
-            "SELECT action_id, identity, phase, outcome FROM receipts"
-        ).fetchall()
+        has_events = (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_events'"
+            ).fetchone()
+            is not None
+        )
+        if has_events:
+            rows = connection.execute(
+                "SELECT action_id, identity, phase, outcome FROM receipts "
+                "WHERE NOT (phase='returned' AND outcome='completed' AND EXISTS ("
+                "SELECT 1 FROM execution_events AS event "
+                "WHERE event.action_id=receipts.action_id AND event.event='business_saved'))"
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                "SELECT action_id, identity, phase, outcome FROM receipts"
+            ).fetchall()
     finally:
         connection.close()
     for key, identity, phase, outcome in rows:
@@ -110,7 +124,8 @@ def recovery_report(state_path, state):
             continue
         audited = (state.get("execution_reconciliations") or {}).get(invocation) or {}
         if (
-            audited.get("resolution") in {"verified_no_effect", "verified_registered_effects"}
+            audited.get("resolution")
+            in {"verified_no_effect", "verified_registered_effects", "verified_abandoned_staging"}
             and audited.get("identity") == json.loads(identity)
             and audited.get("evidence")
             and audited.get("reviewed_at")
@@ -186,38 +201,78 @@ def record_business_saved(state_path, state):
     path = Path(state_path).resolve().parent / "execution_receipts.sqlite"
     if not path.exists():
         return
-    import hashlib
-
-    saved_bytes = Path(state_path).read_bytes()
-    saved_state = json.loads(saved_bytes)
-    if saved_state != json.loads(json.dumps(state, default=str)):
-        raise ValueError("business state changed before settlement acknowledgement")
-    digest = hashlib.sha256(saved_bytes).hexdigest()
-    owner = os.path.normcase(str(Path(state_path).resolve()))
+    # An acknowledged receipt keeps phase='returned' for replay protection.
+    # Check the journal before hashing or encoding the entire business state.
+    pending = (
+        "FROM receipts AS receipt WHERE phase='returned' AND NOT EXISTS ("
+        "SELECT 1 FROM execution_events AS event WHERE event.action_id=receipt.action_id "
+        "AND event.event='business_saved')"
+    )
     connection = _connect(state_path)
     try:
-        for key, identity, outcome in connection.execute(
-            "SELECT action_id,identity,outcome FROM receipts WHERE phase='returned'"
-        ).fetchall():
-            saved_owner, invocation = json.loads(key)
-            business = (saved_state.get("invocations") or {}).get(invocation) or {}
-            execution = business.get("execution") or business.get("execution_result") or {}
-            if (
-                saved_owner == owner
-                and outcome in {"completed", "failed"}
-                and execution.get("status") == outcome
-                and business.get("status") not in {None, "execution_reconciliation_required"}
-            ):
-                _event(
-                    connection,
-                    key,
-                    "business_saved",
-                    {
-                        "identity": json.loads(identity),
-                        "status": business["status"],
-                        "state_file_sha256": digest,
-                    },
-                )
-        connection.commit()
+        if connection.execute("SELECT 1 " + pending + " LIMIT 1").fetchone() is None:
+            return
+        _acknowledge_saved_state(connection, pending, state_path, state)
     finally:
         connection.close()
+
+
+def _acknowledge_saved_state(connection, pending, state_path, state):
+    import hashlib
+
+    saved_path = Path(state_path)
+    from phase_agent.persistence.state.read_versions import file_identity
+
+    before = file_identity(saved_path)
+    saved_hash = hashlib.sha256()
+    with saved_path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            saved_hash.update(chunk)
+    if file_identity(saved_path) != before:
+        raise ValueError("business state changed before settlement acknowledgement")
+    digest = saved_hash.hexdigest()
+    # Canonical state files can be compared without materializing another full state.
+    expected = hashlib.sha256()
+    try:
+        encoder = json.JSONEncoder(
+            ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")
+        )
+        for part in encoder.iterencode(state):
+            expected.update(part.encode("utf-8"))
+        expected.update(b"\n")
+        canonical_match = expected.hexdigest() == digest
+    except (TypeError, UnicodeEncodeError):
+        canonical_match = False
+    if canonical_match:
+        saved_state = state
+    else:
+        with saved_path.open("r", encoding="utf-8") as stream:
+            saved_state = json.load(stream)
+        if saved_state != json.loads(json.dumps(state, default=str)):
+            raise ValueError("business state changed before settlement acknowledgement")
+        if file_identity(saved_path) != before:
+            raise ValueError("business state changed before settlement acknowledgement")
+    owner = os.path.normcase(str(Path(state_path).resolve()))
+    for key, identity, outcome in connection.execute(
+        "SELECT action_id,identity,outcome " + pending
+    ).fetchall():
+        saved_owner, invocation = json.loads(key)
+        business = (saved_state.get("invocations") or {}).get(invocation) or {}
+        execution = business.get("execution") or business.get("execution_result") or {}
+        if (
+            saved_owner == owner
+            and outcome in {"completed", "failed"}
+            and execution.get("status") == outcome
+            and business.get("status") not in {None, "execution_reconciliation_required"}
+        ):
+            _event(
+                connection,
+                key,
+                "business_saved",
+                {
+                    "identity": json.loads(identity),
+                    "status": business["status"],
+                    "state_file_sha256": digest,
+                },
+            )
+    connection.commit()

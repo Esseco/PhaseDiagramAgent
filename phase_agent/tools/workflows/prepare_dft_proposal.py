@@ -37,7 +37,12 @@ def _preview_with_complete_feedback(action, state, config):
             for row in rows
             if row.get("candidate_id") not in known
         )
-        errors.extend(coverage_errors(action, candidates))
+        from phase_agent.tools.workflows.validate_dft_agent_decisions import _is_direct_recovery_selection
+        selected = {row.get("candidate_id") for row in rows
+                    if row.get("action") in {"DFT_SINGLE_POINT", "DFT_RELAX"}}
+        from phase_agent.evidence.unknown_gs_dft import is_authorized_unknown_gs_scope
+        if not _is_direct_recovery_selection(state, selected) and not is_authorized_unknown_gs_scope(state, rows):
+            errors.extend(coverage_errors(action, candidates))
     prepared, preview_error = attach_dft_preview(action, state, config)
     if errors:
         detail = "DFT 身份或D/H审阅未通过：" + "; ".join(errors)

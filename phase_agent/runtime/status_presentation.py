@@ -41,7 +41,8 @@ def format_progress(state):
         if epoch and model.startswith("remote-")
         else model_epoch_label(state, model)
     )
-    pending = state.get("pending_execution_policies") or {}
+    from phase_agent.runtime.pending_plan_state import visible_pending
+    pending = visible_pending(state)
     tasks = state.get("tasks") or []
     training = waiting_training_job(state)
     waiting = [row for row in tasks if awaiting_task_result(row)]
@@ -213,9 +214,10 @@ def format_progress(state):
     elif state.get("pending_dft_recovery_question"):
         lines.append("下一步：回复“继续回收”或“不再回收”，确认是否等待剩余 DFT。")
     elif not training and partial_recovery_facts(state):
-        lines.append(
-            "下一步：回复“继续”使用已回收子集，或回复“补全”只生成失败任务的重试方案；不会重跑整批。"
-        )
+        if any(row.get("kind") == "mc" for row in partial_recovery_facts(state)):
+            lines.append("下一步：回复“继续”使用已回收子集，或回复“补全”只生成失败任务的重试方案；不会重跑整批。")
+        else:
+            lines.append("下一步：使用有效 DFT 结果；失败数据不参与分析。")
     elif training:
         from phase_agent.runtime.training_reply import training_delivery_lines
 
@@ -247,9 +249,6 @@ def format_progress(state):
     lines.append(
         f"累计任务：完成 {completed}、失败/超时 {failed}、已取消 {cancelled}；仍需回收 {wait_text}；未回传但不再等待 {len(waived)}。"
     )
-    remaining = state.get("budget_remaining")
-    if isinstance(remaining, (float, int)) and not isinstance(remaining, bool):
-        lines.append(f"剩余相对预算约 {remaining:.1f}。")
     if detailed_response():
         lines.append(f"配置：{state.get('confirmed_config_version') or '未记录'}。")
         for method, snapshot in (state.get("phase_diagrams") or {}).items():

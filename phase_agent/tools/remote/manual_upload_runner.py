@@ -21,7 +21,7 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
             return selected
         first = selected[0]
         if first.get("stage") == "relax_and_feature":
-            return selected  # Exactly up to 100 structures per job; branch is not a job boundary.
+            return selected  # Branch is not a job boundary for compatible MLIP tasks.
         if first.get("stage") in {"dft_single_point", "dft_relax"} or not first.get("branch_id"):
             return (
                 selected[:1]
@@ -140,7 +140,8 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                 is not None
                 for entry in manifest
             )
-            if inline_refresh:
+            energy_repair = _needs_energy_repair_worker(directory, manifest)
+            if inline_refresh or energy_repair or _needs_scoped_mc_worker(directory, manifest):
                 executor = "_handoff_refresh_executor:execute_mlip_task"
                 from phase_agent.science.mlip import slurm_executor, mace_worker, refresh_inline
 
@@ -160,8 +161,31 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
                         "from _handoff_refresh_inline import run_inline_refresh",
                     )
                 )
-                for entry in manifest:
+                if energy_repair:
+                    from phase_agent.science.mlip import predict_structure
+
+                    worker_source = worker_source.replace(
+                        "from phase_agent.science.mlip.predict_structure import predict_structure",
+                        "from _handoff_energy_predict import predict_structure",
+                    )
+                # The in-process pure-prediction runner loads the executor once
+                # from the first task. Other paths still need per-task helpers.
+                refresh_tasks = [
+                    json.loads((directory / entry["input_path"]).read_text(encoding="utf8"))
+                    for entry in manifest
+                ] if inline_refresh else []
+                pure_refresh = bool(refresh_tasks) and not energy_repair and all(
+                    (task.get("worker_job") or {}).get("operation") == "predict"
+                    and (task.get("parameters") or {}).get("model_refresh_operation") == "predict"
+                    for task in refresh_tasks
+                )
+                helper_entries = manifest[:1] if pure_refresh else manifest
+                for entry in helper_entries:
                     task_directory = directory / Path(entry["input_path"]).parent
+                    if energy_repair:
+                        (task_directory / "_handoff_energy_predict.py").write_bytes(
+                            Path(predict_structure.__file__).read_bytes()
+                        )
                     (task_directory / "_handoff_refresh_executor.py").write_text(
                         executor_source, encoding="utf8"
                     )
@@ -194,7 +218,9 @@ class ManualUploadBatchRunner(RemoteBatchRunner):
         for path in sorted(item for item in directory.rglob("*") if item.is_file()):
             if path.name == "SHA256SUMS":
                 continue
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            from phase_agent.tools.remote.integrity import file_checksum
+
+            digest = file_checksum(path)
             checksums.append(f"{digest}  {path.relative_to(directory).as_posix()}")
         checksum_path = directory / "SHA256SUMS"
         checksum_path.write_text("\n".join(checksums) + "\n", encoding="utf-8")
@@ -294,6 +320,19 @@ pseudopotentials, permissions, or resource requests are correct for your site.
 For DFT, the remote Python environment must import this project and pymatgen
 to parse VASP output and publish `results/` after the calculation.
 """
+
+
+def _needs_energy_repair_worker(directory, manifest):
+    for entry in manifest:
+        task = json.loads((Path(directory) / entry["input_path"]).read_text(encoding="utf8"))
+        if task.get("energy_basis_repair_id"):
+            return True
+    return False
+
+
+def _needs_scoped_mc_worker(directory, manifest):
+    """Ship the audited worker for every MC job, including threshold 1 runs."""
+    return any(entry.get("stage") == "deep_search" for entry in manifest)
 
 
 def _bundle_mc_backend(directory):

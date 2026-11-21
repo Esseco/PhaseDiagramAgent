@@ -78,3 +78,13 @@ def test_stop_requires_exact_project_identity():
     )
 
     assert agent.stop() == {"status": "not_running"}
+
+
+def test_default_service_reader_handles_missing_identity(tmp_path, monkeypatch):
+    from phase_agent.runtime.codex import agent as module
+
+    reader = Mock(return_value=None)
+    monkeypatch.setattr(module, "read_service", reader)
+    control = CodexAgent(tmp_path / "agent_runtime.json", service_reader=reader)
+    assert control._service(require_ready=True) is None
+    assert control._service(require_ready=False) is None

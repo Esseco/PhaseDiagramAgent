@@ -18,6 +18,27 @@ def _spec(tool, purpose, *, parameters=None, stage=None, targets="structure_ids"
 
 
 OPERATIONS = {
+    "prepare_parent_first_recovery": _spec(
+        "prepare_local_batch_files",
+        "微扰结构微调：冻结母帧和成功 DFT 参考，HPC 先用原始 MH-1 弛豫，再微扰、合理性检查、相对弛豫母帧M3GNet特征差<=1筛选、DIRECT和恢复DFT；微扰后不再MLIP弛豫。必须绑定轮次、母帧、目标及 DFT 参数。",
+        parameters={"mode": "parent_first_recovery_inputs"},
+        targets="none",
+        outputs=("parent_first_recovery_batch", "handoff"),
+    ),
+    "prepare_perturbation_recovery": _spec(
+        "prepare_local_batch_files",
+        "旧本地先微扰入口已停用；微扰结构微调应将母帧和成功 DFT 参考交给 HPC，先用原始 MH-1 弛豫，再微扰、DIRECT 和 DFT；新链路使用 prepare_parent_first_recovery",
+        parameters={"mode": "perturbation_recovery_inputs"},
+        targets="none",
+        outputs=("perturbation_mh1_inputs",),
+    ),
+    "sample_direct_extrapolation": _spec(
+        "prepare_local_batch_files",
+        "仅用于历史冻结方案恢复；新恢复禁止选择此入口，使用 prepare_parent_first_recovery。外推风险证据保留供母帧和常规DFT选点。",
+        parameters={"mode": "direct_extrapolation"},
+        targets="none",
+        outputs=("direct_sampling",),
+    ),
     "prepare_training_handoff": _spec(
         "prepare_local_batch_files",
         "单独审批训练交接输入；parameters需job_key及kind=manifest或validation，不提交计算",
@@ -95,7 +116,7 @@ OPERATIONS = {
     ),
     "restart_failed_task": _spec(
         "restart_failed_task",
-        "仅重试一个已登记且可重试的失败科学任务；保留原失败记录并重新走预算与审批",
+        "重试已登记失败任务；MC 阈值修复可批量绑定同轮已核验目标，保留历史并重新审批",
         targets="retryable_task_ids",
         outputs=("retry_task_id", "retry_input_path"),
     ),
@@ -108,7 +129,7 @@ OPERATIONS = {
     ),
     "prepare_mlip_training": _spec(
         "update_mlip",
-        "使用合格 DFT 数据准备远端微调",
+        "使用合格 DFT 数据准备远端微调；可在已审核动作中明确选择验证通过后自动切换并单独审批刷新",
         parameters={"action": "RETRAIN_MLIP", "prepare_inputs_only": True},
         targets="none",
         outputs=("training_handoff",),
@@ -119,6 +140,14 @@ OPERATIONS = {
         parameters={"action": "ACTIVATE_CANDIDATE_MODEL"},
         targets="none",
         outputs=("active_model", "model_refresh"),
+    ),
+    "prepare_mc_energy_repair": _spec(
+        "prepare_local_batch_files",
+        "对已登记 MC 末态以同一主模型进行单点，修复相图能量口径；保留历史原结果",
+        parameters={"mode": "mc_energy_repair_inputs"},
+        stage="relax_and_feature",
+        targets="task_ids",
+        outputs=("energy_repair_preview", "upload_paths"),
     ),
     "prepare_model_refresh": _spec(
         "prepare_local_batch_files",
@@ -149,6 +178,58 @@ def operation_catalog(allowed_tools=None, *, registry=None):
         if (allowed is None or spec["tool"] in allowed)
         and (registry is None or callable((registry.get(spec["tool"]) or {}).get("handler")))
     ]
+
+
+# Existing new-proposal policy; historical frozen plans are not reinterpreted.
+NEW_PROPOSAL_DISABLED = {"sample_direct_extrapolation", "prepare_perturbation_recovery"}
+
+
+def new_operation_errors(action):
+    current = action
+    matches = [
+        name
+        for name in NEW_PROPOSAL_DISABLED
+        if current.get("operation") == name
+        or (
+            (current.get("tool") or current.get("action_type")) == OPERATIONS[name]["tool"]
+            and all(
+                (current.get("parameters") or {}).get(k) == v
+                for k, v in OPERATIONS[name]["parameters"].items()
+            )
+        )
+    ]
+    return ["new_recovery_requires_parent_first_perturbation"] if matches else []
+
+
+def operation_readiness(facts):
+    """Cheap known prerequisites, never full input verification or authorization."""
+    context = facts.get("decision_context") or {}
+    gate = context.get("mc_entry_conditions") or {}
+    rows = [*(facts.get("scientific_operations") or []), *(facts.get("module_operations") or [])]
+    result = {}
+    for row in rows:
+        name = row["operation"]
+        reasons = new_operation_errors(row)
+        state = "unsupported_new_proposal" if reasons else "unknown"
+        sources = ["policies.execution_policy.build_agent_proposal"] if reasons else []
+        if not reasons and name in {"allocate_mlip_mc", "prepare_mlip_mc"} and gate.get("required"):
+            state = "known_prerequisites_passed" if gate.get("ready") else "waiting_dependency"
+            reasons = (
+                []
+                if gate.get("ready")
+                else ["MC requires recovered Relax results and current-model MLIP hull"]
+            )
+            sources = ["decision_context.mc_entry_conditions"]
+        result[name] = {
+            "registered": True,
+            "project_readiness": state,
+            "reasons": reasons,
+            "sources": sources,
+            "implementation": "not_verified_by_catalog",
+            "input_readiness": "not_fully_verified",
+            "authorization": "not_evaluated; existing approval policy still applies",
+        }
+    return result
 
 
 def bind_operation(action):

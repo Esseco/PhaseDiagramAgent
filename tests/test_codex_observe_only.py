@@ -93,9 +93,14 @@ def test_observe_resumes_original_training_handoff(tmp_path):
             return_value=(handed, handoffs),
         ) as advance,
         patch("phase_agent.tools.workflows.lifecycle_support._save_runner_state") as save,
+        patch(
+            "phase_agent.tools.local.training_agent_review.review_training_choice",
+            return_value=(handed, handoffs),
+        ) as review,
     ):
         result = codex.recover()
     advance.assert_called_once_with(received, {"effective": True}, state_path=state_path)
+    review.assert_called_once_with(handed, handoffs, None, state_path=state_path)
     save.assert_called_once_with(handed, state_path)
     assert result["training_handoffs"] == handoffs
     assert result["submitted"] is False
@@ -132,9 +137,30 @@ def test_observe_settles_refresh_through_original_gate(tmp_path):
         patch("phase_agent.tools.workflows.lifecycle_support._save_runner_state") as save,
     ):
         result = codex.recover()
-    advance.assert_called_once_with(state)
+    advance.assert_called_once_with(state, "")
     save.assert_called_once_with(complete, state_path)
     assert result["model_refresh_status"] == "completed"
     assert result["model_refresh_waiting_reason"] is None
     codex.control.propose_codex.assert_not_called()
     codex.control.decide.assert_not_called()
+
+
+def test_observe_imports_relax_mc_before_standard_collection(tmp_path):
+    import json
+    state = {"relax_mc_batches": {"B": {}}, "confirmed_config_version": "v1", "active_model": {"version": "m1"}}
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    handler = SimpleNamespace(state_path=state_path, lock=RLock(), workflow_kwargs={"manager": object()})
+    with patch("phase_agent.runtime.codex.offline.LocalAgentControl", return_value=Mock()):
+        codex = CodexOffline("runtime.json", runtime_factory=lambda _: handler)
+    imported = {**state, "imported": True}
+    with (patch("phase_agent.configuration.runtime.build_effective_run_config.build_effective_run_config", return_value={"mlip": {}}),
+          patch("phase_agent.tools.relax_mc_batch.results.recover_available", return_value=imported) as batch,
+          patch("phase_agent.tools.workflows.recover_saved_results.recover_saved_results", return_value=imported) as regular,
+          patch("phase_agent.tools.local.recover_remote_training.recover_remote_training", return_value=(imported, [])),
+          patch("phase_agent.tools.workflows.lifecycle_support._save_runner_state") as save):
+        result = codex.recover()
+    assert batch.call_args.args[1]["effective_config"]["mlip"]["version"] == "m1"
+    assert regular.call_args.args[0]["imported"] is True
+    save.assert_called_once_with(imported, state_path)
+    assert result["submitted"] is False

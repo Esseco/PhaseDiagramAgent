@@ -6,6 +6,71 @@ TOOLS = {"select_dft_candidates": "supplement_dft", "generate_branches": "new_se
 
 
 def round_budget_review_errors(action, context):
+    parameters = action.get("parameters") or {}
+    if (
+        action.get("operation") == "prepare_mlip_relax"
+        and (action.get("tool") or action.get("action_type")) == "prepare_local_batch_files"
+        and parameters.get("mode") == "relax_inputs"
+        and parameters.get("selection_scope") == "candidate_ids"
+    ):
+        # This prepares a frozen evidence scope; route selection remains downstream.
+        return []
+    if (action.get("tool") or action.get("action_type")) == "prepare_local_batch_files" and (
+        action.get("parameters") or {}
+    ).get("mode") in {"model_refresh_inputs", "mc_inputs", "mc_energy_repair_inputs"}:
+        # Prepare existing work before deciding the next scientific route.
+        return []
+    # DIRECT only prepares evidence for later review; it does not choose between
+    # DFT and new search or authorize either downstream route.
+    if action.get("operation") in {
+        "sample_direct_extrapolation",
+        "prepare_perturbation_recovery",
+        "prepare_parent_first_recovery",
+    }:
+        return []
+    recovery = context.get("extrapolation_recovery") or {}
+    decisions = (action.get("parameters") or {}).get("decisions") or []
+    selected = [
+        row.get("candidate_id")
+        for row in decisions
+        if isinstance(row, dict) and row.get("action") in {"DFT_SINGLE_POINT", "DFT_RELAX"}
+    ]
+    expected = recovery.get("selected_candidate_ids") or []
+    if (
+        action.get("tool") == "select_dft_candidates"
+        and recovery.get("status") == "awaiting_reviewed_dft_labels"
+        and expected
+        and len(selected) == len(expected)
+        and set(selected) == set(expected)
+    ):
+        return []
+    if (
+        action.get("operation") == "prepare_mlip_training"
+        and recovery.get("status") == "awaiting_reviewed_dft_labels"
+        and (recovery.get("labels") or {}).get("status") == "complete"
+    ):
+        return []
+    program = action.get("_simulation_program") or {}
+    team = action.get("_decision_team") or {}
+    approved_input_preparation = (
+        (action.get("tool") or action.get("action_type")) == "prepare_local_batch_files"
+        and action.get("operation") == "prepare_dft_inputs"
+        and parameters == {"mode": "dft_inputs"}
+        and bool(action.get("target_ids"))
+        and program.get("protocol") == "registered_dft_inputs/v1"
+        and program.get("status") == "passed"
+        and program.get("target_ids") == action.get("target_ids")
+        and team.get("backend") == "codex_native"
+        and any(
+            event.get("kind") == "human_accept" and event.get("revision") == team.get("revision")
+            for event in team.get("human_review") or []
+            if isinstance(event, dict)
+        )
+    )
+    if approved_input_preparation:
+        # This only prepares the already-selected and reserved tasks; it does
+        # not reopen the preceding scientific route or expand its budget.
+        return []
     if not (context.get("round_budget_evidence") or {}).get("required"):
         return []
     review = action.get("round_budget_review")

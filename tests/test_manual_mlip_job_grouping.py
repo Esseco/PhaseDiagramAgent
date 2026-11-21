@@ -1,6 +1,7 @@
 """Manual upload has one Slurm submission per compatible MLIP batch."""
 
 import json
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -167,3 +168,226 @@ def test_batch_runner_accepts_legacy_windows_manifest_paths(tmp_path):
         failures = run_mlip_batch(root / "manifest.json", executor="fake.module:execute")
     assert failures == []
     assert observed["cwd"] == task_dir
+
+
+@pytest.mark.parametrize("threshold", [None, 0.1, 0.2])
+def test_mlip_single_point_batches_up_to_500_without_mixing_groups(tmp_path, threshold):
+    runner = ManualUploadBatchRunner(tmp_path / "upload", worker_command=["worker"])
+    state = _make_tasks(tmp_path, 501, "relax_and_feature")
+    for task in state["tasks"]:
+        task["parameters"] = {"model_refresh_operation": "predict", "refresh_force_threshold": threshold}
+        task["search_group_index"] = 1
+    selected = runner._select(state, state["tasks"])
+    assert len(selected) == 500
+    state["tasks"][1]["search_group_index"] = 2
+    assert len(runner._select(state, state["tasks"])) == 500
+    assert state["tasks"][1] not in runner._select(state, state["tasks"])
+    runner.batch_sizes["mlip_single_point"] = 25
+    assert len(runner._select(state, state["tasks"])) == 25
+
+
+def test_relax_and_dft_batch_limits_do_not_change(tmp_path):
+    runner = ManualUploadBatchRunner(tmp_path / "upload", worker_command=["worker"])
+    relax = _make_tasks(tmp_path, 101, "relax_and_feature")
+    assert len(runner._select(relax, relax["tasks"])) == 100
+    dft = _make_tasks(tmp_path, 3, "dft_single_point")
+    assert len(runner._select(dft, dft["tasks"])) == 1
+
+
+def test_slurm_single_point_capacity_respects_explicit_global_limit(tmp_path):
+    from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
+
+    state = _make_tasks(tmp_path, 501, "relax_and_feature")
+    for task in state["tasks"]:
+        task["parameters"] = {"model_refresh_operation": "predict"}
+    runner = SlurmBatchRunner(tmp_path / "slurm", worker_command=["worker"])
+    assert len(runner._select_tasks(state, state["tasks"])) == 500
+    limited = SlurmBatchRunner(tmp_path / "limited", worker_command=["worker"], max_batch_tasks=50)
+    assert len(limited._select_tasks(state, state["tasks"])) == 50
+
+
+@pytest.mark.parametrize("threshold", [None, 0.1, 0.2])
+def test_predict_batch_reuses_calculator_and_keeps_individual_failures(tmp_path, monkeypatch, threshold):
+    from phase_agent.science.mlip import model_interface
+    from phase_agent.tools.remote import run_mlip_batch as batch_module
+    import phase_agent.tools.remote.run_single_task as single_task
+
+    root = tmp_path / "inputs" / "batch"
+    root.mkdir(parents=True)
+    entries = []
+    for i in range(3):
+        directory = root / str(i)
+        directory.mkdir()
+        task = {
+            "task_id": str(i),
+            "task_key": str(i),
+            "stage": "relax_and_feature",
+            "parameters": {"model_refresh_operation": "predict", "refresh_force_threshold": threshold},
+            "worker_job": {"operation": "predict", "model_path": "/model"},
+        }
+        (directory / "task.json").write_text(json.dumps(task), encoding="utf-8")
+        entries.append({"task_id": str(i), "input_path": f"{i}/task.json"})
+    (root / "manifest.json").write_text(json.dumps(entries), encoding="utf-8")
+    loads, calls = [], []
+
+    def create(options, *, model_path=None):
+        loads.append(model_path)
+        return object()
+
+    def execute(task):
+        calculator = model_interface.create_calculator({"device": "cuda"}, model_path="/model")
+        calls.append(calculator)
+        if task["task_id"] == "1":
+            raise ValueError("bad frame")
+        return {"status": "completed"}
+
+    monkeypatch.setattr(model_interface, "create_calculator", create)
+    monkeypatch.setattr(single_task, "_load", lambda reference: execute)
+    monkeypatch.setattr(batch_module, "export_batch_result", lambda *a, **k: root)
+    monkeypatch.setattr("phase_agent.tools.remote.transfer_bundle.result_bundle", lambda *a: None)
+    assert batch_module.run_mlip_batch(root / "manifest.json", executor="fake:execute") == ["1"]
+    assert loads == ["/model"]
+    assert len(calls) == 3 and calls[0] is calls[1] is calls[2]
+    assert json.loads((root / "1" / "result.json").read_text())["status"] == "failed"
+    assert model_interface.create_calculator is create
+
+
+def test_direct_slurm_prediction_reuses_model_and_records_each_result(tmp_path, monkeypatch):
+    from phase_agent.science.mlip import model_interface
+    from phase_agent.tools.remote.run_mlip_batch import run_slurm_predict_batch
+    from phase_agent.tools.slurm import run_slurm_array_task as slurm_module
+
+    manifest = []
+    for i in range(3):
+        directory = tmp_path / str(i)
+        directory.mkdir()
+        task = {"task_id": str(i), "task_key": str(i)}
+        task_path = directory / "task.json"
+        task_path.write_text(json.dumps(task), encoding="utf-8")
+        manifest.append(
+            {
+                "array_index": i,
+                "task_id": str(i),
+                "task_key": str(i),
+                "input_path": str(task_path),
+                "result_path": str(directory / "result.json"),
+            }
+        )
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    loads, calculators = [], []
+
+    def factory(options, *, model_path=None):
+        loads.append(model_path)
+        return object()
+
+    def execute(task):
+        calculators.append(
+            model_interface.create_calculator({"device": "cuda"}, model_path="model")
+        )
+        return {"status": "failed" if task["task_id"] == "1" else "completed"}
+
+    monkeypatch.setattr(model_interface, "create_calculator", factory)
+    monkeypatch.setattr(slurm_module, "load_executor", lambda ref: execute)
+    assert run_slurm_predict_batch(path, "fake:executor") == ["1"]
+    assert loads == ["model"] and len(set(map(id, calculators))) == 1
+    assert all((tmp_path / str(i) / "task.finished.json").is_file() for i in range(3))
+    assert model_interface.create_calculator is factory
+
+
+def test_refresh_batch_shares_mace_calculator_with_inline_relax(tmp_path, monkeypatch):
+    from Process_MLIP import calculators
+    from phase_agent.science.mlip import model_interface
+    from phase_agent.tools.remote.run_mlip_batch import _reuse_calculators
+
+    model = tmp_path / "model"
+    model.write_text("fixture", encoding="utf8")
+    loaded = []
+
+    def factory(model_path, *, device="cuda", head=None, default_dtype="float64",
+                enable_cueq=False, enable_symmetrix=False, symmetrix_use_kokkos=False,
+                symmetrix_species=None):
+        loaded.append(model_path)
+        return object()
+
+    monkeypatch.setattr(calculators, "create_mace_calculator", factory)
+    with _reuse_calculators():
+        first = model_interface.create_calculator(
+            {"framework": "mace", "device": "cuda"}, model_path=str(model)
+        )
+        relaxed = calculators.create_mace_calculator(
+            model, device="cuda", default_dtype="float64"
+        )
+        assert first is relaxed
+    assert len(loaded) == 1
+    assert calculators.create_mace_calculator is factory
+
+
+def test_slurm_predict_script_uses_batch_entry_only_for_predict(tmp_path):
+    from phase_agent.tools.slurm.slurm_batch_runner import SlurmBatchRunner
+
+    runner = SlurmBatchRunner(tmp_path, worker_command=["python3", "--executor", "pkg:execute"])
+    predict = runner._script(
+        "id", tmp_path / "manifest.json", 2, "relax_and_feature", single_point=True
+    )
+    relax = runner._script("id", tmp_path / "manifest.json", 2, "relax_and_feature")
+    assert "--slurm-predict" in predict and "pkg:execute" in predict
+    assert "--slurm-predict" not in relax and "--array-index" in relax
+
+
+def test_real_predict_executor_reuses_ase_calculator_across_frames(tmp_path, monkeypatch):
+    from ase import Atoms
+    from ase.calculators.emt import EMT
+    from ase.io import write
+    from phase_agent.science.mlip import model_interface
+    from phase_agent.tools.remote import run_mlip_batch as batch_module
+
+    root = tmp_path / "inputs" / "batch"
+    root.mkdir(parents=True)
+    model = tmp_path / "model"
+    model.write_text("fake model", encoding="utf-8")
+    entries = []
+    for i, distance in enumerate((2.5, 2.8)):
+        folder = root / str(i)
+        folder.mkdir()
+        write(
+            folder / "initial.vasp",
+            Atoms("Cu2", positions=[[0, 0, 0], [distance, 0, 0]], cell=[10, 10, 10], pbc=True),
+            format="vasp",
+        )
+        task = {
+            "task_id": str(i),
+            "task_key": str(i),
+            "structure_id": str(i),
+            "stage": "relax_and_feature",
+            "parameters": {"model_refresh_operation": "predict"},
+            "worker_job": {
+                "operation": "predict",
+                "structure_path": "initial.vasp",
+                "model_path": str(model),
+                "parameters": {"model_refresh_operation": "predict"},
+            },
+        }
+        (folder / "task.json").write_text(json.dumps(task), encoding="utf-8")
+        entries.append({"task_id": str(i), "input_path": f"{i}/task.json"})
+    (root / "manifest.json").write_text(json.dumps(entries), encoding="utf-8")
+    loads = []
+
+    def calculator(options, *, model_path=None):
+        loads.append(model_path)
+        return EMT()
+
+    monkeypatch.setattr(model_interface, "create_calculator", calculator)
+    monkeypatch.setattr(batch_module, "export_batch_result", lambda *a, **k: root)
+    monkeypatch.setattr("phase_agent.tools.remote.transfer_bundle.result_bundle", lambda *a: None)
+    assert (
+        batch_module.run_mlip_batch(
+            root / "manifest.json",
+            executor="phase_agent.science.mlip.slurm_executor:execute_mlip_task",
+        )
+        == []
+    )
+    assert loads == [str(model)]
+    results = [json.loads((root / str(i) / "result.json").read_text()) for i in range(2)]
+    assert all(r["status"] == "completed" for r in results)
+    assert results[0]["outputs"]["energy"] != results[1]["outputs"]["energy"]

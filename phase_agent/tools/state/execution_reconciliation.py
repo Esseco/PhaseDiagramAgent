@@ -9,15 +9,16 @@ from phase_agent.policies.file_approval import proposal_hash
 from phase_agent.tools.state.execution_recovery_evidence import inspect_execution
 from phase_agent.tools.state.execution_receipts import recovery_report
 
-RESOLUTIONS = {"verified_no_effect", "verified_registered_effects"}
+RESOLUTIONS = {"verified_no_effect", "verified_registered_effects", "verified_abandoned_staging"}
 
 
 def business_fingerprint(state):
     excluded = {"pending_execution_recoveries", "execution_recovery_report"}
     payload = {key: value for key, value in state.items() if key not in excluded}
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()
-    ).hexdigest()
+    digest = hashlib.sha256()
+    for chunk in json.JSONEncoder(sort_keys=True, ensure_ascii=False, default=str).iterencode(payload):
+        digest.update(chunk.encode("utf8"))
+    return digest.hexdigest()
 
 
 def _issue(state_path, state, invocation):
@@ -33,6 +34,39 @@ def _issue(state_path, state, invocation):
     return matches[0]
 
 
+
+def _attach_legacy_staging(state, identity, checks, *, state_path=None, issue=None, attestation=None):
+    invocation = identity.get("invocation_id")
+    record = next((r for r in state.get("action_records") or [] if r.get("record_id") == invocation), {})
+    action = record.get("final_action") or {}
+    from phase_agent.policies.region_sampling import is_region
+
+    if (state_path and identity.get("tool") == "generate_branches" and is_region(action)
+            and (record.get("execution_result") or {}).get("error") == "MemoryError: "):
+        from phase_agent.tools.state.abandoned_region_generation import inspect_abandoned_region_generation
+
+        staging = inspect_abandoned_region_generation(state_path, state, identity)
+        if staging is not None:
+            checks["abandoned_staging"] = staging
+    if (action.get("operation") == "prepare_perturbation_recovery"
+            and (record.get("execution_result") or {}).get("error") == "ValueError: perturbation_upload_incomplete"):
+        from phase_agent.tools.state.abandoned_perturbation import inspect_abandoned_perturbation
+        checks["abandoned_staging"] = inspect_abandoned_perturbation(state, identity)
+    if state_path and issue and identity.get("tool") == "prepare_local_batch_files":
+        from phase_agent.tools.state.execution_receipts import execution_events
+        events = execution_events(state_path, invocation)
+        actions = [row["payload"].get("action") or {} for row in events if row["event"] == "claimed"]
+        if len(actions) == 1 and (((actions[0].get("parameters") or {}).get("refresh_preview") or {}).get("refresh_scope") == "frozen_baseline_hull_vertices"):
+            from phase_agent.tools.state.abandoned_refresh import inspect_abandoned_refresh
+            checks["abandoned_staging"] = inspect_abandoned_refresh(state_path, state, issue)
+    if state_path and issue and (attestation or {}).get("staging_directory"):
+        from phase_agent.tools.state.abandoned_exact_relax import inspect_abandoned_exact_relax
+
+        checks["abandoned_staging"] = inspect_abandoned_exact_relax(
+            state_path, state, issue, attestation["staging_directory"]
+        )
+    return checks
+
 def _validate_checks(checks, resolution, attestation):
     if resolution not in RESOLUTIONS:
         raise ValueError("unsupported recovery resolution")
@@ -40,6 +74,46 @@ def _validate_checks(checks, resolution, attestation):
         raise ValueError("请填写实际核对依据；缺少文件不能证明没有副作用")
     if attestation.get("external_jobs") not in {"none_found", "registered_only", "not_applicable"}:
         raise ValueError("需核对外部作业；未知作业不能解除阻塞")
+    staging = checks.get("abandoned_staging") or {}
+    if resolution == "verified_abandoned_staging" and staging.get("kind") == "abandoned_unsubmitted_refresh_staging":
+        if (staging.get("submitted") is not False
+                or sorted(checks.get("unregistered_returned_task_ids") or []) != staging.get("task_ids")
+                or checks.get("task_count") or checks.get("budget_reservations")
+                or attestation.get("external_jobs") != "none_found"
+                or attestation.get("output_inventory") != "abandoned_local_staging"
+                or type(attestation.get("external_cost")) not in (int, float)
+                or attestation.get("external_cost") != 0):
+            raise ValueError("refresh_staging_requires_verified_local_only_evidence")
+        return
+    if resolution == "verified_abandoned_staging" and staging.get("kind") == "abandoned_exact_candidate_relax_staging":
+        if (staging.get("submitted") is not False or checks.get("task_count")
+                or checks.get("unregistered_returned_task_ids") or checks.get("phase_record_ids")
+                or checks.get("budget_reservations")
+                or attestation.get("external_jobs") != "not_applicable"
+                or attestation.get("output_inventory") != "abandoned_local_staging"
+                or type(attestation.get("external_cost")) not in (int, float)
+                or attestation.get("external_cost") != 0):
+            raise ValueError("exact_staging_requires_verified_local_only_evidence")
+        return
+    if resolution == "verified_abandoned_staging" and staging.get("kind") == "abandoned_region_generation_staging":
+        reservations = checks.get("budget_reservations") or []
+        outputs = checks.get("registered_branch_outputs") or []
+        if (staging.get("submitted") is not False or checks.get("task_count")
+                or checks.get("unregistered_returned_task_ids") or checks.get("phase_record_ids")
+                or checks.get("artifact_checks") or len(outputs) != 1
+                or outputs[0].get("task_key") != staging.get("task_key")
+                or outputs[0].get("status") != "invalid"
+                or len(reservations) != 1
+                or reservations[0].get("task_key") != staging.get("task_key")
+                or reservations[0].get("status") != "reserved"
+                or type(reservations[0].get("reserved_cost", reservations[0].get("relative_cost"))) not in (int, float)
+                or reservations[0].get("reserved_cost", reservations[0].get("relative_cost")) != 0
+                or attestation.get("external_jobs") != "not_applicable"
+                or attestation.get("output_inventory") != "abandoned_local_staging"
+                or type(attestation.get("external_cost")) not in (int, float)
+                or attestation.get("external_cost") != 0):
+            raise ValueError("region_staging_requires_verified_local_only_evidence")
+        return
     if checks.get("unregistered_returned_task_ids"):
         raise ValueError("工具返回的任务尚未完整登记；先核对并修复登记，不能直接解除阻塞")
     branch_outputs = checks.get("registered_branch_outputs") or []
@@ -48,7 +122,21 @@ def _validate_checks(checks, resolution, attestation):
     bad_paths = {"missing", "unreadable", "relative_path_requires_owner"}
     if any(row["status"] in bad_paths for row in checks["artifact_checks"]):
         raise ValueError("先修复或核对缺失文件及路径迁移；不能直接解除阻塞")
+    if resolution == "verified_abandoned_staging":
+        staging = checks.get("abandoned_staging") or {}
+        if (staging.get("kind") != "abandoned_legacy_perturbation_staging"
+                or staging.get("submitted") is not False
+                or checks.get("task_count") or checks.get("registered_branch_outputs")
+                or checks.get("budget_reservations")
+                or attestation.get("external_jobs") not in {"none_found", "not_applicable"}
+                or attestation.get("output_inventory") != "abandoned_local_staging"
+                or attestation.get("external_cost") != 0
+                or isinstance(attestation.get("external_cost"), bool)):
+            raise ValueError("abandoned_staging_requires_verified_local_only_evidence")
+        return
     if resolution == "verified_no_effect":
+        if checks.get("abandoned_staging"):
+            raise ValueError("abandoned_staging_is_not_no_effect")
         import math
 
         if (checks.get("preparation_progress") or {}).get("boundary") == "complete":
@@ -109,7 +197,9 @@ def _validate_checks(checks, resolution, attestation):
 
 def propose_reconciliation(state_path, state, invocation_id, resolution, attestation):
     issue = _issue(state_path, state, invocation_id)
-    checks = inspect_execution(state, issue, state_path=state_path)
+    checks = _attach_legacy_staging(state, issue["identity"],
+                                    inspect_execution(state, issue, state_path=state_path),
+                                    state_path=state_path, issue=issue, attestation=attestation)
     _validate_checks(checks, resolution, attestation)
     from uuid import uuid4
 
@@ -126,7 +216,11 @@ def propose_reconciliation(state_path, state, invocation_id, resolution, attesta
         "checks": checks,
         "business_fingerprint": business_fingerprint(state),
     }
-    updated = deepcopy(state)
+    if (checks.get("abandoned_staging") or {}).get("kind") == "abandoned_exact_candidate_relax_staging":
+        updated = dict(state)
+        updated["pending_execution_recoveries"] = deepcopy(state.get("pending_execution_recoveries") or {})
+    else:
+        updated = deepcopy(state)
     if old.get("proposal") == plan:
         return {"status": "awaiting_recovery_review", "plan_id": plan_id, "state": updated}
     record = {
@@ -146,8 +240,14 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
         raise ValueError("recovery plan is not pending")
     if decision not in {"confirm_sensitive", "reject"}:
         raise ValueError("恢复处理需要 confirm_sensitive；先核对范围和预算影响")
-    updated = deepcopy(state)
     plan = record["proposal"]
+    if (plan.get("checks", {}).get("abandoned_staging") or {}).get("kind") == "abandoned_exact_candidate_relax_staging":
+        updated = dict(state)
+        names = ("pending_execution_recoveries", "recovery_review_history", "invocations", "execution_reconciliations",
+                 "pending_execution_policies", "reconciled_proposals", "effective_decisions", "budget_reservations")
+        updated.update(deepcopy({k:state[k] for k in names if k in state}))
+    else:
+        updated = deepcopy(state)
     if decision == "reject":
         updated["pending_execution_recoveries"].pop(plan_id)
         updated.setdefault("recovery_review_history", []).append(
@@ -165,7 +265,9 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
     invocation = plan["identity"]["invocation_id"]
     original_pending = (updated.get("pending_execution_policies") or {}).get(invocation)
     issue = _issue(state_path, state, invocation)
-    checks = inspect_execution(state, issue, state_path=state_path)
+    checks = _attach_legacy_staging(state, issue["identity"],
+                                    inspect_execution(state, issue, state_path=state_path),
+                                    state_path=state_path, issue=issue, attestation=plan["attestation"])
     if issue["identity"] != plan["identity"] or checks != plan["checks"]:
         raise ValueError("recovery_evidence_changed; 文件、任务或回执已变化，请重新核对")
     _validate_checks(checks, plan["resolution"], plan["attestation"])
@@ -192,6 +294,23 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
             if reservation:
                 reservation.pop("reconciliation_required", None)
         recovered_status = "reconciled_no_effect"
+    elif plan["resolution"] == "verified_abandoned_staging":
+        # Preserve old files and audit; no science output is registered or reused.
+        if (checks.get("abandoned_staging") or {}).get("kind") == "abandoned_region_generation_staging":
+            from phase_agent.tools.budget.settle_budget import settle_budget
+
+            for key in keys:
+                updated = settle_budget(updated, task_key=key, settlement_id=plan_id,
+                                        task_status="failed", actual_cost=0,
+                                        cost_source="human_verified_abandoned_staging",
+                                        failure_reason=plan["attestation"]["evidence_note"])["state"]
+                decision = updated.setdefault("effective_decisions", {}).get(key)
+                if decision:
+                    decision.update(status="failed", verified_abandoned_staging=True)
+                reservation = updated.setdefault("budget_reservations", {}).get(key)
+                if reservation:
+                    reservation.pop("reconciliation_required", None)
+        recovered_status = "reconciled_abandoned_staging"
     else:
         # Registered tasks/results stay authoritative; collectors settle costs.
         recovered_status = "reconciled_existing_effects"
@@ -219,7 +338,8 @@ def apply_reconciliation(state_path, state, plan_id, decision, *, reviewer_comme
         "proposal_hash": proposal_hash(plan),
         "reviewer_comment": str(reviewer_comment).strip(),
     }
-    for output in checks.get("registered_branch_outputs") or []:
+    outputs_to_adopt = [] if plan["resolution"] == "verified_abandoned_staging" else checks.get("registered_branch_outputs") or []
+    for output in outputs_to_adopt:
         gate = updated.get("dedup_gate") or {}
         if gate.get("status") in {None, "ready"}:
             updated["dedup_gate"] = {

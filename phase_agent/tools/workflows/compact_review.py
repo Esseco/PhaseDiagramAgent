@@ -51,9 +51,9 @@ def branch_lines(record):
     if initial.get("required"):
         lines.extend(
             [
-                "首轮仅用 coverage：先选择扩胞，再覆盖这些扩胞下全部合法相与整数 Na 组分；端点按确认边界过滤，TM 排列按确认设置。",
-                f"本次选择 {value(initial.get('selected_supercells'))} 种扩胞矩阵，应覆盖 {value(initial.get('expected_cells'))} 个合法相/H/x 组合；Na 数量=x×氧数量/2，不按候选Na位点数归一化。",
-                "达到保护阈值或初始化失败时报告覆盖未完成，不自动准备 Relax–MC 输入；branch/结构两级去重后才封装。",
+                "首轮仅用 coverage：按需求广泛采样所选相、扩胞和 Na 范围，不要求穷举；端点按确认边界过滤。",
+                f"本次选择 {value(initial.get('selected_supercells'))} 种扩胞矩阵，可选 {value(initial.get('expected_cells'))} 个合法相/H/x 组合（仅为范围统计，不是采样目标）；Na 数量=x×氧数量/2，不按候选Na位点数归一化。",
+                "报告实际采样与未覆盖区域；资源保护触发或初始化失败时暂停审阅；branch/结构两级去重后才封装。",
             ]
         )
     selected_h = {
@@ -84,7 +84,7 @@ def branch_lines(record):
         )
         size = interval(row.get("min_det_H"), row.get("max_det_H"))
         lines.append(
-            f"{phases} | {na} | {size} | {value(row['quota']) if 'quota' in row else '生成后统计'}"
+            f"{phases} | {na} | {size} | {value(row.get('sample_count', row.get('quota', '生成后统计')))}"
         )
     if not allocations:
         from phase_agent.tools.workflows.branch_review_view import phase_rules

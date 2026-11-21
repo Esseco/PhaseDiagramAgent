@@ -11,16 +11,18 @@ def test_new_project_has_one_entry_and_one_action_per_turn(tmp_path, mode):
     config = create_project(tmp_path / mode, registry=tmp_path / "registry.json", execution_mode=mode)
     settings = json.loads(config.read_text(encoding="utf-8"))
     assert settings["run_steps_per_click"] == 1
+    assert settings["project_layout"] == "clean_v2"
     assert (config.parent / "run_project.py").is_file()
-    assert (config.parent / "structures/reference_structures").is_dir()
+    assert (config.parent / "inputs/structures").is_dir()
+    assert (config.parent / "inputs/references").is_dir()
+    assert (config.parent / "outputs/latest").is_dir()
+    assert (config.parent / "runs").is_dir()
     assert not (config.parent / "phase_agent").exists()
-    assert not (config.parent / "workflow_state/state.json").exists()
-    for category in ("submissions", "analysis_outputs", "interaction_records"):
-        assert (config.parent / category / "README.md").is_file()
-    assert not (config.parent / "analysis_outputs/output_index.md").exists()
+    assert not (config.parent / ".phase/state.json").exists()
+    assert not (config.parent / "workflow_state").exists()
+    assert not (config.parent / "analysis_outputs").exists()
     assert not (config.parent / "交互记录").exists()
     assert "run_project.py --check" in (config.parent / "README.md").read_text(encoding="utf-8")
-    assert "](analysis_outputs/output_index.md)" not in (config.parent / "README.md").read_text(encoding="utf-8")
 
 
 def test_entry_never_starts_services_when_checking(tmp_path, monkeypatch):

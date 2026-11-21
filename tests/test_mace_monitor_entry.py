@@ -8,7 +8,7 @@ from phase_agent.science.mlip import mace_worker
 
 def test_standalone_worker_installs_monitor_and_preserves_evidence(monkeypatch):
     from Process_AL_MC import relax as module
-    with TemporaryDirectory(dir=Path.cwd()) as folder:
+    with TemporaryDirectory() as folder:
         root = Path(folder)
         source = root / 'input.vasp'
         atoms = Atoms('NaCoO2', positions=[[0, 0, 0], [1, 1, 1], [1, 0, 0], [0, 1, 0]], cell=[5, 5, 5], pbc=True)
@@ -29,13 +29,15 @@ def test_standalone_worker_installs_monitor_and_preserves_evidence(monkeypatch):
 def test_mc_initial_failure_preserves_failed_frame(monkeypatch):
     import Process_AL_MC
     from Process_AL_MC.MC_sample import InitialExtrapolationFailure
-    with TemporaryDirectory(dir=Path.cwd()) as folder:
+    with TemporaryDirectory() as folder:
         root = Path(folder)
         frame = root / 'extrapolation_000000.vasp'
         frame.write_text('frame', encoding='utf8')
         evidence = {'structure_path': str(frame), 'structure_checksum': 'checksum',
                     'extrapolation_monitor': {'extrapolation_failure': True}}
         class Runner:
+            MC_ENERGY_BASIS = "main_model"
+
             def __init__(self, **kwargs):
                 assert kwargs['relaxation_monitor_factory'] is not None
             def run(self, **kwargs):

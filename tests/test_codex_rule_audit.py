@@ -59,3 +59,23 @@ def test_codex_transfer_contract_requires_minimal_compressed_reviewed_payloads()
     assert policy["approval_does_not_waive_minimization"] is True
     assert policy["preserve_remote_results_and_do_not_recompute"] is True
     assert {"file_count", "compressed_bytes", "uncompressed_bytes", "sha256"} <= set(policy["required_inventory"])
+
+
+
+def test_dft_preflight_distinguishes_current_audit_and_direct_scope():
+    from phase_agent.runtime.codex.context import dft_audit_preflight_errors
+
+    action = {"tool": "select_dft_candidates", "parameters": {"decisions": [
+        {"candidate_id": "frame", "action": "DFT_SINGLE_POINT"},
+    ]}}
+    state = {"qbc_candidates": [_candidate("frame", 0.0, 0.1, 0.2)],
+             "dft_audit_candidate_ids": ["stale"]}
+    assert build_codex_rule_audit(action, state, {})["status"] == "audited"
+    context = {"independent_audit_candidate_ids": ["audit"]}
+    assert build_codex_rule_audit(action, state, context)["status"] == "invalid"
+    context["extrapolation_recovery"] = {
+        "status": "awaiting_reviewed_dft_labels", "selected_candidate_ids": ["frame", "other"],
+    }
+    assert dft_audit_preflight_errors(action, context) == ["independent_dft_audit_required"]
+    context["extrapolation_recovery"]["selected_candidate_ids"] = ["frame"]
+    assert dft_audit_preflight_errors(action, context) == []

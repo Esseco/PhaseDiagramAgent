@@ -60,6 +60,7 @@ def test_cold_project_codex_proposal_is_registered_without_project_model(
     assert context["config_version"] == session["confirmed_snapshot"]["config_version"]
     assert context["model_version"] is None
     assert context["decision_context"]["initial_coverage"]["allowed_strategies"] == ["coverage"]
+    assert "不要求穷举" in context["decision_context"]["region_sampling_policy"]["instruction"]
     action = {
         "tool": "generate_branches",
         "task_key": "cold-first",
@@ -73,6 +74,7 @@ def test_cold_project_codex_proposal_is_registered_without_project_model(
             "regions": [
                 {
                     "region_id": "cold-r1",
+                    "sample_count": 2,
                     "priority": 1,
                     "strategy": "coverage",
                     "phase": "O3",
@@ -100,10 +102,6 @@ def test_cold_project_codex_proposal_is_registered_without_project_model(
     }
     if auto_authorized:
         action["operation"] = "generate_branches"
-    incomplete = deepcopy(action)
-    incomplete["parameters"]["regions"][0]["na_min"] = 0.5
-    with pytest.raises(ValueError, match="initial_coverage_missing_cells"):
-        agent.propose(incomplete)
     parent_dependent = deepcopy(action)
     parent_dependent["parameters"]["regions"][0]["strategy"] = "composition"
     with pytest.raises(ValueError, match="initial_coverage_requires_coverage"):
@@ -150,7 +148,13 @@ def test_cold_project_codex_proposal_is_registered_without_project_model(
             team.feedback(view["team_id"], 1, "accept", "接受初始覆盖方向，仍需单独审批动作")
         result = team.propose(view["team_id"], 1)
     else:
-        result = agent.propose(action)
+        # Codex has no project Simulation planner; a direct compute proposal is
+        # rejected before the lifecycle runs, with the team route as the remedy.
+        with pytest.raises(ValueError, match="codex_simulation_plan_required"):
+            agent.propose(action)
+        assert not agent.pending()["pending"]
+        assert not list((root / "structures/candidate_structures").glob("**/*.vasp"))
+        return
     if auto_authorized:
         from phase_agent.tools.step_runner.file_protocol import read_json
 
@@ -201,3 +205,40 @@ def test_cold_project_codex_proposal_is_registered_without_project_model(
         assert trace["human_review"][-1]["kind"] == "human_accept"
         restored = CodexOffline(runtime)
         assert CodexTeam(restored.control).read()["status"] == "submitted"
+
+
+def test_codex_context_projects_initial_perturbation_direct_ready(tmp_path):
+    root = tmp_path / "project"
+    runtime = create_project(root, registry=tmp_path / "registry.json")
+    ref = root / "structures/reference_structures/O3.vasp"
+    write(
+        ref,
+        Atoms(
+            "NaFeO2",
+            positions=[[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3]],
+            cell=[6, 6, 6],
+            pbc=True,
+        ),
+        format="vasp",
+    )
+    boundary = {
+        "P": ["O3"],
+        "H": {"O3": [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]]},
+        "TM_ratio": {"Fe": 1},
+    }
+    cfg = default_layered_search_config(boundary=boundary, phase_references={"O3": str(ref)})
+    cfg["storage"] = default_workspace_storage(root)
+    cfg["mlip"]["model_path"] = "/fake/model"
+    cfg["calculation"]["mlip_version"] = "m0"
+    cfg["mlip"]["name"] = "m0"
+    session = confirm_config_snapshot(create_config_draft(cfg), user_confirmed=True)
+    save_config_session(session, root / "parameters/config_session.json")
+
+    agent = CodexOffline(runtime)
+    empty_ctx = agent.context()
+    assert empty_ctx["decision_context"]["initial_perturbation_direct_ready"] is False
+
+    manager = agent.handler.workflow_kwargs["manager"]
+    manager.data["structures"]["s_small"] = {"det_H": 4, "phase": "O3"}
+    ready_ctx = agent.context()
+    assert ready_ctx["decision_context"]["initial_perturbation_direct_ready"] is True

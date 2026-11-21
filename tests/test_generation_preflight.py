@@ -20,7 +20,7 @@ def framework(size, cost):
     }
 
 
-def test_preflight_respects_global_cap_and_remaining_budget():
+def test_preflight_respects_global_cap_without_cost_limit():
     action = {
         "parameters": {
             "max_det_H": 1,
@@ -37,8 +37,8 @@ def test_preflight_respects_global_cap_and_remaining_budget():
         {"budgets": {"total_relative_cost": 60}},
     )
     assert result["relax_mc_cost_upper"] == 40
-    assert result["remaining_budget"] == 35
-    assert result["status"] == "over_budget"
+    assert result["remaining_budget"] is None
+    assert result["status"] == "within_budget"
     assert result["serial_seconds_upper"] is None
     assert result["allocations"][0]["atom_count_upper"] == 4
 

@@ -80,7 +80,8 @@ def terminal(directory, expected):
     result, marker = directory / "result.json", directory / "task.finished.json"
     if not result.is_file() or not marker.is_file():
         return None
-    data = json.loads(result.read_text(encoding="utf-8"))
+    result_bytes = result.read_bytes()
+    data = json.loads(result_bytes.decode("utf-8"))
     receipt = json.loads(marker.read_text(encoding="utf-8"))
     for key, value in expected.items():
         if (key == "task_checksum" and receipt.get(key) != value) or (
@@ -89,8 +90,9 @@ def terminal(directory, expected):
             and (data.get(key) != value or receipt.get(key) != value)
         ):
             raise ValueError("original_task_identity_mismatch:" + key)
-    if receipt.get("result_checksum") != checksum(result) or receipt.get("status") != data.get(
-        "status"
+    if (
+        receipt.get("result_checksum") != hashlib.sha256(result_bytes).hexdigest()
+        or receipt.get("status") != data.get("status")
     ):
         raise ValueError("original_result_checksum_or_status_mismatch")
     if data.get("status") not in {"completed", "failed", "timeout", "cancelled"}:
@@ -369,12 +371,26 @@ def main(root=None, *, extra_payloads=(), transform_factory=None):
             "science_submissions": 0,
         }
     diagnostics(root, report)
-    print(
-        json.dumps(
-            {key: value for key, value in report.items() if key != "task_diagnostics"},
-            ensure_ascii=False,
+    errors = report.get("errors") or []
+    if report["status"] == "complete":
+        summary = {
+            "status": "complete",
+            "batch_id": root.name[:-6],
+            "recovered_count": len(report.get("recovered_task_ids") or []),
+            "science_submissions": 0,
+        }
+    else:
+        first = report.get("error") or next(
+            (row.get("error") for row in errors if row.get("error")),
+            "Missing terminal results",
         )
-    )
+        summary = {
+            "failure_step": "return_collection",
+            "batch_id": root.name[:-6],
+            "first_error": str(first).partition("\n")[0][:400],
+            "resume_from": "verify_result_receipt",
+        }
+    print(json.dumps(summary, ensure_ascii=False))
     return 0 if report["status"] == "complete" else 2
 
 

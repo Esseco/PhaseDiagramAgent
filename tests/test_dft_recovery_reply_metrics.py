@@ -181,3 +181,26 @@ def test_failed_next_decision_preserves_recovery_in_final_chat(tmp_path, detail)
     assert "先处理上述问题" not in visible
     assert "本轮未执行：`workflow`" not in visible
     assert result == before
+
+
+@pytest.mark.parametrize("detail", ["brief", "detailed"])
+def test_recovery_shows_only_current_magnetic_analysis(tmp_path, detail):
+    from phase_agent.analysis.feedback.export_dft_products import export_dft_products
+
+    state = {"active_model_version": "m1"}
+    add_result(state, energy_error=0.02, force_error=0.03)
+    add_result(state, task_id="old", operation="000")
+    for row in state["dft_dataset_records"]:
+        row["magnetic_moments"] = {
+            "elements": ["Ni" if row["task_id"] == "old" else "Fe"] * 2,
+            "moments": [-1, 3],
+        }
+    export_dft_products(state, tmp_path)
+    text = render({"status": "completed", "state": state, "recovered_count": 1}, tmp_path, detail)
+    assert "Fe（绝对值）2 个位点" in text and "中位数 2" in text
+    assert "Ni（绝对值）" not in text
+    assert "磁矩分布图" in text
+    from phase_agent.runtime.interaction_reports import short_reply
+
+    receipt = short_reply(text)
+    assert "Fe（绝对值）2 个位点" in receipt and "磁矩分布图" in receipt

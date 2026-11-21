@@ -20,9 +20,9 @@ def publish_workspace_guide(root):
     ):
         if not (root / relative).is_dir():
             text = text.replace(f"[{label}]({relative}/)", f"{label}（初始化后生成）")
-    if not (root / "analysis_outputs/output_index.md").is_file():
+    if not (root / "workflow_state/analysis/output_index.md").is_file():
         text = text.replace(
-            "[结果索引](analysis_outputs/output_index.md)",
+            "[结果索引](workflow_state/analysis/output_index.md)",
             "analysis_outputs/（首次产生结果后生成索引）",
         )
     if (root / "runtime/state.json").is_file() and not (
@@ -35,15 +35,16 @@ def publish_workspace_guide(root):
             text = text.replace(new, old)
     _publish_bytes(root / "README.md", text.encode("utf-8"))
     for directory in ("interaction_records", "submissions", "analysis_outputs"):
-        target = root / directory / "README.md"
+        target = root / directory / ("latest/README.md" if directory == "analysis_outputs" else "README.md")
+        target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
             _publish_bytes(target, _read_template(directory + ".md").encode("utf-8"))
     if not (root / "runtime/state.json").is_file():
         details = _read_template("file_layout.md")
-        if not (root / "analysis_outputs/output_index.md").is_file():
+        if not (root / "workflow_state/analysis/output_index.md").is_file():
             details = details.replace(
-                "[文件索引](../analysis_outputs/output_index.md)",
-                "analysis_outputs/output_index.md（产生结果后生成）",
+                "[文件索引](../workflow_state/analysis/output_index.md)",
+                "workflow_state/analysis/output_index.md（产生结果后生成）",
             )
         _publish_bytes(root / "documentation/FILE_LAYOUT.md", details.encode("utf-8"))
 
@@ -124,11 +125,29 @@ def publish_epoch_guides(root, state):
     from phase_agent.analysis.feedback.export_dft_products import _publish_bytes
 
     root = Path(root)
-    for version, number in ((state.get("upload_layout") or {}).get("model_rounds") or {}).items():
-        epoch = f"epoch{int(number) - 1}"
+    from phase_agent.evidence.model_epoch import model_epoch
+
+    epochs = {}
+    for version in ((state.get("upload_layout") or {}).get("model_rounds") or {}):
+        epoch = model_epoch(state, version)
+        if epoch:
+            epochs.setdefault(epoch, []).append(version)
+    for epoch, versions in epochs.items():
         directory = root / epoch
         if directory.is_dir():
-            text = f"# {epoch}\n\n模型版本：`{version}`。任务和批次编号保持原登记。\n\n"
+            from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
+
+            organization = analysis_metadata_directory(root) / "analysis_organization.json"
+            if root.name == "analysis_outputs" and organization.is_file():
+                from phase_agent.analysis.feedback.analysis_output_organization import write_epoch_guide
+                try:
+                    saved = json.loads(organization.read_text(encoding="utf8"))
+                    write_epoch_guide(directory, (saved.get("dft_selections") or {}).get(epoch))
+                    continue
+                except (OSError, ValueError, TypeError, AttributeError):
+                    pass
+            version_list = "、".join(f"`{version}`" for version in versions)
+            text = f"# {epoch}\n\n模型版本：{version_list}。任务和批次编号保持原登记。\n\n"
             template = (
                 root.name
                 if root.name in {"submissions", "analysis_outputs", "interaction_records"}

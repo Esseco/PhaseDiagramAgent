@@ -46,6 +46,10 @@ def _collect_workflow_results(frame):
         _optimizations={"_owned": True},
         category="processing",
     )
+    recovery_before = {
+        key: (row.get("import_checksum"), row.get("formal_recovery_status"))
+        for key, row in (loaded_state.get("relax_mc_batches") or {}).items()
+    }
     if loaded_state.get("relax_mc_batches"):
         from phase_agent.tools.relax_mc_batch.results import recover_available
 
@@ -63,6 +67,10 @@ def _collect_workflow_results(frame):
             _optimizations={"_owned": True},
             category="processing",
         )
+    recovery_after = {
+        key: (row.get("import_checksum"), row.get("formal_recovery_status"))
+        for key, row in (loaded_state.get("relax_mc_batches") or {}).items()
+    }
     collector = task_runner or result_collector
     if collector is not None:
         if hasattr(collector, "collect_results_with_report"):
@@ -97,8 +105,14 @@ def _collect_workflow_results(frame):
     if execution_mode == "interactive":
         from phase_agent.tools.state.dft_recovery_decision import update_dft_recovery_question
 
-        pre_reconciled["state"] = update_dft_recovery_question(
-            pre_reconciled["state"], runtime_adapters.get("dft_recovery_decision")
+        pre_reconciled["state"] = timed_call(
+            "dft_recovery_question_refresh",
+            call_with_optimizations,
+            update_dft_recovery_question,
+            pre_reconciled["state"],
+            runtime_adapters.get("dft_recovery_decision"),
+            _optimizations={"_owned": not combined_results},
+            category="processing",
         )
     runtime_state_path = state_path or effective_config.get("state_path")
     phase_cache_path = runtime_adapters.get("phase_identification_cache_path")
@@ -109,6 +123,7 @@ def _collect_workflow_results(frame):
     return {
         **frame,
         "training_returns": training_returns,
+        "relax_recovery_updated": recovery_before != recovery_after,
         "loaded_state": loaded_state,
         "automatic_results": automatic_results,
         "collection_report": collection_report,
@@ -163,25 +178,36 @@ def _analyze_workflow_results(frame):
     phase_cache_path = frame["phase_cache_path"]
     execution_mode = frame["execution_mode"]
     collection_report = frame["collection_report"]
-    feedback = timed_call(
-        "scientific_feedback_processing",
-        call_with_optimizations,
-        apply_scientific_feedback,
-        pre_reconciled["state"],
-        combined_results,
-        manager=manager,
-        ledger_path=effective_config.get("ledger_path"),
-        phase_diagram_directory=effective_config.get("phase_diagram_directory"),
-        final_frame_mlip_evaluator=_dft_comparison_evaluator(
-            runtime_adapters, effective_config, pre_reconciled["state"]
-        ),
-        active_model_version=(effective_config.get("mlip") or {}).get("version")
-        or (effective_config.get("mlip") or {}).get("name"),
-        phase_references=phase_references,
-        phase_identification_cache_path=phase_cache_path,
-        _optimizations={"_owned": True},
-        category="processing",
-    )
+    from phase_agent.tools.workflows.saved_dft_input_frame import reuse_exact_after_collection
+
+    reuse = reuse_exact_after_collection(frame)
+    if reuse:
+        feedback = {
+            "state": pre_reconciled["state"],
+            "recorded": [],
+            "rejected": [],
+            "feedback_count": 0,
+        }
+    else:
+        feedback = timed_call(
+            "scientific_feedback_processing",
+            call_with_optimizations,
+            apply_scientific_feedback,
+            pre_reconciled["state"],
+            combined_results,
+            manager=manager,
+            ledger_path=effective_config.get("ledger_path"),
+            phase_diagram_directory=effective_config.get("phase_diagram_directory"),
+            final_frame_mlip_evaluator=_dft_comparison_evaluator(
+                runtime_adapters, effective_config, pre_reconciled["state"]
+            ),
+            active_model_version=(effective_config.get("mlip") or {}).get("version")
+            or (effective_config.get("mlip") or {}).get("name"),
+            phase_references=phase_references,
+            phase_identification_cache_path=phase_cache_path,
+            _optimizations={"_owned": True},
+            category="processing",
+        )
     from phase_agent.analysis.phase.update_local_mlip_hull_pool import update_local_mlip_hull_pool
     from phase_agent.tools.cost.gpu_usage_ledger import update_gpu_usage
 
@@ -213,6 +239,8 @@ def _analyze_workflow_results(frame):
         )
         reserved = float(feedback["state"].get("reserved_relative_cost", 0) or 0)
         feedback["state"]["budget_remaining"] = max(0.0, float(total_limit) - used - reserved)
+    else:
+        feedback["state"]["budget_remaining"] = None
     recovered_count = _count_newly_recovered(pre_reconciled["reconciled"])
     from phase_agent.tools.remote.summarize_manual_upload_wait import summarize_manual_upload_wait
 
@@ -235,6 +263,7 @@ def _analyze_workflow_results(frame):
     return {
         **frame,
         "feedback": feedback,
+        "idle_exact_feedback_reused": reuse,
         "recovered_count": recovered_count,
         "manual_wait": manual_wait,
         "rebuilding": rebuilding,
@@ -283,6 +312,63 @@ def _workflow_wait_gate(frame):
                 "submitted": False,
                 "recovered_count": recovered_count,
             }
+    from phase_agent.evidence.dft_failure_policy import (
+        completed_failure_batches,
+        diagnose_failure_batch,
+        valid_failure_diagnosis,
+    )
+
+    failure_batches = completed_failure_batches(
+        feedback["state"], pre_reconciled.get("reconciled") or []
+    )
+    if failure_batches:
+        state = feedback["state"]
+        history = state.setdefault("dft_failure_reviews", [])
+        prior = {r.get("batch", {}).get("failure_evidence_digest"): r for r in history}
+        reports, changed = [], False
+        for batch in failure_batches:
+            digest = batch["failure_evidence_digest"]
+            existing = prior.get(digest)
+            if existing and valid_failure_diagnosis(existing):
+                reports.append({**deepcopy(existing), "batch": batch})
+                continue
+            # A diagnostic request without a usable client is not analysis.
+            # Retry only when a compatible client becomes available.
+            from phase_agent.agents.simulation.agent import client_for
+
+            if existing and client_for(frame.get("agent_client")) is None:
+                reports.append({**deepcopy(existing), "batch": batch})
+                continue
+            report = diagnose_failure_batch(batch, frame.get("agent_client"))
+            if report.get("llm_usage"):
+                from phase_agent.agents.simulation.agent import _record_usage
+
+                _record_usage(state, report["llm_usage"])
+            item = {"batch": batch, **report}
+            history.append(deepcopy(item))
+            reports.append(item)
+            changed = True
+        pending = [r for r in reports if not valid_failure_diagnosis(r)]
+        state["dft_failure_guard"] = {
+            "status": "awaiting_analysis" if pending else "analyzed",
+            "threshold": 0.2,
+            "batches": [deepcopy(r["batch"]) for r in reports],
+            "reports": deepcopy(reports),
+            "instruction": "DFT失败达到20%：先核查原因和风险；保留成功结果，不自动重试或创建后续计算。"
+            "分析后由 Strategic 提出具体方案并沿用既有审批；未回收任务不视为失败。",
+        }
+        if changed or pending:
+            _save_runner_state(state, runtime_path)
+            return {
+                "status": "dft_failure_review",
+                "state": state,
+                "dft_failure_reviews": reports,
+                "steps_executed": 0,
+                "submitted": False,
+                "recovered_count": recovered_count,
+            }
+    else:
+        feedback["state"].pop("dft_failure_guard", None)
     training_waits = frame.get("training_handoffs") or []
     review_ready = bool(training_waits) and all(
         row.get("stage")
@@ -369,11 +455,15 @@ def _workflow_wait_gate(frame):
             "reconciled": pre_reconciled["reconciled"],
         }
     from phase_agent.tools.workflows.model_refresh_state import refresh_active
+    from phase_agent.tools.workflows.manual_dft_coexistence import allowed as disjoint_frozen_dft
+    from phase_agent.tools.workflows.manual_training_coexistence import allowed as verified_training
 
     if (
         manual_wait
         and not rebuilding
         and not retry_input_only
+        and not disjoint_frozen_dft(frame)
+        and not verified_training(frame)
         and not refresh_active(feedback["state"])
     ):
         wait_state = feedback["state"]
@@ -407,11 +497,17 @@ def _failed_retry_input_only(frame):
         for record in state.get("pending_execution_policies", {}).values():
             proposal = record.get("agent_proposal") or {}
             action = proposal.get("raw_action") or proposal
+            parameters = action.get("parameters") or {}
             if (action.get("tool") or action.get("action_type")) == "restart_failed_task" and (
-                action.get("parameters") or {}
-            ).get("prepare_inputs_after_approval"):
+                parameters.get("prepare_inputs_after_approval")
+                or parameters.get("repair_profile") == "dft_recalculation"
+            ):
                 targets = action.get("target_ids") or []
-                if len(targets) == 1:
+                if targets and (
+                    len(targets) == 1
+                    or parameters.get("repair_profile")
+                    in {"vasp_symmetry_single_gpu", "dft_scf_diagnostic", "dft_recalculation"}
+                ):
                     target = targets[0]
                     break
     return bool(
@@ -434,8 +530,26 @@ def _assess_workflow_round(frame):
     from phase_agent.evidence.post_dft_assessment import post_dft_assessment
     from phase_agent.tools.workflows.refresh_dft_comparisons import refresh_dft_comparisons
 
-    assessment = post_dft_assessment(feedback["state"], effective_config)
-    feedback["state"] = refresh_dft_comparisons(
+    assessment = timed_call(
+        "round_dft_assessment", post_dft_assessment, feedback["state"], effective_config
+    )
+    if frame.get("idle_exact_feedback_reused") and (
+        not assessment or assessment.get("status") == "evaluated"
+    ):
+        from phase_agent.analysis.convergence.feedback_cycles import record_feedback_cycle
+
+        timed_call("round_feedback_cycle", record_feedback_cycle, feedback["state"])
+        timed_call(
+            "round_state_save",
+            _save_runner_state,
+            feedback["state"],
+            state_path or effective_config.get("state_path"),
+            category="io",
+        )
+        return {**frame, "feedback": feedback}
+    feedback["state"] = timed_call(
+        "round_same_frame_checks",
+        refresh_dft_comparisons,
         feedback["state"],
         assessment=assessment,
         manager=manager,
@@ -445,11 +559,22 @@ def _assess_workflow_round(frame):
     # proposal must follow the recovered-round analysis, not precede its export.
     from phase_agent.analysis.feedback.export_dft_products import export_dft_products
 
-    export_dft_products(feedback["state"], effective_config.get("phase_diagram_directory"))
+    timed_call(
+        "round_dft_export",
+        export_dft_products,
+        feedback["state"],
+        effective_config.get("phase_diagram_directory"),
+    )
     from phase_agent.analysis.convergence.feedback_cycles import record_feedback_cycle
 
-    record_feedback_cycle(feedback["state"])
-    _save_runner_state(feedback["state"], state_path or effective_config.get("state_path"))
+    timed_call("round_feedback_cycle", record_feedback_cycle, feedback["state"])
+    timed_call(
+        "round_state_save",
+        _save_runner_state,
+        feedback["state"],
+        state_path or effective_config.get("state_path"),
+        category="io",
+    )
     return {
         **frame,
         "feedback": feedback,

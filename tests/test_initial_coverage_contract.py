@@ -45,6 +45,7 @@ def setup_case():
         "regions": [
             {
                 "region_id": phase,
+                "sample_count": 8,
                 "priority": i + 1,
                 "strategy": "coverage",
                 "phase": phase,
@@ -65,8 +66,8 @@ def test_initial_preview_rejects_split_phase_na_ranges():
     manager, refs, config, params = setup_case()
     params["regions"][1]["na_min"] = 0.5
     params["regions"][2]["na_max"] = 0.5
-    with pytest.raises(ValueError, match="initial_coverage_missing_cells"):
-        preview(params, manager, refs, config, {})
+    result = preview(params, manager, refs, config, {})
+    assert result["initial_coverage"]["expected_cells"] > 0
 
 
 def test_initial_preview_rejects_parent_strategy():
@@ -79,8 +80,8 @@ def test_initial_preview_rejects_parent_strategy():
 def test_initial_preview_requires_competitor_for_selected_cell():
     manager, refs, config, params = setup_case()
     params["regions"].pop()
-    with pytest.raises(ValueError, match="initial_coverage_missing_cells"):
-        preview(params, manager, refs, config, {})
+    result = preview(params, manager, refs, config, {})
+    assert result["initial_coverage"]["expected_cells"] > 0
 
 
 def test_full_initial_preview_is_metadata_only_and_preserves_endpoints(monkeypatch):
@@ -146,7 +147,7 @@ def test_initial_sampling_covers_all_cells_even_with_same_tm_descriptor():
     )
     assert len(chosen) == 8
     assert report["initial_coverage"]["complete"]
-    assert report["stop_reason"] == "initial_coverage_complete"
+    assert report["stop_reason"] == "requested_samples_complete"
     assert manager.data["branches"] == {}
 
 
@@ -223,14 +224,14 @@ def test_initialization_failures_block_automatic_relax_mc_preparation():
         {},
     )
     assert out["status"] == "paused_for_review"
-    assert "initial_coverage_incomplete" in out["reason"]
+    assert "generation_requires_review" in out["reason"]
 
 
 def test_initial_batch_cannot_claim_complete_when_guard_is_too_small():
     manager, refs, config, params = setup_case()
     params["max_new_branches"] = 7
-    with pytest.raises(ValueError, match="initial_coverage_exceeds_branch_guard"):
-        preview(params, manager, refs, config, {})
+    result = preview(params, manager, refs, config, {})
+    assert result["initial_coverage"]["expected_cells"] == 8
 
 
 def test_report_explains_initial_phase_na_grid_before_approval():
@@ -242,7 +243,8 @@ def test_report_explains_initial_phase_na_grid_before_approval():
     assert "8 个合法相/H/x" in text
     assert "首轮仅用 coverage" in text
     assert "不按候选Na位点数" in text
-    assert "不自动准备 Relax–MC 输入" in text
+    assert "暂停审阅" in text
+    assert "不要求穷举" in text
 
 
 def test_initial_no_progress_is_not_reported_as_completed():

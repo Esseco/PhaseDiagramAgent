@@ -542,8 +542,10 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
                 "下一步：查看具体目标后批准、修改或拒绝；本次未创建任务或输入。"
                 "批准仅准备本批输入，不提交计算；首批结果与历史方案保留。"
             )
-        rows = preview["candidates"]
+        reuse = preview.get("reused_results") or {}
+        rows = [r for r in preview["candidates"] if r.get("structure_sha256") not in reuse]
         relax = sum(r["operation"] == "relax" for r in rows)
+        reuse_note = f"另有 {len(reuse)} 条已完成的同帧结果绑定复用。\n" if reuse else ""
         seconds = (preview.get("runtime_budget") or {}).get("serial_seconds")
         timing = (
             f"串行耗时粗估 {seconds / 3600:.1f} 小时（不含排队）"
@@ -553,7 +555,8 @@ def _format_workflow_reply(result: dict, state_path, *, verbose=None) -> str:
         return (
             f"当前：{preview['new_model_version']} 已激活，结构刷新待批准。\n"
             f"首批：弛豫 {relax}、单点 {len(rows) - relax}；暂缓 {preview['deferred']}。\n"
-            "标准：<1 meV/atom弛豫，1–10单点，>10按Na×相抽样10%。\n"
+            f"{reuse_note}"
+            "标准：<1 meV/atom弛豫，1–10全部单点且受力>0.1 eV/Å弛豫，>10全部单点且受力>0.2 eV/Å弛豫。\n"
             f"未覆盖的分层 {len(preview['coverage_gaps'])} 个；{timing}，单点成本暂按弛豫上界。\n"
             "同意仅批准首批输入生成；回收后直接展示新模型 branch 生成方案。\n"
             "仅生成超算输入；你提交GPU.sh并回传results。不本机计算。"
@@ -658,6 +661,7 @@ def _with_post_dft_reply(result, text, *, verbose):
         # A newly proposed follow-up retains its own scientific assessment.
         return text
     from phase_agent.runtime.post_dft_presentation import (
+        magnetic_distribution_lines,
         post_dft_lines,
         post_dft_review_lines,
         reply_assessment,
@@ -678,12 +682,14 @@ def _with_post_dft_reply(result, text, *, verbose):
     assessment, summary = "", ""
     if round_assessment:
         assessment = post_dft_lines(state, assessment=round_assessment)
+        summary = magnetic_distribution_lines(state, round_assessment["scope"])
         from phase_agent.analysis.feedback.dft_magnetic_tables import magnetic_chat_summary
 
         if verbose:
-            summary = magnetic_chat_summary(
+            checks = magnetic_chat_summary(
                 state, task_ids=set(round_assessment["recovered_task_ids"]), verbose=True
             )
+            summary = "\n".join(part for part in (summary, checks) if part)
     review = post_dft_review_lines(
         review_action,
         verbose=verbose,
@@ -699,7 +705,7 @@ def _with_post_dft_reply(result, text, *, verbose):
 def _compact_post_dft_reply(assessment, magnetic, review, action_text):
     """Show the round metrics and next action; full reports remain on disk."""
     visible = assessment.splitlines()[:4]
-    return "\n\n".join(part for part in ("\n".join(visible), action_text) if part)
+    return "\n\n".join(part for part in ("\n".join(visible), magnetic, action_text) if part)
 
 
 def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
@@ -725,6 +731,20 @@ def _workflow_reply_body(result: dict, state_path, *, verbose=False) -> str:
             if reason
             else "\n流程未提供具体原因，请查看完整记录中的审批与执行结果。"
         )
+    if isinstance(result, dict) and result.get("status") == "dft_failure_review":
+        lines = []
+        for report in result.get("dft_failure_reviews") or []:
+            batch = report["batch"]
+            lines.append(f"DFT 失败：已回收 {batch['returned_count']} 项中失败 {batch['failed_count']} 项；"
+                         f"本批可计入总数 {batch['eligible_count']}，尚未结束 {batch['pending_count']} 项。"
+                         "失败数已达到或超过 20% 门槛，暂停后续计算并交由 Agent 分析；未回收不算失败，未自动重试。")
+            diagnosis = report.get("diagnosis")
+            if diagnosis:
+                lines.append("Simulation 调查：" + diagnosis["assessment"])
+                lines.append("证据限制：" + diagnosis["limitations"])
+            else:
+                lines.append("Simulation 诊断尚不可用；已保留诊断请求和失败证据，不能推断原因。")
+        return "\n".join(lines)
     if isinstance(result, dict) and result.get("status") == "awaiting_dft_recovery_decision":
         return _dft_recovery_question_reply(result)
     if verbose or not isinstance(result, dict):
@@ -909,7 +929,10 @@ def _dft_recovery_question_reply(result):
     scope = question.get("scope") or {}
     version = scope.get("model_version") or "未知模型"
     model_round = ((state.get("upload_layout") or {}).get("model_rounds") or {}).get(version)
-    label = f"第 {model_round} 轮（{version}）" if model_round is not None else f"模型 {version}"
+    from phase_agent.evidence.model_epoch import model_epoch_label
+    external_round = ((state.get("upload_layout") or {}).get("extrapolation_rounds") or {}).get(version)
+    label = (model_epoch_label(state, version) if external_round else
+             f"第 {model_round} 轮（{version}）" if model_round is not None else f"模型 {version}")
     recovered = question.get("successful_tasks", question.get("recovered_tasks", 0))
     expected = question.get("expected_tasks", 0)
     ratio = recovered / expected if expected else 0
@@ -919,7 +942,13 @@ def _dft_recovery_question_reply(result):
         f"未回传 {len(question.get('pending_task_ids') or [])} 个。",
     ]
     if state.get("round_summary_csv_path"):
-        lines.append(f"轮次记录：`{state['round_summary_csv_path']}`")
+        from pathlib import Path
+
+        path = Path(state["round_summary_csv_path"])
+        relocated = path.parent / "latest" / path.name
+        if not path.is_file() and relocated.is_file():
+            path = relocated
+        lines.append(f"轮次记录：`{path}`")
     lines.extend(
         [
             "还要继续回收剩余结果吗？",

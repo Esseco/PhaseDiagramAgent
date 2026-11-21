@@ -53,7 +53,12 @@ def create_mlip_mc_bohb_evaluator(
 
 def _default_parse(result):
     outputs = result.get("outputs") or {}
-    for key in ("minimum_energy_per_atom", "best_energy_mean_per_atom", "energy_per_atom"):
+    for key in (
+        "minimum_energy_per_atom",
+        "best_energy_main_model_per_atom",
+        "energy_per_atom",
+        "best_energy_mean_per_atom",
+    ):
         if outputs.get(key) is not None:
             return {"minimum_energy_per_atom": outputs[key]}
     return {"minimum_energy_per_atom": None}

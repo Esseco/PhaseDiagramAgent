@@ -2,11 +2,13 @@
 
 from copy import deepcopy
 import hashlib
-from phase_agent.tools.budget.reserve_budget import reserve_budget
+from phase_agent.tools.budget.reserve_budget import reserve_budget, _reserve_budget_inplace
 
 
-def restart_failed_task(state, task_id, *, budget_limits, config_version, max_retries=1):
-    current = deepcopy(state)
+def restart_failed_task(
+    state, task_id, *, budget_limits, config_version, max_retries=1, _owned=False
+):
+    current = state if _owned else deepcopy(state)
     original = next(
         (row for row in current.get("tasks") or [] if row.get("task_id") == task_id), None
     )
@@ -21,7 +23,9 @@ def restart_failed_task(state, task_id, *, budget_limits, config_version, max_re
     if any(row.get("task_key") == key for row in current.get("tasks") or []):
         return {"status": "already_prepared", "state": current}
     cost = float(original.get("planned_relative_cost", original.get("budget", 0)) or 0)
-    reservation = reserve_budget(
+    if _owned:
+        current.setdefault("budget_reservations", {})
+    reservation = (_reserve_budget_inplace if _owned else reserve_budget)(
         current,
         task_key=key,
         stage=original["stage"],

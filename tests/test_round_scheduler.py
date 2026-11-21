@@ -33,7 +33,7 @@ class RoundSchedulerTest(unittest.TestCase):
         self.assertTrue(all(by_id[item["branch_id"]]["region_id"] != "r1" for item in explored))
         repeated = run_round_scheduler(first["state"], self.candidates, summary=self.summary, bohb_config=self.bohb, strategy_config=self.strategy, invocation_id="call-1", agent_client=lambda _: (_ for _ in ()).throw(RuntimeError()))
         self.assertTrue(repeated["idempotent_replay"]); self.assertEqual(repeated["actions"], first["actions"])
-        with tempfile.TemporaryDirectory(dir=".") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = f"{directory}/state.json"; save_round_scheduler_state(first["state"], path); restored = load_round_scheduler_state(path)
         resumed = run_round_scheduler(restored, self.candidates, summary=self.summary, bohb_config=self.bohb, strategy_config=self.strategy, invocation_id="call-2")
         self.assertFalse({a["task_key"] for a in first["actions"]} & {a["task_key"] for a in resumed["actions"]})

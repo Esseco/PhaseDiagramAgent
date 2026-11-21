@@ -112,16 +112,38 @@ def test_public_entry_does_not_prepare_mc_without_phase_evidence(tmp_path):
 
 
 def test_public_entry_creates_budgeted_dft_child_tasks_from_qbc(tmp_path):
+    from hashlib import sha256
+    from ase import Atoms
+    from ase.io import write
+
     boundary = {"P": ["O3"], "H": {"O3": [H]}, "TM_ratio": {"Fe": 1}}
     manager = PhaseDataManager(boundary)
     branch_id = manager.add_branch(P="O3", H=H, x=1, T=["Fe"], composition={"Na": 1, "Fe": 1, "O": 2})
+    frame = tmp_path / "candidate.vasp"
+    atoms = Atoms("Na10Fe10O20", scaled_positions=[[i / 40, 0, 0] for i in range(40)], cell=[40, 5, 5], pbc=True)
+    write(frame, atoms)
+    digest = sha256(frame.read_bytes()).hexdigest()
     structure_id = manager.add_structure(
-        branch_id=branch_id, arrangement={"order": 1}, metadata={"atom_count": 40}
+        branch_id=branch_id, arrangement={"order": 1}, source_path=frame, metadata={"atom_count": 40}
     )
-    state = {"qbc_candidates": [{
-        "candidate_id": structure_id, "branch_id": branch_id, "atom_count": 40,
-        "qbc": {"status": "completed", "f_std_max": .3, "energy_std": .02},
-    }]}
+    state = {
+        "active_model_version": "m1",
+        "qbc_candidates": [{
+            "candidate_id": structure_id, "structure_id": structure_id,
+            "branch_id": branch_id, "atom_count": 40, "phase": "O3",
+            "structure_path": str(frame), "structure_sha256": digest,
+            "predicted_Ehull": 0.01, "ehull_unit": "eV/atom",
+            "qbc": {"status": "completed", "f_std_max": .3, "energy_std": .02},
+        }],
+        "phase_diagrams": {"mlip": {
+            "status": "completed", "model_version": "m1", "version": "h1",
+            "entries": [
+                {"composition": {"Fe": 1, "O": 2}, "eform_per_O2": 0, "phase": "O3", "is_stable": False},
+                {"composition": {"Na": 2, "Fe": 1, "O": 2}, "eform_per_O2": 0, "phase": "O3", "is_stable": False},
+                {"composition": {"Na": 1, "Fe": 1, "O": 2}, "eform_per_O2": -0.1, "phase": "O3", "is_stable": False, "structure_sha256": digest},
+            ],
+        }},
+    }
     action = {
         "tool": "select_dft_candidates", "task_key": "dft-select-1",
         "target_ids": [structure_id], "budget": 0,
@@ -134,7 +156,7 @@ def test_public_entry_creates_budgeted_dft_child_tasks_from_qbc(tmp_path):
         manager, {}, {"state_path": str(tmp_path / "state.json")}, _session(boundary),
         state=state, agent_client=lambda _: action, execution_mode="autonomous", max_steps=1,
     )
-    assert result["status"] == "tasks_in_progress"
+    assert result["status"] == "tasks_in_progress", result.get("events")
     task = result["state"]["pending_tasks"][0]
     assert task["stage"] == "dft_single_point"
     assert task["structure_id"] == structure_id
@@ -147,6 +169,7 @@ def test_recovered_dft_without_final_structure_updates_ledger_but_not_hull(tmp_p
     manager = PhaseDataManager(boundary)
     branch = manager.add_branch(P="O3", H=H, x=1, T=["Fe"], composition={"Fe": 1})
     structure = manager.add_structure(branch_id=branch, arrangement={"order": 1}, composition={"Fe": 1})
+    manager.save(tmp_path / "ledger.json")
     task = {
         "task_id": "DFT1", "task_key": "DK1", "structure_id": structure,
         "object_id": structure, "stage": "dft_single_point", "status": "pending",

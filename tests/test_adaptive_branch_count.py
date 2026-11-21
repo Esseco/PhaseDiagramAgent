@@ -189,6 +189,7 @@ def test_new_model_proposal_uses_regions_and_counts_only_after_generation(monkey
                     {
                         "region_id": "r1",
                         "priority": 1,
+                        "sample_count": 40,
                         "strategy": "coverage",
                         "phase": "O3",
                         "min_det_H": 4,

@@ -6,8 +6,8 @@ from copy import deepcopy
 CURRENT_STATE_SCHEMA_VERSION = 1
 
 
-def migrate_state_snapshot(snapshot: dict) -> dict:
-    current = deepcopy(snapshot or {})
+def migrate_state_snapshot(snapshot: dict, *, _owned=False) -> dict:
+    current = snapshot if _owned and snapshot is not None else deepcopy(snapshot or {})
     version = int(current.get("schema_version", 0))
     if version > CURRENT_STATE_SCHEMA_VERSION:
         raise ValueError(f"unsupported future state schema version: {version}")
@@ -31,10 +31,10 @@ def migrate_persisted_state(state: dict, *, _owned=False) -> dict:
     current = state if _owned and state is not None else deepcopy(state or {})
     if current.get("current_state_snapshot"):
         current["current_state_snapshot"] = migrate_state_snapshot(
-            current["current_state_snapshot"]
+            current["current_state_snapshot"], _owned=_owned
         )
     current["state_snapshots"] = [
-        item if item.get("history_format") == "summary-v1" else migrate_state_snapshot(item)
+        item if item.get("history_format") == "summary-v1" else migrate_state_snapshot(item, _owned=_owned)
         for item in current.get("state_snapshots") or []
     ]
     return current

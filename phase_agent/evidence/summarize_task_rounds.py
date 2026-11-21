@@ -19,6 +19,7 @@ def summarize_task_rounds(state):
         key = json.dumps(lineage, sort_keys=True)
         group = groups.setdefault(key, {"lineage": lineage, "tasks": []})
         group["tasks"].append(task)
+    accepted = set(state.get("processed_task_ids") or []) if groups else set()
     output = []
     for key in sorted(groups):
         group = groups[key]
@@ -32,8 +33,8 @@ def summarize_task_rounds(state):
                 "stage_evidence": summarize_task_stages(
                     {
                         "tasks": group["tasks"],
-                        "processed_task_ids": state.get("processed_task_ids") or [],
-                    }
+                    },
+                    _accepted_ids=accepted,
                 )["stages"],
             }
         )

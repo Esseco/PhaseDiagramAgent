@@ -128,7 +128,7 @@ def validation_request(current, key, job, config, result):
     }
 
 
-def recover_validation(current, request, handoff):
+def recover_validation(current, request, handoff, *, job=None):
     returned = Path(request["returned"])
     plan, new, old, criteria, settings = (
         request[k] for k in ("plan", "new", "old", "criteria", "settings")
@@ -190,6 +190,32 @@ def recover_validation(current, request, handoff):
         reason=f"独立验证已回收，候选{new['version']}；状态{stage}。验证摘要：{json.dumps(validation, ensure_ascii=False)}。单独审阅后可回复“激活候选 {new['version']} 原因：你的理由”或“拒绝候选 {new['version']} 原因：你的理由”；“继续”不会激活。",
     )
 
+    transition = (job or {}).get("post_training_transition") or {}
+    if validation.get("passed") and transition.get("mode") == "activate_then_refresh_approval":
+        from phase_agent.tools.workflows.create_model_update_handler import (
+            complete_candidate_activation,
+        )
+
+        stored = current["candidate_models"][new["version"]]
+        activation = complete_candidate_activation(
+            current,
+            stored,
+            approval_reason=transition.get("approval_reason"),
+        )
+        if activation.get("status") == "activated":
+            current = activation["state"]
+            handoff.update(
+                stage="activated",
+                activated_automatically=True,
+                activation_reason=transition.get("approval_reason"),
+                reason=(
+                    f"独立验证通过，按已批准训练交接自动切换候选 {new['version']}。"
+                    "模型刷新已标记为单独审批；未生成、上传或提交刷新计算。"
+                ),
+            )
+        else:
+            handoff["auto_activation_blocked_reason"] = activation.get("reason")
+
     return current, handoff
 
 
@@ -240,6 +266,8 @@ def prepare_validation_job(job, config, request, handoff):
 
 def record_handoff(current, key, handoff):
     job = current["remote_finetune_jobs"][key]
+    if handoff.get("stage") == "activated":
+        job["activated"] = True
     prior = job.get("training_handoff") or {}
     job["training_handoff"] = deepcopy(handoff)
     if handoff.get("manifest_result"):

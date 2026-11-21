@@ -189,7 +189,10 @@ def build_training_handoff_graph(checkpointer=None):
     def validate(state):
         def run():
             current, handoff = recover_validation(
-                deepcopy(state["business"]), state["request"], deepcopy(state["handoff"])
+                deepcopy(state["business"]),
+                state["request"],
+                deepcopy(state["handoff"]),
+                job=state["business"]["remote_finetune_jobs"][state["job_key"]],
             )
             return {"business": current, "handoff": handoff, "route": "record"}
 
@@ -202,6 +205,7 @@ def build_training_handoff_graph(checkpointer=None):
             "awaiting_manifest": "manifest_wait",
             "awaiting_validation": "validation_wait",
             "awaiting_activation_approval": "approval_wait",
+            "activated": "done",
         }.get(stage, "input_wait")
         if stage in {"candidate_rejected", "validation_rejected"}:
             route = "done"

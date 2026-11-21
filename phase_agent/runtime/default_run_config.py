@@ -88,7 +88,7 @@ def default_run_config() -> dict[str, Any]:
                 },
             ],
             "max_segments_per_branch": 3,
-            "max_cumulative_cost_per_branch": 90.0,
+            "max_cumulative_cost_per_branch": None,
             "random_exploration_fraction": 0.10,
             "high_ehull_defer_threshold": 0.30,
             "near_hull_retry_threshold": 0.10,
@@ -96,7 +96,13 @@ def default_run_config() -> dict[str, Any]:
         "energy_conventions": {
             "oxygen_reference_unit": "eV/O2",
             "model_error_unit": "eV/atom",
-            "voltage_references": {},
+            "voltage_references": {
+                "Na": {
+                    "value": -1.288,
+                    "unit": "eV/atom",
+                    "source": "program_default:Na=-1.288 eV/atom",
+                }
+            },
         },
         "budgets": default_budget_rules(),
         "task_versions": {

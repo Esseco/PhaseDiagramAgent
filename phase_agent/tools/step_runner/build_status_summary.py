@@ -20,7 +20,7 @@ def build_status_summary(state: dict, *, config_version=None) -> dict:
         "job_counts": dict(Counter(row.get("status", "unknown") for row in jobs)),
         "budget_usage": deepcopy(state.get("budget_usage") or {}),
         "reserved_relative_cost": float(state.get("reserved_relative_cost", 0) or 0),
-        "budget_remaining": state.get("budget_remaining"),
+        "budget_remaining": None,
         "coverage": deepcopy(state.get("coverage_summary")),
         "phase_diagram": deepcopy(state.get("phase_diagram_summary")),
         "qbc": deepcopy(state.get("qbc_summary")),

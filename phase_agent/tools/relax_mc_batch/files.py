@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import json
+import math
 from pathlib import Path
 import shlex
 
@@ -54,7 +55,10 @@ def rebase(value, root, *, portable=False):
 
     def convert(item, key=None):
         if isinstance(item, dict):
-            return {k: convert(v, k) for k, v in item.items()}
+            # Reference names (O1/O3/P3) are dynamic keys, but their string
+            # values are paths and must travel with the archived package.
+            return {k: convert(v, "path" if key == "phase_references" and isinstance(v, str) else k)
+                    for k, v in item.items()}
         if isinstance(item, list):
             return [convert(v, key) for v in item]
         if isinstance(item, str) and key in PATH_KEYS and item:
@@ -91,6 +95,13 @@ def script(profile, command, *, name):
 
 def gpu_profile(profiles, stage="relax_and_feature"):
     return next(row for row in profiles.values() if stage in row.get("stages", []))
+
+
+def balanced_batch_size(count, maximum):
+    if count < 2 or maximum <= 0:
+        return maximum
+    groups = 2 * math.ceil(count / (2 * maximum))
+    return min(maximum, math.ceil(count / groups))
 
 
 def coordinator_profile(profiles):

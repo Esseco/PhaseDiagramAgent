@@ -50,7 +50,7 @@ def test_replanning_covers_current_relax_candidates_without_changing_state(tmp_p
     assert state == original
 
 
-@pytest.mark.parametrize("limit", ["steps", "tasks", "cost"])
+@pytest.mark.parametrize("limit", ["steps", "tasks"])
 def test_full_plan_is_not_silently_truncated_to_fit_limits(tmp_path, monkeypatch, limit):
     state, manager, config = fixture(tmp_path, monkeypatch)
     if limit == "steps":
@@ -59,6 +59,12 @@ def test_full_plan_is_not_silently_truncated_to_fit_limits(tmp_path, monkeypatch
         config["budgets"]["stage_limits"]["deep_search"]["max_" + limit] = 1
     with pytest.raises(ValueError, match="上限"):
         module.replan_mc_allocation(state, manager, config)
+
+
+def test_legacy_cost_cap_does_not_truncate_full_mc_plan(tmp_path, monkeypatch):
+    state, manager, config = fixture(tmp_path, monkeypatch)
+    config["budgets"]["stage_limits"]["deep_search"]["max_cost"] = 1
+    assert module.replan_mc_allocation(state, manager, config)["selected_branch_count"] == 2
 
 
 def test_expanded_replacement_removes_old_scope_and_records_new_scope(tmp_path, monkeypatch):

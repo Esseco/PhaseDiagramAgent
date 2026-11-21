@@ -31,7 +31,7 @@ def execution_state_issues(state):
         from phase_agent.policies.file_approval import proposal_hash
 
         if (
-            audit.get("resolution") in {"verified_no_effect", "verified_registered_effects"}
+            audit.get("resolution") in {"verified_no_effect", "verified_registered_effects", "verified_abandoned_staging"}
             and audit.get("evidence")
             and audit.get("reviewed_at")
             and identity.get("invocation_id") == record.get("record_id")

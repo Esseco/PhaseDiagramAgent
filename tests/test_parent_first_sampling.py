@@ -13,7 +13,8 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def test_parent_relaxation_precedes_perturbation_and_only_selected_are_exported(tmp_path):
+@pytest.mark.parametrize("reject_geometry", [False, True])
+def test_parent_relaxation_precedes_perturbation_and_only_selected_are_exported(tmp_path, monkeypatch, reject_geometry):
     atoms = Atoms('NaCoNiO2', positions=[[0, 0, 0], [2, 0, 0], [0, 2, 0], [2, 2, 0], [0, 0, 2]],
                   cell=[6, 6, 6], pbc=True)
     parent = tmp_path / 'parent.vasp'
@@ -24,6 +25,18 @@ def test_parent_relaxation_precedes_perturbation_and_only_selected_are_exported(
     model.write_bytes(b'model')
     events = []
     paths = []
+    from Process_MLIP import nepkit_sampling
+    original = nepkit_sampling.perturb_layered_oxide_structure
+    valid = nepkit_sampling._valid
+    def perturb(*args, **kwargs):
+        events.append('perturb')
+        return original(*args, **kwargs)
+    def geometry(*args, **kwargs):
+        assert events[-1] in {'perturb', 'geometry'}
+        events.append('geometry')
+        return False if reject_geometry and events.count('geometry') == 2 else valid(*args, **kwargs)
+    monkeypatch.setattr(nepkit_sampling, 'perturb_layered_oxide_structure', perturb)
+    monkeypatch.setattr(nepkit_sampling, '_valid', geometry)
 
     def relax(job):
         events.append('relax')
@@ -45,7 +58,7 @@ def test_parent_relaxation_precedes_perturbation_and_only_selected_are_exported(
     def sample(cache, output, target, reference_count):
         events.append('direct')
         assert reference_count == 1 and target == 2
-        assert len(read(paths[2], index=':')) == 3
+        assert len(read(paths[2], index=':')) == 3 - int(reject_geometry)
         assert read(paths[2], index=0).positions[0, 2] == pytest.approx(0.25)
         output.mkdir()
         (output / 'selected_indices.json').write_text(json.dumps([
@@ -57,10 +70,11 @@ def test_parent_relaxation_precedes_perturbation_and_only_selected_are_exported(
         [{'path': str(reference), 'sha256': sha(reference)}], out, model_path=model,
         model_sha256=sha(model), feature_model_path='unused', target=2, frames_per_parent=3,
         relax_fn=relax, encoder_factory=lambda _: None, extract_fn=extract, sample_fn=sample)
-    assert events == ['relax', 'extract', 'direct']
-    assert result['selected_count'] == 2 and result['candidate_count'] == 3
+    assert events == ['relax', 'perturb', 'geometry', 'geometry', 'geometry', 'extract', 'direct']
+    assert result['selected_count'] == 2 and result['candidate_count'] == 3 - int(reject_geometry)
     assert sorted(p.name for p in out.iterdir()) == ['result.json', 'selected_0000.vasp', 'selected_0001.vasp']
     manifest = json.loads((out / 'result.json').read_text(encoding='utf8'))
+    assert len(manifest['candidate_exclusions']['geometry_excluded']) == int(reject_geometry)
     assert all(item['parent_record_id'] == 'r1' and item['sha256'] == sha(out / item['path'])
                for item in manifest['selected'])
     assert not list(tmp_path.glob('.parent-first-*'))
@@ -237,7 +251,8 @@ def _fake_features(inputs, cache):
 
 
 
-def test_perturbation_feature_filter_applies_before_direct(tmp_path):
+@pytest.mark.parametrize("bad", [1.01, float("nan"), None])
+def test_perturbation_feature_filter_applies_before_direct(tmp_path, bad):
     import h5py
     import numpy as np
     atoms = Atoms('NaCoNiO2', positions=[[0,0,0],[2,0,0],[0,2,0],[2,2,0],[0,0,2]], cell=[6,6,6], pbc=True)
@@ -253,8 +268,8 @@ def test_perturbation_feature_filter_applies_before_direct(tmp_path):
     def extract(inputs, encoder, cache):
         sources.extend(inputs)
         with h5py.File(cache,'x') as h:
-            h.create_dataset('features',data=np.array([[0.0],[1.0],[1.01]],dtype='f4'),maxshape=(None,1))
-            h.create_dataset('indices',data=np.array([[0,0],[1,0],[1,1]],dtype='i8'))
+            h.create_dataset('features',data=np.array([[0.0],[1.0]] + ([] if bad is None else [[bad]]),dtype='f4'),maxshape=(None,1))
+            h.create_dataset('indices',data=np.array([[0,0],[1,0]] + ([] if bad is None else [[1,1]]),dtype='i8'))
     def sample(cache, output, target, reference_count):
         with h5py.File(cache) as h:
             assert h['indices'][:].tolist()==[[1,0]]
@@ -265,7 +280,8 @@ def test_perturbation_feature_filter_applies_before_direct(tmp_path):
             relax_fn=relax,encoder_factory=lambda _:None,extract_fn=extract,sample_fn=sample)
     run_parent_first_sampling(*args,target=1,**kw)
     result=json.loads((tmp_path/'out'/'result.json').read_text())
-    assert result['perturbation_feature_filter']=={'threshold':1.0,'accepted':1,'rejected':1}
+    assert {k:v for k,v in result['perturbation_feature_filter'].items() if k != 'excluded'}=={'threshold':1.0,'accepted':1,'rejected':1}
+    assert result['perturbation_feature_filter']['excluded'][0]['reason']==('feature_difference_missing' if bad is None else 'feature_difference_invalid' if bad != bad else 'feature_difference_above_threshold')
     assert result['selected'][0]['perturbation_feature_difference']==1.0
     sources.clear()
     with pytest.raises(ValueError,match='insufficient_candidates_after_feature_filter'):

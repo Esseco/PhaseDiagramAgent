@@ -152,3 +152,44 @@ def test_codex_context_reuses_snapshot_until_state_file_changes(tmp_path):
         assert control.codex_context() == snapshot
         assert control.codex_context() == snapshot
     assert build.call_count == 1
+
+
+def test_approved_registered_relax_mc_has_explicit_round_comparison_without_cost_cap():
+    from phase_agent.runtime.codex.context import ensure_codex_round_budget_review
+    from phase_agent.agents.strategic.round_budget_review import round_budget_review_errors
+
+    action = {"tool": "prepare_local_batch_files", "operation": "prepare_relax_mc_batch",
+              "parameters": {"mode": "relax_mc_inputs", "relax_mc_preview": {"checksum": "bound"}},
+              "target_ids": ["branch"], "budget": 12.0,
+              "_decision_team": {"backend": "codex_native", "human_review": [{"kind": "human_accept", "revision": 3}],
+                                 "revision": 3}}
+    context = {"round_budget_evidence": {"required": True}}
+    amended = ensure_codex_round_budget_review(action, context)
+    assert "round_budget_review" not in action
+    assert amended["round_budget_review"]["choice"] == "new_search"
+    assert not round_budget_review_errors(amended, context)
+    assert amended["parameters"] == action["parameters"] and amended["target_ids"] == action["target_ids"]
+    assert amended["round_budget_review"]["alternatives"][0]["expected_relative_cost"] is None
+    no_accept = {**action, "_decision_team": {"backend": "codex_native", "revision": 3, "human_review": []}}
+    assert "round_budget_review" not in ensure_codex_round_budget_review(no_accept, context)
+
+
+
+def test_dft_missing_registered_audit_stops_before_workflow():
+    def run(*args):
+        pytest.fail("An invalid selection must not enter the lifecycle")
+
+    control = _control(run)
+    snapshot = _snapshot()
+    snapshot["allowed_tools"] = ["select_dft_candidates"]
+    snapshot["decision_context"]["independent_audit_candidate_ids"] = ["audit"]
+    action = {
+        "tool": "select_dft_candidates",
+        "parameters": {"decisions": [
+            {"candidate_id": "near", "action": "DFT_SINGLE_POINT"},
+            {"candidate_id": "audit", "action": "DEFER", "reason": "defer"},
+        ]},
+    }
+    with patch("phase_agent.runtime.codex.context.build_codex_context", return_value=snapshot):
+        with pytest.raises(ValueError, match="codex_preflight_invalid:.*independent_dft_audit_required"):
+            control.propose_codex(action, context_version="V1", context_digest="D1")

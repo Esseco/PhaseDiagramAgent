@@ -17,6 +17,78 @@ from phase_agent.analysis.cost.predict_runtime import predict_runtime
 from phase_agent.tools.budget.estimate_stage_cost import estimate_stage_cost
 
 
+def _latest_diagram_history(state, diagram, version):
+    """Freeze only current total-hull entries, retaining exact source model and geometry."""
+    from phase_agent.analysis.phase.mc_snapshot import is_current_model_only_hull
+
+    if (
+        diagram.get("status") != "completed"
+        or diagram.get("model_version") != version
+        or (
+            diagram.get("energy_policy") != "latest_valid_per_structure_v1"
+            and not is_current_model_only_hull(state, diagram, version)
+        )
+    ):
+        raise ValueError("latest_hull_not_ready")
+    from phase_agent.analysis.phase.phase_boundary import assert_snapshot_boundary
+
+    assert_snapshot_boundary(state, diagram)
+    rounds = (state.get("upload_layout") or {}).get("model_rounds") or {}
+    records = {}
+    for row in state.get("phase_records") or []:
+        key = row.get("record_id")
+        if key in records:
+            raise ValueError("duplicate_phase_record_id")
+        records[key] = row
+    tasks_by_id = {}
+    for task in state.get("tasks") or []:
+        tasks_by_id.setdefault(task.get("task_id"), []).append(task)
+    result, seen = [], set()
+    for entry in diagram.get("entries") or []:
+        key = entry.get("record_id")
+        row = records.get(key)
+        if not key or key in seen or row is None:
+            raise ValueError("latest_hull_record_missing_or_duplicate")
+        seen.add(key)
+        source = row.get("model_version") or row.get("source_version")
+        value = row.get("energy")
+        normalized = entry.get("normalized_total_energy")
+        from phase_agent.analysis.phase.unidentified_mlip import (
+            unidentified_hull_entry,
+            verified_unidentified_mlip,
+        )
+
+        matching = tasks_by_id.get(row.get("source_task_id"), [])
+        valid_unknown = (
+            unidentified_hull_entry(entry)
+            and len(matching) == 1
+            and verified_unidentified_mlip(row, matching[0])
+        )
+        if (
+            (row.get("status") != "completed" and not valid_unknown)
+            or row.get("checks_passed", True) is not True
+            or row.get("structure_id") != entry.get("structure_id")
+            or not row.get("structure_sha256")
+            or row.get("structure_sha256") != entry.get("structure_sha256")
+            or not source
+            or source != entry.get("source_version")
+            or type(rounds.get(source)) is not int
+            or rounds[source] < 1
+            or not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not isinstance(normalized, (int, float))
+            or isinstance(normalized, bool)
+            or not math.isfinite(value)
+            or not math.isfinite(normalized)
+            or not math.isclose(value, normalized, rel_tol=0, abs_tol=1e-6)
+        ):
+            raise ValueError("latest_hull_record_binding_invalid")
+        result.append(deepcopy(row))
+    if not result or len(set(rounds.values())) != len(rounds):
+        raise ValueError("latest_hull_records_or_model_rounds_invalid")
+    return result
+
+
 def profiles(config):
     supplied = (config.get("manual_upload") or {}).get("stage_profiles") or (
         config.get("supercomputer") or {}
@@ -54,6 +126,26 @@ def _selected_structure_ids(branch, records, valid_ids, count):
     return [
         sid for sid in branch.get("structure_ids") or [] if sid in records and sid in valid_ids
     ][:count]
+
+
+def _validate_initial_na_layers(source, full, x, structure_id):
+    """Reject existing nonzero-Na structures that violate the approved layer rule."""
+    if Fraction(str(x)) == 0:
+        return
+    from phase_agent.science.structures.boundary_utils import load_structure
+    from phase_agent.science.structures.identify_branch import calculate_x
+    from phase_agent.science.structures.rank_na_orderings_by_electrostatics import (
+        _has_na_in_each_layer,
+        _na_layer_groups,
+    )
+
+    template = load_structure(full)
+    na = [i for i, site in enumerate(template) if site.is_ordered and site.specie.symbol == "Na"]
+    structure = load_structure(source)
+    if not na or Fraction(calculate_x(structure)) != Fraction(str(x)):
+        raise ValueError(f"invalid_na_composition_or_template:{structure_id}")
+    if not _has_na_in_each_layer(structure, _na_layer_groups(template, na), template, na):
+        raise ValueError(f"na_layer_occupancy_invalid:{structure_id}")
 
 
 def registration_facts(state, manager, config):
@@ -134,14 +226,20 @@ def diagnose(
     *,
     max_concurrent_jobs=None,
     phase_references=None,
+    bundle_post_mc_dft=None,
+    max_dft_frames=100,
+    max_small_det_h=6,
 ):
+    from phase_agent.analysis.phase.energy_consistency import assert_snapshot_energy_consistency
     from phase_agent.policies.model_generation import new_model_search_errors
 
+    assert_snapshot_energy_consistency(state, (state.get("phase_diagrams") or {}).get("mlip") or {})
     prerequisite_errors = new_model_search_errors(state, branch_ids)
     if prerequisite_errors:
         raise ValueError("; ".join(prerequisite_errors))
-    if not branch_ids or len(branch_ids) != len(set(branch_ids)):
-        raise ValueError("Explicit unique recommended branch IDs are required")
+    from phase_agent.tools.relax_mc_batch.branch_limit import validate_branch_scope
+
+    validate_branch_scope(branch_ids)
     if (state.get("dedup_gate") or {}).get("status") != "ready":
         raise ValueError("structure_dedup_not_ready")
     model = config.get("mlip") or {}
@@ -213,10 +311,34 @@ def diagnose(
         ids = _selected_structure_ids(branch, records, valid_ids, count)
         if not ids:
             raise ValueError(f"branch_has_no_valid_structure:{bid}")
+        full = None
+        if Fraction(str(branch["x"])) > 0:
+            full = branch.get("full_na_structure_path") or records[ids[0]].get(
+                "full_na_structure_path"
+            )
+            if not full or not Path(full).is_file():
+                raise ValueError(
+                    f"missing_full_na_template:{bid}; prepare the existing template before packaging"
+                )
+        if full and Fraction(str(branch["x"])) == 1:
+            from phase_agent.science.structures.boundary_utils import load_structure
+
+            full_na = float(load_structure(full).composition.get("Na", 0))
+            counts = []
+            for sid in ids:
+                source = Path(records[sid].get("source_path") or "")
+                if not source.is_file():
+                    raise ValueError(f"missing_structure:{sid}")
+                counts.append(float(load_structure(source).composition.get("Na", 0)))
+            if full_na <= 0 or any(count > full_na for count in counts):
+                raise ValueError(f"invalid_na_template_capacity:{bid}")
+            if all(count == full_na for count in counts):
+                selected[-1]["mc_no_vacancies"] = True
         for sid in ids:
             source = Path(records[sid].get("source_path") or "")
             if not source.is_file():
                 raise ValueError(f"missing_structure:{sid}")
+            _validate_initial_na_layers(source, full, branch["x"], sid)
             atoms = sum((records[sid].get("composition") or {}).values())
             if not atoms:
                 from pymatgen.core import Structure
@@ -244,13 +366,6 @@ def diagnose(
                 }
             )
         if Fraction(str(branch["x"])) > 0:
-            full = branch.get("full_na_structure_path") or records[ids[0]].get(
-                "full_na_structure_path"
-            )
-            if not full or not Path(full).is_file():
-                raise ValueError(
-                    f"missing_full_na_template:{bid}; prepare the existing template before packaging"
-                )
             inputs.append(
                 {
                     "kind": "full_na",
@@ -262,14 +377,26 @@ def diagnose(
     diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
     if diagram.get("entries") and diagram.get("model_version") != version:
         raise ValueError("existing_phase_diagram_model_mismatch")
-    history = [
-        deepcopy(row)
-        for row in state.get("phase_records") or []
-        if row.get("energy_method") == "mlip"
-        and row.get("model_version", row.get("source_version")) == version
-        and row.get("status") == "completed"
-        and row.get("phase_identification_status") == "identified"
-    ]
+    latest_required = state.get("mlip_energy_policy") == "latest_valid_per_structure_v1"
+    if (
+        latest_required
+        and diagram
+        and (diagram.get("status") != "completed" or not diagram.get("entries"))
+    ):
+        raise ValueError("latest_hull_not_ready")
+    latest_policy = latest_required and bool(diagram.get("entries"))
+    history = (
+        _latest_diagram_history(state, diagram, version)
+        if latest_policy
+        else [
+            deepcopy(row)
+            for row in state.get("phase_records") or []
+            if row.get("energy_method") == "mlip"
+            and row.get("model_version", row.get("source_version")) == version
+            and row.get("status") == "completed"
+            and row.get("phase_identification_status") == "identified"
+        ]
+    )
     if not history and diagram.get("status") == "completed":
         for row in diagram.get("entries") or []:
             history.append(
@@ -282,9 +409,66 @@ def diagnose(
                     "status": "completed",
                 }
             )
+    unknown_ids = [
+        r["record_id"] for r in history if r.get("status") == "pending_phase_identification"
+    ]
+    evidence_tasks = []
+    for row in history:
+        if row.get("record_id") not in unknown_ids:
+            continue
+        matches = [
+            t for t in state.get("tasks") or [] if t.get("task_id") == row.get("source_task_id")
+        ]
+        if len(matches) != 1:
+            raise ValueError("historical_phase_evidence_task_invalid")
+        task = matches[0]
+        # Preserve all fields that the existing convergence and frame checks use,
+        # without transferring worker logs, arrays, or unrelated task metadata.
+        keys = (
+            "task_id",
+            "status",
+            "stage",
+            "model_version",
+            "converged",
+            "checks_passed",
+            "parameters",
+            "result_disposition",
+            "extrapolation_review",
+            "worker_job",
+        )
+        output_keys = (
+            "energy",
+            "energy_unit",
+            "composition",
+            "structure_path",
+            "structure_checksum",
+            "phase_identification",
+            "structure",
+            "optimizer_converged",
+            "final_frame_valid",
+            "extrapolation_monitor",
+            "force_max_ev_per_angstrom",
+            "fmax_target_ev_per_angstrom",
+            "single_point_completed",
+        )
+        item = {k: deepcopy(task[k]) for k in keys if k in task}
+        item["outputs"] = {
+            k: deepcopy(task["outputs"][k]) for k in output_keys if k in task.get("outputs", {})
+        }
+        from phase_agent.analysis.phase.unidentified_mlip import verified_unidentified_mlip
+
+        if not verified_unidentified_mlip(row, item):
+            raise ValueError("historical_phase_evidence_incomplete")
+        evidence_tasks.append(item)
     bootstrap = not bool(history)
     for row in history:
         path = row.get("structure_path")
+        if latest_policy and (
+            not path
+            or not Path(path).is_file()
+            or file_checksum(path) != row.get("structure_sha256")
+        ):
+            raise ValueError("latest_hull_geometry_missing_or_changed")
         if path and Path(path).is_file():
             inputs.append(
                 {
@@ -294,8 +478,10 @@ def diagnose(
                     "sha256": file_checksum(path),
                 }
             )
-    mobile = [b for b in selected if Fraction(str(b["x"])) > 0]
-    if len(mobile) != len(selected) and not references:
+    mobile = [
+        b for b in selected if Fraction(str(b["x"])) > 0 and b.get("mc_no_vacancies") is not True
+    ]
+    if any(Fraction(str(b["x"])) == 0 for b in selected) and not references:
         raise ValueError("phase_references_required_for_empty_mobile_sites")
     sizes = (config.get("supercomputer") or {}).get("batch_sizes") or {}
     relax_size, mc_size = (
@@ -317,7 +503,20 @@ def diagnose(
     reference = [bcount]
     for _ in range(2):
         reference.append(min(bcount, max(10, math.ceil(reference[-1] / 2))) if bcount >= 10 else 0)
-    jobs_upper = [math.ceil(len(structures) / relax_size)] + [math.ceil(n / mc_size) for n in upper]
+    from phase_agent.tools.relax_mc_batch.files import balanced_batch_size, gpu_profile
+
+    effective_profiles = profiles(config)
+
+    def job_count(count, size, stage):
+        if not count:
+            return 0
+        if len(gpu_profile(effective_profiles, stage).get("partition_pool") or []) == 2:
+            size = balanced_batch_size(count, size)
+        return math.ceil(count / size)
+
+    jobs_upper = [job_count(len(structures), relax_size, "relax_and_feature")] + [
+        job_count(n, mc_size, "deep_search") for n in upper
+    ]
     cost_mc = sum(
         estimate_stage_cost(
             "deep_search",
@@ -334,6 +533,18 @@ def diagnose(
     phase_counts = {
         p: sum(b.get("P") == p for b in selected) for p in sorted({b.get("P") for b in selected})
     }
+    small_det_limit = int(max_small_det_h)
+    small_supercell_only = all(int(b.get("det_H") or 1) <= small_det_limit for b in selected)
+    if bundle_post_mc_dft is True and not small_supercell_only:
+        raise ValueError("bundle_post_mc_dft_requires_small_supercells")
+    bundled_dft = (
+        bool((config.get("workflow") or {}).get("bundle_small_supercell_post_mc_dft"))
+        and small_supercell_only
+        if bundle_post_mc_dft is None
+        else bool(bundle_post_mc_dft)
+    )
+    if bundled_dft and not (1 <= int(max_dft_frames) <= 100):
+        raise ValueError("max_dft_frames_must_be_1_to_100")
     plan = {
         "schema_version": 1,
         "config_version": config_version,
@@ -345,6 +556,16 @@ def diagnose(
         "structures": structures,
         "inputs": inputs,
         "history_records": history,
+        "historical_phase_evidence_tasks": evidence_tasks,
+        "historical_unidentified_required_ids": unknown_ids,
+        **(
+            {
+                "history_energy_policy": diagram["energy_policy"],
+                "history_model_rounds": deepcopy(state["upload_layout"]["model_rounds"]),
+            }
+            if latest_policy
+            else {}
+        ),
         "bootstrap_first_mc": bootstrap,
         "require_hull_before_first_mc": True,
         "model_references": {
@@ -353,17 +574,32 @@ def diagnose(
             "model_file_evidence": evidence,
         },
         "mc_policy": effective_mc_policy(config),
-        "stage_profiles": profiles(config),
+        "stage_profiles": effective_profiles,
         "phase_reference_checksums": reference_fingerprints,
         "diagnosis": {
             "phases": phase_counts,
             "Na_contents": sorted({str(b["x"]) for b in selected}),
+            "small_supercell_only": small_supercell_only,
             "warnings": [
                 "Relax must build a valid current-model hull before any MC; missing Na endpoints pauses the package"
             ]
             if bootstrap
             else [],
         },
+        **(
+            {
+                "prepare_dft_on_remote": True,
+                "bundled_dft_policy": {
+                    "enabled": True,
+                    "small_supercell_only": True,
+                    "max_small_det_h": small_det_limit,
+                    "max_dft_frames": int(max_dft_frames),
+                    "selection_policy": "final_hull_gs_first_then_weighted_kmeans",
+                },
+            }
+            if bundled_dft
+            else {}
+        ),
         "workload": {
             "relax_structure_tasks": len(structures),
             "mc_task_reference": reference,
@@ -394,24 +630,45 @@ def diagnose(
     return plan
 
 
+def frozen_plan_matches(action, state):
+    """Check the saved approval's scientific identity without constructing a plan."""
+    preview = (action.get("parameters") or {}).get("relax_mc_preview") or {}
+    if not preview.get("checksum") or not preview.get("bundle_id"):
+        return False
+    return (
+        preview.get("config_version") == state.get("confirmed_config_version")
+        and preview.get("model_version") == state.get("active_model_version")
+        and preview.get("branch_ids") == action.get("target_ids")
+        and preview["checksum"]
+        == payload_checksum(
+            {key: value for key, value in preview.items() if key not in {"checksum", "bundle_id"}}
+        )
+        and preview["bundle_id"] == "relax-mc-" + preview["checksum"].split(":")[-1][:16]
+    )
+
+
 def attach_preview(action, state, context, config):
     if (action.get("parameters") or {}).get("mode") != "relax_mc_inputs":
         return action
     result = deepcopy(action)
     config = context_config(config, context)
+    params = action.get("parameters") or {}
     plan = diagnose(
         action.get("target_ids") or [],
         state,
         context["manager"],
         config,
         context.get("config_version") or state.get("confirmed_config_version"),
-        max_concurrent_jobs=(action.get("parameters") or {}).get("max_concurrent_jobs"),
+        max_concurrent_jobs=params.get("max_concurrent_jobs"),
         phase_references=context.get("phase_references"),
+        bundle_post_mc_dft=params.get("bundle_post_mc_dft"),
+        max_dft_frames=int(params.get("max_dft_frames", 100)),
+        max_small_det_h=int(params.get("max_small_det_h", 6)),
     )
     result.setdefault("parameters", {})["relax_mc_preview"] = plan
     result["budget"] = plan["estimated_relative_cost_upper"]
     result["expected_purpose"] = (
-        f"一次打包Relax+最多三段MC；{len(plan['branch_ids'])}分支，GPU计算作业上限{sum(plan['workload']['gpu_jobs_upper_by_wave'])}个，另1个控制作业；固定模型，人工上传提交。"
+        f"一次打包Relax+最多三段MC；{len(plan['branch_ids'])}分支，GPU计算作业上限{sum(plan['workload']['gpu_jobs_upper_by_wave'])}个，CPU控制作业上限{plan['workload']['cpu_control_jobs_upper']}个；固定模型，人工上传提交。"
     )
     return result
 

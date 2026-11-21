@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+import shlex
 from pathlib import Path
 from phase_agent.tools.remote.transfer_bundle import create_bundle, input_files
 from phase_agent.tools.remote.write_unix_shell_script import write_unix_shell_script
@@ -58,7 +59,7 @@ def write_dispatch_entry(folder, first_script):
     )
     write_unix_shell_script(
         script,
-        "#!/usr/bin/env bash\n#SBATCH --job-name=phase-dispatch\n#SBATCH -N 1\n#SBATCH -n 1\n#SBATCH --mem=2G\n#SBATCH --time=00:20:00\n#SBATCH --output=dispatch-%j.out\n#SBATCH --error=dispatch-%j.err\n"
+        "#!/usr/bin/env bash\n#SBATCH --job-name=phase-dispatch\n#SBATCH -N 1\n#SBATCH -n 1\n#SBATCH --mem=2G\n#SBATCH --time=02:00:00\n#SBATCH --output=dispatch-%j.out\n#SBATCH --error=dispatch-%j.err\n"
         + (partition + "\n" if partition else "")
         + (gpu + "\n" if gpu else "")
         + 'set -euo pipefail\n: "${SLURM_JOB_ID:?Use sbatch submit_all.sh}"\ncd -- "${SLURM_SUBMIT_DIR:?Missing Slurm submit directory}"\n'
@@ -76,7 +77,46 @@ def handoff_root(directory):
     )
 
 
-def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=None, afterany=None):
+def _handoff_input_files(payload):
+    """Omit refresh-only helpers for individually verified MC inputs."""
+    payload = Path(payload).resolve()
+    files = set(input_files(payload))
+    manifest = payload / "manifest.json"
+    if not manifest.is_file():
+        return files
+    try:
+        entries = json.loads(manifest.read_text(encoding="utf-8"))
+        if not isinstance(entries, list):
+            return files
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get("stage") != "deep_search":
+                continue
+            task_path = (payload / entry["input_path"]).resolve()
+            task_path.relative_to(payload)
+            task = json.loads(task_path.read_text(encoding="utf-8"))
+            job = task.get("worker_job") or {}
+            if (
+                task.get("stage") == "deep_search"
+                and job.get("operation") == "mc"
+                and (job.get("parameters") or {}).get("refresh_force_threshold") is None
+            ):
+                files.discard(task_path.parent / "_handoff_refresh_inline.py")
+    except (OSError, ValueError, TypeError, KeyError):
+        # Ambiguous or legacy manifests retain the original complete payload.
+        return set(input_files(payload))
+    return files
+
+
+def prepare_handoff(
+    directory,
+    scripts,
+    *,
+    payload_files=None,
+    operation_label=None,
+    afterany=None,
+    extra_result_roots=None,
+    publish_on_success=None,
+):
     """Build a portable dispatch package without changing scientific inputs."""
     import tempfile
     import shutil
@@ -90,6 +130,8 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
     afterany = {} if afterany is None else afterany
     submission_order(scripts, afterany)
     prerequisites = {script for parents in afterany.values() for script in parents}
+    extra_result_roots = extra_result_roots or {}
+    publish_on_success = set(publish_on_success or [])
     files = set()
     result_roots = {}
     for script in scripts:
@@ -102,7 +144,7 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
         if inputs:
             parts = target.relative_to(inputs).parts
             payload = inputs / parts[0] if len(parts) > 1 else inputs
-        files.update(input_files(payload))
+        files.update(_handoff_input_files(payload))
         result_roots[script] = (operation / "results").relative_to(directory).as_posix()
     if payload_files is not None:
         files = {Path(p).resolve() for p in payload_files}
@@ -158,15 +200,29 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
                     if line.strip() == "trap _gpu_usage_finish EXIT"
                 )
                 accounting = 'python3 "$_gpu_usage_directory/_gpu_accounting.py" "$_gpu_usage_started" "$phase_status" || echo "GPU usage record unavailable" >&2; '
+            roots = list(dict.fromkeys([result_roots[script], *extra_result_roots.get(script, [])]))
+            from phase_agent.tools.remote.submission_dispatcher import safe_path
+
+            for result_root in roots:
+                safe_path(directory, result_root)
+            publish = " ".join(
+                'python3 "$PHASE_HANDOFF_ROOT/_round_transfer.py" "$PHASE_HANDOFF_ROOT" '
+                + shlex.quote(result_root)
+                + " || phase_status=1;"
+                for result_root in roots
+            )
+            if script in publish_on_success:
+                publish = 'if [ "$phase_status" -eq 0 ]; then ' + publish + " fi;"
+            trap_body = (
+                "phase_status=$?; trap - EXIT; " + accounting + publish + ' exit "$phase_status"'
+            )
             hook = (
-                'PHASE_HANDOFF_ROOT="$(cd -- "' + upward + '" && pwd)"\n'
-                "trap 'phase_status=$?; trap - EXIT; "
-                + accounting
-                + 'python3 "$PHASE_HANDOFF_ROOT/_round_transfer.py" "$PHASE_HANDOFF_ROOT" '
-                + '"'
-                + result_roots[script]
-                + '"'
-                + ' || phase_status=1; exit "$phase_status"\' EXIT\n'
+                'PHASE_HANDOFF_ROOT="$(cd -- "'
+                + upward
+                + '" && pwd)"\n'
+                + "trap "
+                + shlex.quote(trap_body)
+                + " EXIT\n"
             )
             lines.insert(index, hook)
             target.write_text("".join(lines), encoding="utf-8", newline="\n")
@@ -174,7 +230,9 @@ def prepare_handoff(directory, scripts, *, payload_files=None, operation_label=N
         identity = hashlib.sha256()
         for source in sorted(portable_files):
             identity.update(source.relative_to(portable).as_posix().encode())
-            identity.update(hashlib.sha256(source.read_bytes()).digest())
+            from phase_agent.tools.remote.integrity import file_checksum
+
+            identity.update(bytes.fromhex(file_checksum(source)))
         key = identity.hexdigest()[:16]
         base = next((p for p in directory.parents if p.name == "submissions"), directory.parent)
         from phase_agent.tools.remote.handoff_naming import (
@@ -256,7 +314,46 @@ def prepare_batch_handoff(state, batch):
 
     for row in selected:
         restore_storage_directory(Path(row["upload_directory"]).parent, "inputs")
-    handoff = prepare_handoff(directory, [r["script_path"] for r in selected])
+    scripts = [r["script_path"] for r in selected]
+    afterany, extra_roots, only_success = {}, {}, []
+    selected_by_id = {row["batch_id"]: row for row in selected}
+    analyses = {
+        row["phase_analysis"]["script_path"]: row["phase_analysis"]
+        for row in selected
+        if row.get("phase_analysis")
+    }
+    for cpu_path, analysis in analyses.items():
+        if not set(analysis["batch_ids"]).issubset(selected_by_id):
+            raise ValueError("phase_analysis_incomplete_handoff_scope")
+        cpu = Path(cpu_path).resolve().relative_to(directory).as_posix()
+        parents = [
+            Path(selected_by_id[bid]["script_path"]).resolve().relative_to(directory).as_posix()
+            for bid in analysis["batch_ids"]
+        ]
+        afterany[cpu] = parents
+        roots = [
+            Path(selected_by_id[bid]["results_directory"])
+            .resolve()
+            .relative_to(directory)
+            .as_posix()
+            for bid in analysis["batch_ids"]
+        ]
+        scripts.append(cpu_path)
+        if analysis.get("finalizer_path"):
+            finalizer_path = analysis["finalizer_path"]
+            finalizer = Path(finalizer_path).resolve().relative_to(directory).as_posix()
+            afterany[finalizer] = [cpu]
+            extra_roots[finalizer] = roots
+            only_success.append(finalizer)
+            scripts.append(finalizer_path)
+        else:
+            extra_roots[cpu] = roots
+            if analysis.get("publish_on_success"):
+                only_success.append(cpu)
+    options = {"afterany": afterany, "extra_result_roots": extra_roots}
+    if only_success:
+        options["publish_on_success"] = only_success
+    handoff = prepare_handoff(directory, scripts, **options)
     if handoff:
         handoff["batch_ids"] = ids
         for row in selected:

@@ -47,6 +47,7 @@ def handoff_label(directory, scripts):
     counts = {}
     refresh = False
     training = False
+    direct_candidates = []
     for script in scripts:
         path = directory / script
         text = str(path).lower()
@@ -65,7 +66,9 @@ def handoff_label(directory, scripts):
             entries = []
         task_file = path.parent / "task.json"
         if task_file.is_file():
-            task_id = json.loads(task_file.read_text(encoding="utf-8")).get("task_id")
+            task_data = json.loads(task_file.read_text(encoding="utf-8"))
+            task_id = task_data.get("task_id")
+            direct_candidates.append(str(task_data.get("object_id") or "").startswith("DIRECT-"))
             entries = [entry for entry in entries if entry.get("task_id") == task_id]
         for entry in entries:
             stage = entry.get("stage", "")
@@ -89,6 +92,12 @@ def handoff_label(directory, scripts):
         if len(counts) == 1
         else "Tasks"
     )
+    if operation == "DFTSP" and len(direct_candidates) == len(scripts) and all(direct_candidates):
+        operation = "ExtrapolationRecoveryDFTSinglePoint"
+    elif operation == "DFTSP":
+        operation = "DFTSinglePoint"
+    elif operation == "DFTRelax":
+        operation = "DFTRelaxation"
     suffix = "_".join(
         f"{kind}{counts[kind]}"
         for kind in ("SP", "Relax", "MC", "DFTSP", "DFTRelax")

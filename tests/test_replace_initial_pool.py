@@ -64,7 +64,13 @@ def test_replacement_removes_only_owned_files_after_success(tmp_path, monkeypatc
         kw["context"]["manager"].data = {"branches": {"new": {"P": "O1"}}, "structures": {}}
         # This fake manager's save callback must use its own new data.
         mgr = kw["context"]["manager"]
-        mgr.save = lambda path: path.write_text(json.dumps(mgr.data))
+        def save(path):
+            path.write_text(json.dumps(mgr.data))
+            mgr._ledger_path = str(path)
+            mgr._ledger_identity = "synthetic-identity"
+            mgr._ledger_data_digest = "synthetic-digest"
+
+        mgr.save = save
         return {
             "status": "completed",
             "state": deepcopy(kw["context"]["event_state"]),

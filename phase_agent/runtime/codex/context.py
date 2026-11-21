@@ -74,6 +74,44 @@ def _json_digest(value) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def dft_audit_preflight_errors(action, decision_context):
+    """Check the registered draw against the versioned Codex context."""
+    if (action.get("tool") or action.get("action_type")) != "select_dft_candidates":
+        return []
+    from phase_agent.tools.workflows.validate_dft_agent_decisions import independent_audit_errors
+
+    decisions = (action.get("parameters") or {}).get("decisions") or []
+    selected = {
+        row.get("candidate_id")
+        for row in decisions
+        if isinstance(row, dict) and row.get("action") in {"DFT_SINGLE_POINT", "DFT_RELAX"}
+    }
+    audit_ids = set(decision_context.get("independent_audit_candidate_ids") or [])
+    errors = independent_audit_errors(selected, audit_ids)
+    authorization = decision_context.get("unknown_gs_dft_authorization") or {}
+    frames = authorization.get("candidate_frame_sha256") or {}
+    if (
+        errors
+        and authorization.get("status") == "approved_for_preparation"
+        and len(decisions) == len(frames)
+        and selected == set(frames)
+        and all(
+            isinstance(row, dict) and row.get("action") == "DFT_SINGLE_POINT" for row in decisions
+        )
+    ):
+        # The formal validator rechecks the actual hull, hashes and monitor statuses.
+        return []
+    recovery = decision_context.get("extrapolation_recovery") or {}
+    # Only the formal validator has the receipts and frame hashes to verify this scope.
+    if (
+        errors
+        and recovery.get("status") == "awaiting_reviewed_dft_labels"
+        and selected == set(recovery.get("selected_candidate_ids") or [])
+    ):
+        return []
+    return errors
+
+
 def build_codex_rule_audit(action, state, decision_context):
     """Attach a deterministic, read-only audit of the scientific selection rules."""
     tool = action.get("tool") or action.get("action_type")
@@ -123,7 +161,14 @@ def build_codex_rule_audit(action, state, decision_context):
         for row in decisions
         if row.get("action") in {"DFT_SINGLE_POINT", "DFT_RELAX"}
     ]
-    audit_ids = set(state.get("dft_audit_candidate_ids") or [])
+    audit_context = {
+        "independent_audit_candidate_ids": list(
+            set(state.get("dft_audit_candidate_ids") or []) & set(by_id)
+        ),
+        **decision_context,
+    }
+    audit_ids = set(audit_context["independent_audit_candidate_ids"])
+    errors = dft_audit_preflight_errors(action, audit_context)
     dh_groups = {}
     for row in candidates:
         evidence = row.get("dft_sampling_evidence") or {}
@@ -134,36 +179,15 @@ def build_codex_rule_audit(action, state, decision_context):
         )
         if group:
             dh_groups.setdefault(group, []).append(row.get("candidate_id"))
-    ranked = []
-    try:
-        from phase_agent.agents.reliability.selection.select_dft_candidates import (
-            select_dft_candidates,
-        )
-
-        rows = []
-        for row in candidates:
-            item = dict(row)
-            signal = row.get("phase_quality_signal") or {}
-            item["hull_impact"] = row.get(
-                "hull_impact", signal.get("distance_to_current_hull_mev_per_O2", 0) or 0
-            )
-            rows.append(item)
-        ranked = [
-            row.get("candidate_id")
-            for row in select_dft_candidates(
-                rows, batch_size=max(1, len(selected)), seed=0, cover_phases=True
-            )["selected_candidates"]
-        ]
-    except (KeyError, TypeError, ValueError):
-        ranked = []
     return {
-        "status": "audited",
+        "status": "invalid" if errors else "audited",
+        "errors": errors,
         "selected_count": len(selected),
         "selected_ids": selected,
         "unknown_selected_ids": [cid for cid in selected if cid not in by_id],
         "independent_audit_selected": [cid for cid in selected if cid in audit_ids],
-        "policy_ranked_candidate_ids": ranked,
-        "policy_overlap_count": len(set(selected) & set(ranked)),
+        "policy_ranked_candidate_ids": [],
+        "policy_overlap_count": None,
         "d_h_group_count": len(dh_groups),
         "d_h_groups_with_decision": sum(
             any(
@@ -194,7 +218,20 @@ def ensure_codex_round_budget_review(action, decision_context):
     if action.get("round_budget_review") is not None:
         return action
     tool = action.get("tool") or action.get("action_type")
-    if tool not in {"select_dft_candidates", "generate_branches"}:
+    team = action.get("_decision_team") or {}
+    approved_relax_mc = (
+        tool == "prepare_local_batch_files"
+        and action.get("operation") == "prepare_relax_mc_batch"
+        and (action.get("parameters") or {}).get("mode") == "relax_mc_inputs"
+        and bool((action.get("parameters") or {}).get("relax_mc_preview"))
+        and team.get("backend") == "codex_native"
+        and any(
+            event.get("kind") == "human_accept" and event.get("revision") == team.get("revision")
+            for event in team.get("human_review") or []
+            if isinstance(event, dict)
+        )
+    )
+    if tool not in {"select_dft_candidates", "generate_branches"} and not approved_relax_mc:
         return action
     choice = "supplement_dft" if tool == "select_dft_candidates" else "new_search"
     budget = action.get("budget")
@@ -291,7 +328,28 @@ def build_codex_context(handler) -> dict:
     approval, or execute a scientific operation. The returned context version
     binds a later structured proposal to this exact project observation.
     """
-    state = read_json(handler.state_path, {}) or {}
+    shared = _shared_state.get()
+    if shared is not None:
+        return _build_codex_context(handler, shared)
+    from phase_agent.persistence.state.field_index import IndexUnavailable, open_indexed_state
+    from phase_agent.runtime.turn_process import has_reusable_initial_state
+
+    state = (
+        None
+        if has_reusable_initial_state(handler.state_path)
+        else open_indexed_state(handler.state_path)
+    )
+    if state is not None:
+        try:
+            result = _build_codex_context(handler, state)
+            state.verify(remember=True)
+            return result
+        except (IndexUnavailable, TypeError, AttributeError):
+            pass
+    return _build_codex_context(handler, read_json(handler.state_path, {}) or {})
+
+
+def _build_codex_context(handler, state):
     session = current_config_session(handler)
     project = handler_project_context(handler, state)
     summary = conversation_facts(state, project)
@@ -300,7 +358,7 @@ def build_codex_context(handler) -> dict:
     summary["refresh_result_facts"] = {
         key: deepcopy(value)
         for key, value in refresh.items()
-        if not isinstance(value, (dict, list))
+        if not isinstance(value, (dict, list)) or key in {"extrapolation_review", "status_counts"}
     }
     # Keep the context endpoint bounded: the Agent's dialogue already stores
     # the prepared evidence in state, while rebuilding every historical index
@@ -335,12 +393,46 @@ def build_codex_context(handler) -> dict:
         "convergence_rules",
     }
     evidence = {key: deepcopy(state.get(key)) for key in evidence_keys if key in state}
+    if state.get("unknown_gs_dft_authorization"):
+        evidence["unknown_gs_dft_authorization"] = deepcopy(state["unknown_gs_dft_authorization"])
+    registered_audit = state.get("dft_audit_candidate_ids") or []
+    if registered_audit:
+        candidate_ids = {row.get("candidate_id") for row in evidence.get("qbc_candidates") or []}
+        evidence["independent_audit_candidate_ids"] = [
+            cid for cid in registered_audit if cid in candidate_ids
+        ]
     from phase_agent.persistence.memory.decision_context import decision_memory_context
 
     memory_context = decision_memory_context(state)
     evidence["memory_context"] = memory_context
     evidence["relevant_approved_knowledge"] = memory_context["approved_knowledge"]
+    if state.get("extrapolation_recovery_cycle"):
+        from phase_agent.evidence.extrapolation_recovery import recovery_context
+
+        evidence["extrapolation_recovery"] = recovery_context(state)
     evidence.setdefault("refresh_result_facts", deepcopy(summary.get("refresh_result_facts") or {}))
+    # Use the active model's current diagram and verified relaxation evidence;
+    # saved decision snapshots can refer to a previous recovery revision.
+    active = state.get("active_model_version")
+    diagrams = dict(evidence.get("current_phase_diagram") or {})
+    old_mlip = diagrams.get("mlip") or {}
+    if old_mlip.get("model_version") != active:
+        diagrams.pop("mlip", None)
+    from phase_agent.evidence.model_diagram_scope import decision_diagram
+
+    current_mlip = decision_diagram(state)
+    if active and current_mlip.get("model_version") == active:
+        diagrams["mlip"] = current_mlip
+    independent = (state.get("phase_diagrams_by_model") or {}).get(active)
+    if independent:
+        from phase_agent.evidence.model_diagram_scope import active_model_diagram
+
+        diagrams["mlip_active_model"] = active_model_diagram(state)
+    evidence["current_phase_diagram"] = diagrams
+    if state.get("model_refresh") or state.get("relax_mc_batches"):
+        from phase_agent.agents.reliability.extrapolation_round import assess_current_rounds
+
+        evidence["reliability_extrapolation_rounds"] = assess_current_rounds(state)
     from phase_agent.agents.exploration.branch_pool_review import (
         INSTRUCTION as BRANCH_REVIEW_INSTRUCTION,
     )
@@ -363,9 +455,16 @@ def build_codex_context(handler) -> dict:
         "context_topics": list(_CONTEXT_TOPICS),
     }
     allowed = _allowed_tools(state, session)
+    from phase_agent.policies.model_generation import new_model_generation_facts
+
+    generation = new_model_generation_facts(state)
+    decision_context["new_model_generation"] = generation
     payload_state = {
         **summary,
         **{key: deepcopy(state[key]) for key in evidence_keys if key in state},
+        "active_model_version": state.get("active_model_version"),
+        "confirmed_config_version": state.get("confirmed_config_version"),
+        "new_model_generation": generation,
     }
     payload = {
         "mode": "autonomous_search",
@@ -374,6 +473,14 @@ def build_codex_context(handler) -> dict:
         "allowed_tools": allowed,
     }
     prepared, _sources = summary_payload(payload)
+    if "unknown_gs_dft_authorization" in evidence:
+        prepared["decision_context"]["unknown_gs_dft_authorization"] = evidence[
+            "unknown_gs_dft_authorization"
+        ]
+    if "independent_audit_candidate_ids" in evidence:
+        prepared["decision_context"]["independent_audit_candidate_ids"] = evidence[
+            "independent_audit_candidate_ids"
+        ]
     from phase_agent.tools.dispatch.scientific_operations import with_operation_contracts
 
     prepared = with_operation_contracts(prepared)
@@ -384,14 +491,6 @@ def build_codex_context(handler) -> dict:
         "references": references,
         "instruction": "Use only these exact references; they identify the read-only snapshot and do not grant execution authority.",
     }
-    persisted_refs = (
-        ((state.get("current_state_snapshot") or {}).get("decision_context") or {})
-        .get("evidence_catalog", {})
-        .get("references", {})
-    )
-    prepared["decision_context"]["evidence_reference_index"]["references"].update(
-        {key: {"kind": row.get("kind", "persisted")} for key, row in persisted_refs.items()}
-    )
     prepared["decision_context"].setdefault("evidence_catalog", {})["references"] = deepcopy(
         prepared["decision_context"]["evidence_reference_index"]["references"]
     )
@@ -416,6 +515,18 @@ def build_codex_context(handler) -> dict:
     }
     initial = contract(manager, handler.workflow_kwargs.get("phase_references") or {}, cfg)
     prepared["decision_context"]["initial_coverage"] = initial
+    from phase_agent.evidence.parent_first_recovery import initial_perturbation_direct_ready
+
+    prepared["decision_context"]["initial_perturbation_direct_ready"] = (
+        initial_perturbation_direct_ready(
+            state,
+            getattr(manager, "data", None) if manager is not None else None,
+            allowed=allowed,
+        )
+    )
+    from phase_agent.policies.region_sampling import policy as region_sampling_policy
+
+    prepared["decision_context"]["region_sampling_policy"] = region_sampling_policy()
     prepared["decision_context"]["branch_pool_review_contract"] = BRANCH_REVIEW_INSTRUCTION
     prepared["decision_context"]["branch_pool_review_required"] = bool(
         branch_pool.get("existing_branches") or branch_pool.get("registered_new_branch_count")
@@ -441,9 +552,6 @@ def build_codex_context(handler) -> dict:
         },
         "scientific_decision": "required for generate_branches/select_dft_candidates/update_mlip/check_convergence/pause_search; use round_direction for model updates and post-DFT decisions, otherwise branch_sampling or dft_sampling",
     }
-    from phase_agent.policies.model_generation import new_model_generation_facts
-
-    generation = new_model_generation_facts(state)
     prepared["decision_context"]["new_model_generation"] = generation
     if generation["required"] and not generation["ready"]:
         prepared["required_next_tool"] = "generate_branches"
@@ -491,3 +599,27 @@ def build_codex_context(handler) -> dict:
             }
         ),
     }
+
+
+# One operation may share already-read fields; only the owning outer boundary
+# performs final strong verification. Never shared across requests or writes.
+from contextvars import ContextVar
+from contextlib import contextmanager
+
+_shared_state = ContextVar("codex_verified_read_scope", default=None)
+_shared_identity = ContextVar("codex_verified_source_identity", default=None)
+
+
+@contextmanager
+def codex_read_scope(state, *, identity=None):
+    token = _shared_state.set(state)
+    identity_token = _shared_identity.set(identity)
+    try:
+        yield
+    finally:
+        _shared_state.reset(token)
+        _shared_identity.reset(identity_token)
+
+
+def shared_codex_identity():
+    return _shared_identity.get()

@@ -202,7 +202,7 @@ def test_actual_coordinator_and_local_recovery_from_named_output(tmp_path, monke
         return 0
 
     monkeypatch.setattr(driver.subprocess, "call", compute)
-    assert driver.main(result["upload_folder"]) == 0
+    assert driver.main(result["upload_folder"]) == 0, (Path(result["upload_folder"]) / "run.log").read_text(encoding="utf8")
     assert calls
     # Old metadata must also discover the newly downloaded output folder.
     incoming = result["state"]
@@ -218,3 +218,24 @@ def test_actual_coordinator_and_local_recovery_from_named_output(tmp_path, monke
         assert "relax_mc_formal_recovery_blocked" in record["return_error"]
         assert not record.get("import_checksum")
         assert recovered["tasks"] == incoming["tasks"]
+
+
+def test_relax_mc_preflight_checks_installed_dependencies_before_dispatch(tmp_path, monkeypatch):
+    root = tmp_path / "Batch_input"
+    root.mkdir()
+    work = root / "work"
+    work.mkdir()
+    monkeypatch.setenv("SLURM_JOB_ID", "test")
+    monkeypatch.setattr(driver, "prepare_work", lambda _root: work)
+    seen = []
+
+    def preflight(_root, _scripts, *, required_modules):
+        seen.extend(required_modules)
+        raise RuntimeError("missing dependency")
+
+    monkeypatch.setattr(driver, "preflight_environment", preflight)
+    monkeypatch.setattr(driver.subprocess, "call", lambda *a, **k: pytest.fail("must not dispatch"))
+    monkeypatch.setattr(driver, "publish_diagnostics", lambda *a, **k: None)
+    assert driver.main(root) != 0
+    assert "mace" in seen
+    assert "Process_MLIP.forgetting" not in seen

@@ -15,6 +15,24 @@ def new_model_generation_facts(state):
         and not training_pending_validation(state)
     )
     checksum = (refresh.get("plan") or {}).get("checksum")
+    lineage = {checksum} if checksum else set()
+    current, child = refresh, checksum
+    history = state.get("completed_refresh_replans") or []
+    while child and (parent := current.get("reopened_from_plan")) and parent not in lineage:
+        matches = []
+        for entry in history:
+            prior = entry.get("prior_refresh") or {}
+            if (
+                entry.get("new_preview_checksum") == child
+                and (prior.get("plan") or {}).get("checksum") == parent
+                and prior.get("new_model_version") == version
+                and prior.get("status") == "completed"
+            ):
+                matches.append(prior)
+        if len(matches) != 1:
+            break
+        lineage.add(parent)
+        current, child = matches[0], parent
     from phase_agent.tools.state.retired_generations import retired_task_keys
 
     retired = retired_task_keys(state)
@@ -25,7 +43,7 @@ def new_model_generation_facts(state):
         and row.get("model_version") == version
         and row.get("new_branch_ids")
         and row.get("registered_ids")
-        and (not checksum or row.get("refresh_plan_checksum") == checksum)
+        and (not checksum or row.get("refresh_plan_checksum") in lineage)
     ]
     ids = sorted({bid for row in rows for bid in row["new_branch_ids"]})
     searched = any(

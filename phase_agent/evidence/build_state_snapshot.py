@@ -10,6 +10,10 @@ from phase_agent.evidence.sanitize_untrusted_text import untrusted_text
 def build_state_snapshot(state: dict, *, snapshot_index: int, config_version=None) -> dict:
     tasks = state.get("tasks") or []
     phase = state.get("phase_diagrams") or state.get("phase_diagram_state") or {}
+    from phase_agent.evidence.model_diagram_scope import decision_diagram
+
+    phase = phase.get("diagrams", phase)
+    phase = {**phase, "mlip": decision_diagram(state, phase.get("mlip") or {})}
     diagrams = phase.get("diagrams", phase) if isinstance(phase, dict) else {}
     qbc_rows = state.get("qbc_candidates") or []
     uncertainty = [_qbc_summary(row) for row in qbc_rows[-50:]]

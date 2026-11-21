@@ -32,9 +32,31 @@ class RefreshUploadRunner(ManualUploadBatchRunner):
         ]
 
 
+def _refresh_working_state(source):
+    """Isolate fields this preparation mutates without copying scientific history."""
+    current = dict(source)
+    for key in (
+        "tasks",
+        "pending_tasks",
+        "budget_reservations",
+        "slurm_batches",
+        "upload_layout",
+        "model_refresh",
+        "pending_execution_policies",
+        "invocations",
+        "action_records",
+    ):
+        if key in source:
+            current[key] = deepcopy(source[key])
+    return current
+
+
 def prepare_model_refresh(*, action, context):
     state = timed_call(
-        "刷新：建立本批独立状态", deepcopy, context["event_state"], category="processing"
+        "刷新：建立本批独立状态",
+        _refresh_working_state,
+        context["event_state"],
+        category="processing",
     )
     config = deepcopy(context["effective_config"])
     refresh = state["model_refresh"]
@@ -67,7 +89,21 @@ def prepare_model_refresh(*, action, context):
                 "state": state,
                 "reason": "刷新结构或设置已改变，请重新确认方案",
             }
-        rows = plan["candidates"]
+        reuse = plan.get("reused_results") or {}
+        if "reopened_from_plan" in plan:
+            from phase_agent.tools.workflows.model_refresh_reuse import (
+                archived_refresh,
+                matching_refresh_results,
+            )
+
+            prior = archived_refresh(state, plan["reopened_from_plan"])
+            if prior is None or matching_refresh_results(state, plan, prior) != reuse:
+                return {
+                    "status": "rejected",
+                    "state": state,
+                    "reason": "旧刷新结果的复用证据已改变，请重新审阅",
+                }
+        rows = [r for r in plan["candidates"] if r["structure_sha256"] not in reuse]
         requested_cost = plan["maximum_total_cost"]
         requested_count = len(rows) + plan["maximum_supplemental_count"]
     else:
@@ -267,7 +303,7 @@ def prepare_model_refresh(*, action, context):
             call_with_optimizations,
             runner.prepare,
             state,
-            _optimizations={"_owned": True, "_defer_archive": True},
+            _optimizations={"_owned": True, "_defer_archive": True, "_defer_index": True},
             category="processing",
         )
         state = result["state"]
@@ -277,6 +313,22 @@ def prepare_model_refresh(*, action, context):
     prepared_ids = {t["task_id"] for t in tasks}
     if any(t["task_id"] in prepared_ids and not t.get("input_path") for t in state["tasks"]):
         raise ValueError("刷新任务未全部生成输入；请检查去重有效ID与结构登记")
+    waiting_ids = {t["task_id"] for t in tasks if t.get("status") in {"pending", "running"}}
+    batch_ids = {task_id for batch in batches for task_id in batch.get("task_ids") or []}
+    if batches and waiting_ids == batch_ids:
+        from phase_agent.tools.remote.prepare_phase_analysis import prepare_phase_analysis
+
+        prepare_phase_analysis(
+            state,
+            batches,
+            context["manager"],
+            context.get("phase_references"),
+            default_slurm_cluster_config(),
+        )
+        state["model_refresh"]["phase_analysis_status"] = "remote_cpu_planned"
+    elif batches:
+        # Previously issued packages must retain their original submission/receipt contract.
+        state["model_refresh"]["phase_analysis_status"] = "legacy_mixed_wave_local_fallback"
     state["model_refresh"].update(
         status="waiting_results",
         plan=plan,
@@ -284,10 +336,13 @@ def prepare_model_refresh(*, action, context):
         task_ids=[t["task_id"] for t in tasks],
         approved_by=context.get("approval_record_id"),
     )
+    if not wave and "reused_results" in plan:
+        state["model_refresh"]["reused_task_ids"] = sorted(reuse.values())
     return {
         "status": "prepared",
         "state": state,
         "task_count": len(tasks),
+        "reused_count": len(reuse) if not wave else 0,
         "batch_count": len(batches),
         "submitted": False,
         "reason": f"已准备刷新第{wave + 1}批 {len(tasks)} 个输入；上传并提交各批次GPU.sh，回传results后继续。",

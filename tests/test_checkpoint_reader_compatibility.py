@@ -167,3 +167,51 @@ def test_loading_diagnostics_cover_checkpoint_entrypoints_and_codecs():
         "phase_agent.persistence.compact_checkpoints",
         "phase_agent.persistence.checkpoint_blobs",
     } <= set(WATCHED_MODULES)
+
+
+def test_v2_chunked_checkpoint_reads_and_preserves_referenced_payloads(tmp_path):
+    from phase_agent.persistence.checkpoint_blobs import STATE_FIELDS_V2
+    from phase_agent.persistence.compact_checkpoints import collect_payloads
+
+    with sqlite3.connect(tmp_path / "chunked.sqlite") as conn:
+        conn.execute("CREATE TABLE checkpoint_payloads (id TEXT PRIMARY KEY, kind TEXT, data BLOB)")
+        conn.execute("CREATE TABLE checkpoints (type TEXT, checkpoint BLOB)")
+        conn.execute("CREATE TABLE writes (type TEXT, value BLOB)")
+        raw = JsonPlusSerializer()
+        refs = []
+        for chunk in ([{"id": 1}, {"id": 2}], [{"id": 3}]):
+            kind, data = raw.dumps_typed(chunk)
+            ident = hashlib.sha256(kind.encode() + b"\0" + data).hexdigest()
+            conn.execute("INSERT INTO checkpoint_payloads VALUES (?,?,?)", (ident, kind, data))
+            refs.append(ident)
+        unused_kind, unused_data = raw.dumps_typed(["unused"])
+        conn.execute("INSERT INTO checkpoint_payloads VALUES (?,?,?)", ("unused", unused_kind, unused_data))
+        envelope = {"channel_values": {"completed_response": {"state": {STATE_FIELDS_V2: {
+            "tasks": {"chunks": refs, "length": 3, "state_instance": 1},
+            "model": {"inline": "M", "state_instance": 1}}}}}}
+        serde = CompressedSerde(raw)
+        kind, data = serde.dumps_typed(envelope)
+        conn.execute("INSERT INTO checkpoints VALUES (?,?)", ("phase-cas-v2:" + kind, data))
+        reader = CheckpointBlobSerde(serde, conn, threading.RLock())
+        decoded = reader.loads_typed(("phase-cas-v2:" + kind, data))
+        assert decoded["channel_values"]["completed_response"]["state"] == {
+            "tasks": [{"id": 1}, {"id": 2}, {"id": 3}], "model": "M"}
+        assert collect_payloads(conn, serde) == 1
+        assert {row[0] for row in conn.execute("SELECT id FROM checkpoint_payloads")} == set(refs)
+        envelope["channel_values"]["completed_response"]["state"][STATE_FIELDS_V2]["tasks"]["length"] = 4
+        kind, data = serde.dumps_typed(envelope)
+        with pytest.raises(ValueError, match="chunk length"):
+            reader.loads_typed(("phase-cas-v2:" + kind, data))
+
+
+def test_payload_collection_refuses_unknown_checkpoint_format(tmp_path):
+    from phase_agent.persistence.compact_checkpoints import collect_payloads
+    with sqlite3.connect(tmp_path / "unknown.sqlite") as conn:
+        conn.execute("CREATE TABLE checkpoint_payloads (id TEXT PRIMARY KEY, kind TEXT, data BLOB)")
+        conn.execute("CREATE TABLE checkpoints (type TEXT, checkpoint BLOB)")
+        conn.execute("CREATE TABLE writes (type TEXT, value BLOB)")
+        conn.execute("INSERT INTO checkpoint_payloads VALUES ('retained','msgpack',X'90')")
+        conn.execute("INSERT INTO checkpoints VALUES ('phase-cas-v9:msgpack', X'80')")
+        with pytest.raises(ValueError, match="Unknown checkpoint format"):
+            collect_payloads(conn, CompressedSerde(JsonPlusSerializer()))
+        assert conn.execute("SELECT count(*) FROM checkpoint_payloads").fetchone()[0] == 1

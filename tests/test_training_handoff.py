@@ -110,6 +110,83 @@ def test_validation_request_recovery_and_separate_activation(tmp_path):
     assert waits == [] and updated["remote_finetune_jobs"]["j"]["activated"]
 
 
+def test_explicit_training_transition_activates_then_waits_for_refresh(tmp_path):
+    state, results, inputs = setup(tmp_path)
+    state["remote_finetune_jobs"]["j"]["post_training_transition"] = {
+        "mode": "activate_then_refresh_approval",
+        "approval_reason": "已批准训练完成后自动切换模型，并单独审批刷新",
+    }
+    settings = config(tmp_path)
+    updated, waits = advance_training_handoffs(state, settings)
+    assert waits[0]["stage"] == "awaiting_validation"
+    plan = json.loads((inputs / "validation_request.json").read_text())
+    metrics = {
+        "energy_mae": 0.003,
+        "force_rmse": 0.06,
+        "critical_failure_fraction": 0,
+        "near_hull_ranking_reversals": 0,
+    }
+    (results / ("validation-" + plan["request_id"] + ".json")).write_text(
+        json.dumps(
+            {
+                "request_id": plan["request_id"],
+                "data_sha256": plan["data_sha256"],
+                "status": "completed",
+                "structures": 2,
+                "metrics": {
+                    "old_model": {**metrics, "energy_mae": 0.009},
+                    "new_model": metrics,
+                },
+            }
+        )
+    )
+    updated, waits = advance_training_handoffs(updated, settings)
+    candidate_version = next(iter(updated["candidate_models"]))
+    assert waits == []
+    assert updated["active_model_version"] == candidate_version
+    assert updated["remote_finetune_jobs"]["j"]["activated"] is True
+    assert updated["remote_finetune_jobs"]["j"]["training_handoff"]["stage"] == "activated"
+    assert updated["model_refresh"]["status"] == "approval_required"
+    assert updated["model_refresh"]["new_model_version"] == candidate_version
+    assert not updated.get("tasks")
+
+
+def test_failed_validation_never_auto_activates_explicit_transition(tmp_path):
+    state, results, inputs = setup(tmp_path)
+    state["remote_finetune_jobs"]["j"]["post_training_transition"] = {
+        "mode": "activate_then_refresh_approval",
+        "approval_reason": "已批准训练完成后自动切换模型，并单独审批刷新",
+    }
+    settings = config(tmp_path)
+    updated, waits = advance_training_handoffs(state, settings)
+    plan = json.loads((inputs / "validation_request.json").read_text())
+    metrics = {
+        "energy_mae": 0.2,
+        "force_rmse": 0.2,
+        "critical_failure_fraction": 1,
+        "near_hull_ranking_reversals": 2,
+    }
+    (results / ("validation-" + plan["request_id"] + ".json")).write_text(
+        json.dumps(
+            {
+                "request_id": plan["request_id"],
+                "data_sha256": plan["data_sha256"],
+                "status": "completed",
+                "structures": 2,
+                "metrics": {"old_model": metrics, "new_model": metrics},
+            }
+        )
+    )
+    updated, waits = advance_training_handoffs(updated, settings)
+    assert waits == []
+    assert updated["remote_finetune_jobs"]["j"]["training_handoff"]["stage"] == (
+        "validation_rejected"
+    )
+    assert updated["active_model_version"] == "base"
+    assert not updated["remote_finetune_jobs"]["j"].get("activated")
+    assert "model_refresh" not in updated
+
+
 def test_missing_data_does_not_prepare_fake_validation(tmp_path):
     state, _, inputs = setup(tmp_path)
     updated, waits = advance_training_handoffs(state, {})

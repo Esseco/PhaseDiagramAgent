@@ -111,7 +111,9 @@ def main(root=None):
             preflight_environment(
                 work,
                 ["submit_all.sh"],
-                required_modules=("numpy", "scipy", "pymatgen", "ase", "torch", "mace"),
+                required_modules=(
+                    "numpy", "scipy", "pymatgen", "ase", "torch", "mace"
+                ),
             )
             env = dict(os.environ, SLURM_SUBMIT_DIR=str(work))
             code = subprocess.call(

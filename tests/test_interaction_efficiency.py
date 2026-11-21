@@ -189,3 +189,16 @@ def test_server_filters_only_benign_windows_transport_disconnects():
     assert not _is_benign_transport_disconnect(
         {"exception": ValueError("workflow failed"), "handle": handle}
     )
+
+
+def test_initial_state_rejected_after_same_metadata_external_change(tmp_path):
+    from tests.test_strong_state_versions import _other_process_same_metadata
+
+    (tmp_path / "workflow_state").mkdir()
+    path = tmp_path / "workflow_state/state.json"
+    path.write_text('{"tasks":[],"value":"A"}', encoding="utf8")
+    config = tmp_path / "agent_runtime.json"
+    config.write_text("{}", encoding="utf8")
+    with record_turn(config, "status", "thread"):
+        _other_process_same_metadata(path)
+        assert read_json(path)["value"] == "B"

@@ -1,15 +1,13 @@
 """Deterministic, model-isolated refresh selection; no calculation or file writes."""
 
-from collections import defaultdict
-import hashlib
 import math
 
 
-def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026):
+def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026, include_all=False):
     """Candidates carry registered IDs, content hashes and old-version evidence.
 
     Missing energies are evaluated, not silently discarded. Historical structures
-    without current energy remain unassessed; known far structures use the audit sample.
+    without current energy remain unassessed; all known far structures are predicted.
     """
     if not old_version or not new_version or old_version == new_version:
         raise ValueError("refresh requires two distinct explicit model versions")
@@ -51,30 +49,8 @@ def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026)
             or priority[row["selection_reason"]] < priority[previous["selection_reason"]]
         ):
             unique[key] = row
-    selected, strata = [], defaultdict(list)
-    for row in unique.values():
-        if row["selection_reason"] != "far_audit":
-            selected.append(row)
-        else:
-            strata[(str(row.get("x_Na_per_O2")), str(row.get("phase")))].append(row)
-    far = [r for group in strata.values() for r in group]
-    target = math.ceil(len(far) * 0.10)
-    # Largest remainder allocation gives exactly 10% rounded up, never one per stratum.
-    quotas = {k: len(v) * 0.10 for k, v in strata.items()}
-    counts = {k: math.floor(q) for k, q in quotas.items()}
-    for key in sorted(strata, key=lambda k: (-(quotas[k] - counts[k]), k))[
-        : target - sum(counts.values())
-    ]:
-        counts[key] += 1
+    selected = list(unique.values())
     gaps = []
-    for key, group in sorted(strata.items()):
-        ranked = sorted(
-            group,
-            key=lambda r: hashlib.sha256(f"{seed}:{r['structure_sha256']}".encode()).hexdigest(),
-        )
-        selected.extend(ranked[: counts[key]])
-        if not counts[key]:
-            gaps.append({"na": key[0], "phase": key[1], "deferred": len(group)})
     selected.sort(key=lambda r: r["structure_sha256"])
     return {
         "old_model_version": old_version,
@@ -82,7 +58,7 @@ def build_model_refresh_plan(candidates, *, old_version, new_version, seed=2026)
         "policy": {
             "relax_below": 0.001,
             "predict_through": 0.010,
-            "audit_fraction": 0.10,
+            "audit_fraction": 1.0,
             "force_threshold": 0.1,
             "far_force_threshold": 0.2,
             "force_followup_version": 2,

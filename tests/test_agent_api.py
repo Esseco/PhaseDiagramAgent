@@ -450,6 +450,9 @@ class OpenWebUIAPITest(unittest.TestCase):
             second([{"role": "user", "content": "新建"}], conversation_id="two")
             self.assertNotEqual(first.state_path, second.state_path)
             self.assertTrue(first.state_path.exists())
+            from phase_agent.persistence.state.field_index import open_indexed_state
+
+            self.assertIsNotNone(open_indexed_state(first.state_path))
             self.assertTrue((first.state_path.parent / "phase_data.json").exists())
             self.assertEqual(old_ledger.read_bytes(), before)
             descriptor = first.state_path.parent / "agent_runtime.json"

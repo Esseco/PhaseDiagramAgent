@@ -125,6 +125,13 @@ def import_results(*, action, context, _owned=False):
             prior["phase_analysis"] = publish_relax_mc_analysis(
                 current, bundle_id, directory=config.get("phase_diagram_directory")
             )
+        from phase_agent.analysis.feedback.export_dft_products import publish_output_catalog
+
+        publish_output_catalog(
+            current,
+            config.get("phase_diagram_directory"),
+            action="relax_mc",
+        )
         return {
             "status": "already_imported",
             "state": current,
@@ -212,11 +219,17 @@ def import_results(*, action, context, _owned=False):
                 "composition",
                 "qbc",
                 "pool_summary",
+                "extrapolation_failures",
+                "relaxation_observations",
+                "relaxation_observations_complete",
             ):
                 if _scientific_values((raw.get("outputs") or {}).get(key)) != _scientific_values(
                     (task.get("outputs") or {}).get(key)
                 ):
                     raise ValueError("returned_state_result_disagreement:" + key)
+    from phase_agent.tools.relax_mc_batch.branch_limit import batch_reservation_limits
+
+    batch_limits = batch_reservation_limits(config["budgets"], record["branch_ids"])
     existing = {t["task_id"]: t for t in state.get("tasks") or []}
     for task in returned_tasks:
         sid = task.get("structure_id")
@@ -242,7 +255,7 @@ def import_results(*, action, context, _owned=False):
                 task_key=task["task_key"],
                 stage=task["stage"],
                 amount=task["planned_relative_cost"],
-                limits=config["budgets"],
+                limits=batch_limits,
                 config_version=record["config_version"],
                 model_version=model,
             )
@@ -283,6 +296,38 @@ def import_results(*, action, context, _owned=False):
     # Standard decision context already exposes qbc_candidates; retain other active candidates.
     by_id = {r.get("candidate_id"): r for r in state.get("qbc_candidates") or []}
     by_id.update({r["candidate_id"]: r for r in candidate["branch_candidates"]})
+    from phase_agent.science.qbc.remote_dft_sampling import verify_remote_dft_sampling
+
+    sampling_acceptance = verify_remote_dft_sampling(
+        destination,
+        state,
+        snapshot=(state.get("phase_diagrams") or {}).get("mlip"),
+    )
+    if sampling_acceptance.get("status") == "accepted":
+        sampling_payload = read(destination / "dft_sampling_result.json")
+        sampling_payload = rebase(sampling_payload, destination)
+        for row in sampling_payload.get("selected") or []:
+            cid = row.get("candidate_id")
+            if not cid:
+                continue
+            by_id[cid] = {
+                **by_id.get(cid, {}),
+                **row,
+                "predicted_Ehull": row.get("ehull"),
+                "qbc": {
+                    "status": "completed",
+                    "energy_per_atom_std": row.get("energy_per_atom_std"),
+                    "f_std_max": row.get("f_std_max"),
+                }
+                if row.get("energy_per_atom_std") is not None
+                else {"status": "not_configured"},
+            }
+        state.setdefault("remote_dft_sampling", {})[bundle_id] = {
+            **sampling_acceptance,
+            "bundle_id": bundle_id,
+            "model_version": model,
+            "selected": sampling_payload.get("selected") or [],
+        }
     state["qbc_candidates"] = list(by_id.values())
     state["relax_mc_batches"][bundle_id].update(
         status=summary["status"],
@@ -292,16 +337,36 @@ def import_results(*, action, context, _owned=False):
         return_directory=str(destination),
         return_path_check=path_report,
         remote_diagnostics=remote_diagnostics,
+        remote_dft_sampling=sampling_acceptance,
     )
     state["relax_mc_batches"][bundle_id].pop("return_error", None)
     state["relax_mc_batches"][bundle_id].pop("return_diagnostic", None)
     from phase_agent.analysis.phase.phase_quality_actions import automatic_round_review
+    from phase_agent.analysis.feedback.analysis_events import ACTIVE_RELAX
 
+    token = ACTIVE_RELAX.set(bundle_id)
     try:
         ledger_path = config.get("ledger_path")
         if not ledger_path:
             raise ValueError("缺少台账位置，不能创建排除备份；本轮保留并交人工核查")
         backup_root = Path(ledger_path).resolve().parents[2] / "history_backups" / "phase_quality"
+        remote_quality_path = destination / "remote_phase_quality_report.json"
+        if remote_quality_path.is_file():
+            remote_quality = read(remote_quality_path)
+            snapshot = (state.get("phase_diagrams") or {}).get("mlip") or {}
+            from phase_agent.analysis.phase.phase_quality import snapshot_evidence_digest
+
+            if (
+                remote_quality.get("model_version") == model
+                and remote_quality.get("hull_version") == snapshot.get("version")
+                and snapshot.get("status") == "completed"
+                and remote_quality.get("snapshot_evidence_digest")
+                == snapshot_evidence_digest(snapshot)
+            ):
+                state.setdefault("phase_quality_reports", {})[remote_quality["hull_version"]] = (
+                    remote_quality
+                )
+                state["relax_mc_batches"][bundle_id]["remote_phase_quality_verified"] = True
         checked = automatic_round_review(
             state,
             context["manager"],
@@ -321,10 +386,20 @@ def import_results(*, action, context, _owned=False):
             "reason": str(error),
             "submitted": False,
         }
+    finally:
+        ACTIVE_RELAX.reset(token)
     from phase_agent.analysis.phase.phase_round_analysis import publish_relax_mc_analysis
 
     state["relax_mc_batches"][bundle_id]["phase_analysis"] = publish_relax_mc_analysis(
         state, bundle_id, directory=config.get("phase_diagram_directory")
+    )
+    from phase_agent.analysis.feedback.export_dft_products import publish_output_catalog
+
+    publish_output_catalog(
+        state,
+        config.get("phase_diagram_directory"),
+        action="relax_mc",
+        epoch=epoch,
     )
     from phase_agent.analysis.phase.phase_quality_reports import candidate_quality_evidence
 
@@ -426,6 +501,18 @@ def recover_available(state, context, *, _owned=False):
             historical = model != record.get("model_version") or context.get(
                 "config_version"
             ) != record.get("config_version")
+            # A legacy receipt may have been marked blocked before delivery
+            # path migration support was available. If the current resolver
+            # now finds and verifies the archive, clear only that stale
+            # diagnostic before applying normal historical-batch rules.
+            stale_error = str(
+                (record.get("return_diagnostic") or {}).get("error")
+                or record.get("return_error")
+                or ""
+            )
+            if "recovery_receipt_archive_outside_batch" in stale_error:
+                record.pop("return_error", None)
+                record.pop("return_diagnostic", None)
             # A known historical receipt is not a request to activate or re-import it.
             if historical and record.get("import_checksum") == checksum(result_archive(record)):
                 diagnostic = record.get("return_diagnostic") or {}

@@ -68,6 +68,7 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             "name": "mace-mh-1",
             "mace_head": "omat_pbe",
             "model_path": "/data/home/lichaoyue/Py-lzy/MLIP_Model/mace-mh-1.model",
+            "model_sha256": None,
             "model_paths": [],
             "device": "cuda",
             "main_model_index": 0,
@@ -81,6 +82,7 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             "mc_parameters": {"save_relax_traj": False},
         },
         "mlip_finetune": default_mace_committee_config(),
+        "direct": {"feature_model_path": None, "feature_model_sha256": None},
         "initial_mlip_health_check": {
             "required_phase_roles": ["endpoint", "intermediate"],
             "max_failure_fraction": 0.5,
@@ -135,7 +137,7 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             ],
             "max_segments_per_branch": 3,
             "minimum_continuation_tasks": 10,
-            "max_cumulative_cost_per_branch": 200.0,
+            "max_cumulative_cost_per_branch": None,
             "random_exploration_fraction": 0.10,
             "high_ehull_defer_threshold": 0.040,
             "near_hull_retry_threshold": 0.10,
@@ -156,8 +158,26 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             "phase_competition_gap_ev_per_atom": 0.003,
             "minimum_recent_dft_checks": 1,
             "coverage_is_hard_condition": False,
+            "gs_only_convergence_mode": True,
         },
         "shared_dft": {"enabled": False, "source_projects": []},
+        "mp_competing_phases": {
+            "enabled": True,
+            "max_arity": 2,
+            "e_above_hull_max": 0.0,
+            "shared_repo_path": None,
+        },
+        "energy_conventions": {
+            "oxygen_reference_unit": "eV/O2",
+            "model_error_unit": "eV/atom",
+            "voltage_references": {
+                "Na": {
+                    "value": -1.288,
+                    "unit": "eV/atom",
+                    "source": "program_default:Na=-1.288 eV/atom",
+                }
+            },
+        },
         "reliability": {"require_dft_validation": True, "model_update_requires_validation": True},
         "agent": {
             "enabled": True,
@@ -188,7 +208,7 @@ def default_layered_search_config(*, boundary=None, phase_references=None) -> di
             "auto_retry_limit": 1,
             "human_review_relative_cost": None,
             "branch_batch_size": 900,
-            "finetune_min_new_dft": 10,
+            "finetune_min_new_dft": 50,
             "finetune_max_new_dft": None,
         },
         "run": {"total_quota": 900, "batch_size": 288, "initial_states_per_branch": 4, "seed": 42},

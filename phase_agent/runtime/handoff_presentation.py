@@ -98,11 +98,10 @@ def planned_handoff_lines(proposal, state, state_path, *, config=None):
     )
     rounds = (state.get("upload_layout") or {}).get("model_rounds") or {}
     try:
-        epoch_number = (
-            int(rounds[version]) - 1
-            if version in rounds
-            else max((int(value) for value in rounds.values()), default=0)
-        )
+        from phase_agent.evidence.model_epoch import model_epoch
+
+        label = model_epoch(state, version) if version in rounds else None
+        epoch_number = int(label[5:]) if label else max((int(value) for value in rounds.values()), default=0)
     except (TypeError, ValueError):
         return []
     if epoch_number < 0:

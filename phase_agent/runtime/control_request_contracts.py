@@ -38,6 +38,7 @@ class CodexReportRequest(ControlRequest):
 
 
 class DecisionRequest(ControlRequest):
+    operator: Literal["agent", "codex"] = "agent"
     decision: Literal["approve", "reject", "confirm_sensitive", "modify"]
     plan_id: Identifier
     state_version: Identifier
@@ -47,11 +48,12 @@ class DecisionRequest(ControlRequest):
 
 class RecoveryProposeRequest(ControlRequest):
     invocation_id: Identifier
-    resolution: Literal["verified_no_effect", "verified_registered_effects"]
+    resolution: Literal["verified_no_effect", "verified_registered_effects", "verified_abandoned_staging"]
     evidence_note: Identifier
     external_jobs: Literal["none_found", "registered_only", "not_applicable"]
-    output_inventory: Literal["checked_no_outputs", "registered_outputs"]
+    output_inventory: Literal["checked_no_outputs", "registered_outputs", "abandoned_local_staging"]
     external_cost: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    staging_directory: str | None = None
 
 
 class PauseRequest(ControlRequest):

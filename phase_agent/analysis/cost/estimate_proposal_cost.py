@@ -77,7 +77,8 @@ def estimate_proposal_cost(action, state):
                     "stage": "relax_and_feature",
                     "tasks": len(action.get("target_ids") or [])
                     if supplemental
-                    else len(preview.get("candidates") or []),
+                    else len(preview.get("candidates") or [])
+                    - len(preview.get("reused_results") or {}),
                     "maximum_supplemental_tasks": 0
                     if supplemental
                     else preview.get("maximum_supplemental_count"),
@@ -123,7 +124,7 @@ def estimate_proposal_cost(action, state):
             if count:
                 base = _stage_unit(state, stage)
                 stages.append({"stage": stage, "tasks": count, "initial_cost": count * base})
-        preview = params.get("dft_input_preview") or {}
+        preview = params.get("dft_input_preview") or params.get("dft_selection_preview") or {}
         if preview.get("relative_cost") is not None:
             stages = preview.get("workload") or [
                 {
@@ -143,14 +144,15 @@ def estimate_proposal_cost(action, state):
     total = 0.0
     for row in stages:
         factor, samples = calibrate_relative_cost(state, row["stage"])
-        if tool == "select_dft_candidates" and params.get("dft_input_preview"):
+        if tool == "select_dft_candidates" and (
+            params.get("dft_input_preview") or params.get("dft_selection_preview")
+        ):
             factor = 1.0  # Preview already uses the configured scientific cost model.
         row["calibration_factor"] = factor
         row["history_samples"] = samples
         row["estimated_cost"] = float(row["initial_cost"]) * factor
         total += row["estimated_cost"]
     limits = state.get("budget_limits") or {}
-    limit = limits.get("total_relative_cost")
     used = float((state.get("budget_usage") or {}).get("total_relative_cost", 0) or 0)
     reserved = float(state.get("reserved_relative_cost", 0) or 0)
     return {
@@ -159,10 +161,8 @@ def estimate_proposal_cost(action, state):
         "cost_unit": limits.get("cost_unit", "relative_cost"),
         "used_cost": used,
         "reserved_cost": reserved,
-        "remaining_before": None if limit is None else max(0.0, float(limit) - used - reserved),
-        "remaining_after": None
-        if limit is None
-        else max(0.0, float(limit) - used - reserved - total),
+        "remaining_before": None,
+        "remaining_after": None,
         "calibration": "30% initial estimate + 70% historical actual/planned ratio",
     }
 

@@ -43,7 +43,8 @@ def decision_summary(action):
 
 
 def pending_decision(state):
-    records = list((state.get("pending_execution_policies") or {}).values())
+    from phase_agent.runtime.pending_plan_state import visible_pending
+    records = list(visible_pending(state).values())
     if len(records) != 1:
         return {}
     proposal = records[0].get("agent_proposal") or {}

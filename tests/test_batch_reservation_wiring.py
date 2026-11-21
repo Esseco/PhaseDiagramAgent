@@ -84,7 +84,7 @@ def test_rejected_batch_discards_partial_private_reservations_and_creates_no_inp
 def test_owned_rejection_does_not_mutate_shared_ledger_or_create_empty_one():
     from phase_agent.tools.budget.reserve_budget import reserve_owned_budget
 
-    limits = {"enforcement": "hard", "total_relative_cost": 0, "stage_limits": {"deep_search": {}}}
+    limits = {"enforcement": "hard", "stage_limits": {"deep_search": {"max_tasks": 0}}}
     state = {"history": {"large": [1] * 1000}}
     original = deepcopy(state)
     result = reserve_owned_budget(state, task_key="x", stage="deep_search", amount=1, limits=limits)

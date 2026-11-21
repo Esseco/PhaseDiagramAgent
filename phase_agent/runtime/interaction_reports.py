@@ -106,7 +106,13 @@ def short_reply(reply):
             selected.append(line)
     handoff_prefixes = (
         "待审对象：",
+        "补算任务及策略：",
+        "Simulation 分析：",
+        "分析局限：",
+        "本次审批仅登记补算任务",
         "本轮微调结果报告：",
+        "过渡金属磁矩分析：",
+        "磁矩分布图：",
         "Branch 分布与构成文件：",
         "训练安排：",
         "Relax+MC 输入地址：",

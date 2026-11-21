@@ -156,3 +156,49 @@ def test_old_plot_receipt_is_republished_without_changing_review_ids(tmp_path, m
         json.loads(open(first["review_report_path"], encoding="utf-8").read())["structures"]
         == diagnose_phase_diagram(state)["structures"]
     )
+
+
+def test_hd_output_is_one_panel_with_complete_legend(tmp_path, monkeypatch):
+    import Process_Phasediagram
+
+    state = masked_endpoint()
+    report = diagnose_phase_diagram(state)
+    captured = []
+    original = Process_Phasediagram.plot_phase_diagram
+
+    def capture(*args, **kwargs):
+        fig, ax = original(*args, **kwargs)
+        captured.append((fig, ax))
+        return fig, ax
+
+    monkeypatch.setattr(Process_Phasediagram, "plot_phase_diagram", capture)
+    result = publish_quality_comparison(state, report, directory=tmp_path)
+    assert result["status"] == "completed"
+    assert len(captured) == 1 and len(captured[0][0].axes) == 1
+    labels = [text.get_text() for text in captured[0][1].get_legend().get_texts()]
+    assert any(label.startswith("O3") for label in labels)
+    assert "Global hull" in labels and "Phase hulls" in labels
+    assert any(label.startswith("Tier 1:") for label in labels)
+
+
+def test_main_plot_includes_high_energy_non_hull_entry(tmp_path, monkeypatch):
+    import Process_Phasediagram
+
+    state = diagram()
+    entries = state["phase_diagrams"]["mlip"]["entries"]
+    unstable = deepcopy(entries[1])
+    unstable.update(record_id="high-energy", structure_id="high-energy",
+                    eform_per_O2=0.5, is_stable=False)
+    entries.append(unstable)
+    received = []
+    original = Process_Phasediagram.plot_phase_diagram
+
+    def capture(x, energy, phases, stable, **kwargs):
+        received.append((list(x), list(energy), list(stable)))
+        return original(x, energy, phases, stable, **kwargs)
+
+    monkeypatch.setattr(Process_Phasediagram, "plot_phase_diagram", capture)
+    phase_diagram_reply(state, operation="plot", directory=tmp_path)
+    assert len(received[0][0]) == len(entries) == 4
+    assert received[0][2][-1] is False
+    assert received[0][1][-1] == pytest.approx(500)

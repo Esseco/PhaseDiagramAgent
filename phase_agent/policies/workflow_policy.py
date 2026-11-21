@@ -160,10 +160,52 @@ def action_errors(action, state, config):
     tool = action.get("tool") or action.get("action_type")
     params = action.get("parameters") or {}
     errors = branch_batch_errors(action, config) if tool == "generate_branches" else []
+    from phase_agent.evidence.dft_failure_policy import failure_guard_facts
+    needs_analysis = failure_guard_facts(state).get("status") == "awaiting_analysis"
+    if needs_analysis and (
+        tool in {"generate_branches", "allocate_mc_bohb", "select_dft_candidates", "select_candidates",
+                 "update_mlip", "run_calculation_stage", "restart_failed_task", "reevaluate_candidates"}
+        or (tool == "prepare_local_batch_files" and params.get("mode") not in {"relax_mc_results", "ordering_search_results"})
+    ):
+        errors.append("dft_failure_analysis_required")
+    cycle = state.get("extrapolation_recovery_cycle") or {}
+    if cycle.get("status") == "awaiting_reviewed_dft_labels":
+        if tool in {"generate_branches", "allocate_mc_bohb", "select_candidates", "prepare_dedup_batch", "reevaluate_candidates"} or (
+            tool == "prepare_local_batch_files" and params.get("mode") in {"relax_inputs", "mc_inputs", "relax_mc_inputs"}
+        ) or (tool == "run_calculation_stage" and (action.get("stage") or params.get("stage")) not in {"dft_single_point", "dft_relax"}):
+            errors.append("extrapolation_recovery_dft_labels_required")
+        if tool == "update_mlip":
+            from phase_agent.evidence.extrapolation_recovery import recovery_label_facts, recovery_model_matches_labels
+
+            if recovery_label_facts(state)["status"] != "complete":
+                errors.append("extrapolation_recovery_dft_labels_required")
+            elif params.get("action") == "ACTIVATE_CANDIDATE_MODEL" and not recovery_model_matches_labels(state, params.get("candidate_model_version")):
+                errors.append("extrapolation_recovery_candidate_training_scope_unverified")
+    from phase_agent.agents.reliability.extrapolation_round import (
+        required_direct_round, unquarantined_direct_round,
+    )
+
+    pending_quarantine = unquarantined_direct_round(state)
+    if pending_quarantine and (tool in {"generate_branches", "select_dft_candidates", "update_mlip", "run_calculation_stage", "allocate_mc_bohb"}
+                               or (tool == "prepare_local_batch_files" and params.get("mode") in {"dft_inputs", "relax_inputs", "mc_inputs", "relax_mc_inputs"})):
+        errors.append("direct_recovery_quarantine_required:" + pending_quarantine)
+    required = required_direct_round(state)
+    if required and (tool in {"generate_branches", "select_dft_candidates", "update_mlip", "run_calculation_stage", "allocate_mc_bohb"}
+                     or (tool == "prepare_local_batch_files" and params.get("mode") in {"dft_inputs", "relax_inputs", "mc_inputs", "relax_mc_inputs"})):
+        errors.append("reliability_direct_sampling_required:" + required["scope_id"])
     if tool == "update_mlip" and params.get("action", "RETRAIN_MLIP") == "RETRAIN_MLIP":
         if len(new_dft_ids(state, config)) < policy["finetune_min_new_dft"]:
             errors.append("finetune_min_new_dft_not_reached")
-        if active_tasks(state):
+        from phase_agent.tools.state.prepared_unsubmitted import verified_ids
+
+        verified_unsubmitted = (
+            verified_ids(state)
+            if params.get("prepare_inputs_only") is True
+            and (action.get("_decision_team") or {}).get("backend") == "codex_native"
+            and action.get("_simulation_plan")
+            else set()
+        )
+        if any(row.get("task_id") not in verified_unsubmitted for row in active_tasks(state)):
             errors.append("fine_tune_waits_for_inflight_tasks")
     stage = action.get("stage") or params.get("stage")
     direct_dft = tool == "run_calculation_stage" and stage in {
@@ -208,6 +250,8 @@ def action_errors(action, state, config):
 def needs_human(action, config):
     tool = action.get("tool") or action.get("action_type")
     params = action.get("parameters") or {}
+    if tool == "restart_failed_task" and params.get("repair_profile") == "dft_recalculation":
+        return True
     if tool == "generate_branches":
         system = config.get("system_config") or config.get("system") or {}
         cap = (

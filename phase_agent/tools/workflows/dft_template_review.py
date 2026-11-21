@@ -95,7 +95,7 @@ def create_review(action, state, config, manager, *, revision=0, settings=None):
     (folder / "settings.json").write_text(
         json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    incar = layered_oxide_incar(settings["parameters"].get("incar_settings", {}).get(stage))
+    incar = layered_oxide_incar(settings["parameters"].get("incar_settings", {}).get(stage), static=stage == "static")
     incar["GGA"] = None
     if stage == "static":
         incar.update(NSW=0, IBRION=-1)

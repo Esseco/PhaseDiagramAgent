@@ -314,6 +314,9 @@ def semantic_recovery_intent(handler, facts, message, *, pending=True):
         return "approve"
     if normalized in {"拒绝回收", "暂不回收", "不回收", "不再回收", "reject recovery"}:
         return "reject"
+    if normalized in {"同意", "approve", "拒绝", "reject"}:
+        # A bare response does not identify recovery as its target.
+        return "unknown"
     if normalized in {"继续", "continue", "继续原运行"}:
         return "status"
     if not pending:

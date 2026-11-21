@@ -59,6 +59,17 @@ def test_explicit_latest_policy_uses_each_latest_source_and_keeps_versions(tmp_p
         "t": "older",
     }
     assert all(r["ehull"] is not None for r in plan["candidates"])
+    # A perturbation structure is a DFT training input, not a hull point to refresh.
+    manager.data["structures"]["training"] = {**manager.data["structures"]["s"],
+        "metadata": {"perturbation_recovery_batch": "approved-batch"}}
+    updated = refresh_preview(state, manager, cfg)
+    assert {r["structure_id"] for r in updated["candidates"]} == {"s", "t"}
+
+    import pytest
+
+    manager.data["structures"]["missing"] = dict(manager.data["structures"]["s"])
+    with pytest.raises(ValueError, match="注册结构缺少可用于凸包的有效MLIP结果"):
+        refresh_preview(state, manager, cfg)
 
 
 def test_unknown_model_epoch_blocks_preview(tmp_path):
@@ -106,10 +117,17 @@ def test_policy_name_and_shape_are_validated():
 
 
 def test_latest_policy_is_explicit_scientific_constraint():
-    from phase_agent.configuration.session.classify_config_permission import classify_config_permission
-    from phase_agent.configuration.runtime.build_effective_run_config import build_effective_run_config
+    from phase_agent.configuration.session.classify_config_permission import (
+        classify_config_permission,
+    )
+    from phase_agent.configuration.runtime.build_effective_run_config import (
+        build_effective_run_config,
+    )
 
     config = {"model_refresh": {"energy_policy": "latest_valid_per_structure_v1"}}
     assert classify_config_permission("model_refresh.energy_policy", config) == "hard_constraint"
-    effective = build_effective_run_config({"status": "confirmed", "confirmed_snapshot": {"config": config, "config_version": "c"}})
+    effective = build_effective_run_config(
+        {"status": "confirmed", "confirmed_snapshot": {"config": config, "config_version": "c"}}
+    )
     assert effective["model_refresh"]["energy_policy"] == "latest_valid_per_structure_v1"
+

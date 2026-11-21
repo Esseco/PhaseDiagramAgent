@@ -75,9 +75,12 @@ def test_readonly_views_preserve_files_and_skip_runtime(tmp_path, monkeypatch):
         ]
     }
     assert names == {
+        "phase_overview",
         "phase_status",
         "phase_memory",
         "phase_pending",
+        "phase_recovery_diagnostic",
+        "phase_dft_recalculation_review",
         "phase_list_projects",
         "phase_select_project",
         "phase_current_project",

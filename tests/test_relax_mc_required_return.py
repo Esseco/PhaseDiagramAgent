@@ -119,3 +119,24 @@ def test_collect_only_maps_remote_checkpoint_without_rewriting_signed_json(tmp_p
     files = result_files(tmp_path, state, {}, remote_root="/cluster/work")
     assert worker / "status.json.gz" in files
     assert (out / "result.json").read_bytes() == original
+
+
+@pytest.mark.parametrize("failure,expected", [(False, False), (True, True)])
+def test_direct_frames_transferred_only_when_round_requires_direct(tmp_path, failure, expected):
+    import hashlib
+    state, out, worker = pool_fixture(tmp_path, 1)
+    frame = out / "mc_relaxation_frame_000000.vasp"
+    frame.write_text("frame", encoding="utf8")
+    observation = {"structure_id": "observed", "identity_scheme": "periodic_input_v1", "monitor_complete": True, "extrapolation_failure": failure, "structure_path": str(frame), "structure_checksum": hashlib.sha256(frame.read_bytes()).hexdigest()}
+    output = state["tasks"][0]["outputs"]
+    output.update(actual_mc_steps=0, relaxation_observations_complete=True, relaxation_observations=[observation])
+    raw_path = out / "result.json"
+    raw = json.loads(raw_path.read_text())
+    raw["outputs"] = output
+    raw_path.write_text(json.dumps(raw))
+    selected = result_files(tmp_path, state, {})
+    assert (frame in selected) is expected
+    if expected:
+        frame.write_text("changed", encoding="utf8")
+        with pytest.raises(ValueError, match="invalid_mc_relaxation_frame"):
+            result_files(tmp_path, state, {})

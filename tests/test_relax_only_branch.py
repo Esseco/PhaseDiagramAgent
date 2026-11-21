@@ -50,3 +50,9 @@ def test_x0_relax_only_does_not_require_model_field():
 
 def test_x0_continue_group_is_normalized_to_relax_only_when_declared():
     assert review_errors(_action("continue_search", relax_only=[0]), _context()) == []
+
+
+def test_deferred_branch_without_mobile_ions_remains_deferred():
+    action = _action("defer")
+    assert review_errors(action, _context()) == []
+    assert action["branch_pool_review"]["existing_branch_groups"][0]["decision"] == "defer"

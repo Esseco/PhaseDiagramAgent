@@ -27,15 +27,73 @@ def update_phase_diagram(
     include_dft: bool = False,
     latest_per_structure: bool = False,
     latest_only: bool = False,
+    model_versions_only: list[str] | None = None,
 ) -> dict[str, Any]:
     """分别构建 mlip/dft 相图，保留原能量并保存可追踪版本。"""
     if energy_basis not in {"total", "per_atom", "per_formula_unit"}:
         raise ValueError("energy_basis 必须是 total/per_atom/per_formula_unit")
     if latest_only and (not latest_per_structure or output_directory is not None):
         raise ValueError("latest_only 仅支持不写文件的最新能量预览")
+    if model_versions_only is not None and (
+        not isinstance(model_versions_only, list)
+        or not model_versions_only
+        or any(not isinstance(value, str) or not value for value in model_versions_only)
+        or len(set(model_versions_only)) != len(model_versions_only)
+        or include_dft
+        or latest_only
+    ):
+        raise ValueError("invalid_model_only_hull_scope")
     output = {"energy_basis": energy_basis, "diagrams": {}, "mlip_by_version": {}}
-    refresh_plan = ((output_state or {}).get("model_refresh") or {}).get("plan") or {}
-    latest_mode = (
+    recovery = (output_state or {}).get("extrapolation_recovery_cycle") or {}
+    if (
+        recovery.get("status") == "awaiting_reviewed_dft_labels"
+        and recovery.get("invalid_model_version")
+        and active_model_version == recovery.get("invalid_model_version")
+    ):
+        baseline = recovery.get("baseline_diagram") or {}
+        if (
+            baseline.get("status") != "completed"
+            or baseline.get("model_version") != recovery.get("baseline_model_version")
+            or baseline.get("version") != recovery.get("baseline_hull_version")
+        ):
+            raise ValueError("recovery_previous_hull_invalid")
+        from copy import deepcopy
+
+        output["diagrams"]["mlip"] = deepcopy(baseline)
+        return output
+    if (
+        output_state
+        and active_model_version
+        and active_model_version == output_state.get("active_model_version")
+    ):
+        from phase_agent.agents.reliability.extrapolation_round import assess_current_rounds
+
+        rounds = assess_current_rounds(output_state)
+        invalid = [
+            row["scope_id"]
+            for row in rounds["rounds"]
+            if row.get("direct_sampling_required") is True
+        ]
+        if invalid:
+            # Fail closed before generating snapshots or touching latest.  The
+            # previous accepted diagram and the raw data remain available.
+            output["diagrams"]["mlip"] = {
+                "method": "mlip",
+                "model_version": active_model_version,
+                "status": "invalidated",
+                "reason": "large_extrapolation_failure",
+                "invalidated_rounds": invalid,
+                "entries": [],
+            }
+            return output
+    refresh = (output_state or {}).get("model_refresh") or {}
+    refresh_plan = refresh.get("plan") or {}
+    current_model_only = (
+        refresh.get("hull_source_policy") == "current_model_only_v1"
+        and active_model_version == refresh.get("new_model_version")
+        and active_model_version is not None
+    )
+    latest_mode = not current_model_only and (
         latest_per_structure
         or (output_state or {}).get("mlip_energy_policy") == "latest_valid_per_structure_v1"
         or refresh_plan.get("energy_policy") == "latest_valid_per_structure_v1"
@@ -52,13 +110,25 @@ def update_phase_diagram(
 
     phase_rule = phase_boundary_rule(output_state)
     excluded = {
-        (review.get("model_version"), record_id)
+        ((review.get("source_model_by_record") or {}).get(record_id, review.get("model_version")), record_id)
         for review in (output_state or {}).get("phase_quality_exclusions") or []
         for record_id in review.get("record_ids") or []
     }
     from phase_agent.analysis.phase.phase_quality_restore import restored_records
 
     excluded -= restored_records(output_state)
+    recovery_cycles = [
+        *((output_state or {}).get("extrapolation_recovery_history") or []),
+        ((output_state or {}).get("extrapolation_recovery_cycle") or {}),
+    ]
+    invalidated_tasks = {
+        tid for cycle in recovery_cycles for tid in cycle.get("invalidated_task_ids") or []
+    }
+    invalidated_models = {
+        version
+        for cycle in recovery_cycles
+        for version in cycle.get("invalidated_model_versions") or []
+    }
     from phase_agent.analysis.convergence.mlip_relaxation import relaxation_failure
 
     tasks = {t.get("task_id"): t for t in (output_state or {}).get("tasks") or []}
@@ -69,13 +139,28 @@ def update_phase_diagram(
             if item.get("energy_method") == "mlip"
         }
     )
+    if model_versions_only is not None:
+        versions = [version for version in versions if version in model_versions_only]
+        if set(versions) != set(model_versions_only):
+            raise ValueError("model_only_hull_scope_missing")
     groups = [("mlip", version) for version in versions] + ([("dft", None)] if include_dft else [])
+    layer_cache = {}
+    from phase_agent.evidence.dft_extrapolation import failed_dft_task_ids, known_failed_frames
+
+    failed_frames = known_failed_frames(output_state or {})
+    failed_dft_tasks = failed_dft_task_ids(output_state or {})
     for method, model_version in groups:
         selected = [
             item
             for item in records
             if str(item.get("energy_method", "")).lower() == method
             and item.get("status", "completed") == "completed"
+            and (method != "mlip" or item.get("source_task_id") not in invalidated_tasks)
+            and (
+                method != "mlip"
+                or (item.get("model_version") or item.get("source_version"))
+                not in invalidated_models
+            )
             and (
                 method != "mlip"
                 or (item.get("model_version") or item.get("source_version"), item.get("record_id"))
@@ -92,7 +177,23 @@ def update_phase_diagram(
         )
         normalized, rejected = [], []
         for item in selected:
+            if (
+                method == "mlip"
+                and (
+                    (item.get("model_version") or item.get("source_version")),
+                    item.get("structure_sha256"),
+                )
+                in failed_frames
+            ) or (method == "dft" and item.get("source_task_id") in failed_dft_tasks):
+                rejected.append(
+                    {"record_id": item.get("record_id"), "reason": "excluded_extrapolation_failure"}
+                )
+                continue
             try:
+                identification = item.get("phase_identification_status")
+                if (identification not in (None, "identified")
+                    or str(item.get("phase") or "").strip().lower() in {"", "x", "unknown", "unidentified"}):
+                    raise ValueError("phase_identification_failed")
                 if method == "mlip" and (
                     item.get("checks_passed", True) is not True
                     or relaxation_failure(tasks.get(item.get("source_task_id")) or item)
@@ -125,6 +226,14 @@ def update_phase_diagram(
             latest_normalized.extend(normalized)
             if latest_only:
                 continue
+        if method == "mlip":
+            from phase_agent.persistence.ledger.mc_energy_repair import (
+                superseded_mc_energy_record_ids,
+            )
+
+            superseded = superseded_mc_energy_record_ids(normalized, tasks.values())
+            if superseded:
+                normalized = [row for row in normalized if row.get("record_id") not in superseded]
         snapshot = _build_snapshot(
             method,
             normalized,
@@ -132,6 +241,7 @@ def update_phase_diagram(
             energy_basis,
             (parent_versions or {}).get(method),
             phase_rule=phase_rule,
+            layer_cache=layer_cache,
         )
         if method == "mlip":
             snapshot["model_version"] = model_version
@@ -200,6 +310,8 @@ def update_phase_diagram(
                     snapshot.clear()
                     snapshot.update(stored)
                     archive = snapshot.get("archive_csv_path")
+                    if model_versions_only is not None:
+                        continue
                     if archive and Path(archive).is_file():
                         from phase_agent.analysis.phase.publish_current_csv import (
                             publish_current_csv,
@@ -215,14 +327,17 @@ def update_phase_diagram(
                 export_phase_diagram_csv(snapshot, csv_path)
                 from phase_agent.analysis.phase.publish_current_csv import publish_current_csv
 
-                publish_current_csv(snapshot, csv_path)
-            elif not snapshot.get("entries"):
+                if model_versions_only is None:
+                    publish_current_csv(snapshot, csv_path)
+            elif not snapshot.get("entries") and model_versions_only is None:
                 _publish_empty_current_csv(snapshot, directory, filename)
             snapshot["path"] = str(path)
             path.write_text(
                 json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
+    if model_versions_only is not None:
+        return output
     chosen = active_model_version or (versions[0] if len(versions) == 1 else None)
     output["diagrams"]["mlip"] = output["mlip_by_version"].get(chosen) or {
         "method": "mlip",
@@ -233,10 +348,59 @@ def update_phase_diagram(
         else "no_results_for_active_model",
         "entries": [],
     }
+    if current_model_only and not latest_mode:
+        output["diagrams"]["mlip"].update(
+            energy_policy="current_model_only_v1",
+            mixed_model_versions=False,
+            source_model_versions=[chosen],
+        )
     if latest_mode:
         from phase_agent.analysis.phase.latest_mlip_lineage import latest_mlip_records
 
         rounds = latest_rounds
+        from phase_agent.analysis.phase.outside_refresh_hull import outside_refresh_inputs
+
+        outside_inputs = outside_refresh_inputs(
+            records, (output_state or {}).get("tasks") or [], rounds
+        )
+        from phase_agent.analysis.phase.outside_refresh_hull import unidentified_refresh_inputs
+
+        unknown_inputs = unidentified_refresh_inputs(
+            records, (output_state or {}).get("tasks") or [], rounds
+        )
+        from phase_agent.analysis.phase.outside_refresh_hull import rejected_refresh_inputs
+
+        rejected_inputs = rejected_refresh_inputs(
+            records,
+            (output_state or {}).get("tasks") or [],
+            rounds,
+            preserve_extrapolation=(
+                refresh.get("hull_source_policy") == "latest_valid_per_structure_v1"
+                or (
+                    not refresh.get("hull_source_policy")
+                    and (output_state or {}).get("mlip_energy_policy")
+                    == "latest_valid_per_structure_v1"
+                )
+            ),
+        )
+        latest_normalized = [
+            row for row in latest_normalized
+            if (row.get("model_version") or row.get("source_version")) not in rounds
+            or rounds[row.get("model_version") or row.get("source_version")]
+            >= rejected_inputs.get((row.get("structure_id"), row.get("structure_sha256")), 0)
+        ]
+        latest_normalized = [
+            row for row in latest_normalized
+            if (row.get("model_version") or row.get("source_version")) not in rounds
+            or rounds[row.get("model_version") or row.get("source_version")]
+            >= unknown_inputs.get((row.get("structure_id"), row.get("structure_sha256")), 0)
+        ]
+        latest_normalized = [
+            row for row in latest_normalized
+            if (row.get("model_version") or row.get("source_version")) not in rounds
+            or rounds[row.get("model_version") or row.get("source_version")]
+            >= outside_inputs.get((row.get("structure_id"), row.get("structure_sha256")), 0)
+        ]
         try:
             latest, issues, aliases = latest_mlip_records(
                 latest_normalized,
@@ -271,6 +435,7 @@ def update_phase_diagram(
                 energy_basis,
                 (parent_versions or {}).get("mlip"),
                 phase_rule=phase_rule,
+                layer_cache=layer_cache,
             )
             sources = sorted({r["source_version"] for r in latest})
             provenance = [(r.get("record_id"), r["source_version"]) for r in latest]
@@ -353,7 +518,7 @@ def _total_energy(item, composition, basis):
     return energy
 
 
-def _build_snapshot(method, records, rejected, basis, parent, *, phase_rule=None):
+def _build_snapshot(method, records, rejected, basis, parent, *, phase_rule=None, layer_cache=None):
     payload = [
         {
             "record_id": item.get("record_id"),
@@ -370,6 +535,7 @@ def _build_snapshot(method, records, rejected, basis, parent, *, phase_rule=None
         "method": method,
         "basis": basis,
         "algorithm": "na_eform_hull_v1",
+        "na_layer_observation_rule": "at_least_three_occupied_na_layers_v1",
         "entries": payload,
     }
     if phase_rule is not None:
@@ -406,7 +572,7 @@ def _build_snapshot(method, records, rejected, basis, parent, *, phase_rule=None
                 build_composition_hull_entries,
             )
 
-            snapshot["entries"] = build_composition_hull_entries(records)
+            snapshot["entries"] = build_composition_hull_entries(records, layer_cache=layer_cache)
             snapshot["hull_domain"] = "observed_Na_endpoints"
             return snapshot
         entries = [
@@ -419,11 +585,9 @@ def _build_snapshot(method, records, rejected, basis, parent, *, phase_rule=None
         ]
         diagram = PhaseDiagram(entries)
         for item, entry in zip(records, entries, strict=True):
-            na_check = check_na_layer_uniformity(
-                item.get("structure_path"),
-                item["composition"],
-                structure_data=item.get("structure"),
-            )
+            from phase_agent.analysis.phase.check_na_layer_uniformity import cached_na_layer_check
+
+            na_check = cached_na_layer_check(check_na_layer_uniformity, item, layer_cache)
             snapshot["entries"].append(
                 {
                     "record_id": item.get("record_id"),
@@ -431,6 +595,8 @@ def _build_snapshot(method, records, rejected, basis, parent, *, phase_rule=None
                     "structure_path": item.get("structure_path"),
                     "structure": item.get("structure"),
                     "phase": item.get("phase"),
+                    "phase_identification_status": item.get("phase_identification_status"),
+                    "unidentified_valid": item.get("unidentified_valid", False),
                     "composition": item["composition"],
                     "original_energy": item["original_energy"],
                     "normalized_total_energy": item["normalized_total_energy"],
@@ -439,6 +605,7 @@ def _build_snapshot(method, records, rejected, basis, parent, *, phase_rule=None
                     "is_stable": entry in diagram.stable_entries,
                     "source_version": item.get("source_version"),
                     "na_layer_uniform": na_check["uniform"],
+                    "na_layer_occupied": na_check.get("occupied"),
                     "na_layer_status": na_check["status"],
                     "na_layer_rule": na_check["rule"],
                 }

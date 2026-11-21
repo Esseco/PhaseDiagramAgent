@@ -125,7 +125,39 @@ def refresh_preview(state, manager, config):
     latest_policy = (
         state.get("mlip_energy_policy") or (config.get("model_refresh") or {}).get("energy_policy")
     ) == "latest_valid_per_structure_v1"
-    if latest_policy:
+    recovery = state.get("extrapolation_recovery_cycle") or {}
+    recovery_refresh = (recovery.get("policy_version") == "epoch_refresh_v1"
+                        and recovery.get("status") == "awaiting_new_model_refresh"
+                        and recovery.get("replacement_model_version") == refresh["new_model_version"])
+    if recovery_refresh:
+        if (diagram.get("status") != "completed"
+            or diagram.get("version") != recovery.get("baseline_hull_version")
+            or diagram.get("model_version") != recovery.get("baseline_model_version")
+            or diagram != recovery.get("baseline_diagram")):
+            raise ValueError("外推恢复的上一有效凸包证据不一致")
+        vertices = []
+        for entry in diagram.get("entries") or []:
+            ehull = entry.get("ehull")
+            is_vertex = entry.get("is_stable") is True or (
+                "is_stable" not in entry and isinstance(ehull, (int, float))
+                and not isinstance(ehull, bool) and 0 <= ehull < 0.001)
+            if is_vertex:
+                vertices.append(entry)
+        if not vertices:
+            raise ValueError("上一有效凸包缺少可核验的基态结构")
+        # The failed refresh cannot supply a baseline. Apply the normal H/D
+        # screening and full far-hull prediction to the last trusted baseline instead.
+        from phase_agent.analysis.phase.phase_quality_reports import get_phase_quality_report
+        review_state = {**state, "active_model_version": old,
+                        "phase_diagrams": {**(state.get("phase_diagrams") or {}), "mlip": diagram}}
+        report = get_phase_quality_report(review_state, snapshot=diagram)
+        high, reference_ehull = _hd_reference(diagram, report)
+        for entry in diagram.get("entries") or []:
+            is_high = entry.get("record_id") in high
+            selected_entry = entry if is_high else {
+                **entry, "ehull": reference_ehull[entry["record_id"]], "ehull_unit": "eV/atom"}
+            append(selected_entry, mixed=True, hd_required=is_high)
+    elif latest_policy:
         from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
 
         if not state.get("phase_records"):
@@ -138,10 +170,14 @@ def refresh_preview(state, manager, config):
             latest_only=True,
         )["diagrams"]["mlip"]
         if latest.get("status") != "completed":
-            raise ValueError(
-                "最新结构能量谱系未解决，不能生成刷新预览："
-                + str(latest.get("issues") or latest.get("reason"))
+            detail = (
+                latest.get("issues")
+                or latest.get("reason")
+                or latest.get("error")
+                or latest.get("status")
+                or "unknown"
             )
+            raise ValueError("最新结构能量谱系未解决，不能生成刷新预览：" + str(detail))
         from phase_agent.analysis.phase.phase_quality_reports import get_phase_quality_report
 
         review_state = {
@@ -172,13 +208,38 @@ def refresh_preview(state, manager, config):
             for entry in prior.get("entries") or []:
                 if entry.get("ehull") is not None and float(entry["ehull"]) <= 0.010:
                     append(entry, historical=True)
-    missing = sorted(set(structures) - represented)
+    # Recovery perturbations are training-only structures; their MH-1 results
+    # do not become phase-search history during the next epoch refresh.
+    missing = sorted(
+        sid
+        for sid in set(structures) - represented
+        if not (structures[sid].get("metadata") or {}).get("perturbation_recovery_batch")
+    )
     for sid in missing:
+        if latest_policy:
+            path = Path(structures[sid].get("source_path") or "")
+            if path.is_file():
+                checksum = hashlib.sha256(path.read_bytes()).hexdigest()
+                if any(row.get("structure_sha256") == checksum for row in candidates):
+                    raise ValueError("注册结构缺少可用于凸包的有效MLIP结果：" + str(sid))
         append({"structure_id": sid})
     plan = build_model_refresh_plan(
-        candidates, old_version=old, new_version=refresh["new_model_version"]
+        candidates, old_version=old, new_version=refresh["new_model_version"],
+        include_all=False,
     )
-    if latest_policy:
+    if recovery_refresh:
+        plan["baseline_hull_version"] = diagram["version"]
+        plan["refresh_scope"] = "trusted_baseline_hd_and_all_far"
+        if latest_policy:
+            plan["energy_policy"] = "latest_valid_per_structure_v1"
+        plan["hd_refresh_reference"] = {
+            "hull_version": diagram["version"],
+            "report_digest": report["snapshot_evidence_digest"],
+            "thresholds": report["screening_policy"],
+            "high_record_ids": sorted(high),
+            "reference_scope": "counterfactual_selection_only",
+        }
+    elif latest_policy:
         plan["energy_policy"] = "latest_valid_per_structure_v1"
         plan["energy_source_models"] = latest.get("source_model_versions", [])
         plan["mixed_model_versions"] = latest.get("mixed_model_versions", False)
@@ -231,6 +292,19 @@ def refresh_preview(state, manager, config):
     if plan["model"].get("version") != refresh["new_model_version"]:
         raise ValueError("刷新模型路径与激活版本不一致")
     plan["relax_parameters"] = deepcopy((config.get("mlip") or {}).get("relax_parameters") or {})
+    if refresh.get("reopened_from_plan") and not recovery_refresh:
+        from phase_agent.tools.workflows.model_refresh_reuse import archived_refresh, matching_refresh_results
+
+        prior = archived_refresh(state, refresh["reopened_from_plan"])
+        if prior is None:
+            raise ValueError("缺少重开刷新所绑定的历史任务范围")
+        plan["reopened_from_plan"] = refresh["reopened_from_plan"]
+        reuse = matching_refresh_results(state, plan, prior)
+        plan["reused_results"] = reuse
+        plan["initial_cost"] = sum(
+            r["relative_cost"] for r in plan["candidates"] if r["structure_sha256"] not in reuse
+        )
+        plan["maximum_total_cost"] = plan["initial_cost"] + plan["maximum_supplemental_cost"]
     plan["checksum"] = fingerprint(plan)
     return plan
 
@@ -243,4 +317,7 @@ def current_model_refresh(state):
 
 
 def refresh_active(state):
-    return bool(state.get("model_refresh") and state["model_refresh"].get("status") != "completed")
+    return bool(
+        state.get("model_refresh")
+        and state["model_refresh"].get("status") not in {"completed", "abandoned_extrapolation"}
+    )

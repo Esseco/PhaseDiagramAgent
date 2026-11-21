@@ -275,3 +275,34 @@ def test_all_dft_points_revoked_does_not_leave_old_current_csv(tmp_path):
     timestamp = Path(second["csv_path"]).stat().st_mtime_ns
     repeated = update_phase_diagram(rows, output_directory=tmp_path, include_dft=True)["diagrams"]["dft"]
     assert Path(repeated["csv_path"]).stat().st_mtime_ns == timestamp
+
+
+@pytest.mark.parametrize("case", ["verified", "snapshot_conflict", "result_conflict", "missing_snapshot_field"])
+def test_legacy_dft_metadata_provenance_must_match_verified_snapshot(tmp_path, case):
+    from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
+    from phase_agent.tools.remote.integrity import file_checksum
+    prior = make_result(moments=None)
+    prior.update(upload_operation_id="op1", search_group_index=1)
+    incoming = make_result()
+    taskdir = tmp_path / "batch" / "00000-D1"
+    taskdir.mkdir(parents=True)
+    snap = {"task_id": "D1", "task_key": "K1", "model_version": "m1", "upload_operation_id": "op1", "search_group_index": 1}
+    if case == "snapshot_conflict": snap["upload_operation_id"] = "other"
+    if case == "missing_snapshot_field": snap.pop("upload_operation_id")
+    if case == "result_conflict": incoming["upload_operation_id"] = "other"
+    (taskdir / "task.json").write_text(json.dumps(snap))
+    path = taskdir / "result.json"
+    path.write_text(json.dumps(incoming))
+    (taskdir / "task.finished.json").write_text(json.dumps({"task_id":"D1", "task_key":"K1", "model_version":"m1", "status":"completed", "result_checksum":file_checksum(path)}))
+    prior.update(input_path=str(taskdir / "task.json"), result_path=str(path))
+    result = RemoteBatchRunner(tmp_path / "unused", worker_command=[]).collect_results_with_report({"tasks":[prior], "processed_task_ids":["D1"]})
+    if case == "verified":
+        assert len(result["results"]) == 1
+        row = result["results"][0]
+        assert row["upload_operation_id"] == "op1" and row["search_group_index"] == 1
+        reconciled = reconcile_task_results({"tasks":[prior], "processed_task_ids":["D1"]}, [row])
+        assert reconciled["reconciled"][0]["status"] == "metadata_refreshed"
+        assert reconciled["state"]["tasks"][0]["actual_cost"] == 30
+    else:
+        assert result["results"] == []
+        assert result["report"]["metadata_refresh_report"]["invalid_count"] == 1

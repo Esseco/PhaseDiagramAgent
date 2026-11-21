@@ -41,6 +41,7 @@ def build_config_field_catalog(config):
             "dft.parameter_source": "DFT参数来源；采用默认值需说明来源",
             "dft.parameters": "用户DFT设置；单点与弛豫设置须区分",
             "python_environments.local_python": "本地管理和分析环境；未另指定使用py1",
+            "energy_conventions.voltage_references.Na": "Na 电压参考化学势，单位 eV/atom；默认 -1.288，若不适用当前体系请在确认前修改并提供来源",
         }
     )
     derived = {

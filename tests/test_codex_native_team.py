@@ -47,6 +47,14 @@ def advice(view, role="exploration"):
     }
 
 
+
+def register_opinions(t, view, roles):
+    """Register actual fake replies for tests focused on later approval boundaries."""
+    for role in roles:
+        opinion = advice(view, role)
+        opinion["options"] = []
+        t.advise(view["team_id"], view["revision"], opinion)
+
 def prepared(tmp_path):
     control, context = make_control(tmp_path)
     t = team(control)
@@ -124,7 +132,10 @@ def test_activation_reason_comes_only_from_real_accept_feedback(tmp_path):
     control, context = make_control(tmp_path)
     context["allowed_tools"] = ["update_mlip"]
     t = team(control)
-    view = t.start(question="review candidate", consult=[])
+    view = t.start(question="review candidate", consult=["reliability"])
+    opinion = advice(view, "reliability")
+    opinion["options"] = []
+    t.advise(view["team_id"], 1, opinion)
     action = {
         "operation": "activate_mlip_candidate",
         "tool": "update_mlip",
@@ -144,6 +155,7 @@ def test_activation_reason_comes_only_from_real_accept_feedback(tmp_path):
         "checks": ["no automatic approval"],
         "failure_policy": "return_to_strategic",
     }
+    plan["context_binding"] = {"team_id": view["team_id"], "revision": 1, "snapshot_id": view["snapshot"]["snapshot_id"]}
     t.draft(view["team_id"], 1, action, rationale="review CV candidate", simulation_plan=plan)
     before = t._action(t._load())
     assert "user_approval_reason" not in before["parameters"]
@@ -159,6 +171,10 @@ def test_activation_reason_comes_only_from_real_accept_feedback(tmp_path):
     assert accepted["execution_approved"] is False
     assert control.state_path.read_text(encoding="utf-8") == "{}"
     revised = t.feedback(view["team_id"], 1, "revise", "重新核对候选")
+    opinion = advice(revised, "reliability")
+    opinion["options"] = []
+    t.advise(view["team_id"], revised["revision"], opinion)
+    plan["context_binding"] = {"team_id": view["team_id"], "revision": revised["revision"], "snapshot_id": revised["snapshot"]["snapshot_id"]}
     t.draft(
         view["team_id"],
         revised["revision"],
@@ -325,6 +341,54 @@ def test_uncertain_submission_does_not_retry_or_start_another_discussion(tmp_pat
         team(control).start(question="another", consult=[])
 
 
+def test_verified_assessed_checkpoint_is_forwarded_only_for_same_frozen_action(tmp_path):
+    control, _, t, view = prepared(tmp_path)
+    action = {"tool": "pause_search", "task_key": "same"}
+    t.draft(view["team_id"], 1, action, rationale="review")
+    t.feedback(view["team_id"], 1, "accept", "accept")
+    session = t._load()
+    session["events"].append({"kind": "verified_stale_lifecycle_block", "revision": 1,
+        "proof": {"resume_from_assessed": True, "action_task_key": "same",
+                  "checkpoint_id": "cp", "checkpoint_sha256": "a" * 64, "request_id": "old"}})
+    t._save(session)
+    received = []
+
+    def submit(action, **kwargs):
+        received.append(kwargs["_on_dispatch"].resume_checkpoint)
+        return {"reply": {"status": "awaiting_approval", "submitted": False}}
+
+    control._propose_codex = submit
+    team(control).propose(view["team_id"], 1)
+    assert received == [{"checkpoint_id": "cp", "checkpoint_sha256": "a" * 64, "request_id": "old"}]
+
+
+@pytest.mark.parametrize("steps,reason,expected", [
+    (0, "unsafe_inflight_checkpoint", "ready_to_propose"),
+    (1, "unsafe_inflight_checkpoint", "submission_uncertain"),
+    (0, "unknown", "submission_uncertain"),
+])
+def test_stale_lifecycle_block_only_clears_proven_pre_dispatch_team_attempt(
+    tmp_path, steps, reason, expected
+):
+    control, _, t, view = prepared(tmp_path)
+    t.draft(view["team_id"], 1, {"tool": "pause_search"}, rationale="review")
+    t.feedback(view["team_id"], 1, "accept", "接受方向")
+
+    def blocked(action, **kwargs):
+        kwargs["_on_dispatch"]()
+        return {"reply": {
+            "status": "execution_reconciliation_required", "submitted": False,
+            "steps_executed": steps,
+            "recovery_report": {"unsettled": [{
+                "reason": reason, "identity": {"tool": "scientific_lifecycle"},
+            }], "checks": []},
+        }}
+
+    control._propose_codex = blocked
+    t.propose(view["team_id"], 1)
+    assert t.read()["status"] == expected
+
+
 def test_actual_memory_review_stales_existing_team_and_keeps_user_guidance_local(tmp_path):
     from phase_agent.runtime.codex.context import build_codex_context
     from phase_agent.runtime.codex.team import call_team_tool
@@ -358,7 +422,7 @@ def test_actual_memory_review_stales_existing_team_and_keeps_user_guidance_local
     )
     assert t.read()["stale"] is True
     revised = t.feedback(view["team_id"], 1, "revise", "本轮先检查DFT")
-    memory = revised["snapshot"]["facts"]["decision_context"]["memory_context"]
+    memory = revised["requests"]["exploration"]["evidence_snapshot"]["facts"]["decision_context"]["memory_context"]
     assert memory["approved_knowledge"][0]["statement"] == "优先小批次验证"
     assert (
         "knowledge:" + memory["approved_knowledge"][0]["knowledge_id"]
@@ -512,7 +576,10 @@ def test_canonical_activation_receipt_settles_training_handoff(tmp_path, invalid
     control, context = make_control(tmp_path)
     context["allowed_tools"] = ["update_mlip", "pause_search"]
     t = team(control)
-    view = t.start(question="review candidate", consult=[])
+    view = t.start(question="review candidate", consult=["reliability"])
+    opinion = advice(view, "reliability")
+    opinion["options"] = []
+    t.advise(view["team_id"], 1, opinion)
     action = {
         "operation": "activate_mlip_candidate",
         "tool": "update_mlip",
@@ -531,6 +598,7 @@ def test_canonical_activation_receipt_settles_training_handoff(tmp_path, invalid
         "checks": ["no compute"],
         "failure_policy": "return_to_strategic",
     }
+    plan["context_binding"] = {"team_id": view["team_id"], "revision": 1, "snapshot_id": view["snapshot"]["snapshot_id"]}
     t.draft(view["team_id"], 1, action, rationale="review", simulation_plan=plan)
     t.feedback(view["team_id"], 1, "accept", "approve candidate direction")
     session = t._load()
@@ -583,3 +651,253 @@ def test_canonical_activation_receipt_settles_training_handoff(tmp_path, invalid
         assert recorded["record_id"] == "review:model_activation:J"
         assert t.start(question="next decision", consult=[])["team_id"] != view["team_id"]
         assert t.read(view["team_id"])["status"] == "submitted"
+
+
+def test_user_can_pause_interrupted_team_only_without_records(tmp_path, monkeypatch):
+    control, _ = make_control(tmp_path)
+    t = team(control)
+    view = t.start(question="review", consult=[])
+    session = t._load()
+    session["status"] = "submitting"
+    t._save(session)
+    monkeypatch.setattr(t, "_recorded_submission", lambda session: {"record_id": "existing"})
+    with pytest.raises(ValueError, match="has_records"):
+        t.feedback(view["team_id"], 1, "pause", "discard interrupted proposal")
+    assert t._load()["status"] == "submitting"
+    monkeypatch.setattr(t, "_recorded_submission", lambda session: None)
+    result = t.feedback(view["team_id"], 1, "pause", "discard interrupted proposal")
+    assert result["status"] == "paused"
+    assert t._load()["events"][-1]["kind"] == "human_pause_interrupted"
+
+
+def test_relax_preview_is_planned_before_freezing_and_changed_budget_is_rejected(tmp_path):
+    from phase_agent.agents.simulation.agent import action_hash, prepare_proposal
+    from tests.test_relax_mc_batch import fixture
+
+    manager, state, config, runtime, action = fixture(tmp_path / "science", count=2)
+    state["active_model"] = deepcopy(config["mlip"])
+    state["active_model"]["version"] = "finetuned-epoch3"
+    state["active_model_version"] = "finetuned-epoch3"
+    control, context = make_control(tmp_path)
+    control.state_path.write_text(__import__("json").dumps(state), encoding="utf-8")
+    session = {"status": "confirmed", "confirmed_snapshot": {"config": config, "config_version": "v1"}}
+    control.chat_handler.workflow_kwargs = {**runtime, "config_session": session, "run_config": config}
+    context["allowed_tools"] = ["prepare_local_batch_files"]
+    context["config_version"] = "v1"
+    t = team(control)
+    view = t.start(question="prepare inputs", consult=["exploration"])
+    opinion = advice(view, "exploration")
+    opinion["options"] = []
+    t.advise(view["team_id"], 1, opinion)
+    draft = t.draft(view["team_id"], 1, action, rationale="preview before planning")
+    planned = draft["draft"]["action"]
+    assert planned["budget"] > 0
+    assert planned["expected_purpose"]
+    assert "relax_mc_preview" in planned["parameters"]
+    request = draft["requests"]["simulation"]
+    assert request["action_hash"] == action_hash(planned)
+    plan = {"action_hash": request["action_hash"], "rationale": "prepare local files",
+            "steps": [{"kind": "preflight", "description": "verify inputs", "tool": None},
+                      {"kind": "invoke", "description": "prepare once", "tool": action["tool"]},
+                      {"kind": "verify", "description": "check files", "tool": None}],
+            "checks": ["no submission"], "failure_policy": "return_to_strategic"}
+    plan["context_binding"] = request["context_binding"]
+    t.simulate(view["team_id"], 1, plan)
+    frozen = t._load()["draft"]["action"]
+    from phase_agent.tools.relax_mc_batch.plan import attach_preview
+    from phase_agent.configuration.runtime.build_effective_run_config import build_effective_run_config
+    effective = build_effective_run_config(session, config)
+    effective["mlip"] = {**effective["mlip"], **state["active_model"]}
+    repeated = attach_preview(frozen, state, runtime, effective)
+    assert repeated["budget"] == planned["budget"]
+    prepared = prepare_proposal({"raw_action": repeated}, None, state=state, config=config, registry={})
+    assert prepared["raw_action"]["budget"] == planned["budget"]
+    changed = deepcopy(repeated)
+    changed["budget"] += 1
+    with pytest.raises(ValueError, match="simulation_intent_changed"):
+        prepare_proposal({"raw_action": changed}, None, state=state, config=config, registry={})
+
+
+def test_dft_preview_precedes_simulation_and_failure_blocks_draft(tmp_path, monkeypatch):
+    from phase_agent.tools.workflows.prepare_dft_proposal import DFTProposalPreparation
+    control, context = make_control(tmp_path)
+    context["allowed_tools"] = ["select_dft_candidates"]
+    control.chat_handler.workflow_kwargs = {"config_session": {"status": "confirmed", "confirmed_snapshot": {"config": {"system": {}}, "config_version": "c1"}}}
+    t = team(control)
+    view = t.start(question="review", consult=["reliability"])
+    opinion = advice(view, "reliability")
+    opinion["options"] = []
+    t.advise(view["team_id"], 1, opinion)
+    action = {"tool": "select_dft_candidates", "parameters": {"decisions": []}, "budget": 0}
+    def preview(action, state, decision_state, config, **kwargs):
+        return DFTProposalPreparation({**action, "budget": 12, "parameters": {**action["parameters"], "dft_selection_preview": {"relative_cost": 12}, "prepare_inputs_after_approval": True}}, state, None)
+    monkeypatch.setattr("phase_agent.tools.workflows.prepare_dft_proposal.prepare_dft_proposal", preview)
+    draft = t.draft(view["team_id"], 1, action, rationale="review")
+    assert draft["draft"]["action"]["budget"] == 12
+    assert draft["requests"]["simulation"]["action"]["parameters"]["dft_selection_preview"]["relative_cost"] == 12
+    assert draft["status"] == "planning_simulation"
+
+
+def test_draft_checks_required_scientific_decision_before_approval(tmp_path):
+    control, context = make_control(tmp_path)
+    context["allowed_tools"] = ["select_dft_candidates"]
+    context["required_contracts"] = {"scientific_decision": True}
+    t = team(control)
+    view = t.start(question="review", consult=["reliability"])
+    opinion = advice(view, "reliability")
+    opinion["options"] = []
+    t.advise(view["team_id"], view["revision"], opinion)
+    action = {"tool": "select_dft_candidates", "parameters": {"decisions": []}}
+    with pytest.raises(ValueError, match="scientific_decision"):
+        t.draft(view["team_id"], view["revision"], action, rationale="review")
+    session = t._load(view["team_id"])
+    assert session["status"] == "consulting"
+    assert not session.get("draft")
+
+
+def test_draft_accepts_complete_bound_scientific_decision(tmp_path):
+    control, context = make_control(tmp_path)
+    context["required_contracts"] = {"scientific_decision": True}
+    t = team(control)
+    view = t.start(question="review", consult=["exploration", "reliability"])
+    for role in ("exploration", "reliability"):
+        opinion = advice(view, role)
+        opinion["options"] = []
+        t.advise(view["team_id"], view["revision"], opinion)
+    action = {"tool": "pause_search", "scientific_decision": {
+        "point": "round_direction", "config_version": "c1", "model_version": "m1",
+        "bottleneck": "missing evidence", "rationale": "wait",
+        "alternatives": [{"route": "search", "reason": "not enough evidence"}],
+        "expected_outcome": "review", "success_criterion": "evidence ready",
+        "limitations": "results unknown"}}
+    result = t.draft(view["team_id"], view["revision"], action, rationale="review")
+    assert result["status"] in {"planning_simulation", "awaiting_human_input"}
+
+
+def test_snapshot_branch_pool_references_match_formal_decision_catalog(monkeypatch):
+    from phase_agent.agents.strategic import codex_team
+
+    monkeypatch.setattr(codex_team, "evidence_snapshot", lambda payload: payload)
+    context = {
+        "allowed_tools": [],
+        "decision_context": {"branch_pool_facts": {}, "evidence_catalog": {"references": {"branch_pool:valid": {}}}},
+        "team_decision_context": {"evidence_catalog": {"references": {"branch_pool:stale": {}, "phase_diagram:mlip:model": {}}}},
+    }
+    session = {"team_id": "t", "revision": 1, "question": "q", "guidance": []}
+    snapshot = codex_team.CodexTeam._snapshot(context, session)
+    refs = snapshot["decision_context"]["evidence_catalog"]["references"]
+    assert "branch_pool:valid" in refs
+    assert "branch_pool:stale" not in refs
+    assert "phase_diagram:mlip:model" in refs
+
+
+def test_warm_consultation_reads_state_contents_once(tmp_path, monkeypatch):
+    from phase_agent.persistence.state import read_versions
+
+    control, _ = make_control(tmp_path)
+    t = team(control)
+    view = t.start(question="review", consult=["exploration"])
+    original = read_versions.read_identity
+    full_reads = []
+
+    def audited(path, *, strong=False):
+        if strong:
+            full_reads.append(path)
+        return original(path, strong=strong)
+
+    monkeypatch.setattr(read_versions, "read_identity", audited)
+    t.advise(view["team_id"], 1, advice(view), compact=True)
+    assert full_reads == [control.state_path]
+
+
+def test_warm_consultation_rejects_change_with_unchanged_file_metadata(tmp_path, monkeypatch):
+    from phase_agent.persistence.state import read_versions
+
+    control, _ = make_control(tmp_path)
+    control.state_path.write_text('{"marker":1}', encoding="utf-8")
+    t = team(control)
+    view = t.start(question="review", consult=["exploration"])
+    original = read_versions.read_identity
+    weak_identity = original(control.state_path)
+    control.state_path.write_text('{"marker":2}', encoding="utf-8")
+
+    def fixed_metadata(path, *, strong=False):
+        return (*weak_identity, original(path, strong=True)[2]) if strong else weak_identity
+
+    monkeypatch.setattr(read_versions, "read_identity", fixed_metadata)
+    with pytest.raises(ValueError, match="sources_changed_during_read"):
+        t.advise(view["team_id"], 1, advice(view), compact=True)
+
+
+@pytest.mark.parametrize("source", ["model", "configuration", "returned_archive", "collected_state"])
+def test_consultation_rechecks_changed_sources(tmp_path, source):
+    import json
+
+    control, context = make_control(tmp_path)
+    archive = tmp_path / "result.zip"
+    saved = {"relax_mc_batches": {"b1": {"expected_results_archive": str(archive)}}}
+    control.state_path.write_text(json.dumps(saved), encoding="utf-8")
+    t = team(control)
+    view = t.start(question="review", consult=["exploration"])
+
+    if source == "model":
+        context["model_version"] = "m2"
+    elif source == "configuration":
+        context["config_version"] = "c2"
+    elif source == "returned_archive":
+        archive.write_bytes(b"new return")
+    else:
+        saved["relax_mc_batches"]["b1"]["status"] = "completed"
+        control.state_path.write_text(json.dumps(saved), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="codex_team_stale"):
+        t.advise(view["team_id"], 1, advice(view), compact=True)
+
+
+def test_large_verified_context_cache_is_bounded_and_detached(monkeypatch):
+    from phase_agent.agents.strategic import codex_team
+
+    monkeypatch.setattr(codex_team, "_READ_CACHE", {})
+    monkeypatch.setattr(codex_team, "_READ_CACHE_LIMIT", 1024)
+    monkeypatch.setattr(codex_team, "_CONTEXT_UNCOMPRESSED_LIMIT", 8192)
+    key = ("project", "identity")
+    value = {"tasks": [{"label": "a" * 4096}]}
+    codex_team._save_cached("context", key, value)
+    assert len(codex_team._READ_CACHE["context"][1]) <= 1024
+    parsed = codex_team._read_cached("context", key)
+    assert parsed == value
+    parsed["tasks"].clear()
+    assert codex_team._read_cached("context", key) == value
+    codex_team._save_cached("context", key, {"tasks": ["a" * 8192]})
+    assert codex_team._read_cached("context", key) is None
+
+
+def test_human_direction_skips_optional_advice_and_keeps_review(tmp_path):
+    from phase_agent.runtime.codex.team import call_team_tool
+
+    control, _ = make_control(tmp_path)
+    view = call_team_tool(
+        control, "phase_team_start", {"question": "Pause this search", "human_directed": True}
+    )
+    assert not view["requests"] and "facts" not in view["snapshot"]
+    draft = team(control).draft(view["team_id"], 1, {"tool": "pause_search"}, rationale="Explicit scope")
+    assert draft["status"] == "awaiting_human_input"
+    assert draft["execution_approved"] is False
+
+
+def test_revision_uses_human_direction_and_requests_only_required_role(tmp_path):
+    control, context = make_control(tmp_path)
+    context["allowed_tools"].append("reevaluate_candidates")
+    t = team(control)
+    original = t.start(question="compare options")
+    assert set(original["requests"]) == {"exploration", "reliability"}
+    revised = t.feedback(
+        original["team_id"], 1, "revise", "Re-evaluate just this batch", human_directed=True
+    )
+    assert revised["consult"] == [] and revised["requests"] == {}
+    result = t.draft(
+        original["team_id"], 2, {"tool": "reevaluate_candidates"}, rationale="Check the fixed batch"
+    )
+    assert set(result["requests"]) == {"reliability"}
+    assert "chosen the direction" in result["requests"]["reliability"]["instruction"]
+    assert result["execution_approved"] is False

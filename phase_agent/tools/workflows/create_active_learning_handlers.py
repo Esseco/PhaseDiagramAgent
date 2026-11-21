@@ -447,7 +447,12 @@ def _allocate_mc_bohb(*, action, context):
     bohb = deepcopy(config.get("bohb") or {})
     bohb["new_candidates_per_iteration"] = len(candidates)
     if second_round:
-        diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+        from phase_agent.analysis.phase.mc_snapshot import mc_model_snapshot
+
+        try:
+            diagram = mc_model_snapshot(state, model_version)
+        except ValueError:
+            diagram = {}
         approved_diagram_version = params.get("phase_diagram_version") or (
             params.get("budget_preview") or {}
         ).get("phase_diagram_version")
@@ -507,6 +512,7 @@ def _allocate_mc_bohb(*, action, context):
                 "mc_hull_reference_version": params.get("hull_reference_version"),
                 "mc_phase_diagram_version": params.get("phase_diagram_version"),
             },
+            _owned=True,
         )
         state = screening["state"]
         if screening["status"] not in {"ready", "ready_partial"}:
@@ -551,6 +557,21 @@ def _allocate_mc_bohb(*, action, context):
         bohb.setdefault("scope", {})["hull_reference_version"] = screening["pool"]["version"]
         bohb["scope"]["mlip_version"] = screening["pool"]["model_version"]
         bohb["objective"] = {**bohb["objective"], "name": "relaxed_batch_hull_gap"}
+    from phase_agent.analysis.phase.mc_snapshot import mc_model_snapshot
+
+    try:
+        mc_diagram = mc_model_snapshot(
+            state,
+            (bohb.get("scope") or {}).get("mlip_version")
+            or (config.get("mlip") or {}).get("version")
+            or (config.get("mlip") or {}).get("name"),
+        )
+    except ValueError:
+        return {
+            "status": "not_configured",
+            "state": state,
+            "reason": "current_model_independent_hull_required",
+        }
     bohb.setdefault("budget_limits", config["budgets"])
     bohb.setdefault("scope", {})
     bohb["scope"] = {
@@ -562,9 +583,7 @@ def _allocate_mc_bohb(*, action, context):
         or _hull_version(state),
         "candidate_set_version": bohb["scope"].get("candidate_set_version")
         or _candidate_version(candidates),
-        "phase_diagram_version": ((state.get("phase_diagrams") or {}).get("mlip") or {}).get(
-            "version"
-        ),
+        "phase_diagram_version": mc_diagram.get("version"),
     }
     current_diagram_version = bohb["scope"].get("phase_diagram_version")
     if (
@@ -589,6 +608,8 @@ def _allocate_mc_bohb(*, action, context):
             "reason": "mc_requires_current_phase_diagram_ehull_per_atom",
         }
     if not bohb.get("bohb_selection_interface_enabled", False):
+        from phase_agent.science.mc.second_round_state import legacy_committee_task_keys
+
         tier_state = reconciled_mc_state(state)
         total_mc_budget = int(params.get("mc_budget", action.get("budget", 0)))
         mc_policy = config.get("mc_policy") or {
@@ -602,7 +623,7 @@ def _allocate_mc_bohb(*, action, context):
                 for value in bohb.get("budget_levels", [10, 30, 90])
             ],
             "max_segments_per_branch": 3,
-            "max_cumulative_cost_per_branch": 90,
+            "max_cumulative_cost_per_branch": None,
             "random_exploration_fraction": bohb.get("random_fraction", 0.1),
         }
         from phase_agent.science.mc.continuation_policy import effective_mc_policy
@@ -616,13 +637,12 @@ def _allocate_mc_bohb(*, action, context):
             tier_state,
             policy=mc_policy,
             scope_by_model=True,
+            excluded_history_task_keys=legacy_committee_task_keys(state),
             total_budget=total_mc_budget,
             seed=int(params.get("seed", config.get("seed", 0))),
             model_version=bohb["scope"]["mlip_version"],
             hull_reference_version=bohb["scope"]["hull_reference_version"],
-            phase_diagram_version=(state.get("phase_diagrams") or {})
-            .get("mlip", {})
-            .get("version"),
+            phase_diagram_version=mc_diagram.get("version"),
         )
         if scheduled["status"] == "continuation_pool_below_minimum":
             return {
@@ -694,44 +714,18 @@ def _allocate_mc_bohb(*, action, context):
             and preview.get("selected_branch_count") == preview.get("full_plan_branch_count")
             and preview.get("requested_steps") == preview.get("full_plan_steps")
         )
-        reservation_limits = deepcopy(config["budgets"])
-        if full_plan_approved:
-            active_reservations = [
-                row
-                for row in (state.get("budget_reservations") or {}).values()
-                if row.get("status") in {"reserved", "submitted", "running"}
-            ]
-            existing_total = sum(float(row.get("reserved_cost", 0)) for row in active_reservations)
-            existing_mc = [row for row in active_reservations if row.get("stage") == "deep_search"]
-            approved_cost = sum(float(row["planned_relative_cost"]) for row in scheduled["actions"])
-            stage_limit = reservation_limits.setdefault("stage_limits", {}).setdefault(
-                "deep_search", {}
+        from phase_agent.tools.relax_mc_batch.branch_limit import batch_reservation_limits
+
+        try:
+            reservation_limits = batch_reservation_limits(
+                config["budgets"], [row["branch_id"] for row in candidates]
             )
-            usage = state.get("budget_usage") or {}
-            stage_usage = (usage.get("stages") or {}).get("deep_search") or {}
-            reservation_limits["total_relative_cost"] = max(
-                float(reservation_limits["total_relative_cost"]),
-                float(usage.get("total_relative_cost", 0)) + existing_total + approved_cost,
-            )
-            stage_limit["max_cost"] = max(
-                float(stage_limit.get("max_cost") or 0),
-                float(stage_usage.get("cost", 0))
-                + sum(float(row.get("reserved_cost", 0)) for row in existing_mc)
-                + approved_cost,
-            )
-            stage_limit["max_tasks"] = max(
-                int(stage_limit.get("max_tasks") or 0),
-                int(stage_usage.get("tasks", 0)) + len(existing_mc) + len(scheduled["actions"]),
-            )
-            state.setdefault("approved_mc_budget_overrides", []).append(
-                {
-                    "allocation_checksum": preview["allocation_checksum"],
-                    "task_count": len(scheduled["actions"]),
-                    "estimated_relative_cost": approved_cost,
-                    "configured_limits": deepcopy(config["budgets"]),
-                    "reason": "explicit_full_plan_approval",
-                }
-            )
+        except ValueError as error:
+            return {
+                "status": "not_configured",
+                "state": context.get("event_state") or {},
+                "reason": str(error),
+            }
         from phase_agent.tools.budget.stratify_mc_actions import (
             interleave_mc_strata,
             summarize_mc_interception,

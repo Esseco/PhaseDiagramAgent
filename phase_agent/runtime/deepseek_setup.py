@@ -38,7 +38,7 @@ def test_and_save_api_key(api_key: str, *, settings: dict, activate_client) -> d
         thinking="disabled",
     )
     result = test_client({"mode": "connection_test", "instruction": "Return connected=true."})
-    if not isinstance(result, dict) or not result.get("_llm_usage"):
+    if not isinstance(result, dict) or result.get("connected") is not True or not result.get("_llm_usage"):
         raise RuntimeError("DeepSeek 没有返回有效的 JSON 测试结果；密钥未保存。")
 
     save_deepseek_api_key(api_key)

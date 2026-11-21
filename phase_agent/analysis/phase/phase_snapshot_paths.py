@@ -28,7 +28,8 @@ def phase_snapshot_directory(root, method, model_version=None, *, state=None):
             raise ValueError("缺少相图输出所属模型版本，不能推测 epoch")
         return (
             model_output_directory(root, version, state=state)
-            / "phase_diagrams"
+            / "phase_diagram"
+            / "_internal"
             / method
             / "history"
         )

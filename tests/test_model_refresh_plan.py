@@ -17,11 +17,13 @@ def test_thresholds_and_duplicate_structure():
     assert result["maximum_supplemental_count"] == 0
 
 
-def test_far_sampling_is_global_ten_percent_not_per_stratum():
+def test_all_far_structures_are_predicted():
     rows = [row(i, .02, phase=f"phase{i}") for i in range(21)]
     result = build_model_refresh_plan(rows, old_version="old", new_version="new")
-    assert len(result["candidates"]) == 3
-    assert len(result["coverage_gaps"]) == 18
+    assert len(result["candidates"]) == 21
+    assert all(r["operation"] == "predict" for r in result["candidates"])
+    assert result["deferred"] == 0
+    assert result["coverage_gaps"] == []
     assert result == build_model_refresh_plan(reversed(rows), old_version="old", new_version="new")
 
 
@@ -60,4 +62,9 @@ def test_plan_advertises_new_force_threshold_only():
     assert plan["policy"]["force_threshold"] == .1
     assert plan["policy"]["relax_below"] == .001
     assert plan["policy"]["predict_through"] == .01
-    assert plan["policy"]["audit_fraction"] == .1
+    assert plan["policy"]["audit_fraction"] == 1.0
+
+
+def test_far_force_threshold_is_strictly_above_point_two():
+    assert not supplemental_relaxation_required(.010001, [[.2, 0, 0]])
+    assert supplemental_relaxation_required(.010001, [[.200001, 0, 0]])

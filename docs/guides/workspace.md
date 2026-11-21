@@ -21,22 +21,19 @@ agent_memory/                         记忆阅读视图
 structures/
   reference_structures/               母结构与相参考
   candidate_structures/               生成的候选结构
-submissions/epochN_实际模型版本/
-  Search-group-0001/                  同一次branch搜索链
-    Relax-0001/
-    Relax-0001_MC-round-0001/
-    Relax-0001_MC-round-0002/
-    DFT-round-0001_方案标识/
-  MLIP-finetune-round-0001/            本epoch原模型的微调输入
+submissions/epochN/
+  calculations/                       登记的各阶段输入与结果
+  delivery/transfers/                  普通计算与训练的交付包
+  delivery/relax_mc/                  Relax/MC 交付包
+  evidence/                           已核验结果、回收证据与归档
 analysis_outputs/
-  output_index.md                     提交、结果、分析的文件索引
-  round_summary.csv                   跨epoch总览
-  epochN_实际模型版本/
-    phase_diagrams/mlip|dft|combined/  当前相图与history快照
-    Search-group-0001/DFT-round-…/
-      comparisons/                    能量、受力CSV及plots
-      training/                       可训练数据
-      diagnostics/                    磁矩检查
+  latest/                             当前 MLIP 相图、当前模型 DFT 误差及状态
+  epochN/
+    phase_diagram/                    每轮唯一相图目录，按可核实事件顺序排列
+      0_update_phasediagram/          初次凸包更新及图件
+      1_relaxmc-1/                    首次 Relax/MC 相图更新（若发生）
+      2_dft-selection-1/              首次 DFT 选点图（若发生）
+workflow_state/analysis/              内部索引、跨轮汇总及未分配证据
 logs/                                 日志
 history_backups/                      唯一旧版本、恢复资料及整理清单
 documentation/                        工作区说明
@@ -95,16 +92,17 @@ submissions 与 analysis_outputs 共用 state.upload_layout.model_rounds 的模�
 
 新版 Agent 输出目录：
 
-    analysis_outputs/epoch0_mace-mh-1/
-      phase_diagrams/mlip/phase_diagram.csv
+    analysis_outputs/epoch0/
+      phase_diagram/0_update_phasediagram/
+      phase_diagram/_internal/mlip/phase_diagram.csv
       Search-group-0001/DFT-round-0001_<operation>/
         comparisons/{energy_comparison,force_comparison,metrics}.csv
         comparisons/plots/
         diagnostics/magnetic_moments.csv
         training/training.json
       round_metrics.csv
-    analysis_outputs/round_summary.csv
-    analysis_outputs/output_index.md
+    workflow_state/analysis/round_summary.csv
+    workflow_state/analysis/output_index.md
 
 output_index.md 是查找入口：列出已登记的相图、误差、磁矩、绘图、训练输入路径及文件是否存在；不扫描原始计算数据、不计算新结果。round_summary.csv 用于跨 epoch 总览，round_metrics.csv 用于单 epoch 多 DFT 轮误差比较。索引在 Agent 发布 DFT 分析产品时更新，内容相同不重写。
 

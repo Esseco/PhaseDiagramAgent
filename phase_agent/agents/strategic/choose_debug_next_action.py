@@ -143,7 +143,9 @@ def choose_debug_next_action(
     )
     if mc_action is not None:
         return mc_action
-    has_mc = any(row.get("stage") == "deep_search" for row in state.get("tasks") or [])
+    from phase_agent.science.mc.second_round_state import has_relevant_mc_tasks
+
+    has_mc = has_relevant_mc_tasks(state)
     if has_mc:
         from phase_agent.science.mc.second_round_state import (
             first_round_source,
@@ -306,7 +308,9 @@ def _mc_action_from_completed_relax(
         second_round_already_allocated,
     )
 
-    has_mc = any(row.get("stage") == "deep_search" for row in state.get("tasks") or [])
+    from phase_agent.science.mc.second_round_state import has_relevant_mc_tasks
+
+    has_mc = has_relevant_mc_tasks(state)
     source = first_round_source(state, version) if has_mc else None
     if has_mc and (
         source is None
@@ -318,7 +322,12 @@ def _mc_action_from_completed_relax(
     pool = (state.get("branch_hull_batches") or {}).get(hull_version) or {}
     if pool.get("model_version") != version:
         return None
-    diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    from phase_agent.analysis.phase.mc_snapshot import mc_model_snapshot
+
+    try:
+        diagram = mc_model_snapshot(state, version)
+    except ValueError:
+        return None
     if (
         diagram.get("status") != "completed"
         or diagram.get("model_version") != version

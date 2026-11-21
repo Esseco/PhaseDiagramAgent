@@ -48,10 +48,58 @@ def second_round_completed(state, model_version):
     )
 
 
+def legacy_committee_task_keys(state):
+    """Only exclude completed old trajectories proven by approved repair evidence."""
+    from phase_agent.analysis.phase.energy_consistency import legacy_mc_mean_record_ids
+
+    records = {row.get("record_id"): row for row in state.get("phase_records") or []}
+    verified_ids = set()
+    for repair_id, repair in (state.get("mc_energy_repairs") or {}).items():
+        preview = repair.get("preview") or {}
+        if preview.get("checksum") != repair_id or not repair.get("approval_record_id"):
+            continue
+        for frame in preview.get("frames") or []:
+            record = records.get(frame.get("record_id")) or {}
+            if (
+                record.get("source_task_id") == frame.get("source_task_id")
+                and record.get("structure_id") == frame.get("structure_id")
+                and record.get("structure_sha256") == frame.get("structure_sha256")
+            ):
+                verified_ids.add(record.get("record_id"))
+    snapshot = {"entries": [{"record_id": key} for key in verified_ids]}
+    legacy_ids = set(legacy_mc_mean_record_ids(state, snapshot))
+    task_ids = {records[key].get("source_task_id") for key in legacy_ids}
+    return {
+        row.get("task_key")
+        for row in state.get("tasks") or []
+        if row.get("task_id") in task_ids
+        and row.get("status") == "completed"
+        and row.get("task_key")
+    }
+
+
+def has_relevant_mc_tasks(state):
+    ignored = legacy_committee_task_keys(state)
+    version = state.get("active_model_version")
+    return any(
+        row.get("stage") == "deep_search"
+        and row.get("task_key") not in ignored
+        and (
+            not version
+            or row.get("model_version") in (None, version)
+            or row.get("status") in {"pending", "running"}
+        )
+        for row in state.get("tasks") or []
+    )
+
+
 def first_round_source(state, model_version):
     """Latest fully recovered wave seeds either addition; retain the saved field names."""
+    ignored = legacy_committee_task_keys(state)
     segments = [
-        row for row in _reconciled_segments(state) if row.get("model_version") == model_version
+        row
+        for row in _reconciled_segments(state)
+        if row.get("model_version") == model_version and row.get("task_key") not in ignored
     ]
     indexed = _with_legacy_segment_indices(segments)
     latest = max((row["_effective_segment_index"] for row in indexed), default=0)
@@ -117,10 +165,11 @@ def second_round_candidates(candidates, state, diagram, model_version):
     source = first_round_source(state, model_version)
     if not source:
         return [], []
+    ignored = legacy_committee_task_keys(state)
     completed = {
         row.get("branch_id"): row
         for row in _reconciled_segments(state)
-        if row.get("model_version") == model_version
+        if row.get("model_version") == model_version and row.get("task_key") not in ignored
     }
     entries_by_path = {}
     for entry in diagram.get("entries") or []:

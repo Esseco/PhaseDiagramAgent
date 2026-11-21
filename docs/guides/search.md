@@ -58,10 +58,14 @@ round_budget_review记录choice、两方案预期收益和相对成本依据、r
 
 候选模型经独立验证和明确激活后，先保留旧相图，再通过 prepare_model_refresh 审阅结构清单、模型/参数、校验和与成本，准备远端 Relax/Single-point 输入。实际范围以冻结方案为准，不因继续消息自动提交或扩大。
 
-选择复用 analysis/feedback/model_refresh_plan.py：按旧模型正式相图 EHull（eV/atom）冻结首批分层；小于 0.001 的结构全部弛豫，0.001–0.010（含两端）全部单点，大于 0.010 的结构按组分与相分层抽取 10%（总数向上取整）做单点。没有可用 EHull 的已登记结构保留单点，不将其假定为远凸包。刷新后只用新模型结果构建其凸包，暂缓和缺失项标记 partial；不能以 partial 相图单独宣称全局收敛。
+选择复用 analysis/feedback/model_refresh_plan.py：按已核验的基准相图冻结首批分层；使用 latest_valid_per_structure_v1 或外推恢复基准时，登记绑定的 D/H 参考；EHull（eV/atom）小于 0.001 的结构全部弛豫，其余结构全部进行单点预测，缺少 EHull 的已登记结构也保留单点。当前实现不是对高于 0.010 的结构抽样 10%。采用 latest_valid_per_structure_v1 时，总相图按每个结构最新有效记录保留来源模型，可能包含不同模型；单模型相图单独保存，混合模型的能量可比性应明确审查。暂缓和缺失项标记 partial，不能以 partial 相图单独宣称全局收敛。
 
 新方案在同一远端刷新任务中先做单点，再按首批冻结分层检查最大原子力模长：0.001–0.010 eV/atom 严格大于 0.1 eV/Å，>0.010 eV/atom 的抽样点严格大于 0.2 eV/Å 时立即弛豫；无旧 EHull 的结构保守使用 0.1 eV/Å。单点先保存与输入结构和模型身份绑定的受力缓存，弛豫失败后在同一任务目录恢复时复用，不重新计算已完成单点。刷新交付包携带必要的受控执行器；一批审批及一次提交覆盖该条件弛豫范围。回收后校验逐原子受力、阈值、结构身份和弛豫收敛，全部有效后更新本地凸包、版本归档及 latest；缺力、身份不符或失败时保持等待并保留结果，不宣称完成。旧冻结方案按原语义恢复。
 
 刷新完成后，若新模型没有有效新增 Branch，先生成并展示实际数量和分布，再单独审批 Relax/MC；后续比较旧 Branch 在新模型下续搜、新 Branch 和 DFT。详见 [epoch 工作流](../architecture/workflow.md)。
 
 实现：[model_refresh_plan.py](../../phase_agent/analysis/feedback/model_refresh_plan.py)、[model_refresh_gate.py](../../phase_agent/tools/workflows/model_refresh_gate.py)、[training_context.py](../../phase_agent/evidence/training_context.py)。
+
+For a complete, frame-verified DIRECT recovery batch, the DIRECT selection supplies
+the sampling; do not add the ordinary DFT independent-audit candidates. Preserve
+historical audit records. Ordinary DFT selection retains its audit requirement.

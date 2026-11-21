@@ -14,6 +14,8 @@ def fixture(tmp_path):
     state = {
         "workspace_layout": {"workspace_root": str(tmp_path)},
         "active_model_version": "m1",
+        "analysis_output_directory": str(tmp_path / "analysis_outputs"),
+        "upload_layout": {"model_rounds": {"m1": 1}},
         "qbc_candidates": [
             {
                 "candidate_id": "s1",
@@ -28,6 +30,16 @@ def fixture(tmp_path):
             }
         ],
     }
+    from hashlib import sha256
+    frame = tmp_path / "s1.vasp"
+    frame.write_text("test frame", encoding="utf8")
+    digest = sha256(frame.read_bytes()).hexdigest()
+    state["qbc_candidates"][0].update(structure_path=str(frame), structure_sha256=digest)
+    state["phase_diagrams"] = {"mlip": {"status": "completed", "model_version": "m1", "version": "h1", "entries": [
+        {"composition": {"O": 2}, "eform_per_O2": 0, "phase": "O3", "is_stable": True},
+        {"composition": {"Na": 1, "O": 2}, "eform_per_O2": 0, "phase": "O3", "is_stable": True},
+        {"composition": {"Na": 0.5, "O": 2}, "eform_per_O2": -0.1, "phase": "O3", "is_stable": False, "structure_sha256": digest},
+    ]}}
     action = {
         "tool": "select_dft_candidates",
         "task_key": "select1",
@@ -61,6 +73,9 @@ def test_approval_exports_one_json_without_changing_science(tmp_path):
     assert row["H"] is None and row["training_membership"] == "unknown"
     assert data["submit_authorized"] is False and data["actual"] is None
     assert len(list(path.parent.iterdir())) == 2
+    assert Path(artifacts["selection_plot"]).is_file()
+    assert Path(artifacts["selection_plot_metadata"]).is_file()
+    assert Path(artifacts["selection_plot"]).is_relative_to(tmp_path / "analysis_outputs")
 
 
 def test_prepared_inventory_updates_same_file_and_keeps_plan(tmp_path):
@@ -73,7 +88,7 @@ def test_prepared_inventory_updates_same_file_and_keeps_plan(tmp_path):
         {"accepted": [action["parameters"]["decisions"][0]], "rejected": []},
         {"status": "prepared", "directory": "upload"},
     )
-    assert result == artifacts
+    assert result["json"] == artifacts["json"] and result["text"] == artifacts["text"]
     assert "已生成输入" in Path(result["text"]).read_text(encoding="utf-8")
     path = Path(result["json"])
     data = raw_record(json.loads(path.read_text(encoding="utf-8")))

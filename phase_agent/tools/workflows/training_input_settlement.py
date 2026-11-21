@@ -3,7 +3,7 @@
 from phase_agent.tools.budget.settle_budget import settle_budget
 
 
-def settle_training_input(state, action, execution, *, record_id):
+def training_input_eligible(state, action, execution):
     key = action.get("task_key")
     reservation = (state.get("budget_reservations") or {}).get(key) or {}
     payload = execution.get("result") or {}
@@ -20,7 +20,7 @@ def settle_training_input(state, action, execution, *, record_id):
         or reservation.get("relative_cost", 0) != 0
         or key in (state.get("pending_execution_policies") or {})
     ):
-        return state
+        return False
     handoffs = payload.get("handoffs") or []
     jobs = (state.get("remote_finetune_jobs") or {}).values()
     if not handoffs or not all(
@@ -35,7 +35,14 @@ def settle_training_input(state, action, execution, *, record_id):
         )
         for handoff in handoffs
     ):
+        return False
+    return True
+
+
+def settle_training_input(state, action, execution, *, record_id):
+    if not training_input_eligible(state, action, execution):
         return state
+    key = action.get("task_key")
     current = settle_budget(
         state,
         task_key=key,

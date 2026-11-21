@@ -12,4 +12,9 @@ def model_upload_directory(root, state, model_version):
         other != label and int(number) == int(rounds[label]) for other, number in rounds.items()
     ):
         raise ValueError("Model epoch registration is ambiguous")
-    return Path(root) / f"epoch{int(rounds[label]) - 1}"
+    from phase_agent.evidence.model_epoch import model_epoch
+
+    epoch = model_epoch(state, label)
+    if not epoch:
+        raise ValueError("Model epoch registration is unavailable")
+    return Path(root) / epoch

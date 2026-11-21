@@ -105,3 +105,24 @@ def test_existing_approval_is_preserved_and_still_shown():
     reply = format_turn_reply("结果包仍未登记", s)
     assert "已核验并入账" in reply and "同意" in reply
     assert s == before
+
+
+def test_accepted_threshold_stop_requires_all_tasks_and_valid_evidence():
+    s = facts()
+    row = s["relax_mc_batches"]["b"]
+    row.update(status="paused", formal_recovery_status="accepted")
+    row["result_summary"].update(
+        status="paused", reason="continuation_pool_below_minimum",
+        completed_mc_waves=[0], failed_task_ids=[],
+    )
+    for number, task in enumerate(s["tasks"]):
+        task.update(task_id=str(number), relax_mc_bundle_id="b")
+    assert batch_return_facts(s)["all_registered_returns_verified"]
+    s["tasks"][0]["status"] = "running"
+    assert not batch_return_facts(s)["all_registered_returns_verified"]
+    s["tasks"][0]["status"] = "completed"
+    row["result_summary"]["failed_task_ids"] = ["0"]
+    assert not batch_return_facts(s)["all_registered_returns_verified"]
+    row["result_summary"]["failed_task_ids"] = []
+    row["plan_checksum"] = "different"
+    assert not batch_return_facts(s)["all_registered_returns_verified"]

@@ -16,7 +16,10 @@ def commit_quality_change(state_path, state, manager, transform, *, ledger_path,
 
     path, ledger = Path(state_path), Path(ledger_path)
     control = control_path(path)
-    with FileLock(str(control) + ".lock", timeout=10):
+    with (
+        FileLock(str(control) + ".lock", timeout=10),
+        FileLock(str(ledger.resolve()) + ".lock", timeout=30),
+    ):
         raw, ledger_raw = path.read_bytes(), ledger.read_bytes()
         saved = json.loads(raw)
         if saved.get("workflow_control_revision") != state.get(
@@ -34,6 +37,11 @@ def commit_quality_change(state_path, state, manager, transform, *, ledger_path,
             raise ValueError("审查期间项目已变化，本次不覆盖")
         revision = uuid4().hex
         record = {
+            **{
+                key: control_before[key]
+                for key in ("path_relocation_revision", "path_relocations")
+                if control_before and key in control_before
+            },
             "schema_version": 1,
             "state_path": str(path.resolve()),
             "revision": revision,
@@ -48,7 +56,7 @@ def commit_quality_change(state_path, state, manager, transform, *, ledger_path,
         updated["workflow_control_revision"] = revision
         try:
             _write_json(control, record)
-            fresh.save(ledger)
+            fresh.save(ledger, _lock_held=True)
             _write_json(path, updated)
         except Exception:
             _write_json(path, saved)
@@ -59,11 +67,15 @@ def commit_quality_change(state_path, state, manager, transform, *, ledger_path,
                 _write_json(control, control_before)
             raise
         manager.data = fresh.data
+        manager._ledger_path = fresh._ledger_path
+        manager._ledger_identity = fresh._ledger_identity
+        manager._ledger_data_digest = fresh._ledger_data_digest
     return result
 
 
 def commit_human_quality_review(
-    state_path, state, manager, *, review_ids, decision, user_message, ledger_path, directory=None
+    state_path, state, manager, *, review_ids, decision, user_message, ledger_path, directory=None,
+    expected_hull=None, expected_targets=None,
 ):
     from phase_agent.analysis.phase.phase_quality_actions import apply_quality_review
     from phase_agent.analysis.phase.phase_quality_reports import get_phase_quality_report
@@ -89,6 +101,17 @@ def commit_human_quality_review(
         presented, current = get_phase_quality_report(state), get_phase_quality_report(saved)
         if presented["input_fingerprint"] != current["input_fingerprint"]:
             raise ValueError("相图或结构已变化，请使用最新编号")
+        if expected_targets is not None:
+            actual_targets = {
+                row["review_id"]: {
+                    "geometry_key": row["geometry_key"],
+                    "record_ids": sorted(row["record_ids"]),
+                }
+                for row in current["structures"]
+                if row["review_id"] in review_ids
+            }
+            if current["hull_version"] != expected_hull or actual_targets != expected_targets:
+                raise ValueError("排除范围与当前相图的几何或记录不一致")
         return apply_quality_review(
             saved,
             fresh,

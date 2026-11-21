@@ -34,15 +34,27 @@ def prepare_react_proposal(frame):
         )
         if response:
             return response
+    frozen_branch_proposal = (
+        context.get("saved_input_only")
+        and not stored
+        and getattr(frame.get("agent_client"), "_codex_structured", False) is True
+        and getattr(frame.get("agent_client"), "_frozen_generation_draft", False) is True
+    )
+    if frozen_branch_proposal and context.get("manager") is None:
+        raise ValueError("frozen_branch_requires_live_ledger")
     summary = (
         call_with_optimizations(
             agent_state_summary, current, _optimizations={"_approval_only": True}
         )
-        if context.get("saved_input_only")
-        else agent_state_summary(current, manager=context.get("manager"))
+        if context.get("saved_input_only") and not frozen_branch_proposal
+        else (
+            agent_state_summary(current, manager=context["manager"])
+            if context.get("manager") is not None
+            else agent_state_summary(current)
+        )
     )
     summary["user_message"] = str(context.get("user_message") or "")
-    if stored:
+    if stored and not (context.get("saved_input_only") and decision in {"approve", "reject"}):
         summary.setdefault("decision_context", {})["pending_proposal"] = deepcopy(
             stored["agent_proposal"]
         )
@@ -164,11 +176,10 @@ def stale_proposal_error(proposal, current, context, config):
 
     if action.get("tool") == "update_mlip" and training_pending_validation(current):
         return "训练结果已回收；旧训练方案不可再次执行。"
-    from phase_agent.evidence.post_dft_assessment import post_dft_assessment
+    if action.get("_post_dft_scope_key"):
+        from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
-    assessment = post_dft_assessment(current, context.get("effective_config") or config)
-    if action.get("_post_dft_scope_key") and (
-        not assessment or action["_post_dft_scope_key"] != assessment.get("scope_key")
-    ):
-        return "DFT分析依据已变化；请重新生成并审核方案。"
+        assessment = post_dft_assessment(current, context.get("effective_config") or config)
+        if not assessment or action["_post_dft_scope_key"] != assessment.get("scope_key"):
+            return "DFT分析依据已变化；请重新生成并审核方案。"
     return None

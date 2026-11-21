@@ -321,6 +321,7 @@ def test_remote_publication_includes_bound_machine_readable_diagnostics(tmp_path
 
     state = state_with_task(tmp_path)
     state["active_model_version"] = "m"
+    state["tasks"][0]["model_version"] = "m"
     record_remote_diagnostics(tmp_path, state, [], ["t"], {}, None)
     write(tmp_path / "workflow_state.json", {"tasks": state["tasks"]})
     manifest = {"bundle_id": "b", "plan_checksum": "p", "model_version": "m", "config_version": "c"}

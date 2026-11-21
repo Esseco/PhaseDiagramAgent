@@ -14,7 +14,8 @@ def restored_records(state):
         for record_id, digest in event["sha_by_record"].items():
             row = rows.get(record_id) or {}
             model = row.get("model_version") or row.get("source_version")
-            if model == event["model_version"] and row.get("structure_sha256") == digest:
+            expected = (event.get("source_model_by_record") or {}).get(record_id, event["model_version"])
+            if model == expected and row.get("structure_sha256") == digest:
                 protected.add((model, record_id))
     return protected
 
@@ -31,7 +32,7 @@ def restore_quality_records(
 
     if human_requested is not True or not str(reason).strip() or backup_root is None:
         raise ValueError("恢复需要明确人工指令、原因和备份目录")
-    requested, selected = set(review_ids), {}
+    requested, selected, source_models = set(review_ids), {}, {}
     model = state.get("active_model_version")
     for review_id in requested:
         entry = next(
@@ -63,6 +64,9 @@ def restore_quality_records(
             if record_id not in originals:
                 raise ValueError("备份缺少待恢复记录")
             selected[record_id] = (originals[record_id], manifest)
+            source_models[record_id] = (entry.get("source_model_by_record") or {}).get(
+                record_id, model
+            )
     if not selected:
         raise ValueError("未选择恢复项")
     current_rows = {
@@ -76,7 +80,7 @@ def restore_quality_records(
         row = current_rows.get(record_id)
         if not row or not str(row.get("status", "")).startswith("excluded_"):
             raise ValueError("记录已恢复或不再处于排除状态")
-        if (row.get("model_version") or row.get("source_version")) != model:
+        if (row.get("model_version") or row.get("source_version")) != source_models[record_id]:
             raise ValueError("不能恢复其他模型的排除结果")
         ignored = {"status", "phase_quality_review"}
         if {k: v for k, v in row.items() if k not in ignored} != {
@@ -144,6 +148,7 @@ def restore_quality_records(
     current, shadow = deepcopy(state), deepcopy(manager)
     event = {
         "model_version": model,
+        "source_model_by_record": source_models,
         "review_ids": sorted(requested),
         "record_ids": sorted(selected),
         "sha_by_record": {key: value[0].get("structure_sha256") for key, value in selected.items()},

@@ -79,3 +79,22 @@ def test_chat_rerun_defers_to_current_decision_pipeline(tmp_path):
     assert handle(handler, "重新生成branch", state, [], None) is None
     assert calls == []
     assert json.loads(path.read_text(encoding="utf-8")) == state
+
+
+def test_dft_regeneration_identifies_distinct_selected_geometry_frames():
+    state = _state()
+    record = _record("dft-1", "select_dft_candidates", status="prepared")
+    record["final_action"]["parameters"]["decisions"] = [
+        {"candidate_id": "S:frame:a", "action": "DFT_SINGLE_POINT"},
+        {"candidate_id": "S:frame:b", "action": "DFT_SINGLE_POINT"},
+    ]
+    state["action_records"].append(record)
+    state["tasks"] += [
+        {"task_id": "D-1", "stage": "dft_single_point", "parent_decision_id": "dft-1",
+         "structure_id": "S", "object_id": "S:frame:a"},
+        {"task_id": "D-2", "stage": "dft_single_point", "parent_decision_id": "dft-1",
+         "structure_id": "S", "object_id": "S:frame:b"},
+    ]
+    plan = identify_rerun_plan("重新生成当前轮DFT输入 dft-1", state)
+    assert plan["status"] == "identified"
+    assert plan["affected_task_count"] == 2

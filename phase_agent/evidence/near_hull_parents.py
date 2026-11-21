@@ -12,6 +12,12 @@ def parent_evidence(state, branches, *, boundary=None, references=None):
     model = state.get("active_model_version")
     if not model or diagram.get("status") != "completed" or diagram.get("model_version") != model:
         raise ValueError("near_hull_requires_current_model_phase_diagram")
+    from phase_agent.evidence.model_diagram_scope import active_model_state
+
+    state = active_model_state(state)
+    diagram = state["phase_diagrams"]["mlip"]
+    if diagram.get("status") != "completed" or diagram.get("model_version") != model:
+        raise ValueError("near_hull_requires_current_model_phase_diagram")
     if not diagram.get("version"):
         raise ValueError("near_hull_requires_versioned_phase_diagram")
     entries = {row.get("record_id"): row for row in diagram.get("entries") or []}

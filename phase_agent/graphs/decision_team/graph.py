@@ -1,6 +1,7 @@
 """Bounded three-role reasoning inside the existing proposal/approval boundary."""
 
 from functools import lru_cache
+from phase_agent.runtime.api_deadline import model_round_operation
 from langgraph.graph import StateGraph, START, END
 from phase_agent.graphs.decision_team.state import DecisionTeamState
 from phase_agent.graphs.decision_team.runtime import DecisionTeamRuntime, merge_usage
@@ -72,6 +73,7 @@ def build_proposal_graph():
     return graph.compile(checkpointer=False, name="scientific_decision_team")
 
 
+@model_round_operation
 def request_with_langgraph(agent_client, payload):
     # Existing callers own their potentially large state/history. Team evidence
     # is projected separately; the legacy proposal path must not copy it again.

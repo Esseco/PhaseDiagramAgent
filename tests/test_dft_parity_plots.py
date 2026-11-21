@@ -84,3 +84,28 @@ def test_publication_failure_does_not_crash_or_overwrite(tmp_path, monkeypatch):
     assert report["status"] == "unavailable"
     assert "发布失败" in report["reason"]
     assert path.read_bytes() == b"original"
+
+
+def test_filtered_old_plot_is_archived_before_replacement(tmp_path):
+    from phase_agent.analysis.feedback.dft_parity_plots import archive_filtered_parity
+
+    root = tmp_path / "analysis_outputs"
+    folder = root / "epoch1" / "KFold_Error" / "job"
+    folder.mkdir(parents=True)
+    (folder / "energy_parity.png").write_bytes(b"old-energy")
+    (folder / "force_parity.png").write_bytes(b"old-force")
+    (folder / "parity_metrics.json").write_text('{"fingerprint": "old"}', encoding="utf8")
+    archive_filtered_parity(root, folder, [], [], "new")
+    archives = list((root / "history" / "filtered_parity").iterdir())
+    assert len(archives) == 1
+    assert (archives[0] / "energy_parity.png").read_bytes() == b"old-energy"
+    assert (archives[0] / "force_parity.png").read_bytes() == b"old-force"
+    assert not (folder / "energy_parity.png").exists()
+
+
+def test_new_parity_plots_only_publish_png(tmp_path):
+    energy, force = tables()
+    report = export_parity_plots(energy, force, tmp_path, "epoch0")
+    assert set(report["files"]) == {"energy_png", "force_png"}
+    assert not list(tmp_path.glob("*.pdf"))
+    assert not list(tmp_path.glob("*.svg"))

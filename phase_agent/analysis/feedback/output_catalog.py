@@ -32,7 +32,7 @@ def _relative_target(path, root):
         return Path(path).as_posix()
 
 
-def _project_overview(root, state):
+def _project_overview(root, state, navigation_root=None):
     from phase_agent.tools.step_runner.build_status_summary import build_status_summary
 
     summary = build_status_summary(state)
@@ -41,7 +41,7 @@ def _project_overview(root, state):
     labels = {"pending": "待回传/核对", "completed": "已完成", "failed": "失败待核对"}
     tasks = "；".join(f"{labels.get(key, key)} {value}" for key, value in sorted(counts.items()))
     structures = [
-        f"[{label}](<{_relative_target(root.parent / relative, root)}>)"
+        f"[{label}](<{_relative_target(root.parent / relative, navigation_root or root)}>)"
         for label, relative in (
             ("母结构", "structures/reference_structures"),
             ("候选结构", "structures/candidate_structures"),
@@ -59,8 +59,56 @@ def _project_overview(root, state):
     ]
 
 
-def catalog_markdown(rows, root, state=None):
+
+def _english_catalog(rows, root, state, navigation_root):
+    """Human-readable navigation for the organized analysis layout."""
+    from phase_agent.tools.step_runner.build_status_summary import build_status_summary
+
+    lines = ["# Analysis output index", "", "Registered products only; missing files are identified explicitly.", ""]
+    if state is not None:
+        summary = build_status_summary(state)
+        epoch = model_epoch(state, summary["model_version"]) or "unrecorded"
+        lines += [f"Project: **{root.parent.name}**  ", f"Current epoch: **{epoch}**  ",
+                  f"Pending approvals: **{summary['pending_approvals']}**", ""]
+    latest = root / "latest"
+    lines += [f"- [Latest analysis](<{_relative_target(latest / 'README.md', navigation_root)}>)",
+              f"- [MLIP publication status](<{_relative_target(latest / 'phase_diagram_status.json', navigation_root)}>)",
+              f"- [DFT error publication status](<{_relative_target(latest / 'dft_error_status.json', navigation_root)}>)"]
+    summary_path = navigation_root / "round_summary.csv"
+    if summary_path.is_file():
+        lines.append("- [Round summary](round_summary.csv)")
+    gpu = navigation_root / "gpu_usage.csv"
+    if gpu.is_file():
+        lines.append("- [GPU usage](gpu_usage.csv)")
+    lines += ["", "## Epochs", ""]
+    epochs = sorted((p for p in root.iterdir() if p.is_dir() and re.fullmatch(r"epoch\d+", p.name)),
+                    key=lambda p: int(p.name[5:]))
+    for epoch in epochs:
+        lines.append(f"- [{epoch.name}](<{_relative_target(epoch / 'README.md', navigation_root)}>)")
+    failed = sorted(p for p in root.iterdir() if p.is_dir() and re.fullmatch(r"epoch\d+-extrapolation_failed", p.name))
+    if failed:
+        lines += ["", "## Failed epoch archives", ""]
+        for archive in failed:
+            lines.append(f"- [{archive.name}](<{_relative_target(archive / 'EXTRAPOLATION_ARCHIVE.md', navigation_root)}>)")
+    derived = [row for row in rows if row["product"] not in SUBMISSION_PRODUCTS]
+    if derived:
+        lines += ["", "## Registered products", ""]
+        for row in derived:
+            product = {"relax_mc_report": "Phase review report", "relax_mc_plot": "Phase review figure",
+                       "mlip 相图图片目录": "MLIP figure directory"}.get(row["product"], row["product"].replace("_", " "))
+            label = str(row.get("round") or "").replace("已保存相图", "saved phase plots")
+            target = Path(row["path"])
+            availability = "available" if row["exists"] else "missing"
+            lines.append(f"- {row['epoch']} · {label} · {product} ({availability}): "
+                         f"[{target.name}](<{_relative_target(target, navigation_root)}>)")
+    return "\n".join(lines) + "\n"
+
+
+def catalog_markdown(rows, root, state=None, index_directory=None):
     root = Path(root)
+    navigation_root = Path(index_directory) if index_directory is not None else root
+    if index_directory is not None:
+        return _english_catalog(rows, root, state, navigation_root)
     indexes = sorted(
         {row["submission_index_path"] for row in rows if row.get("submission_index_path")}
     ) or [str(root.parent / "submissions" / "README.md")]
@@ -69,20 +117,24 @@ def catalog_markdown(rows, root, state=None):
         "",
         "仅索引已登记的分析产物，不分析科学数据。缺失项标为缺失，不视为完成。",
         "",
-        *[f"- 提交与原始回传：[提交索引](<{_relative_target(path, root)}>)" for path in indexes],
+        *[f"- 提交与原始回传：[提交索引](<{_relative_target(path, navigation_root)}>)" for path in indexes],
         (
-            "- [跨 epoch summary](round_summary.csv)：模型与 DFT 轮次汇总。"
+            f"- [跨 epoch summary]({_relative_target(root / 'latest' / 'round_summary.csv', navigation_root)})：模型与 DFT 轮次汇总。"
+            if index_directory is not None and (root / "latest" / "round_summary.csv").is_file()
+            else "- [跨 epoch summary](round_summary.csv)：模型与 DFT 轮次汇总。"
             if (root / "round_summary.csv").is_file()
             else "- `round_summary.csv`：尚未生成。"
         ),
         "- 各 epoch 的 `round_metrics.csv`：本模型各 DFT 轮能量与受力误差。",
         "",
-        "- 完整发布状态：[MLIP](latest/phase_diagram_status.json) · [DFT误差](latest/dft_error_status.json)。状态未就绪时，latest 文件仅为上次完整版本。",
+        ("- Publication status: [MLIP](phase_diagram_status.json) · [DFT error](dft_error_status.json). "
+         "When not ready, saved files are the last complete version." if index_directory is not None else
+         "- 完整发布状态：[MLIP](latest/phase_diagram_status.json) · [DFT误差](latest/dft_error_status.json)。状态未就绪时，latest 文件仅为上次完整版本。"),
         "## 当前模型分析",
         "",
     ]
     if state is not None:
-        lines[2:2] = _project_overview(root, state)
+        lines[2:2] = _project_overview(root, state, navigation_root)
     derived = [row for row in rows if row["product"] not in SUBMISSION_PRODUCTS]
 
     def append_rows(selected):
@@ -105,7 +157,7 @@ def catalog_markdown(rows, root, state=None):
             status = "存在" if row["exists"] else "缺失"
             lines.append(
                 f"- {group}{row['round']} · {product}（{status}）："
-                f"[{target.name}](<{_relative_target(target, root)}>)"
+                f"[{target.name}](<{_relative_target(target, navigation_root)}>)"
             )
 
     current = [row for row in derived if row.get("current_model")]

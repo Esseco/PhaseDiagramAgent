@@ -87,7 +87,7 @@ class SearchFeedbackTest(unittest.TestCase):
         )
         self.assertEqual(duplicate["status"], "already_accounted")
 
-    def test_budget_exhaustion_is_not_convergence(self):
+    def test_legacy_cost_exhaustion_is_not_convergence(self):
         result = check_global_convergence(
             {
                 "tasks": [],
@@ -100,7 +100,7 @@ class SearchFeedbackTest(unittest.TestCase):
             }, rules={"hull_change_tolerance": .003, "stable_model_update_epochs": 2,
                       "final_energy_mae_tolerance": .003, "minimum_recent_dft_checks": 1}
         )
-        self.assertEqual(result["status"], "budget_exhausted")
+        self.assertEqual(result["status"], "insufficient_evidence")
         self.assertFalse(result["converged"])
 
 

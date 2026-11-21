@@ -133,7 +133,7 @@ def identify_rerun_plan(message, state):
                 task.get("parent_decision_id") == row.get("record_id")
                 or task.get("upload_operation_id") == operation
             )
-            and task.get("structure_id") in selected
+            and (task.get("object_id") or task.get("structure_id")) in selected
         ]
     affected = _affected_tasks(action, related)
     return {

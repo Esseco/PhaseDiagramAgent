@@ -41,6 +41,12 @@ ROUND_SUMMARY_FIELDS = (
     "force_mae_eV_per_A",
     "force_rmse_eV_per_A",
     "force_component_count",
+    "gs_matched_dft_tasks",
+    "gs_energy_mae_eV_per_atom",
+    "gs_force_mae_eV_per_A",
+    "sample_matched_dft_tasks",
+    "sample_energy_mae_eV_per_atom",
+    "sample_force_mae_eV_per_A",
     "error_status",
 )
 
@@ -76,6 +82,28 @@ def summarize_model_rounds(state):
             records, comparisons, round_name=f"MLIP:{version}"
         )
         metrics = comparison_metrics(energies, forces, {"model_version": version})
+        tasks_by_id = {row.get("task_id"): row for row in selected_tasks if row.get("task_id")}
+        gs_ids = {
+            row.get("task_id")
+            for row in records
+            if (tasks_by_id.get(row.get("task_id")) or {}).get("is_ground_state") is True
+            or (tasks_by_id.get(row.get("task_id")) or {}).get("selection_mode")
+            == "phase_diagram_gs"
+            or row.get("is_ground_state") is True
+            or row.get("selection_mode") == "phase_diagram_gs"
+        }
+        gs_e, gs_f = build_comparison_tables(
+            [r for r in records if r.get("task_id") in gs_ids],
+            [c for c in comparisons if c.get("task_id") in gs_ids],
+            round_name=f"MLIP:{version}:GS",
+        )
+        sp_e, sp_f = build_comparison_tables(
+            [r for r in records if r.get("task_id") not in gs_ids],
+            [c for c in comparisons if c.get("task_id") not in gs_ids],
+            round_name=f"MLIP:{version}:sample",
+        )
+        gs_metrics = comparison_metrics(gs_e, gs_f, {"model_version": version, "subset": "gs"})
+        sp_metrics = comparison_metrics(sp_e, sp_f, {"model_version": version, "subset": "sample"})
         gen_rows, unknown = _generations_for_model(generations, tasks, version)
         unknown = unknown or "generation_history" not in state
         summary = {
@@ -132,6 +160,12 @@ def summarize_model_rounds(state):
             force_mae_eV_per_A=metrics["forces"]["mae"],
             force_rmse_eV_per_A=metrics["forces"]["rmse"],
             force_component_count=metrics["forces"]["components"],
+            gs_matched_dft_tasks=gs_metrics["matched_structures"],
+            gs_energy_mae_eV_per_atom=gs_metrics["energy_per_atom"]["mae"],
+            gs_force_mae_eV_per_A=gs_metrics["forces"]["mae"],
+            sample_matched_dft_tasks=sp_metrics["matched_structures"],
+            sample_energy_mae_eV_per_atom=sp_metrics["energy_per_atom"]["mae"],
+            sample_force_mae_eV_per_A=sp_metrics["forces"]["mae"],
             error_status="completed"
             if dft and metrics["matched_structures"] == len(dft)
             else "partial",

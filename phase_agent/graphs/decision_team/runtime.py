@@ -1,6 +1,7 @@
 """Live clients and provider accounting stay outside graph State."""
 
 from dataclasses import dataclass, field
+import threading
 from typing import Any
 
 
@@ -24,16 +25,22 @@ class DecisionTeamRuntime:
     agent_client: Any
     payload: dict
     usages: list[dict] = field(default_factory=list)
+    _usage_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _pending_reliability: Any = field(default=None, repr=False)
 
     def call(self, client, request):
         try:
-            result = client(request)
+            from phase_agent.runtime.api_deadline import traced_model_call
+
+            result = traced_model_call(client, request)
         except Exception as error:
             if getattr(error, "llm_usage", None):
-                self.usages.append(error.llm_usage)
+                with self._usage_lock:
+                    self.usages.append(error.llm_usage)
             raise
         if isinstance(result, dict) and result.get("_llm_usage"):
-            self.usages.append(result["_llm_usage"])
+            with self._usage_lock:
+                self.usages.append(result["_llm_usage"])
         return result
 
     def expert_call(self, request):

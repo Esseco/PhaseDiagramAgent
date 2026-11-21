@@ -8,7 +8,7 @@ def test_shared_epoch_paths(tmp_path):
     state = {"active_model_version": "m1", "upload_layout": {"model_rounds": {"m1": 1, "m2": 2}}}
     for method in ("mlip", "dft", "combined"):
         path = phase_snapshot_directory(tmp_path, method, "m1", state=state)
-        assert path == tmp_path / "epoch0" / "phase_diagrams" / method / "history"
+        assert path == tmp_path / "epoch0" / "phase_diagram" / "_internal" / method / "history"
     assert "epoch1" in phase_snapshot_directory(tmp_path, "mlip", "m2", state=state).parts
 
 
@@ -21,7 +21,7 @@ def test_phase_csv_epoch_and_unchanged_reuse(tmp_path):
     first = update_phase_diagram(records, active_model_version="m1", output_directory=tmp_path,
                                 output_state=state)["diagrams"]["mlip"]
     path = Path(first["csv_path"])
-    assert path == tmp_path / "epoch0/phase_diagrams/mlip/phase_diagram.csv"
+    assert path == tmp_path / "epoch0/phase_diagram/_internal/mlip/phase_diagram.csv"
     with path.open(encoding="utf-8-sig") as stream:
         assert list(csv.DictReader(stream))[0]["epoch"] == "epoch0"
     stamp = path.stat().st_mtime_ns

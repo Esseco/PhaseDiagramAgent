@@ -65,7 +65,9 @@ def _training_return_facts(state):
     return facts
 
 
-def recovery_candidate_fingerprint(state, *, legacy_training_metadata=False):
+def recovery_candidate_fingerprint(
+    state, *, legacy_training_metadata=False, observe_relax_archives=False
+):
     """Return a cheap identity for the currently registered return sources."""
     from phase_agent.tools.remote.transfer_bundle import (
         _registered_archives,
@@ -169,6 +171,14 @@ def recovery_candidate_fingerprint(state, *, legacy_training_metadata=False):
         if legacy_training_metadata
         else _training_return_facts(state),
     }
+    if observe_relax_archives:
+        from phase_agent.persistence.state.read_versions import file_identity
+
+        payload["relax_archives"] = {
+            row["archive"]: file_identity(row["archive"])
+            for row in payload["relax_mc"]
+            if row["archive"]
+        }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
     ).hexdigest()
@@ -231,12 +241,17 @@ def _return_watch_signature(state):
             if S_ISDIR(stat.st_mode):
                 # Directory timestamps can lag new files on Windows. Inspect
                 # only immediate archives, without opening or walking them.
-                for archive in sorted(path.glob("*.zip")):
+                for watched in (
+                    *sorted(path.glob("*.zip")),
+                    *sorted((path / "transfer").glob("*.zip")),
+                    *sorted((path / "return-results").glob("*.zip")),
+                    *sorted((path / ".transfer_receipts").glob("*.sha256")),
+                ):
                     try:
-                        archive_stat = archive.stat()
+                        watched_stat = watched.stat()
                     except OSError:
                         continue
-                    signature.append((str(archive), archive_stat.st_mtime_ns, archive_stat.st_size))
+                    signature.append((str(watched), watched_stat.st_mtime_ns, watched_stat.st_size))
         except OSError:
             signature.append((value, None, None))
     return tuple(signature)
@@ -277,14 +292,21 @@ def recovery_candidate(state, *, state_path=None):
             return deepcopy(cached)
     processed = set(state.get("processed_task_ids") or [])
     feedback_processed = set(state.get("feedback_processed_task_ids") or [])
+    unprocessed = processed - feedback_processed
     backlog = [
         row
         for row in state.get("tasks") or []
-        if row.get("task_id") in processed - feedback_processed
+        if row.get("task_id") in unprocessed
         and row.get("stage")
         in {"relax_and_feature", "deep_search", "dft_single_point", "dft_relax"}
         and row.get("status") in {"completed", "failed", "timeout", "cancelled"}
     ]
+    from phase_agent.persistence.ledger.mc_energy_repair import missing_verified_repair_tasks
+
+    backlog.extend(missing_verified_repair_tasks(state))
+    from phase_agent.persistence.ledger.mc_energy_repair import stale_mc_energy_model_snapshots
+
+    stale_models = stale_mc_energy_model_snapshots(state)
     returned = has_registered_return(state) or any(
         awaiting_task_result(row)
         and isinstance(row.get("result_path"), str)
@@ -324,13 +346,63 @@ def recovery_candidate(state, *, state_path=None):
         "returned": bool(returned),
         "backlog_count": len(backlog),
         "fingerprint": fingerprint,
-        "pending": bool((returned or backlog) and not already_reviewed),
+        "pending": bool(stale_models or ((returned or backlog) and not already_reviewed)),
     }
     if cache_key is not None:
         with _RECOVERY_CACHE_LOCK:
             _RECOVERY_CACHE.clear()
             _RECOVERY_CACHE[cache_key] = deepcopy(result)
     return result
+
+
+def _refresh_recovered_submission_index(state):
+    """Refresh stale navigation only for handoffs whose results are reconciled."""
+    groups = {}
+    for batch in state.get("slurm_batches") or []:
+        handoff = batch.get("handoff") or {}
+        folder, directory = handoff.get("folder"), handoff.get("import_directory")
+        if not folder or not directory:
+            continue
+        root = next((p for p in Path(directory).parents if p.name == "submissions"), None)
+        if root:
+            groups.setdefault(root, {}).setdefault(str(folder), set()).add(batch.get("status"))
+    from phase_agent.tools.remote.submission_layout import write_submission_index
+
+    for root, expected in groups.items():
+        if not any("results_synced" in statuses for statuses in expected.values()):
+            continue
+        try:
+            index = json.loads((root / "submission_index.json").read_text(encoding="utf8"))
+            actual = {
+                str((row.get("submission_path") or {}).get("path")): set(row.get("status") or [])
+                for row in index.get("handoffs") or []
+            }
+        except (OSError, ValueError, TypeError, AttributeError):
+            actual = {}
+        if any(
+            "results_synced" in statuses and actual.get(folder) != statuses
+            for folder, statuses in expected.items()
+        ):
+            write_submission_index(root, state)
+
+
+def _copy_state(value):
+    """Detach a JSON-shaped tree quickly; any other type falls back to deepcopy."""
+
+    def detach(item):
+        kind = type(item)
+        if item is None or kind in (str, int, float, bool):
+            return item
+        if kind is list:
+            return [detach(row) for row in item]
+        if kind is dict:
+            return {key: detach(row) for key, row in item.items()}
+        raise TypeError
+
+    try:
+        return detach(value)
+    except (TypeError, RecursionError):
+        return deepcopy(value)
 
 
 def recover_saved_results(state, **dependencies):
@@ -341,8 +413,55 @@ def recover_saved_results(state, **dependencies):
     version = state.get("confirmed_config_version")
     if collector is None or manager is None or not bound or not version:
         return state
+    if state.get("parent_first_recovery_batches") and dependencies.get("state_path"):
+        from phase_agent.runtime.parent_first_recovery import recover_available_parent_first
+
+        state = recover_available_parent_first(
+            state, manager=manager, state_path=dependencies["state_path"]
+        )
+    from phase_agent.tools.state.reconcile_task_results import mark_recovered_batches
+
+    current = {
+        **state,
+        "slurm_batches": [dict(row) for row in state.get("slurm_batches") or []],
+    }
+    if mark_recovered_batches(current):
+        _save_runner_state(current, dependencies.get("state_path"))
+        state = current
+    _refresh_recovered_submission_index(state)
     candidate = recovery_candidate(state, state_path=dependencies.get("state_path"))
-    if not candidate["pending"]:
+    if not candidate["pending"] and not dependencies.get("force_metadata_rescan", False):
+        # A prior failed observation can remain in the saved report after the
+        # corresponding archive has been receipted. Clear that stale gate on
+        # the no-new-return fast path without reopening scientific processing.
+        collection = state.get("result_collection") or {}
+        unresolved = list(collection.get("transfer_errors") or [])
+        if unresolved:
+            from phase_agent.tools.remote.transfer_bundle import _archive_receipt, checksum
+
+            checked = []
+            for row in unresolved:
+                archive = Path(row.get("archive") or "")
+                try:
+                    receipt = _archive_receipt(archive.parent, archive)
+                    if receipt.is_file() and receipt.read_text(encoding="utf8").strip() == checksum(
+                        archive
+                    ):
+                        continue
+                except (OSError, ValueError, TypeError):
+                    pass
+                checked.append(row)
+            unresolved = checked
+        if (
+            collection.get("recovery_error")
+            and not unresolved
+            and not collection.get("historical_transfer_errors")
+        ):
+            current = _copy_state(state)
+            current["result_collection"].pop("recovery_error", None)
+            current["result_collection"].pop("transfer_errors", None)
+            _save_runner_state(current, dependencies.get("state_path"))
+            return current
         return state
     processed = set(state.get("processed_task_ids") or [])
     feedback_processed = set(state.get("feedback_processed_task_ids") or [])
@@ -379,14 +498,30 @@ def recover_saved_results(state, **dependencies):
     else:
         results = collector.collect_results(state)
         report = {"recovered_count": len(results)}
+    from phase_agent.persistence.ledger.mc_energy_repair import missing_verified_repair_tasks
+
+    repair_backlog = missing_verified_repair_tasks(state)
     incoming_ids = {row.get("task_id") for row in results}
     results = [
         *results,
         *(row for row in backlog if row.get("task_id") not in incoming_ids),
+        *(row for row in repair_backlog if row.get("task_id") not in incoming_ids),
     ]
-    current = deepcopy(state)
+    current = _copy_state(state)
     report = _classify_transfer_diagnostics(report, state)
     current["result_collection"] = deepcopy(report)
+    # A previous blocked collection must not survive a later clean receipt pass.
+    # Keep the diagnostic only while current transfer/validation errors remain.
+    if not any(
+        current["result_collection"].get(key)
+        for key in (
+            "transfer_errors",
+            "invalid_count",
+            "missing_structure_count",
+            "missing_marker_count",
+        )
+    ):
+        current["result_collection"].pop("recovery_error", None)
     if not results:
         # A soft collector failure is not successful observation. The results
         # already include saved feedback backlog, so valid partial evidence is
@@ -395,7 +530,35 @@ def recover_saved_results(state, **dependencies):
         if failure:
             current["result_collection"]["recovery_error"] = failure
             return current
-        return _complete_saved_comparisons(current, evaluator, manager, config, dependencies)
+        from phase_agent.persistence.ledger.mc_energy_repair import stale_mc_energy_model_snapshots
+
+        stale_models = stale_mc_energy_model_snapshots(current)
+        if stale_models:
+            from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
+
+            previous = current.get("phase_diagrams_by_model") or {}
+            rebuilt = update_phase_diagram(
+                current.get("phase_records") or [],
+                output_directory=config.get("phase_diagram_directory"),
+                parent_versions={
+                    f"mlip:{name}": row.get("version") for name, row in previous.items()
+                },
+                active_model_version=current.get("active_model_version"),
+                output_state=current,
+                model_versions_only=stale_models,
+            )["mlip_by_version"]
+            if set(rebuilt) != set(stale_models) or any(
+                row.get("status") != "completed" for row in rebuilt.values()
+            ):
+                raise ValueError("model_only_hull_rebuild_incomplete")
+            current.setdefault("phase_diagrams_by_model", {}).update(rebuilt)
+            if stale_mc_energy_model_snapshots(current):
+                raise ValueError("model_only_hull_still_stale")
+            _save_runner_state(current, dependencies.get("state_path") or config.get("state_path"))
+        updated = _complete_saved_comparisons(current, evaluator, manager, config, dependencies)
+        if dependencies.get("force_metadata_rescan", False):
+            _save_runner_state(updated, dependencies.get("state_path") or config.get("state_path"))
+        return updated
     reconciled = call_with_optimizations(
         reconcile_task_results, current, results, _optimizations={"_owned": True}
     )
@@ -430,6 +593,10 @@ def recover_saved_results(state, **dependencies):
     )
     current["result_collection"]["feedback_rejected"] = feedback.get("rejected") or []
     current = _complete_saved_comparisons(current, evaluator, manager, config, dependencies)
+    if current.get("parent_first_recovery_batches"):
+        from phase_agent.evidence.parent_first_recovery import advance_parent_first_recovery
+
+        current = advance_parent_first_recovery(current)
     _save_runner_state(current, state_path)
     return current
 

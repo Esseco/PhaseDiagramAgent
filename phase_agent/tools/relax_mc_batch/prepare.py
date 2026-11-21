@@ -28,6 +28,26 @@ def _runtime_source_checksums():
     }
 
 
+def _copy_frozen_inputs(entries, root):
+    """Reuse identical input bytes while preserving every source-path reference."""
+    mapping, by_digest = {}, {}
+    for entry in entries:
+        source = Path(entry["path"])
+        digest = file_checksum(source)
+        if digest != entry["sha256"]:
+            raise ValueError("input_file_changed_during_packaging")
+        target = by_digest.get(digest)
+        if target is None:
+            target = Path(root) / "inputs" / f"{len(by_digest):05d}.vasp"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            if file_checksum(target) != digest:
+                raise ValueError("input_copy_checksum_mismatch")
+            by_digest[digest] = target
+        mapping[str(source)] = str(target)
+    return mapping
+
+
 def prepare_batch(*, action, context):
     from phase_agent.tools.state.execution_progress import preparation_progress
     from phase_agent.tools.remote.input_validation import (
@@ -126,18 +146,29 @@ def prepare_batch(*, action, context):
             **existing,
             "submitted": False,
         }
-    plan = timed_call(
-        "RelaxMC：校验已批准方案",
-        diagnose,
-        action.get("target_ids") or [],
-        state,
-        manager,
-        config,
-        context["config_version"],
-        max_concurrent_jobs=(action.get("parameters") or {}).get("max_concurrent_jobs"),
-        phase_references=context.get("phase_references"),
-        category="processing",
-    )
+    try:
+        params = action.get("parameters") or {}
+        plan = timed_call(
+            "RelaxMC：校验已批准方案",
+            diagnose,
+            action.get("target_ids") or [],
+            state,
+            manager,
+            config,
+            context["config_version"],
+            max_concurrent_jobs=params.get("max_concurrent_jobs"),
+            phase_references=context.get("phase_references"),
+            bundle_post_mc_dft=params.get("bundle_post_mc_dft"),
+            max_dft_frames=int(params.get("max_dft_frames", 100)),
+            max_small_det_h=int(params.get("max_small_det_h", 6)),
+            category="processing",
+        )
+    except ValueError as error:
+        if not str(error).startswith(
+            ("na_layer_occupancy_invalid:", "invalid_na_composition_or_template:")
+        ):
+            raise
+        return {"status": "rejected", "reason": str(error), "state": state, "submitted": False}
     if plan["checksum"] != approved["checksum"]:
         return {
             "status": "awaiting_approval",
@@ -210,17 +241,10 @@ def prepare_batch(*, action, context):
     check_cancelled()
     preparation_progress("effects_started", {"directory": str(root)})
     root.mkdir(parents=True)
-    mapping = {}
-    for index, entry in enumerate(plan["inputs"]):
-        source = Path(entry["path"])
-        if file_checksum(source) != entry["sha256"]:
-            raise ValueError("input_file_changed_during_packaging")
-        target = root / "inputs" / f"{index:05d}.vasp"
-        target.parent.mkdir(exist_ok=True)
-        shutil.copy2(source, target)
-        mapping[str(source)] = str(target)
+    mapping = _copy_frozen_inputs(plan["inputs"], root)
     structures = {}
     branches = {}
+    frozen_branches = {row["branch_id"]: row for row in plan["branches"]}
     for bid in plan["branch_ids"]:
         branch = manager.data["branches"][bid]
         branches[bid] = {
@@ -228,6 +252,8 @@ def prepare_batch(*, action, context):
             for key in ("branch_id", "P", "H", "x", "T", "composition")
             if key in branch
         }
+        if frozen_branches[bid].get("mc_no_vacancies") is True:
+            branches[bid]["mc_no_vacancies"] = True
         branches[bid]["structure_ids"] = [
             r["structure_id"] for r in plan["structures"] if r["branch_id"] == bid
         ]
@@ -259,6 +285,29 @@ def prepare_batch(*, action, context):
         path.parent.mkdir(exist_ok=True)
         load_structure(reference).to(filename=path, fmt="poscar")
         references[name] = str(path)
+    dft_references = []
+    for index, rec in enumerate(state.get("dft_dataset_records") or []):
+        if not (
+            rec.get("status") == "completed"
+            and rec.get("checks_passed") is True
+            and rec.get("converged") is True
+            and rec.get("final_frame_valid") is True
+            and rec.get("training_ready") is True
+            and isinstance(rec.get("structure"), dict)
+        ):
+            continue
+        from pymatgen.core import Structure
+
+        ref_path = root / "references" / "dft_refs" / f"dft_{index:04d}.vasp"
+        ref_path.parent.mkdir(parents=True, exist_ok=True)
+        Structure.from_dict(rec["structure"]).to(filename=ref_path, fmt="poscar")
+        dft_references.append(
+            {
+                "task_id": rec.get("task_id"),
+                "path": str(ref_path),
+                "sha256": file_checksum(ref_path),
+            }
+        )
     system = {
         "species": deepcopy(
             (manager.data.get("system_config") or {}).get("species") or {"mobile": ["Na"]}
@@ -301,14 +350,23 @@ def prepare_batch(*, action, context):
             row.pop(
                 "structure_path"
             )  # Historical energy evidence remains; absent geometry is not fabricated.
+    history_evidence = deepcopy(plan.get("historical_phase_evidence_tasks") or [])
+    for item in history_evidence:
+        output = item["outputs"]
+        if output.get("structure_path"):
+            if output["structure_path"] not in mapping:
+                raise ValueError("historical_phase_evidence_geometry_missing")
+            output["structure_path"] = mapping[output["structure_path"]]
     runtime = root / "runtime"
     source = Path(__file__).resolve().parents[2]
+    from phase_agent.tools.relax_mc_batch.runtime_inventory import copy_runtime
+
     timed_call(
         "RelaxMC：复制运行代码",
-        shutil.copytree,
+        copy_runtime,
         source,
         runtime / "phase_agent",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        remote_config["supercomputer"]["worker"],
         category="processing",
     )
     from phase_agent.tools.remote.manual_upload_runner import _bundle_mc_backend
@@ -324,14 +382,45 @@ def prepare_batch(*, action, context):
         "config": remote_config,
         "manager": data,
         "phase_references": references,
+        "dft_references": dft_references,
         "bootstrap_first_mc": plan["bootstrap_first_mc"],
         "require_hull_before_first_mc": True,
+        "prepare_dft_on_remote": bool(plan.get("prepare_dft_on_remote", False)),
+        **(
+            {"bundled_dft_policy": deepcopy(plan["bundled_dft_policy"])}
+            if plan.get("bundled_dft_policy")
+            else {}
+        ),
         "stage_profiles": plan["stage_profiles"],
         "workload": plan["workload"],
         "seed": plan["seed"],
         "initial_state": {
             "tasks": remote_tasks,
             "phase_records": history,
+            "historical_phase_evidence_tasks": history_evidence,
+            "historical_unidentified_required_ids": deepcopy(
+                plan.get("historical_unidentified_required_ids") or []
+            ),
+            **(
+                {
+                    "mlip_energy_policy": plan["history_energy_policy"],
+                    "upload_layout": {"model_rounds": deepcopy(plan["history_model_rounds"])},
+                }
+                if plan.get("history_energy_policy") == "latest_valid_per_structure_v1"
+                else {}
+            ),
+            **(
+                {
+                    "mlip_energy_policy": "latest_valid_per_structure_v1",
+                    "upload_layout": {"model_rounds": deepcopy(plan["history_model_rounds"])},
+                    "model_refresh": {
+                        "hull_source_policy": "current_model_only_v1",
+                        "new_model_version": plan["model_version"],
+                    },
+                }
+                if plan.get("history_energy_policy") == "current_model_only_v1"
+                else {}
+            ),
             "active_model_version": plan["model_version"],
             "confirmed_config_version": plan["config_version"],
             "budget_reservations": deepcopy(state["budget_reservations"]),

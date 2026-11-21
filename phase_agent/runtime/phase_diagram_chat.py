@@ -52,6 +52,21 @@ def _location(state, snapshot, directory, method):
     )
 
 
+def _active_model_plot_state(state):
+    """Plot the current model's independent hull, never a mixed-model hull."""
+    from phase_agent.evidence.model_diagram_scope import active_model_diagram
+
+    global_diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    selected = active_model_diagram(state, global_diagram)
+    if selected is global_diagram:
+        return state
+    selected = dict(selected)
+    # The mutable current CSV can belong to the global mixed snapshot.
+    archive = selected.get("archive_csv_path")
+    selected["csv_path"] = archive if archive and Path(archive).is_file() else None
+    return {**state, "phase_diagrams": {**(state.get("phase_diagrams") or {}), "mlip": selected}}
+
+
 def phase_diagram_reply(state, *, operation, method="mlip", directory=None, formats=("png",)):
     if operation not in {"plot", "locate", "export_csv"} or method not in {
         "mlip",
@@ -60,6 +75,8 @@ def phase_diagram_reply(state, *, operation, method="mlip", directory=None, form
     }:
         raise ValueError("无效的相图对话操作")
     try:
+        if method == "mlip":
+            state = _active_model_plot_state(state)
         snapshot = (state.get("phase_diagrams") or {}).get(method) or {}
         if operation == "locate":
             folder = _location(state, snapshot, directory, method)
@@ -127,8 +144,15 @@ def _plot(
     from matplotlib.figure import Figure
 
     # Export on a copy: publication must not modify workflow state or approvals.
+    # CSV publication may update the snapshot and model layout; copy only those
+    # mutable fields, not the task and scientific history needed for checks.
+    export_state = {
+        **state,
+        "phase_diagrams": deepcopy(state.get("phase_diagrams") or {}),
+        "upload_layout": deepcopy(state.get("upload_layout") or {}),
+    }
     csv_path, count, version = export_current_phase_diagram(
-        deepcopy(state), directory=directory, method=method
+        export_state, directory=directory, method=method
     )
     folder = (
         Path(output_directory)
@@ -154,7 +178,8 @@ def _plot(
     model_version = snapshot.get("model_version") or state.get("active_model_version")
     epoch_label = model_epoch_label(state, model_version)
     epoch = model_epoch(state, model_version) or "epoch unrecorded"
-    axes.set_title(f"{method.upper()} | {epoch} | {version}")
+    mixed = " | mixed MLIP models" if snapshot.get("mixed_model_versions") else ""
+    axes.set_title(f"{method.upper()} Phase Diagram | {epoch}{mixed}")
     folder.mkdir(parents=True, exist_ok=True)
     name = (
         "phase_diagram_"
@@ -187,7 +212,7 @@ def _plot(
                 if artifacts is not None:
                     artifacts["hd"] = compared["plot_paths"]
                 comparison_note = (
-                    "\n左右对照（右图第一/第二档假设排除并打×，第二档正式保留）：\n"
+                    "\n独立D/H图（第一/第二档假设排除并打×，第二档正式保留）：\n"
                     + "\n".join(f"`{p}`" for p in compared["plot_paths"])
                 )
             else:

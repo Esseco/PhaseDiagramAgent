@@ -19,7 +19,7 @@ def test_epoch_action_and_waived_results_are_explicit():
     assert "生成微调训练输入" in text
     assert "下一步" in text and "同意" in text
     assert "仍需回收 0；未回传但不再等待 1" in text
-    assert "12314.7" in text
+    assert "12314.7" not in text
     assert state == before
 
 

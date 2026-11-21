@@ -84,10 +84,14 @@ def resume(state, config=None):
     return result
 
 
-def test_resume_revalidates_complete_decisions_without_model_or_mutation():
+def test_resume_revalidates_complete_decisions_without_model_or_mutation(tmp_path):
     state = rejected_selection()
+    from tests.dft_plot_fixture import add_dft_plot_evidence
+
+    add_dft_plot_evidence(state, tmp_path)
     before = deepcopy(state)
     result = resume(state)
+    assert "proposal" in result, result
     proposal = result["proposal"]
     raw = proposal["raw_action"]
     assert proposal["reuse_source_record_id"] == "old"
@@ -107,11 +111,14 @@ def test_resume_revalidates_complete_decisions_without_model_or_mutation():
 
 
 def test_resumed_plan_requires_new_approval_even_if_old_feedback_is_approve(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ):
     from phase_agent.tools.workflows.react_proposal import prepare_react_proposal
 
     state = rejected_selection()
+    from tests.dft_plot_fixture import add_dft_plot_evidence
+
+    add_dft_plot_evidence(state, tmp_path)
     state["pending_execution_policies"] = {}
     before = deepcopy(state)
     config = {
@@ -142,6 +149,7 @@ def test_resumed_plan_requires_new_approval_even_if_old_feedback_is_approve(
         "human_feedback": {"decision": "approve"},
     }
     result = prepare_react_proposal(frame)
+    assert "_graph_prepared" in result, result
     assert result["_graph_prepared"]
     assert result["human_feedback"] is None and result["stored"] is None
     assert result["proposal"]["reuse_source_record_id"] == "old"

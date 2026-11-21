@@ -148,7 +148,8 @@ def test_long_lived_manager_reloads_committed_ledger_once_per_revision(tmp_path)
     manager = PhaseDataManager(boundary)
     path = tmp_path / "ledger.json"
     manager.data["recovery_fact"] = "old"
-    fresh = PhaseDataManager(boundary)
+    manager.save(path)
+    fresh = PhaseDataManager.load(path)
     fresh.data["recovery_fact"] = "new"
     fresh.save(path)
     identity = id(manager)
@@ -157,9 +158,10 @@ def test_long_lived_manager_reloads_committed_ledger_once_per_revision(tmp_path)
     assert not refresh_manager_after_recovery(manager, {"workflow_control_revision": "r1"}, path)
 
 
-
 @pytest.mark.parametrize("extended_posix", [False, True])
-def test_extended_drive_paths_relocate_without_touching_approved_snapshots(tmp_path, extended_posix):
+def test_extended_drive_paths_relocate_without_touching_approved_snapshots(
+    tmp_path, extended_posix
+):
     from copy import deepcopy
     from phase_agent.configuration.session.relocate_workspace_paths import relocate_workspace_paths
     from phase_agent.policies.file_approval import proposal_hash
@@ -170,11 +172,18 @@ def test_extended_drive_paths_relocate_without_touching_approved_snapshots(tmp_p
     source = native.replace(chr(92), "/") if extended_posix else native
     unmapped = chr(92) * 2 + "?" + chr(92) + str(tmp_path / "elsewhere/unmapped.vasp")
     proposal = {"raw_action": {"parameters": {"structure_path": source}}}
-    original = {"structure_path": source, "outside": unmapped, "energy": -123.456,
-                "confirmed_snapshot": {"structure_path": source}, "agent_proposal": proposal,
-                "action_records": [{"final_action": {"structure_path": source}}]}
+    original = {
+        "structure_path": source,
+        "outside": unmapped,
+        "energy": -123.456,
+        "confirmed_snapshot": {"structure_path": source},
+        "agent_proposal": proposal,
+        "action_records": [{"final_action": {"structure_path": source}}],
+    }
     before = deepcopy(original)
-    changed = relocate_workspace_paths(original, [{"from": str(old), "to": str(new)}], tmp_path, preserve_snapshots=True)
+    changed = relocate_workspace_paths(
+        original, [{"from": str(old), "to": str(new)}], tmp_path, preserve_snapshots=True
+    )
     assert Path(changed["structure_path"]) == new / "initial_relaxed.vasp"
     assert changed["outside"] == unmapped and changed["energy"] == -123.456
     assert changed["confirmed_snapshot"] == original["confirmed_snapshot"]
@@ -187,12 +196,86 @@ def test_recovery_commit_keeps_existing_path_relocation_control(tmp_path):
 
     state, ledger, old, hashes = setup(tmp_path)
     moves = [{"from": str(tmp_path / "old"), "to": str(tmp_path / "new")}]
-    control_path(state).write_text(json.dumps({"state_path": str(state.resolve()),
-        "revision": "prior", "patch": {}, "path_relocations": moves,
-        "path_relocation_revision": "paths-prior"}), encoding="utf-8")
-    commit_result_recovery(state, old, {ledger: {"structures": {}}}, expected_hashes=hashes,
-                           evidence={"maintenance": "verified_path_repair"})
+    control_path(state).write_text(
+        json.dumps(
+            {
+                "state_path": str(state.resolve()),
+                "revision": "prior",
+                "patch": {},
+                "path_relocations": moves,
+                "path_relocation_revision": "paths-prior",
+            }
+        ),
+        encoding="utf-8",
+    )
+    commit_result_recovery(
+        state,
+        old,
+        {ledger: {"structures": {}}},
+        expected_hashes=hashes,
+        evidence={"maintenance": "verified_path_repair"},
+    )
     saved = read_control(state)
     assert saved["path_relocations"] == moves
     assert saved["path_relocation_revision"] == "paths-prior"
     assert saved["restore_allowed"] is False
+
+
+def test_recovery_waits_for_other_process_ledger_lock(tmp_path):
+    import subprocess
+    import sys
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    state, ledger, old, hashes = setup(tmp_path)
+    ready, release = tmp_path / "ready", tmp_path / "release"
+    script = """import sys,time
+from pathlib import Path
+from filelock import FileLock
+ledger,ready,release=map(Path,sys.argv[1:])
+with FileLock(str(ledger.resolve()) + ".lock", timeout=10):
+ ready.write_text("ready")
+ while not release.exists(): time.sleep(0.01)
+"""
+    proc = subprocess.Popen([sys.executable, "-c", script, str(ledger), str(ready), str(release)])
+    try:
+        deadline = time.monotonic() + 20
+        while not ready.exists():
+            if proc.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError("ledger lock holder failed")
+            time.sleep(0.02)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                commit_result_recovery,
+                state,
+                old,
+                {ledger: {"committed": True}},
+                expected_hashes=hashes,
+                evidence={"job": "1"},
+            )
+            time.sleep(0.3)
+            assert not future.done()
+            release.write_text("release")
+            assert future.result(timeout=20)["status"] == "completed"
+        assert json.loads(ledger.read_text()) == {"committed": True}
+    finally:
+        release.write_text("release")
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
+def test_config_transition_requires_exact_nelm_evidence_and_model_binding(tmp_path):
+    state, ledger, old, hashes = setup(tmp_path)
+    changed = {**old, "confirmed_config_version": "new"}
+    kwargs = {"expected_hashes": hashes, "evidence": {"operation": "user_approved_dft_nelm"}}
+    with pytest.raises(ValueError, match="binding_changed"):
+        commit_result_recovery(state, changed, {ledger: {}}, **kwargs)
+    with pytest.raises(ValueError, match="binding_changed"):
+        commit_result_recovery(state, changed, {ledger: {}}, config_transition={"from": "wrong", "to": "new"}, **kwargs)
+    with pytest.raises(ValueError, match="binding_changed"):
+        commit_result_recovery(state, {**changed, "active_model_version": "other"}, {ledger: {}}, config_transition={"from": "c", "to": "new"}, **kwargs)
+    commit_result_recovery(state, changed, {ledger: {}}, config_transition={"from": "c", "to": "new"}, **kwargs)
+    assert json.loads(state.read_text())["confirmed_config_version"] == "new"

@@ -33,6 +33,13 @@ def generate_composition_branches(
         framework = _framework(frameworks, parent["P"], parent["H"])
         full = _framework(legal, parent["P"], parent["H"])
         neighbours = _neighbouring_x(parent["x"], full["allowed_x"])
+        oxygen_count = full.get("oxygen_count")
+        if oxygen_count is not None:
+            neighbours = {
+                value
+                for value in neighbours
+                if abs(value - Fraction(str(parent["x"]))) * oxygen_count / 2 == 1
+            }
         for x in framework["allowed_x"]:
             if Fraction(str(x)) in neighbours:
                 tasks.append((parent_id, parent, x))

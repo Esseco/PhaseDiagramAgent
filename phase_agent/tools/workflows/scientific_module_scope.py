@@ -50,14 +50,15 @@ def prepare_generated_module(action, result, context):
     if not scope or not result.get("registered"):
         return result
     summary = result.get("summary") or {}
-    initial = (summary.get("sampling_report") or {}).get("initial_coverage") or {}
-    if initial.get("required") and (
-        not initial.get("complete") or summary.get("initialization_failed_branches")
+    if (
+        result.get("status") == "paused_for_review"
+        or (summary.get("sampling_report") or {}).get("status") == "paused_for_review"
+        or summary.get("initialization_failed_branches")
     ):
         return {
             **result,
             "status": "paused_for_review",
-            "reason": "initial_coverage_incomplete; review initialization failures before preparing inputs",
+            "reason": "generation_requires_review_before_preparing_inputs",
         }
     state = result["state"]
     from phase_agent.tools.relax_mc_batch.plan import attach_preview

@@ -8,7 +8,7 @@ from phase_agent.analysis.phase.check_na_layer_uniformity import check_na_layer_
 from phase_agent.analysis.phase.endpoint_reference import endpoint_relative_energies
 
 
-def build_composition_hull_entries(records):
+def build_composition_hull_entries(records, *, layer_cache=None):
     prepared, frameworks = [], set()
     for row in records:
         composition = Composition(row["composition"])
@@ -67,9 +67,9 @@ def build_composition_hull_entries(records):
         hull_formed = a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0])
         gap_per_o2 = max(0.0, formed - hull_formed)
         gap = gap_per_o2 * units / composition.num_atoms
-        check = check_na_layer_uniformity(
-            row.get("structure_path"), row["composition"], structure_data=row.get("structure")
-        )
+        from phase_agent.analysis.phase.check_na_layer_uniformity import cached_na_layer_check
+
+        check = cached_na_layer_check(check_na_layer_uniformity, row, layer_cache)
         entries.append(
             {
                 "record_id": row.get("record_id"),
@@ -78,6 +78,7 @@ def build_composition_hull_entries(records):
                 "phase": row.get("phase"),
                 "structure": row.get("structure"),
                 "phase_identification_status": row.get("phase_identification_status"),
+                "unidentified_valid": row.get("unidentified_valid", False),
                 "structure_sha256": row.get("structure_sha256"),
                 "composition": row["composition"],
                 "original_energy": row["original_energy"],
@@ -100,6 +101,7 @@ def build_composition_hull_entries(records):
                 "ehull_per_O2": gap_per_o2,
                 "source_version": row.get("source_version"),
                 "na_layer_uniform": check["uniform"],
+                "na_layer_occupied": check.get("occupied"),
                 "na_layer_status": check["status"],
                 "na_layer_rule": check["rule"],
             }

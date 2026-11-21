@@ -30,11 +30,11 @@ def test_dft_partial_return_exposes_12_of_13_and_single_fill_scope():
     assert len(rows) == 1
     assert rows[0]["coverage"] == "12/13"
     assert rows[0]["failed_task_ids"] == ["D12"]
-    assert rows[0]["retryable_task_ids"] == ["D12"]
+    assert rows[0]["retryable_task_ids"] == []
+    assert rows[0]["choice_required"] is False
     text = brief_chat_state(state)
     assert "12/13" in text
-    assert "只补全失败项" in text
-    assert "不会重跑整批" in text
+    assert "失败数据不参与分析" in text
 
 
 def test_mc_partial_return_uses_the_same_choice_without_batch_resubmission():

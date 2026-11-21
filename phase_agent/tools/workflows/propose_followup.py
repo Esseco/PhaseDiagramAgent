@@ -6,6 +6,10 @@ from copy import deepcopy
 def propose_after_generation(frame, result, *, event_loop):
     if result.get("module_preparation"):
         return result
+    client = frame.get("agent_client")
+    if getattr(client, "_codex_structured", False) or getattr(client, "_decision_source", None) == "codex":
+        # Codex owns the next decision; do not invoke the configured project model.
+        return result
     if frame.get("execution_mode") != "interactive" or not callable(frame.get("agent_client")):
         return result
     if result.get("status") != "completed":
@@ -56,6 +60,12 @@ def propose_after_generation(frame, result, *, event_loop):
     )
     payload = (completed.get("execution") or {}).get("result") or {}
     summary = payload.get("summary") or {}
+    if tool == "generate_branches" and (
+        payload.get("status") == "paused_for_review"
+        or (summary.get("sampling_report") or {}).get("status") == "paused_for_review"
+        or summary.get("initialization_failed_branches")
+    ):
+        return result
     if tool == "generate_branches" and not summary.get("registered_structures"):
         return result
     invocation = (

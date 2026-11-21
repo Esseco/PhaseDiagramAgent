@@ -1,3 +1,5 @@
+from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
+
 """Synthetic publication regression; no real project, model or HPC access."""
 
 from copy import deepcopy
@@ -38,12 +40,16 @@ def test_real_phase_pair_version_reuse_increment_and_failed_hd(tmp_path, monkeyp
     publication = state["analysis_publications"]["phase_diagram"]
     assert publication["status"] == "completed", publication
     archive = Path(publication["directory"])
+    assert publication["voltage_curve"]["status"] == "not_ready"
     original = files(archive)
     from PIL import Image
 
     for name in ("main.png", "hd_cross.png"):
         with Image.open(archive / name) as image:
             assert image.format == "PNG" and min(image.size) > 500
+    for name in ("voltage_curve.png", "voltage_curve.csv", "voltage_curve_status.json"):
+        assert (archive / name).is_file()
+        assert (tmp_path / "latest" / "phase_diagram" / name).is_file()
     first_time = (archive / "manifest.json").stat().st_mtime_ns
     publish_analysis_products(state, tmp_path)
     assert state["analysis_publications"]["phase_diagram"] == publication
@@ -128,7 +134,7 @@ def test_dft_epoch_cumulative_dedup_original_model_and_latest(tmp_path):
     assert third["status"] == "completed" and third["epoch"] == "epoch1"
     assert load(Path(third["directory"]) / "metrics.json")["matched_structures"] == 1
     assert (
-        validate_bundle(tmp_path / "epoch0" / "dft_error" / "latest")["version"]
+        validate_bundle(tmp_path / "epoch0" / "dft" / "summary" / "latest")["version"]
         == second["version"]
     )
     assert validate_bundle(tmp_path / "latest" / "dft_error")["version"] == third["version"]
@@ -233,8 +239,8 @@ def test_existing_export_entry_updates_latest_and_catalog(tmp_path):
     export_dft_products(state, tmp_path)
     assert state["analysis_publications"]["dft_error"]["status"] == "completed"
     assert (tmp_path / "latest" / "dft_error" / "energy_parity.png").is_file()
-    index = (tmp_path / "output_index.md").read_text(encoding="utf-8")
-    assert "dft_error latest" in index and "dft_error versions" in index
+    index = (analysis_metadata_directory(tmp_path) / "output_index.md").read_text(encoding="utf-8")
+    assert "dft error latest" in index and "dft error versions" in index
     assert state["dft_result_exports"]
 
 
@@ -306,3 +312,100 @@ def test_latest_swap_rollback_restores_previous_copy(tmp_path, monkeypatch):
     assert files(tmp_path / "latest" / "phase_diagram") == before
     assert load(tmp_path / "latest" / "phase_diagram_status.json")["status"] == "not_ready"
     assert not list(tmp_path.rglob(".latest-*"))
+
+
+def test_invalid_active_model_cannot_overwrite_previous_latest(tmp_path, monkeypatch):
+    import phase_agent.analysis.feedback.analysis_publication as module
+
+    marker = tmp_path / "latest-status.txt"
+    marker.write_text("valid baseline", encoding="utf8")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid model phase publication attempted")
+
+    monkeypatch.setattr(module, "_phase", forbidden)
+    monkeypatch.setattr(module, "_dft", lambda *args: {"status": "not_ready"})
+    state = {
+        "active_model_version": "bad",
+        "extrapolation_recovery_cycle": {
+            "status": "awaiting_reviewed_dft_labels",
+            "invalid_model_version": "bad",
+        },
+        "analysis_publications": {"phase_diagram": {"version": "old"}},
+    }
+    module.publish_analysis_products(state, tmp_path)
+    assert marker.read_text(encoding="utf8") == "valid baseline"
+    assert state["analysis_publications"]["phase_diagram"] == {"version": "old"}
+
+
+def test_historical_invalid_model_is_not_republished(tmp_path, monkeypatch):
+    import phase_agent.analysis.feedback.analysis_publication as module
+
+    called = []
+
+    def phase(state, root, *, current=True):
+        called.append((state["active_model_version"], current))
+        return {"status": "not_ready"}
+
+    monkeypatch.setattr(module, "_phase", phase)
+    monkeypatch.setattr(module, "_dft", lambda *args: {"status": "not_ready"})
+    state = {
+        "active_model_version": "new",
+        "upload_layout": {"model_rounds": {"new": 3, "bad": 2}},
+        "extrapolation_recovery_cycle": {
+            "status": "completed",
+            "invalidated_model_versions": ["bad"],
+        },
+        "phase_diagrams_by_model": {"bad": {"model_version": "bad"}},
+    }
+    module.publish_analysis_products(state, tmp_path)
+    assert called == [("new", True)]
+
+
+def test_failed_dft_is_excluded_from_published_epoch_without_erasing_records(tmp_path):
+    state = {"active_model_version": "m1", "upload_layout": {"model_rounds": {"m1": 1}}}
+    add_dft(state, "T1", "round1")
+    add_dft(state, "T2", "round2", energy=-5.0)
+    state["tasks"][0].update(stage="dft_single_point", input_structure_sha256="badsha")
+    state["tasks"].append(
+        {
+            "task_id": "source",
+            "model_version": "m1",
+            "outputs": {
+                "structure_checksum": "badsha",
+                "extrapolation_monitor": {"extrapolation_failure": True},
+            },
+        }
+    )
+    publish_analysis_products(state, tmp_path)
+    result = state["analysis_publications"]["dft_error"]
+    assert result["status"] == "completed", result
+    manifest = load(Path(result["directory"]) / "dataset_manifest.json")
+    assert [r["task_id"] for r in manifest["records"]] == ["T2"]
+    assert manifest["excluded_extrapolation_failed_task_ids"] == ["T1"]
+    assert {r["task_id"] for r in state["dft_dataset_records"]} == {"T1", "T2"}
+
+
+def test_failed_only_dataset_archives_old_latest_instead_of_showing_failed_frame(tmp_path):
+    state = {"active_model_version": "m1", "upload_layout": {"model_rounds": {"m1": 1}}}
+    add_dft(state, "T1", "round1")
+    publish_analysis_products(state, tmp_path)
+    assert (tmp_path / "latest/dft_error/energy_parity.png").is_file()
+    state["tasks"][0].update(stage="dft_single_point", input_structure_sha256="badsha")
+    state["tasks"].append(
+        {
+            "task_id": "source",
+            "model_version": "m1",
+            "outputs": {
+                "structure_checksum": "badsha",
+                "extrapolation_monitor": {"extrapolation_failure": True},
+            },
+        }
+    )
+    publish_analysis_products(state, tmp_path)
+    assert state["analysis_publications"]["dft_error"]["status"] == "not_ready"
+    assert not (tmp_path / "latest/dft_error").exists()
+    archives = list((tmp_path / "history/filtered_dft_latest").iterdir())
+    assert len(archives) == 2
+    assert all((path / "energy_parity.png").is_file() for path in archives)
+    assert len(state["dft_dataset_records"]) == 1

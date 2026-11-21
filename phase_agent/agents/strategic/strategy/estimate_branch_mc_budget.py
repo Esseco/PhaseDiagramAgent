@@ -25,7 +25,10 @@ def estimate_branch_mc_budget(
     branch_count=None,
     exploration_fraction=None,
 ):
-    diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    from phase_agent.analysis.phase.mc_snapshot import mc_model_snapshot
+    from phase_agent.science.mc.second_round_state import legacy_committee_task_keys
+
+    diagram = mc_model_snapshot(state, pool.get("model_version"))
     if (
         diagram.get("status") != "completed"
         or diagram.get("model_version") != pool.get("model_version")
@@ -43,6 +46,7 @@ def estimate_branch_mc_budget(
         ranked, missing_mc = second_round_candidates(ranked, state, diagram, pool["model_version"])
         missing = sorted(set(missing + missing_mc))
     tier_state = reconciled_mc_state(state)
+    ignored_history = legacy_committee_task_keys(state)
     policy = effective_mc_policy(config)
     policy["agent_branch_count"] = branch_count
     if exploration_fraction is not None:
@@ -52,6 +56,7 @@ def estimate_branch_mc_budget(
         tier_state,
         policy=policy,
         scope_by_model=True,
+        excluded_history_task_keys=ignored_history,
         total_budget=float("inf"),
         seed=seed,
         model_version=pool["model_version"],
@@ -77,6 +82,7 @@ def estimate_branch_mc_budget(
         tier_state,
         policy=policy,
         scope_by_model=True,
+        excluded_history_task_keys=ignored_history,
         total_budget=step_limit,
         seed=seed,
         model_version=pool["model_version"],

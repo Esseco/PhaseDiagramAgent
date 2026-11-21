@@ -69,6 +69,36 @@ def test_new_package_has_independent_array_tasks_and_dependent_collection(traini
         assert "inputs/run_training_task.py" in archive.namelist()
 
 
+def test_explicit_training_transition_is_persisted_on_immutable_job(tmp_path):
+    from phase_agent.configuration.defaults.default_mace_committee_config import (
+        default_mace_committee_config,
+    )
+    from phase_agent.tools.workflows.prepare_remote_finetune import prepare_remote_finetune
+    from tests.test_dft_comparison_csv import add_result
+
+    state = {}
+    for index in range(10):
+        add_result(state, task_id=f"T{index}")
+    settings = default_mace_committee_config()
+    settings["labels"]["include_stress"] = False
+    result = prepare_remote_finetune(
+        state,
+        {
+            "mlip_finetune": settings,
+            "upload_batches_directory": str(tmp_path),
+            "mlip": {"version": "m1", "model_path": "/remote/base.model"},
+            "python_environments": {"remote_mlip": "mace"},
+        },
+        transition_policy="activate_then_refresh_approval",
+        transition_approval_reason="训练方案已批准，验证通过后自动切换并单独审批刷新",
+    )
+    job = next(iter(result["state"]["remote_finetune_jobs"].values()))
+    assert job["post_training_transition"] == {
+        "mode": "activate_then_refresh_approval",
+        "approval_reason": "训练方案已批准，验证通过后自动切换并单独审批刷新",
+    }
+
+
 def test_parallel_package_rebuild_preserves_dependencies_and_configuration(training_package):
     from phase_agent.tools.remote.write_training_submission import prepare_training_handoff
 
@@ -295,3 +325,31 @@ def test_successful_parallel_training_collects_the_existing_recovery_format(
     assert report["status"] == "metadata_required"
     assert len(report["models"]) == 4
     assert float(report["kfold_metrics"]["energy_RMSE_meV_per_atom"]) == 0
+
+
+def test_training_uses_original_foundation_with_active_finetuned_model(tmp_path):
+    from phase_agent.configuration.defaults.default_mace_committee_config import default_mace_committee_config
+    from phase_agent.tools.workflows.prepare_remote_finetune import prepare_remote_finetune
+    from tests.test_dft_comparison_csv import add_result
+
+    state = {
+        "active_model_version": "finetuned-v2",
+        "active_model": {"version": "finetuned-v2", "model_path": "/remote/previous.model"},
+        "confirmed_config": {"mlip": {"model_path": "/remote/original.model"}},
+    }
+    for index in range(10):
+        add_result(state, task_id=f"T{index}")
+    settings = default_mace_committee_config()
+    settings["labels"]["include_stress"] = False
+    settings["training"]["foundation_model"] = "/remote/previous.model"
+    result = prepare_remote_finetune(state, {
+        "mlip_finetune": settings,
+        "upload_batches_directory": str(tmp_path),
+        "mlip": state["active_model"],
+        "python_environments": {"remote_mlip": "mace"},
+    })
+    assert result["status"] == "awaiting_remote_training"
+    job = next(iter(result["state"]["remote_finetune_jobs"].values()))
+    plan = json.loads((Path(job["directory"]) / "inputs" / "training_plan.json").read_text(encoding="utf-8"))
+    assert plan["original_model_version"] == "finetuned-v2"
+    assert plan["config"]["training"]["foundation_model"] == "/remote/original.model"

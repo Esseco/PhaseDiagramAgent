@@ -1,0 +1,2232 @@
+{
+  "state_bytes": 2123928,
+  "results": [
+    {
+      "operation": "cold_context",
+      "seconds": 0.05889819998992607,
+      "io": {
+        "opens": 11,
+        "read_bytes": 6375300
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_miss": 1,
+          "index_hit": 1,
+          "field_read": 2,
+          "field_cache_hit": 67,
+          "index_full_validation": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 593,
+          "strong_file_validation": 4247776,
+          "ledger_object_digest": 430,
+          "codex_context_miss": 0,
+          "index_hit": 0,
+          "field_read": 2107,
+          "field_cache_hit": 0,
+          "index_full_validation": 2123888
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "codex_context_miss",
+            "changed_sources": [
+              "empty"
+            ]
+          },
+          {
+            "kind": "field_read",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_read",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 97144832,
+      "rss_end": 99655680
+    },
+    {
+      "operation": "unchanged_context",
+      "seconds": 0.008249000005889684,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248495
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 593,
+          "strong_file_validation": 4247776,
+          "ledger_object_digest": 430,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 99655680,
+      "rss_end": 99655680
+    },
+    {
+      "operation": "single_field_changed",
+      "seconds": 0.02131490000465419,
+      "io": {
+        "opens": 12,
+        "read_bytes": 6375566
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_miss": 1,
+          "index_hit": 1,
+          "field_read": 3,
+          "field_cache_hit": 67,
+          "index_full_validation": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 593,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 430,
+          "codex_context_miss": 0,
+          "index_hit": 0,
+          "field_read": 2129,
+          "field_cache_hit": 0,
+          "index_full_validation": 2123928
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "codex_context_miss",
+            "changed_sources": [
+              "state_control"
+            ]
+          },
+          {
+            "kind": "field_read",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_read",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_read",
+            "field": "current_status"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 99794944,
+      "rss_end": 99815424
+    },
+    {
+      "operation": "configuration_changed",
+      "seconds": 0.021664400002919137,
+      "io": {
+        "opens": 12,
+        "read_bytes": 6375642
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_miss": 1,
+          "index_hit": 1,
+          "field_read": 3,
+          "field_cache_hit": 67,
+          "index_full_validation": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 593,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 430,
+          "codex_context_miss": 0,
+          "index_hit": 0,
+          "field_read": 2129,
+          "field_cache_hit": 0,
+          "index_full_validation": 2123928
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "codex_context_miss",
+            "changed_sources": [
+              "session_file"
+            ]
+          },
+          {
+            "kind": "field_read",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_read",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_read",
+            "field": "current_status"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 99815424,
+      "rss_end": 99815424
+    },
+    {
+      "operation": "ledger_changed",
+      "seconds": 0.02355179999722168,
+      "io": {
+        "opens": 16,
+        "read_bytes": 6376429
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 4,
+          "ledger_object_digest": 4,
+          "strong_file_validation": 2,
+          "codex_context_miss": 1,
+          "index_hit": 1,
+          "field_read": 3,
+          "field_cache_hit": 67,
+          "index_full_validation": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 1104,
+          "ledger_object_digest": 989,
+          "strong_file_validation": 4247856,
+          "codex_context_miss": 0,
+          "index_hit": 0,
+          "field_read": 2129,
+          "field_cache_hit": 0,
+          "index_full_validation": 2123928
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "codex_context_miss",
+            "changed_sources": [
+              "ledger_file",
+              "ledger_memory"
+            ]
+          },
+          {
+            "kind": "field_read",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_read",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_read",
+            "field": "current_status"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "tasks"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "field_cache_hit",
+            "field": "active_model_version"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 99815424,
+      "rss_end": 99831808
+    },
+    {
+      "operation": "control_changed",
+      "seconds": 0.017997899994952604,
+      "io": {
+        "opens": 12,
+        "read_bytes": 6373688
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 4,
+          "ledger_object_digest": 2,
+          "codex_context_miss": 1,
+          "index_fallback": 1,
+          "full_state_parse": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4248184,
+          "ledger_object_digest": 516,
+          "codex_context_miss": 0,
+          "index_fallback": 0,
+          "full_state_parse": 2123928
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json.control.json"
+          },
+          {
+            "kind": "codex_context_miss",
+            "changed_sources": [
+              "state_control"
+            ]
+          },
+          {
+            "kind": "index_fallback",
+            "reason": "source_or_field_manifest_mismatch"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json.control.json"
+          }
+        ]
+      },
+      "rss_before": 99831808,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "index_corrupt",
+      "seconds": 0.014797899988479912,
+      "io": {
+        "opens": 9,
+        "read_bytes": 6372394
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_miss": 1,
+          "index_fallback": 1,
+          "full_state_parse": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_miss": 0,
+          "index_fallback": 0,
+          "full_state_parse": 2123928
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "codex_context_miss",
+            "changed_sources": [
+              "empty"
+            ]
+          },
+          {
+            "kind": "index_fallback",
+            "reason": "JSONDecodeError:Expecting value: line 1 column 1 (char 0)"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100990976,
+      "rss_end": 101388288
+    },
+    {
+      "operation": "index_missing",
+      "seconds": 0.014472599999862723,
+      "io": {
+        "opens": 8,
+        "read_bytes": 6372388
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_miss": 1,
+          "index_fallback": 1,
+          "full_state_parse": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_miss": 0,
+          "index_fallback": 0,
+          "full_state_parse": 2123928
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "codex_context_miss",
+            "changed_sources": [
+              "empty"
+            ]
+          },
+          {
+            "kind": "index_fallback",
+            "reason": "FileNotFoundError:[Errno 2] No such file or directory: 'C:\\\\Users\\\\Esseco\\\\AppData\\\\Local\\\\Temp\\\\read-cases-qbtrqtog\\\\state.json.index.json'"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 101388288,
+      "rss_end": 100790272
+    },
+    {
+      "operation": "overview_first",
+      "seconds": 0.009995100001106039,
+      "io": {
+        "opens": 3,
+        "read_bytes": 2132383
+      },
+      "metrics": {
+        "counts": {
+          "overview_miss": 1,
+          "strong_file_validation": 1,
+          "state_view_hit": 1
+        },
+        "bytes": {
+          "overview_miss": 0,
+          "strong_file_validation": 2123928,
+          "state_view_hit": 0
+        },
+        "details": [
+          {
+            "kind": "overview_miss",
+            "reason": "missing_or_corrupt"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100921344,
+      "rss_end": 100925440
+    },
+    {
+      "operation": "overview_repeat",
+      "seconds": 0.003155700003844686,
+      "io": {
+        "opens": 1,
+        "read_bytes": 2067
+      },
+      "metrics": {
+        "counts": {
+          "overview_hit": 1
+        },
+        "bytes": {
+          "overview_hit": 0
+        },
+        "details": []
+      },
+      "rss_before": 100925440,
+      "rss_end": 100925440
+    },
+    {
+      "operation": "repeat_1",
+      "seconds": 0.008297500011394732,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100925440,
+      "rss_end": 100925440
+    },
+    {
+      "operation": "repeat_2",
+      "seconds": 0.008061000000452623,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100925440,
+      "rss_end": 100925440
+    },
+    {
+      "operation": "repeat_3",
+      "seconds": 0.008026099996641278,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100925440,
+      "rss_end": 100925440
+    },
+    {
+      "operation": "repeat_4",
+      "seconds": 0.008007800002815202,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100925440,
+      "rss_end": 100925440
+    },
+    {
+      "operation": "repeat_5",
+      "seconds": 0.008165499995811842,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100925440,
+      "rss_end": 100929536
+    },
+    {
+      "operation": "repeat_6",
+      "seconds": 0.008111799994367175,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100929536,
+      "rss_end": 100929536
+    },
+    {
+      "operation": "repeat_7",
+      "seconds": 0.008014799997908995,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100929536,
+      "rss_end": 100929536
+    },
+    {
+      "operation": "repeat_8",
+      "seconds": 0.008119600010104477,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100929536,
+      "rss_end": 100929536
+    },
+    {
+      "operation": "repeat_9",
+      "seconds": 0.008084000000962988,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100929536,
+      "rss_end": 100929536
+    },
+    {
+      "operation": "repeat_10",
+      "seconds": 0.008186099992599338,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100929536,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_11",
+      "seconds": 0.008135199997923337,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_12",
+      "seconds": 0.008330700002261437,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_13",
+      "seconds": 0.008257899986347184,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_14",
+      "seconds": 0.008118999990983866,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_15",
+      "seconds": 0.008228600010625087,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_16",
+      "seconds": 0.008289100005640648,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_17",
+      "seconds": 0.008045499998843297,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_18",
+      "seconds": 0.008274400010122918,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_19",
+      "seconds": 0.00813170000037644,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    },
+    {
+      "operation": "repeat_20",
+      "seconds": 0.008184100006474182,
+      "io": {
+        "opens": 5,
+        "read_bytes": 4248296
+      },
+      "metrics": {
+        "counts": {
+          "ledger_file_validation": 1,
+          "strong_file_validation": 2,
+          "ledger_object_digest": 2,
+          "codex_context_hit": 1
+        },
+        "bytes": {
+          "ledger_file_validation": 276,
+          "strong_file_validation": 4247856,
+          "ledger_object_digest": 516,
+          "codex_context_hit": 0
+        },
+        "details": [
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          },
+          {
+            "kind": "strong_file_validation",
+            "path": "C:\\Users\\Esseco\\AppData\\Local\\Temp\\read-cases-qbtrqtog\\state.json"
+          }
+        ]
+      },
+      "rss_before": 100941824,
+      "rss_end": 100941824
+    }
+  ],
+  "scope": "synthetic; no model or HPC"
+}

@@ -8,7 +8,7 @@
 | 运行入口配置 | [agent_runtime.json](agent_runtime.json) |
 | 修改体系、环境、边界 | [初始配置](parameters/search_config.project.json) |
 | 修改预算、MC、DFT和训练设置 | [运行配置](parameters/run_config.project.json) |
-| 查看产物 | [结果索引](analysis_outputs/output_index.md) |
+| 查看产物 | [结果索引](workflow_state/analysis/output_index.md) |
 | 查状态与审批 | workflow_state/ |
 | 查母结构与候选 | [母结构](structures/reference_structures/) · [候选结构](structures/candidate_structures/) |
 | 查提交与回传 | Agent 先读 [机器索引](submissions/submission_index.json)，目录说明见 [提交索引](submissions/README.md) |

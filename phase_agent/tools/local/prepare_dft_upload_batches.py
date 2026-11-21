@@ -23,6 +23,38 @@ def prepare_dft_upload_batches(*, action, context, _owned=False):
     ]
 
     if tasks:
+        from phase_agent.evidence.dft_extrapolation import candidate_extrapolation
+        from phase_agent.evidence.unknown_gs_dft import is_authorized_unknown_gs_tasks
+
+        authorized_unknown = is_authorized_unknown_gs_tasks(
+            state,
+            tasks,
+            approval_record_id=context.get("approval_record_id"),
+            approved_action=context.get("_approved_unknown_gs_selection"),
+        )
+        for task in tasks:
+            evidence = candidate_extrapolation(
+                {
+                    "structure_path": task.get("structure_path"),
+                    "structure_sha256": task.get("input_structure_sha256"),
+                    "model_version": state.get("active_model_version")
+                    if authorized_unknown
+                    else (task.get("extrapolation_model_version") or task.get("model_version")),
+                },
+                state,
+            )
+            if evidence["status"] != "normal" and not (
+                authorized_unknown
+                and evidence["status"] == "unknown"
+                and task.get("stage") == "dft_single_point"
+            ):
+                return {
+                    "status": "rejected",
+                    "reason": "dft_extrapolation_" + evidence["status"],
+                    "detail": evidence["reason"],
+                    "task_id": task.get("task_id"),
+                    "state": state,
+                }
         from phase_agent.configuration.schema.python_environments import python_environment
 
         python_environment(config, "remote", mlip=True)

@@ -85,16 +85,19 @@ def collect_payloads(conn, serde):
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "checkpoint_payloads" not in tables:
         return 0
-    from phase_agent.persistence.checkpoint_blobs import STATE_FIELDS
+    from phase_agent.persistence.checkpoint_blobs import STATE_FIELDS, STATE_FIELDS_V2
 
     reachable = set()
 
     def visit(value):
         if isinstance(value, dict):
-            if set(value) == {STATE_FIELDS}:
-                reachable.update(
-                    ref["blob"] for ref in value[STATE_FIELDS].values() if "blob" in ref
-                )
+            marker = next((name for name in (STATE_FIELDS, STATE_FIELDS_V2) if set(value) == {name}), None)
+            if marker is not None:
+                for ref in value[marker].values():
+                    if "blob" in ref:
+                        reachable.add(ref["blob"])
+                    if "chunks" in ref:
+                        reachable.update(ref["chunks"])
             else:
                 for item in value.values():
                     visit(item)
@@ -103,11 +106,14 @@ def collect_payloads(conn, serde):
                 visit(item)
 
     for query in (
-        "SELECT type,checkpoint FROM checkpoints WHERE type LIKE 'phase-cas-v1:%'",
-        "SELECT type,value FROM writes WHERE type LIKE 'phase-cas-v1:%'",
+        "SELECT type,checkpoint FROM checkpoints WHERE type LIKE 'phase-cas-v%:%'",
+        "SELECT type,value FROM writes WHERE type LIKE 'phase-cas-v%:%'",
     ):
         for kind, data in conn.execute(query):
-            visit(serde.loads_typed((kind[len("phase-cas-v1:") :], data)))
+            prefix = next((p for p in ("phase-cas-v1:", "phase-cas-v2:") if kind.startswith(p)), None)
+            if prefix is None:
+                raise ValueError("Unknown checkpoint format; storage collection blocked")
+            visit(serde.loads_typed((kind[len(prefix):], data)))
     with conn:
         conn.execute("CREATE TEMP TABLE IF NOT EXISTS reachable_payloads (id TEXT PRIMARY KEY)")
         conn.execute("DELETE FROM reachable_payloads")
@@ -174,6 +180,11 @@ class CompactSqliteSaver(SqliteSaver):
         identity = config["configurable"]
         with self.lock:
             self.setup()
+        encoded_values = (
+            self.serde.dumps_many(value for _, value in writes)
+            if callable(getattr(self.serde, "dumps_many", None))
+            else (self.serde.dumps_typed(value) for _, value in writes)
+        )
         rows = [
             (
                 str(identity["thread_id"]),
@@ -182,9 +193,9 @@ class CompactSqliteSaver(SqliteSaver):
                 task_id,
                 WRITES_IDX_MAP.get(channel, idx),
                 channel,
-                *self.serde.dumps_typed(value),
+                *encoded,
             )
-            for idx, (channel, value) in enumerate(writes)
+            for idx, ((channel, value), encoded) in enumerate(zip(writes, encoded_values))
         ]
         with self.cursor() as cursor:
             cursor.executemany(query, rows)
@@ -220,7 +231,12 @@ class CompactSqliteSaver(SqliteSaver):
                         limit_namespaces=True,
                         namespace_keep=namespace_keep,
                     )
-                    collect_payloads(conn, saver.serde.delegate)
+                    # A read-only session with nothing to prune cannot create
+                    # unreachable payloads. Avoid decoding every historical
+                    # envelope; interrupted writes are collected on a later
+                    # mutation or explicit maintenance.
+                    if conn.total_changes:
+                        collect_payloads(conn, saver.serde.delegate)
                 # Do not copy a multi-GB database on the user-facing request path.
                 # Existing free pages are reused; offline storage maintenance is separate.
                 from phase_agent.runtime.turn_process import record_timing, process_event

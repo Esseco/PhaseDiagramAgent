@@ -11,10 +11,14 @@ def predict_structure(job):
     from phase_agent.science.qbc.summarize_member_energies import summarize_member_energies
 
     structure_path = Path(job["structure_path"])
+    parameters = job.get("parameters") or {}
+    if parameters.get("energy_basis_repair"):
+        expected = job.get("input_structure_sha256")
+        if not expected or file_checksum(structure_path) != expected:
+            raise ValueError("energy_repair_input_checksum_mismatch")
     atoms = read(
         structure_path, format="vasp" if structure_path.suffix.lower() == ".vasp" else None
     )
-    parameters = job.get("parameters") or {}
     paths = job.get("model_paths") or [job.get("model_path")]
     from phase_agent.science.mlip.model_interface import create_calculator
 
@@ -54,6 +58,11 @@ def predict_structure(job):
         "energy": energies[index],
         "forces": forces[index].tolist(),
         "energy_unit": "eV",
+        **(
+            {"energy_source": "main_model_selected_frame"}
+            if parameters.get("energy_basis_repair")
+            else {}
+        ),
         "forces_unit": "eV/angstrom",
         "single_point_completed": True,
         "structure_path": str(structure_path.resolve()),
@@ -63,7 +72,11 @@ def predict_structure(job):
         "mlip_version": job.get("model_version"),
         "mlip_name": parameters.get("framework", "mace").upper(),
         "qbc": qbc,
-        "geometry": "model_refresh"
-        if parameters.get("model_refresh_operation")
-        else "DFT_final_frame",
+        "geometry": (
+            "mc_energy_repair_same_frame"
+            if parameters.get("energy_basis_repair")
+            else "model_refresh"
+            if parameters.get("model_refresh_operation")
+            else "DFT_final_frame"
+        ),
     }

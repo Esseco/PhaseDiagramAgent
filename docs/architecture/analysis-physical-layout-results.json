@@ -1,0 +1,647 @@
+[
+  {
+    "project": "O3-NaCo-3phase",
+    "seconds": 35.42,
+    "status": "completed",
+    "physical_layout": {
+      "status": "completed",
+      "moved_directories": 13,
+      "verified_files": 563,
+      "compatibility_aliases": [
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\epoch0\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\epoch0\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\epoch0\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\epoch0\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\epoch0\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch1\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\epoch1\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch1\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\epoch1\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch1\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\epoch1\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\latest\\out_data",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\compatibility\\latest\\out_data"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\out_data\\latest",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\out_data\\latest"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\out_data\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\out_data\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\workflow_state\\analysis\\Previous_Latest",
+          "target": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\history\\project\\Previous_Latest"
+        }
+      ],
+      "report": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\workflow_state\\analysis\\physical_layout.json"
+    },
+    "unavailable": [],
+    "state_unchanged": true,
+    "checkpoints_metadata_unchanged": true,
+    "repeat_verification": {
+      "moved_directories": 0,
+      "state_unchanged": true,
+      "status": "completed",
+      "selection_issues": []
+    }
+  },
+  {
+    "project": "NaNiO2-phase",
+    "seconds": 34.02,
+    "status": "incomplete",
+    "physical_layout": {
+      "status": "completed",
+      "moved_directories": 27,
+      "verified_files": 704,
+      "compatibility_aliases": [
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch0\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\Historical_Reports",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch0\\Historical_Reports"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\Search-group-0002",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\dft\\Search-group-0002"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch0\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch0\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch0\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch0\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch1\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\Historical_Reports",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch1\\Historical_Reports"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\Search-group-0002",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\dft\\Search-group-0002"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\Search-group-0004",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\dft\\Search-group-0004"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch1\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch1\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch1\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch1\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\Search-group-0002",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\dft\\Search-group-0002"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\Search-group-0003",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\dft\\Search-group-0003"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\Search-group-0004",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\dft\\Search-group-0004"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch2\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\direct_sampling",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\diagnostics\\direct_sampling"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch2\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch2\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\epoch2\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\latest\\out_data",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\compatibility\\latest\\out_data"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\out_data\\latest",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\out_data\\latest"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\out_data\\versions",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\out_data\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\NaNiO2-phase\\workflow_state\\analysis\\Previous_Latest",
+          "target": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\history\\project\\Previous_Latest"
+        }
+      ],
+      "report": "E:\\0-PhaseDiagram\\NaNiO2-phase\\workflow_state\\analysis\\physical_layout.json"
+    },
+    "unavailable": [
+      {
+        "epoch": "epoch2",
+        "reason": "ValueError: Current model epoch or verified complete MLIP hull is unavailable"
+      }
+    ],
+    "state_unchanged": true,
+    "checkpoints_metadata_unchanged": true,
+    "repeat_verification": {
+      "moved_directories": 0,
+      "state_unchanged": true,
+      "status": "incomplete",
+      "selection_issues": [
+        {
+          "epoch": "epoch2",
+          "reason": "prepared_tasks_and_selected_frames_differ"
+        }
+      ]
+    }
+  },
+  {
+    "project": "O3-1ele-NaCoO2",
+    "seconds": 6.47,
+    "status": "incomplete",
+    "physical_layout": {
+      "status": "completed",
+      "moved_directories": 11,
+      "verified_files": 203,
+      "compatibility_aliases": [
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\epoch0\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\Search-group-0002",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\dft\\Search-group-0002"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\epoch0\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\epoch0\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\epoch0\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch1\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\epoch1\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\latest\\out_data",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\compatibility\\latest\\out_data"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\out_data\\latest",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\out_data\\latest"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\out_data\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\out_data\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\workflow_state\\analysis\\Previous_Latest",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\history\\project\\Previous_Latest"
+        }
+      ],
+      "report": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\workflow_state\\analysis\\physical_layout.json"
+    },
+    "unavailable": [
+      {
+        "epoch": "epoch1",
+        "reason": "ValueError: relax_mc_formal_publication_blocked:relax-mc-956d83315a920acf"
+      }
+    ],
+    "state_unchanged": true,
+    "checkpoints_metadata_unchanged": true,
+    "repeat_verification": {
+      "moved_directories": 0,
+      "state_unchanged": true,
+      "status": "incomplete",
+      "selection_issues": []
+    }
+  },
+  {
+    "project": "O3-2ele-NaFeMn",
+    "seconds": 13.74,
+    "status": "completed",
+    "physical_layout": {
+      "status": "completed",
+      "moved_directories": 17,
+      "verified_files": 334,
+      "compatibility_aliases": [
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\epoch0\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\epoch0\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\epoch0\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\epoch0\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\recovery",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\diagnostics\\recovery"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\epoch1\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\Search-group-0003",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\dft\\Search-group-0003"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\epoch1\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\epoch1\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\epoch1\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\recovery",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch1\\diagnostics\\recovery"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\latest\\out_data",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\compatibility\\latest\\out_data"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\out_data\\latest",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\out_data\\latest"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\out_data\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\out_data\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\workflow_state\\analysis\\Previous_Latest",
+          "target": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\history\\project\\Previous_Latest"
+        }
+      ],
+      "report": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\workflow_state\\analysis\\physical_layout.json"
+    },
+    "unavailable": [],
+    "state_unchanged": true,
+    "checkpoints_metadata_unchanged": true,
+    "repeat_verification": {
+      "moved_directories": 0,
+      "state_unchanged": true,
+      "status": "completed",
+      "selection_issues": []
+    }
+  },
+  {
+    "project": "O3-NiCo",
+    "seconds": 28.2,
+    "status": "incomplete",
+    "physical_layout": {
+      "status": "completed",
+      "moved_directories": 20,
+      "verified_files": 1230,
+      "compatibility_aliases": [
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch0\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch0\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch0\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch0\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch0\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1-extrapolation_failed",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\failed_epochs\\epoch1-extrapolation_failed"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\Search-group-unassigned",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\dft\\Search-group-unassigned"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch1\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\direct_sampling",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\diagnostics\\direct_sampling"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\extrapolation_review",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\diagnostics\\extrapolation_review"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch1\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch1\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\epoch1\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\latest\\Historical_Reports",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\compatibility\\latest\\Historical_Reports"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\latest\\out_data",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\compatibility\\latest\\out_data"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\out_data\\latest",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\out_data\\latest"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\out_data\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\out_data\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-NiCo\\workflow_state\\analysis\\Previous_Latest",
+          "target": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\history\\project\\Previous_Latest"
+        }
+      ],
+      "report": "E:\\0-PhaseDiagram\\O3-NiCo\\workflow_state\\analysis\\physical_layout.json"
+    },
+    "unavailable": [],
+    "state_unchanged": true,
+    "checkpoints_metadata_unchanged": true,
+    "repeat_verification": {
+      "moved_directories": 0,
+      "state_unchanged": true,
+      "status": "incomplete",
+      "selection_issues": [
+        {
+          "epoch": "epoch1",
+          "reason": "prepared_tasks_and_selected_frames_differ"
+        }
+      ]
+    }
+  },
+  {
+    "project": "O3-1ele-NaCrO2",
+    "resumed_by_user": true,
+    "authorized_stopped_pid": 52196,
+    "seconds": 43.83,
+    "status": "completed",
+    "physical_layout": {
+      "status": "completed",
+      "moved_directories": 35,
+      "verified_files": 1061,
+      "compatibility_aliases": [
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch0\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch0\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch0\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch0\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch0\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch1\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch1\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch1\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch1\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch1\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch2\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\Search-group-0003",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\dft\\Search-group-0003"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch2\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch2\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch2\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch2\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\DFT_Selection",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch3\\DFT_Selection"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\Search-group-0001",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\dft\\Search-group-0001"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\Search-group-0003",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\dft\\Search-group-0003"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\Search-group-0004",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\dft\\Search-group-0004"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\Search-group-0005",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\dft\\Search-group-0005"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\Search-group-0006",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\dft\\Search-group-0006"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\dft_error\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch3\\dft_error\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch3\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch3\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\phase_diagrams",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch3\\phase_diagrams"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch4\\phase_diagram\\_internal",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch4\\phase_diagram\\_internal"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch4\\phase_diagram\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\epoch4\\phase_diagram\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\latest\\out_data",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\compatibility\\latest\\out_data"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\out_data\\latest",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\out_data\\latest"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\out_data\\versions",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\out_data\\versions"
+        },
+        {
+          "source": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\workflow_state\\analysis\\Previous_Latest",
+          "target": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\history\\project\\Previous_Latest"
+        }
+      ],
+      "report": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\workflow_state\\analysis\\physical_layout.json"
+    },
+    "unavailable": [],
+    "state_unchanged": true,
+    "checkpoints_metadata_unchanged": true,
+    "repeat_verification": {
+      "moved_directories": 0,
+      "state_unchanged": true,
+      "status": "completed"
+    }
+  }
+]

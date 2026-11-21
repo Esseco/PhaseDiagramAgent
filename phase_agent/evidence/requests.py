@@ -354,6 +354,24 @@ def summary_payload(payload):
         if key not in {"state", "decision_context"}
     }
     result.update(state=view, decision_context={"evidence_catalog": catalog, "loaded_topics": []})
+    reliability_rounds = sources.get("reliability_extrapolation_rounds")
+    if isinstance(reliability_rounds, dict):
+        result["state"]["reliability_extrapolation_rounds"] = deepcopy(reliability_rounds)
+        result["decision_context"]["reliability_extrapolation_rounds"] = deepcopy(reliability_rounds)
+    recovery = sources.get("extrapolation_recovery")
+    if isinstance(recovery, dict):
+        result["state"]["extrapolation_recovery"] = deepcopy(recovery)
+        result["decision_context"]["extrapolation_recovery"] = deepcopy(recovery)
+    # Carry bounded refresh-quality evidence into the initial agent context.
+    refresh = sources.get("refresh_result_facts") or {}
+    if isinstance(refresh, dict) and isinstance(refresh.get("extrapolation_review"), dict):
+        bounded = {key: deepcopy(refresh.get(key)) for key in (
+            "status", "task_count", "registered_count", "discarded_unconverged_count"
+        )}
+        bounded["status_counts"] = deepcopy(refresh.get("status_counts") or {})
+        bounded["extrapolation_review"] = deepcopy(refresh["extrapolation_review"])
+        result["state"]["refresh_result_facts"] = bounded
+        result["decision_context"]["refresh_result_facts"] = deepcopy(bounded)
     # Validated invocation-local opinions must reach the coordinator even when
     # expensive scientific tables are progressively loaded. They remain advice.
     for key in ("expert_advice", "evidence_snapshot_id", "memory_context"):

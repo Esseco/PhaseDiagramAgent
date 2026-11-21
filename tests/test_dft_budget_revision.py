@@ -5,7 +5,7 @@ from phase_agent.agents.reliability.selection.recommend_post_mc_dft import recom
 from phase_agent.tools.workflows.preview_dft_inputs import preview_dft_inputs
 
 
-def test_budget_failure_does_not_convert_original_action():
+def test_legacy_cost_limit_does_not_convert_original_action(tmp_path):
     config = default_layered_search_config()
     config["budgets"]["enforcement"] = "hard"
     config["budgets"]["total_relative_cost"] = 10000
@@ -27,6 +27,9 @@ def test_budget_failure_does_not_convert_original_action():
             }
         ],
     }
+    from tests.test_dft_input_preview import add_monitor_evidence
+
+    add_monitor_evidence(state, tmp_path)
     action = {
         "tool": "select_dft_candidates",
         "task_key": "draft",
@@ -35,17 +38,17 @@ def test_budget_failure_does_not_convert_original_action():
         },
     }
     preview, error = preview_dft_inputs(action, state, config)
-    assert preview is None and "dft_budget" in error
+    assert error is None and preview["task_count"] == 1
     assert action["parameters"]["decisions"][0]["action"] == "DFT_RELAX"
 
 
-def test_exhausted_hard_budget_does_not_offer_zero_cost_plan():
+def test_legacy_cost_exhaustion_does_not_block_dft_selection():
     config = default_layered_search_config()
     config["budgets"]["enforcement"] = "hard"
+    config["budgets"]["total_relative_cost"] = 0
     state = {
-        "budget_usage": {"total_relative_cost": config["budgets"]["total_relative_cost"]},
+        "budget_usage": {"total_relative_cost": 0},
         "qbc_candidates": [{"candidate_id": "s", "atom_count": 40}],
     }
-    assert (
-        recommend_post_mc_dft(state["qbc_candidates"], config, state)["selected_candidates"] == []
-    )
+    selected = recommend_post_mc_dft(state["qbc_candidates"], config, state)["selected_candidates"]
+    assert [row["candidate_id"] for row in selected] == ["s"]

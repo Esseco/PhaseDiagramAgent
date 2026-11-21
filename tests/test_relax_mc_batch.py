@@ -32,7 +32,8 @@ def fixture(root, count=13, single_x=False):
     manager = PhaseDataManager({"P": ["O3"], "H": {"max_det": 100}, "TM_ratio": {"Fe": 1}})
     for i in range(count):
         # Small physical files, deliberately fake model calculations below.
-        n_na = 1 if single_x or i % 2 else 2
+        # Keep both endpoints but give the remaining branches a Na/vacancy pair.
+        n_na = 1 if single_x or i != 2 else 2
         if not single_x and i == 0:
             n_na = 0
         species = ["Fe", "Fe", "O", "O", "O", "O"] + ["Na"] * n_na
@@ -107,8 +108,14 @@ def fake_executor(monkeypatch, *, fail_relax=False, fail_mc=False):
     def identify(task, manager, **kwargs):
         task = deepcopy(task)
         task.update(actual_phase="O3", phase_identification_status="identified")
+        digest = file_checksum(task["outputs"]["structure_path"])
         task["outputs"].update(
-            actual_phase="O3", phase_identification={"status": "identified", "phase": "O3"}
+            actual_phase="O3",
+            phase_identification={
+                "status": "identified",
+                "phase": "O3",
+                "structure_sha256": digest,
+            },
         )
         return task
 
@@ -137,7 +144,14 @@ def fake_executor(monkeypatch, *, fail_relax=False, fail_mc=False):
             source = Path(task["structure_path"])
             geometry = output_dir / "final.vasp"
             shutil.copy2(source, geometry)
-            composition = Structure.from_file(geometry).composition.as_dict()
+            synthetic = Structure.from_file(geometry)
+            if task["stage"] == "deep_search":
+                oxygen_index = next(
+                    i for i, site in enumerate(synthetic) if site.specie.symbol == "O"
+                )
+                synthetic.translate_sites([oxygen_index], [0, 0, 0.001], frac_coords=True)
+                synthetic.to(filename=geometry, fmt="poscar")
+            composition = synthetic.composition.as_dict()
             atoms = sum(composition.values())
             steps = task.get("max_mc_steps")
             segment = task.get("segment_index", -1)
@@ -192,9 +206,9 @@ def test_preview_diagnosis_workload_and_complete_portable_inventory(tmp_path):
     assert plan["bootstrap_first_mc"] is True
     assert len(plan["diagnosis"]["Na_contents"]) == 3
     assert plan["workload"]["relax_structure_tasks"] == 13
-    assert plan["workload"]["gpu_jobs_upper_by_wave"] == [3, 3, 3, 3]
-    assert plan["workload"]["mc_step_upper"] == 6000
-    assert plan["workload"]["max_concurrent_jobs"] == 3
+    assert plan["workload"]["gpu_jobs_upper_by_wave"] == [4, 4, 4, 4]
+    assert plan["workload"]["mc_step_upper"] == 5500
+    assert plan["workload"]["max_concurrent_jobs"] == 4
     assert plan["workload"]["submission_policy"] == "phase_dependencies"
     assert plan["workload"]["coordinator_jobs"] == 0
     with zipfile.ZipFile(result["upload_archive"]) as archive:
@@ -203,8 +217,12 @@ def test_preview_diagnosis_workload_and_complete_portable_inventory(tmp_path):
         assert any(p.startswith("runtime/phase_agent/science/mc/") for p in names)
         assert "runtime/phase_agent/tools/relax_mc_batch/dependencies.py" in names
         assert any(p.startswith("runtime/mc_backend/Process_AL_MC/") for p in names)
-        assert sum(p.startswith("inputs/") for p in names) == 25
+        assert sum(p.startswith("inputs/") for p in names) == len(
+            {entry["sha256"] for entry in plan["inputs"]}
+        )
         assert not any(p.endswith(".model") for p in names)
+        runtime = [p for p in names if p.startswith("runtime/phase_agent/")]
+        assert not any(p.endswith(("/README.md", ".pyw", ".code-workspace")) for p in runtime)
     script = Path(result["script_path"]).read_text()
     assert script.index("#SBATCH") < script.index("set -e")
     assert "--gres" not in script and "--partition=p1" in script
@@ -228,14 +246,16 @@ def test_relax_builds_hull_before_three_mc_waves_and_safe_resume(tmp_path, monke
     execute, calls = fake_executor(monkeypatch)
     outcome = run_batch(result["directory"], submit=True, batch_executor=execute)
     assert outcome["status"] == "completed", outcome
-    assert len(calls) == 49
+    assert len(calls) == 46
     assert {step for stage, index, step in calls if stage == "deep_search" and index == 0} == {100}
     assert {step for stage, index, step in calls if stage == "deep_search" and index in (1, 2)} == {
         200
     }
     report = inspect_archive(outcome["archive"])
     assert report["summary"]["completed_mc_waves"] == [0, 1, 2]
-    assert report["summary"]["gpu_job_count"] == 12
+    assert report["summary"]["gpu_job_count"] == sum(
+        action["parameters"]["relax_mc_preview"]["workload"]["gpu_jobs_upper_by_wave"]
+    )
     assert report["candidate_pool"]["branch_candidates"]
     remote = read(Path(result["directory"]) / "workflow_state.json")
     assert remote["phase_diagrams"]["mlip"]["status"] == "completed"
@@ -245,7 +265,7 @@ def test_relax_builds_hull_before_three_mc_waves_and_safe_resume(tmp_path, monke
         if r.get("stage") == "deep_search" and r["segment_index"] == 0
     )
     rerun = run_batch(result["directory"], submit=True, batch_executor=execute)
-    assert rerun["status"] == "completed" and len(calls) == 49
+    assert rerun["status"] == "completed" and len(calls) == 46
 
 
 def test_missing_hull_endpoints_pause_before_first_mc(tmp_path, monkeypatch):
@@ -326,7 +346,7 @@ def test_return_import_rebases_results_preserves_ledger_and_is_idempotent(tmp_pa
         context={**context, "event_state": result["state"]},
     )
     assert imported["status"] == "completed"
-    assert len(imported["state"]["tasks"]) == 49
+    assert len(imported["state"]["tasks"]) == 46
     assert imported["state"]["phase_diagrams"]["mlip"]["status"] == "completed"
     assert imported["state"]["qbc_candidates"]
     assert all(Path(r["structure_path"]).is_file() for r in imported["state"]["qbc_candidates"])
@@ -421,6 +441,20 @@ def test_combined_operation_both_modes_dry_run_creates_no_tasks(mode, tmp_path, 
         "actions": [{"id": "batch", "kind": "Relax", "depends_on": [], "action": action}],
     }
     registry = create_tool_registry({name: forbidden for name in create_tool_registry()})
+    from tests.test_decision_team import FakeTeam
+
+    class FakeBatchTeam(FakeTeam):
+        supports_simulation = True
+
+        def __call__(self, request):
+            if request.get("mode") in {"team_consultation", "expert_assessment"}:
+                return super().__call__(request)
+            if request.get("mode") == "simulation_plan":
+                from tests.test_simulation_agent import SimulationModel
+
+                return SimulationModel()(request)
+            return deepcopy(plan if request.get("mode") == "adaptive_plan" else action)
+
     result = run_action_turn(
         state,
         {"status": "confirmed", "confirmed_snapshot": {"config_version": "v1", "config": config}},
@@ -428,9 +462,7 @@ def test_combined_operation_both_modes_dry_run_creates_no_tasks(mode, tmp_path, 
         context={"manager": manager, "phase_references": context["phase_references"]},
         execution_mode="dry_run",
         max_steps=1,
-        agent_client=lambda request: deepcopy(
-            plan if request.get("mode") == "adaptive_plan" else action
-        ),
+        agent_client=FakeBatchTeam(),
         state_path=tmp_path / "dry-state.json",
     )
     assert result["status"] == "planned_only", result
@@ -473,10 +505,13 @@ def test_submission_collection_loop_with_fake_slurm_only(tmp_path, monkeypatch):
     for phase in range(4):
         outcome = run_batch(root, submit=True, io=io, phase=phase)
     assert outcome["status"] == "completed", outcome
-    assert len(calls) == 49 and len(io.submissions) == 16
-    assert len(set(io.submissions)) == 16
+    expected_jobs = sum(
+        action["parameters"]["relax_mc_preview"]["workload"]["gpu_jobs_upper_by_wave"]
+    ) + 4  # one CPU analysis job for each Relax/MC phase
+    assert len(calls) == 46 and len(io.submissions) == expected_jobs
+    assert len(set(io.submissions)) == expected_jobs
     assert run_batch(root, submit=True, io=io, poll_seconds=0)["submitted"] is False
-    assert len(io.submissions) == 16
+    assert len(io.submissions) == expected_jobs
 
 
 def test_corrupt_return_is_reported_without_advancing_pending_tasks(tmp_path):
@@ -539,7 +574,7 @@ def test_full_pipeline_uses_100_relax_and_20_mc_per_gpu(tmp_path, monkeypatch):
     action = attach_preview(action, state, context, config)
     plan = action["parameters"]["relax_mc_preview"]
     assert plan["batch_sizes"] == {"relax_and_feature": 100, "deep_search": 20}
-    assert plan["workload"]["gpu_jobs_upper_by_wave"] == [1, 2, 2, 2]
+    assert plan["workload"]["gpu_jobs_upper_by_wave"] == [2, 2, 2, 2]
     prepared = prepare_batch(action=action, context=context)
     execute, calls = fake_executor(monkeypatch)
     outcome = run_batch(prepared["directory"], submit=True, batch_executor=execute)
@@ -548,11 +583,149 @@ def test_full_pipeline_uses_100_relax_and_20_mc_per_gpu(tmp_path, monkeypatch):
         read(Path(prepared["directory"]) / "workflow_state.json"), prepared["directory"]
     )
     batches = remote["slurm_batches"]
-    assert len(batches) == 7
+    assert len(batches) == 8
+    assert {b["gpu_partition"] for b in batches} == {"v100m3", "v100g32"}
     for batch in batches:
         tasks = [t for t in remote["tasks"] if t["task_id"] in batch["task_ids"]]
         stage = tasks[0]["stage"]
         assert len(tasks) <= ({"relax_and_feature": 100, "deep_search": 20}[stage])
         assert "#SBATCH --array" not in Path(batch["script_path"]).read_text()
-    assert len(calls) == 161
+    assert len(calls) == 158
     assert remote["relax_mc_remote"]["completed_mc_waves"] == [0, 1, 2]
+
+
+def test_latest_mixed_hull_survives_remote_relax_and_mc(tmp_path, monkeypatch):
+    manager, state, config, context, action = fixture(tmp_path, count=3)
+    phase_records = []
+    entries = []
+    for index, (model, i) in enumerate((("m0", 0), ("m1", 2))):
+        path = tmp_path / f"s{i}.vasp"
+        structure = Structure.from_file(path)
+        record = {
+            "record_id": f"history-{index}",
+            "structure_id": f"historical-{index}",
+            "source_task_id": f"history-task-{index}",
+            "structure_path": str(path),
+            "structure_sha256": file_checksum(path),
+            "model_version": model,
+            "source_version": model,
+            "energy": -5.0 * len(structure),
+            "energy_unit": "eV",
+            "energy_method": "mlip",
+            "status": "completed",
+            "checks_passed": True,
+            "phase": "O3",
+            "phase_identification_status": "identified",
+            "composition": structure.composition.as_dict(),
+        }
+        phase_records.append(record)
+        entries.append({**record, "normalized_total_energy": record["energy"]})
+    state.update(
+        phase_records=phase_records,
+        mlip_energy_policy="latest_valid_per_structure_v1",
+        upload_layout={"model_rounds": {"m0": 1, "m1": 2}},
+        phase_diagrams={
+            "mlip": {
+                "version": "latest",
+                "status": "completed",
+                "model_version": "m1",
+                "energy_policy": "latest_valid_per_structure_v1",
+                "source_model_versions": ["m0", "m1"],
+                "mixed_model_versions": True,
+                "entries": entries,
+            }
+        },
+    )
+    action = attach_preview(action, state, context, config)
+    plan = action["parameters"]["relax_mc_preview"]
+    assert {r["model_version"] for r in plan["history_records"]} == {"m0", "m1"}
+    assert plan["workload"]["relax_structure_tasks"] == 3
+    assert plan["workload"]["mc_task_upper"][0] == 1
+    result = prepare_batch(action=action, context=context)
+    assert result["status"] == "prepared"
+    root = Path(result["directory"])
+    initial = rebase(read(root / "batch.json"), root)["initial_state"]
+    assert initial["mlip_energy_policy"] == "latest_valid_per_structure_v1"
+    assert initial["upload_layout"]["model_rounds"] == {"m0": 1, "m1": 2}
+    assert {r["model_version"] for r in initial["phase_records"]} == {"m0", "m1"}
+    execute, calls = fake_executor(monkeypatch)
+    outcome = run_batch(root, submit=True, batch_executor=execute)
+    remote = read(root / "workflow_state.json")
+    assert remote["phase_diagrams"]["mlip"]["status"] == "completed", outcome
+    assert remote["phase_diagrams"]["mlip"]["energy_policy"] == "latest_valid_per_structure_v1"
+    assert {"m0", "m1"} == set(remote["phase_diagrams"]["mlip"]["source_model_versions"])
+    assert len([x for x in calls if x[0] == "relax_and_feature"]) == 3
+    assert len([x for x in calls if x[0] == "deep_search"]) == 1, outcome
+    assert all(
+        str(manager.data["branches"][t["branch_id"]]["x"]) != "1"
+        for t in remote["tasks"]
+        if t["stage"] == "deep_search"
+    )
+
+
+def test_x_one_with_real_vacancy_is_not_globally_excluded(tmp_path, monkeypatch):
+    from phase_agent.tools.relax_mc_batch import plan as plan_module
+
+    manager, state, config, context, action = fixture(tmp_path, count=3)
+    path = tmp_path / "full2.vasp"
+    full = Structure.from_file(path)
+    full.append("Na", [0.8, 0.8, 0.8])
+    full.to(filename=path, fmt="poscar")
+    # This isolates site capacity; layer geometry has its own dedicated tests.
+    monkeypatch.setattr(plan_module, "_validate_initial_na_layers", lambda *args: None)
+    preview = diagnose(
+        action["target_ids"],
+        state,
+        manager,
+        config,
+        "v1",
+        phase_references=context["phase_references"],
+    )
+    full_branch = next(b for b in preview["branches"] if str(b["x"]) == "1")
+    assert not full_branch.get("mc_no_vacancies")
+    assert preview["workload"]["mc_task_upper"][0] == 2
+
+
+def test_verified_unknown_history_is_packaged_and_rebuilt(tmp_path, monkeypatch):
+    from tests.test_unidentified_mlip_hull import fixture as unknown_fixture
+    from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
+
+    manager, state, config, context, action = fixture(tmp_path, count=3)
+    (tmp_path / "unknown").mkdir()
+    records, source_state = unknown_fixture(tmp_path / "unknown")
+    task = source_state["tasks"][0]
+    task["model_version"] = "m1"
+    # The Relax/MC fixture uses Fe; keep all synthetic hull records in that
+    # same chemical system, otherwise the convex hull cannot be constructed.
+    for record in records:
+        path = Path(record["structure_path"])
+        structure = Structure.from_file(path)
+        structure.replace_species({"Ni": "Fe"})
+        structure.to(filename=path, fmt="poscar")
+        record["structure_sha256"] = file_checksum(path)
+        record["composition"]["Fe"] = record["composition"].pop("Ni")
+        record["source_version"] = record["model_version"] = "m1"
+    unknown = records[-1]
+    unknown["phase_identification"]["structure_sha256"] = unknown["structure_sha256"]
+    task["outputs"]["structure_checksum"] = unknown["structure_sha256"]
+    task["outputs"]["composition"] = deepcopy(unknown["composition"])
+    state.update(phase_records=records, tasks=[task],
+                 upload_layout={"model_rounds": {"m1": 1}},
+                 mlip_energy_policy="latest_valid_per_structure_v1")
+    state["phase_diagrams"] = {"mlip": update_phase_diagram(
+        records, active_model_version="m1", output_state=state)["diagrams"]["mlip"]}
+    action = attach_preview(action, state, context, config)
+    plan = action["parameters"]["relax_mc_preview"]
+    assert "x" not in plan.get("historical_unidentified_required_ids", [])
+    result = prepare_batch(action=action, context=context)
+    assert result["status"] == "prepared"
+    root = Path(result["directory"])
+    initial = rebase(read(root / "batch.json"), root)["initial_state"]
+    assert all(t["task_id"] != "x" for t in initial["tasks"])
+    assert all(r.get("record_id") != "x" for r in initial["phase_records"])
+    execute, _ = fake_executor(monkeypatch)
+    outcome = run_batch(root, submit=True, batch_executor=execute)
+    remote = read(root / "workflow_state.json")
+    assert "phase_diagrams" in remote, (outcome, read(root / "failure.json"))
+    assert remote["phase_diagrams"]["mlip"]["status"] == "completed", outcome
+    assert all(e["record_id"] != "x" for e in remote["phase_diagrams"]["mlip"]["entries"])

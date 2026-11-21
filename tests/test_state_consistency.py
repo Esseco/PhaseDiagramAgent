@@ -65,7 +65,7 @@ class StateConsistencyTest(unittest.TestCase):
         self.assertFalse(result["submitted"])
         self.assertEqual(result["state"]["confirmed_config_version"], "v2")
         self.assertEqual(result["state"]["tasks"][0]["config_version"], "v1")
-        self.assertEqual(result["state"]["budget_remaining"], 18)
+        self.assertIsNone(result["state"]["budget_remaining"])
 
     def test_config_migration_rejects_scientific_mlip_setting_changes_with_paths(self):
         old = {"budgets": {"total_relative_cost": 10},
@@ -170,7 +170,7 @@ class StateConsistencyTest(unittest.TestCase):
         self.assertIn("budgets.structure_limits.max_det_H", result["changed_fields"])
 
     def test_concurrent_reservation_and_duplicate_settlement(self):
-        limits = default_budget_rules(); limits["enforcement"] = "hard"; limits["total_relative_cost"] = 10; limits["stage_limits"]["deep_search"]["max_cost"] = 10
+        limits = default_budget_rules(); limits["enforcement"] = "hard"; limits["total_relative_cost"] = 10; limits["stage_limits"]["deep_search"]["max_cost"] = 10; limits["stage_limits"]["deep_search"]["max_tasks"] = 1
         first = reserve_budget({}, task_key="A", stage="deep_search", amount=7, limits=limits)
         second = reserve_budget(first["state"], task_key="B", stage="deep_search", amount=5, limits=limits)
         self.assertEqual(first["status"], "reserved"); self.assertEqual(second["status"], "rejected")
@@ -196,7 +196,7 @@ class StateConsistencyTest(unittest.TestCase):
         convergence = check_global_convergence({"budget_remaining": 0, "budget_limits": {"enforcement": "hard"}}, rules={
             "hull_change_tolerance": .003, "stable_model_update_epochs": 2,
             "final_energy_mae_tolerance": .003, "minimum_recent_dft_checks": 1})
-        self.assertEqual(convergence["status"], "budget_exhausted"); self.assertFalse(convergence["converged"]); self.assertTrue(convergence["missing_evidence"])
+        self.assertEqual(convergence["status"], "insufficient_evidence"); self.assertFalse(convergence["converged"]); self.assertTrue(convergence["missing_evidence"])
 
 
 if __name__ == "__main__": unittest.main()

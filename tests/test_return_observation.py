@@ -63,7 +63,7 @@ def test_returns_recovered_with_original_config_without_migration(tmp_path, monk
     assert recovered["tasks"][0]["status"] == "completed"
     assert recovered["confirmed_config_version"] == "old"
     assert seen["config"]["config_version"] == "old"
-    assert seen["config"]["budgets"] == {"max_tasks": 300}
+    assert seen["config"]["budgets"] == {"max_tasks": 300, "total_relative_cost": None}
     assert seen["saved"] == recovered
     assert recovered["processed_task_ids"] == ["r1"]
     collector.collect_results_with_report = lambda s: (_ for _ in ()).throw(
@@ -611,6 +611,16 @@ def test_standalone_recovery_imperative_is_explicit_approval():
     assert semantic_recovery_intent(handler, {"tasks": []}, "回收") == "approve"
 
 
+@pytest.mark.parametrize("message", ["同意", "approve", "拒绝", "reject"])
+def test_bare_reply_does_not_authorize_recovery_or_call_model(message):
+    from phase_agent.graphs.dialogue.saved_control import semantic_recovery_intent
+
+    calls = []
+    handler = SimpleNamespace(workflow_kwargs={"agent_client": lambda payload: calls.append(payload)})
+    assert semantic_recovery_intent(handler, {"tasks": []}, message) == "unknown"
+    assert calls == []
+
+
 def test_no_pending_recovery_does_not_add_an_intent_model_call():
     from phase_agent.graphs.dialogue.saved_control import semantic_recovery_intent
 
@@ -847,3 +857,96 @@ def test_interrupted_feedback_resumes_without_double_settlement(tmp_path, monkey
     )
     assert resumed["budget_usage"]["total_relative_cost"] == 1
     assert resumed["feedback_processed_task_ids"] == ["t"]
+
+
+def test_recovery_cache_tracks_receipt_creation_change_and_removal(tmp_path, monkeypatch):
+    output = tmp_path / "output"
+    output.mkdir()
+    archive = output / "old.results.zip"
+    archive.write_bytes(b"archive")
+    receipt = output / ".transfer_receipts" / "old.results.zip.sha256"
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}")
+    state = {"slurm_batches": [{"handoff": {"return_directory": str(output)}}]}
+    calls = []
+    def pending(_state):
+        calls.append(1)
+        return not receipt.exists() or receipt.read_text() != "valid"
+    monkeypatch.setattr(recovery, "has_registered_return", pending)
+    monkeypatch.setattr(recovery, "recovery_candidate_fingerprint", lambda state: "f")
+    assert recovery.recovery_candidate(state, state_path=state_path)["returned"]
+    assert recovery.recovery_candidate(state, state_path=state_path)["returned"]
+    assert len(calls) == 1
+    receipt.parent.mkdir()
+    receipt.write_text("valid")
+    assert not recovery.recovery_candidate(state, state_path=state_path)["returned"]
+    receipt.write_text("invalid")
+    assert recovery.recovery_candidate(state, state_path=state_path)["returned"]
+    receipt.unlink()
+    assert recovery.recovery_candidate(state, state_path=state_path)["returned"]
+    assert len(calls) == 4
+
+
+@pytest.mark.parametrize("lane", ["transfer", "return-results"])
+def test_recovery_cache_detects_new_archives_in_nested_return_lanes(tmp_path, monkeypatch, lane):
+    output = tmp_path / "output"
+    (output / lane).mkdir(parents=True)
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}")
+    state = {"slurm_batches": [{"handoff": {"return_directory": str(output)}}]}
+    monkeypatch.setattr(recovery, "has_registered_return", lambda s: bool(list((output / lane).glob("*.zip"))))
+    monkeypatch.setattr(recovery, "recovery_candidate_fingerprint", lambda s: "f")
+    assert not recovery.recovery_candidate(state, state_path=state_path)["returned"]
+    (output / lane / "new.results.zip").write_bytes(b"new")
+    assert recovery.recovery_candidate(state, state_path=state_path)["returned"]
+
+
+def test_clean_collection_clears_stale_recovery_error(tmp_path):
+    result_path = tmp_path / "stale-result.json"
+    result_path.write_text("{}", encoding="utf8")
+    state = {
+        "result_collection": {
+            "recovery_error": "old transfer mismatch",
+            "historical_transfer_errors": [],
+        },
+        "confirmed_config_version": "v1",
+        "confirmed_config": {"run": {}},
+        "tasks": [{"task_id": "T", "stage": "relax_and_feature", "status": "pending", "result_path": str(result_path)}],
+        "dft_dataset_records": [],
+        "dft_mlip_comparisons": [],
+    }
+    collector = SimpleNamespace(
+        collect_results_with_report=lambda current: {
+            "results": [],
+            "report": {"transfer_errors": [], "historical_transfer_errors": [], "recovered_count": 0},
+        }
+    )
+    recovered = recovery.recover_saved_results(
+        state, manager=object(), result_collector=collector, config_session={"confirmed_snapshot": {}}
+    )
+    assert "recovery_error" not in recovered["result_collection"]
+
+
+def test_no_new_return_fast_path_clears_stale_error(tmp_path, monkeypatch):
+    archive = tmp_path / "old.results.zip"
+    archive.write_bytes(b"verified")
+    from phase_agent.tools.remote.transfer_bundle import _archive_receipt, checksum
+    receipt = _archive_receipt(tmp_path, archive)
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text(checksum(archive), encoding="utf8")
+    state = {
+        "confirmed_config_version": "v1",
+        "confirmed_config": {"run": {}},
+        "result_collection": {"recovery_error": "old", "historical_transfer_errors": [],
+                              "transfer_errors": [{"archive": str(archive), "reason": "old"}]},
+    }
+    monkeypatch.setattr(recovery, "recovery_candidate", lambda *a, **k: {"pending": False})
+    saved = {}
+    monkeypatch.setattr(recovery, "_save_runner_state", lambda current, path: saved.update(current))
+    collector = SimpleNamespace(collect_results_with_report=lambda current: {"results": [], "report": {}})
+    out = recovery.recover_saved_results(
+        state, manager=object(), result_collector=collector, state_path="state.json"
+    )
+    assert "recovery_error" not in out["result_collection"]
+    assert "transfer_errors" not in out["result_collection"]
+    assert "recovery_error" not in saved["result_collection"]

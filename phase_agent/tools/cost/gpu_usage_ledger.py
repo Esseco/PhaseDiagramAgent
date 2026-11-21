@@ -268,7 +268,10 @@ def update_gpu_usage(state, config, results=()):
     temp = ledger.with_suffix(".tmp")
     temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(temp, ledger)
-    output = Path(config.get("phase_diagram_directory") or ledger.parent) / "gpu_usage.csv"
+    from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
+
+    output_root = config.get("phase_diagram_directory")
+    output = (analysis_metadata_directory(output_root) if output_root else ledger.parent) / "gpu_usage.csv"
     output.parent.mkdir(parents=True, exist_ok=True)
     fields = [
         "round_id",

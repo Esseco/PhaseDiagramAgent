@@ -55,6 +55,35 @@ def test_model_mismatch_not_counted_but_training_preserved():
     assert len(state["new_dft_records"]) == 1
 
 
+def test_round_export_reuses_verified_products_and_rebuilds_on_change(tmp_path, monkeypatch):
+    from pathlib import Path
+    from phase_agent.analysis.feedback import export_dft_products as publisher
+
+    state = {"tasks": [{"task_id": "T1", "upload_operation_id": "dft-1"}]}
+    record_dft_products(state, result(), predict)
+    export_dft_products(state, tmp_path)
+    directory = Path(next(iter(state["dft_result_exports"].values()))["directory"])
+    energy = dft_product_path(directory, "energy_comparison.csv")
+    original = energy.read_bytes()
+    build = publisher.build_comparison_tables
+    calls = []
+
+    def count(*args, **kwargs):
+        calls.append(True)
+        return build(*args, **kwargs)
+
+    monkeypatch.setattr(publisher, "build_comparison_tables", count)
+    state = json.loads(json.dumps(state))  # Simulate restored state; no live cache.
+    export_dft_products(state, tmp_path)
+    assert calls == []
+    energy.write_bytes(b"corrupt")
+    export_dft_products(state, tmp_path)
+    assert len(calls) == 1 and energy.read_bytes() == original
+    state["dft_dataset_records"][0]["energy"] -= 1
+    export_dft_products(state, tmp_path)
+    assert len(calls) == 2 and energy.read_bytes() != original
+
+
 def test_rmse_aggregates_squared_errors_not_frame_rmse(tmp_path):
     from pathlib import Path
     state = {"tasks": [{"task_id": name, "upload_operation_id": "round1"} for name in ("T1", "T2")]}

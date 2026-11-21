@@ -270,8 +270,37 @@ def test_actual_snapshot_chat_front_door_has_zero_model_calls(tmp_path, monkeypa
         handler._run = Mock(
             return_value={"status": "not_configured", "reason": "verification only", "state": state}
         )
-        handler([{"role": "user", "content": "同意"}], conversation_id="test")
-        handler._run.assert_called_once()
-        assert handler._run.call_args.args[1:] == (None, "继续")
+        reply = handler([{"role": "user", "content": "同意"}], conversation_id="test")
+        if "同意回收" in reply:
+            # A returned batch takes precedence over an old frozen selection;
+            # a bare affirmation cannot approve recovery or new computation.
+            assert "尚未" in reply
+            handler._run.assert_not_called()
+        elif "没有可批准或拒绝的待审方案" in reply:
+            assert "未执行任务" in reply
+            handler._run.assert_not_called()
+        else:
+            handler._run.assert_called_once()
+            assert handler._run.call_args.args[1:] == (None, "继续")
     forbidden.assert_not_called()
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("case", ["ui", "unknown", "scientific", "automatic"])
+def test_dft_shortcut_skips_only_terminal_ui_bookkeeping(tmp_path, monkeypatch, case):
+    from phase_agent.tools.workflows.saved_dft_input_frame import prepare_saved_dft_input_frame
+
+    state = rejected_template_state()
+    state["phase_diagrams"] = {"mlip": {"status": "completed", "model_version": "m"}}
+    identifier = "webui-123:task"
+    state["tasks"] = [{"task_id": identifier, "status": "completed", "stage": None}]
+    state["processed_task_ids"] = [identifier]
+    if case == "unknown":
+        state["processed_task_ids"].append("unknown")
+    if case == "scientific":
+        state["tasks"][0]["stage"] = "dft_single_point"
+    frame = {"loaded_state": state, "execution_mode": "interactive", "runtime_adapters": {"frozen_selection_only": True}, "state_path": str(tmp_path / "state.json"), "effective_config": {}}
+    if case == "automatic":
+        frame["automatic_results"] = [{"task_id": "new"}]
+    monkeypatch.setattr("phase_agent.tools.remote.transfer_bundle.has_registered_return", lambda s: False)
+    assert bool(prepare_saved_dft_input_frame(frame).get("saved_input_only")) == (case == "ui")

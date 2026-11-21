@@ -66,7 +66,7 @@ def test_round_export_plots_rejected_sites_and_actual_limits(tmp_path):
     assert plots["site_counts"] == {"Fe_absolute": 1, "Mn_absolute": 1}
     assert all(Path(path).is_file() for path in plots["files"].values())
     assert "Fe 3.8–4.1" in magnetic_chat_summary(state)
-    assert "magnetic_distribution_Fe_absolute" in (tmp_path / "output_index.md").read_text(
+    assert "magnetic distribution Fe absolute" in Path(state["output_index_path"]).read_text(
         encoding="utf-8"
     )
     times = {key: Path(path).stat().st_mtime_ns for key, path in plots["files"].items()}
@@ -204,3 +204,31 @@ def test_unconstrained_legacy_elements_keep_original_moments():
     assert [row["moment_mu_B"] for row in rows] == [-0.8, 0.01]
     assert all(row["spin_assessment"] == "not_checked" for row in rows)
     assert all(row["expected_abs_min_mu_B"] is None for row in rows)
+
+
+def test_magnetic_kde_uses_absolute_sites_and_nonnegative_support(tmp_path):
+    import numpy as np
+    from matplotlib.figure import Figure
+    from phase_agent.analysis.feedback.dft_magnetic_plots import _draw_distribution
+
+    record = {
+        "task_id": "returned",
+        "magnetic_moments": {
+            "elements": ["Fe", "Fe", "Fe", "Fe", "Co", "Co", "O"],
+            "moments": [-2, 0, 1, None, -1.5, 1.5, 12],
+        },
+    }
+    report = export_magnetic_plots(magnetic_rows([record]), tmp_path)
+    assert report["excluded_sites"] == 1
+    fe = report["element_summaries"]["Fe_absolute"]
+    assert (fe["site_count"], fe["min_mu_B"], fe["median_mu_B"], fe["max_mu_B"]) == (3, 0, 1, 2)
+    assert fe["method"] == "kde"
+    assert report["element_summaries"]["Co_absolute"]["method"] == "observed_sites"
+    assert set(report["files"]) == {"Fe_absolute", "Co_absolute"}
+    assert Path(report["files"]["Fe_absolute"]).read_bytes().startswith(b"\x89PNG")
+
+    axis = Figure().subplots()
+    assert _draw_distribution(axis, [0, 1, 2]) == "kde"
+    x, y = axis.lines[0].get_data()
+    assert x[0] == 0 and min(y) >= 0
+    assert np.trapezoid(y, x) == pytest.approx(1, abs=0.001)

@@ -49,6 +49,7 @@ def test_modify_request_validates_identity_and_is_never_approval(tmp_path):
     handler = SimpleNamespace(
         state_path=path,
         lock=RLock(),
+        workflow_kwargs={},
         _run=lambda *args: calls.append(args) or {"status": "awaiting_approval"},
     )
     args = {
@@ -81,6 +82,7 @@ def test_read_only_summary_refresh_does_not_invalidate_unchanged_plan(tmp_path):
     handler = SimpleNamespace(
         state_path=path,
         lock=RLock(),
+        workflow_kwargs={},
         _run=lambda *args: calls.append(args) or {"status": "completed", "state": state},
     )
     before = build_status_summary(state, config_version="c1")["summary_id"]
@@ -140,3 +142,15 @@ def test_pending_card_has_human_wait_and_chat_shows_revision(tmp_path):
     )
     assert "修订 1" in text and "budget：1 → 2" in text
     assert "旧版批准不适用于新版方案" in text
+
+
+def test_wait_status_distinguishes_prepared_unsubmitted_batch(tmp_path):
+    config = tmp_path / "agent_runtime.json"
+    config.write_text('{"state_path":"state.json"}')
+    (tmp_path / "state.json").write_text(json.dumps({
+        "tasks": [{"task_id": "t1", "status": "pending"}],
+        "slurm_batches": [{"task_ids": ["t1"], "status": "prepared", "job_id": None}],
+    }))
+    progress = scientific_progress(config)
+    assert progress["waiting_state"]["kind"] == "prepared_not_submitted"
+    assert "不要重复生成输入" in progress["waiting_state"]["next_action"]

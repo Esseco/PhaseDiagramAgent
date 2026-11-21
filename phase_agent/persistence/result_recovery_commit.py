@@ -1,6 +1,7 @@
 """Compare-and-swap recovery commit with backups and a stale-writer revision barrier."""
 
 from copy import deepcopy
+from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
@@ -26,7 +27,7 @@ def _atomic_restore(path, content):
         Path(temporary).unlink(missing_ok=True)
 
 
-def commit_result_recovery(state_path, desired_state, files, *, expected_hashes, evidence):
+def commit_result_recovery(state_path, desired_state, files, *, expected_hashes, evidence, config_transition=None):
     state_path = Path(state_path).resolve()
     base = state_path.parent
     if not evidence or state_path.name != "state.json":
@@ -41,17 +42,22 @@ def commit_result_recovery(state_path, desired_state, files, *, expected_hashes,
         raise ValueError("recovery_commit_requires_all_file_hashes")
     backup = base / "backups" / ("result-recovery-" + revision)
     control = control_path(state_path)
-    with FileLock(str(control) + ".lock", timeout=10):
+    with FileLock(str(control) + ".lock", timeout=10), ExitStack() as locks:
+        for ledger in sorted(p for p in payloads if p != state_path):
+            locks.enter_context(FileLock(str(ledger) + ".lock", timeout=30))
         for path in payloads:
             digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
             if digest != expected_hashes[str(path)]:
                 raise ValueError("recovery_commit_source_changed:" + str(path))
         current = json.loads(state_path.read_text(encoding="utf-8"))
-        if any(
-            current.get(k) != desired_state.get(k)
-            for k in ("active_model_version", "confirmed_config_version")
-        ):
+        if current.get("active_model_version") != desired_state.get("active_model_version"):
             raise ValueError("recovery_commit_binding_changed")
+        if current.get("confirmed_config_version") != desired_state.get("confirmed_config_version"):
+            if (not isinstance(config_transition, dict)
+                or config_transition != {"from": current.get("confirmed_config_version"),
+                                          "to": desired_state.get("confirmed_config_version")}
+                or (evidence or {}).get("operation") != "user_approved_dft_nelm"):
+                raise ValueError("recovery_commit_binding_changed")
         previous = read_control(state_path)
         previous_bytes = control.read_bytes() if control.exists() else None
         backup.mkdir(parents=True)
@@ -177,45 +183,57 @@ def resume_result_recovery(state_path, *, revision):
             return {**status, "idempotent_replay": True}
         journal_path = Path(status["journal"])
         journal = json.loads(journal_path.read_text(encoding="utf-8"))
-        payloads = []
-        for row in journal["targets"]:
-            target = (state_path.parent / row["relative_path"]).resolve()
-            prepared = (journal_path.parent / row["prepared_path"]).resolve()
-            if (
-                target != state_path and not target.is_relative_to(state_path.parent / "ledgers")
-            ) or not prepared.is_relative_to(journal_path.parent / "prepared"):
-                raise ValueError("recovery_transaction_unsafe_target")
-            if hashlib.sha256(prepared.read_bytes()).hexdigest() != row["desired_sha256"]:
-                raise ValueError("recovery_transaction_staged_checksum_mismatch")
-            current = hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None
-            if current not in {row["before_sha256"], row["desired_sha256"]}:
-                raise ValueError("recovery_transaction_source_changed")
-            payloads.append((target, json.loads(prepared.read_text(encoding="utf-8"))))
-        for target, payload in payloads:
-            _write_json(target, payload)
-        _write_json(journal_path, {**journal, "status": "completed"})
-        return {"status": "completed", "revision": revision, "submitted": False}
+        ledger_targets = sorted(
+            (state_path.parent / row["relative_path"]).resolve()
+            for row in journal["targets"]
+            if (state_path.parent / row["relative_path"]).resolve() != state_path
+        )
+        if any(
+            not target.is_relative_to(state_path.parent / "ledgers") for target in ledger_targets
+        ):
+            raise ValueError("recovery_transaction_unsafe_target")
+        with ExitStack() as locks:
+            for target in ledger_targets:
+                locks.enter_context(FileLock(str(target) + ".lock", timeout=30))
+            return _resume_locked(state_path, revision, journal_path, journal)
+
+
+def _resume_locked(state_path, revision, journal_path, journal):
+    payloads = []
+    for row in journal["targets"]:
+        target = (state_path.parent / row["relative_path"]).resolve()
+        prepared = (journal_path.parent / row["prepared_path"]).resolve()
+        if (
+            target != state_path and not target.is_relative_to(state_path.parent / "ledgers")
+        ) or not prepared.is_relative_to(journal_path.parent / "prepared"):
+            raise ValueError("recovery_transaction_unsafe_target")
+        if hashlib.sha256(prepared.read_bytes()).hexdigest() != row["desired_sha256"]:
+            raise ValueError("recovery_transaction_staged_checksum_mismatch")
+        current = hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None
+        if current not in {row["before_sha256"], row["desired_sha256"]}:
+            raise ValueError("recovery_transaction_source_changed")
+        payloads.append((target, json.loads(prepared.read_text(encoding="utf-8"))))
+    for target, payload in payloads:
+        _write_json(target, payload)
+    _write_json(journal_path, {**journal, "status": "completed"})
+    return {"status": "completed", "revision": revision, "submitted": False}
 
 
 def refresh_manager_after_recovery(manager, state, ledger_path):
     """A long-lived handler must not save a pre-recovery manager over the new ledger."""
     revision = state.get(FIELD)
-    if (
-        not revision
-        or not ledger_path
-        or getattr(manager, "_workflow_control_revision", None) == revision
-    ):
+    if not ledger_path:
         return False
-    from phase_agent.persistence.ledger.phase_data_manager import PhaseDataManager
+    from phase_agent.persistence.ledger.phase_data_manager import (
+        PhaseDataManager,
+        refresh_if_changed,
+    )
 
     if not isinstance(manager, PhaseDataManager):
         return False
     path = Path(ledger_path)
     if not path.is_file():
         raise ValueError("recovery_manager_ledger_missing")
-    loaded = PhaseDataManager.load(path)
-    if manager.boundary != loaded.boundary:
-        raise ValueError("recovery_manager_boundary_changed")
-    manager.data = loaded.data
+    changed = refresh_if_changed(manager, path)
     manager._workflow_control_revision = revision
-    return True
+    return changed

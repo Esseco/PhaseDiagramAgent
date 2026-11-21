@@ -12,6 +12,71 @@ from tests.test_phase_quality import sample, add, row_for
 from tests.test_phase_quality_review import fixture
 
 
+def test_exact_mixed_hull_removal_keeps_source_model_for_restore(tmp_path):
+    from pathlib import Path
+    from threading import RLock
+    from types import SimpleNamespace
+
+    from phase_agent.runtime.local_agent_control import LocalAgentControl
+    from phase_agent.runtime.codex.mcp import CodexMcpServer
+    from phase_agent.tools.step_runner.file_protocol import read_json, write_json
+
+    state, manager, *_ = fixture()
+    state["mlip_energy_policy"] = "latest_valid_per_structure_v1"
+    state["upload_layout"] = {"model_rounds": {"m0": 1, "m1": 2}}
+    snapshot = state["phase_diagrams"]["mlip"]
+    snapshot["energy_basis_id"] = "mlip:latest-per-structure:total"
+    snapshot["energy_policy"] = "latest_valid_per_structure_v1"
+    snapshot["source_model_versions"] = ["m0", "m1"]
+    snapshot["entries"][1]["source_version"] = "m0"
+    state["phase_records"][1].update(model_version="m0", source_version="m0")
+    report = get_phase_quality_report(state)
+    row = row_for(report)
+    targets = {row["review_id"]: {"geometry_key": row["geometry_key"], "record_ids": ["r1"]}}
+    path, ledger = tmp_path / "workflow_state" / "state.json", tmp_path / "ledger.json"
+    write_json(path, state)
+    manager.save(ledger)
+    handler = SimpleNamespace(
+        state_path=Path(path),
+        lock=RLock(),
+        workflow_kwargs={"manager": manager, "ledger_path": ledger},
+    )
+    control = LocalAgentControl(handler)
+    with pytest.raises(ValueError, match="排除范围"):
+        control.remove_phase_quality_records(
+            expected_hull="stale", targets=targets, user_message="排除精确旧模型记录"
+        )
+    assert read_json(path)["phase_diagrams"]["mlip"]["version"] == "h1"
+    server = CodexMcpServer(codex=SimpleNamespace(control=control))
+    reply = server.handle({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {
+            "name": "phase_remove_quality_records",
+            "arguments": {
+                "expected_hull": "h1", "targets": targets, "user_message": "排除精确旧模型记录",
+            },
+        },
+    })
+    import json
+
+    receipt = json.loads(reply["result"]["content"][0]["text"])
+    assert receipt["excluded_record_ids"] == ["r1"] and receipt["submitted"] is False
+    saved = read_json(path)
+    assert saved["phase_quality_exclusions"][-1]["source_model_by_record"] == {"r1": "m0"}
+    assert saved["phase_quality_archived_records"][0]["model_version"] == "m0"
+    restored = apply_quality_review(
+        saved,
+        manager,
+        None,
+        review_ids=[row["review_id"]],
+        decision="restore",
+        reason="恢复精确记录",
+        backup_root=tmp_path / "backups",
+        human_requested=True,
+    )["state"]
+    assert any(r["record_id"] == "r1" for r in restored["phase_diagrams"]["mlip"]["entries"])
+
+
 @pytest.mark.parametrize(
     "lift,eligible", [(99.999, False), (100, False), (100.001, True), (667.45, True)]
 )

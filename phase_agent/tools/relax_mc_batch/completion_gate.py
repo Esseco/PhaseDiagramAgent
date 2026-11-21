@@ -5,7 +5,18 @@ import zipfile
 
 
 def completion_error(summary, tasks):
-    if not isinstance(summary, dict) or summary.get("status") != "completed":
+    if not isinstance(summary, dict):
+        return "batch_status_not_completed"
+    normal_stop = (
+        summary.get("status") == "paused"
+        and summary.get("reason") == "continuation_pool_below_minimum"
+        and bool(summary.get("completed_mc_waves"))
+        and not summary.get("failed_task_ids")
+        and not ((summary.get("diagnostics") or {}).get("unverified_task_ids") or [])
+        and not ((summary.get("diagnostics") or {}).get("unverified_failure_task_ids") or [])
+        and not ((summary.get("diagnostics") or {}).get("verified_failed_task_ids") or [])
+    )
+    if summary.get("status") != "completed" and not normal_stop:
         return "batch_status_not_completed"
     if not tasks or summary.get("task_count") != len(tasks):
         return "batch_task_scope_incomplete"
@@ -34,9 +45,9 @@ def incomplete_imports(state):
         if not batch.get("import_checksum") or (model and batch.get("model_version") != model):
             continue
         tasks = [t for t in state.get("tasks", []) if t.get("relax_mc_bundle_id") == key]
-        if batch.get("status") != "completed" or completion_error(
-            batch.get("result_summary"), tasks
-        ):
+        if (
+            batch.get("status") != "completed" and batch.get("formal_recovery_status") != "accepted"
+        ) or completion_error(batch.get("result_summary"), tasks):
             result.append(key)
     return result
 

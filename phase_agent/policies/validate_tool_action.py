@@ -85,17 +85,19 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
     if requested_dft_tasks:
         from phase_agent.agents.reliability.selection.dft_round_policy import (
             dft_task_limit,
-            round_dft_tasks,
         )
 
         try:
-            if len(round_dft_tasks(state, config)) + requested_dft_tasks > dft_task_limit(config):
+            if requested_dft_tasks > dft_task_limit(config):
                 errors.append("dft_round_task_limit")
         except ValueError as error:
             errors.append(f"invalid_dft_round_task_limit:{error}")
     from phase_agent.policies.branch_conditions import branch_entry_errors
 
     errors.extend(branch_entry_errors(action, state))
+    from phase_agent.policies.recovery_transition import exact_recovery_scope_errors
+
+    errors.extend(exact_recovery_scope_errors(action, state))
     from phase_agent.policies.adaptive_branch_count import generation_review_errors
 
     errors.extend(generation_review_errors(action, state))
@@ -164,7 +166,55 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
             for row in state.get("tasks") or []
             if row.get("task_id") and row.get("status") in {"failed", "timeout"}
         }
-        if len(targets) != 1 or targets[0] not in retryable:
+        batch_profile = parameters.get("repair_profile") in {
+            "vasp_symmetry_single_gpu",
+            "dft_scf_diagnostic",
+            "dft_recalculation",
+        }
+        stages = {row.get("task_id"): row.get("stage") for row in state.get("tasks") or []}
+        valid_batch = (
+            batch_profile
+            and len(targets) >= 1
+            and (
+                parameters.get("repair_profile") == "dft_scf_diagnostic"
+                or len(targets)
+                <= (1000 if parameters.get("repair_profile") == "dft_recalculation" else 10)
+            )
+            and len(targets) == len(set(targets))
+            and all(
+                target in retryable and stages.get(target) in {"dft_single_point", "dft_relax"}
+                for target in targets
+            )
+        )
+        if parameters.get("repair_profile") == "dft_scf_diagnostic":
+            strategies = parameters.get("strategies")
+            if (
+                not isinstance(strategies, dict)
+                or set(strategies) != set(targets)
+                or any(x not in {"nelm_200", "nelm_200_slow_mixing"} for x in strategies.values())
+                or any(stages.get(target) != "dft_single_point" for target in targets)
+            ):
+                errors.append("invalid_scf_diagnostic_scope")
+                valid_batch = False
+        if parameters.get("repair_profile") == "dft_recalculation":
+            from phase_agent.agents.simulation.dft_recalculation import validate_action
+
+            try:
+                validate_action(action, state)
+            except (ValueError, TypeError) as error:
+                errors.append(str(error))
+                valid_batch = False
+        if parameters.get("repair_profile") == "mc_threshold_recovery":
+            from phase_agent.tools.state.mc_threshold_retry import validate_mc_threshold_retry
+
+            try:
+                validate_mc_threshold_retry(state, targets)
+                if parameters.get("prepare_inputs_after_approval"):
+                    raise ValueError("mc_retry_input_preparation_requires_separate_action")
+                valid_batch = True
+            except ValueError as error:
+                errors.append(str(error))
+        if not valid_batch and (len(targets) != 1 or targets[0] not in retryable):
             errors.append("retry_target_not_failed_task")
     task_key = action.get("task_key")
     if tool not in {"check_convergence", "pause_search"} and not task_key:
@@ -186,22 +236,25 @@ def validate_tool_action(action: dict, state: dict, session: dict, registry: dic
         )
 
         branch_limits = budget_limits_for_action(action, config["budgets"])
+        if tool == "allocate_mc_bohb" and action.get("target_ids"):
+            from phase_agent.tools.relax_mc_batch.branch_limit import batch_reservation_limits
+
+            try:
+                branch_limits = batch_reservation_limits(branch_limits, action["target_ids"])
+            except ValueError as error:
+                errors.append(str(error))
+        # Exporting already-reserved MC tasks does not allocate a new task.
+        preparation = tool == "prepare_local_batch_files" and parameters.get("mode") == "mc_inputs"
         check = check_budget(
             state,
-            {"stage": action.get("stage"), "tasks": 1, "relative_cost": budget},
+            {
+                "stage": None if preparation else action.get("stage"),
+                "tasks": 0 if preparation else 1,
+                "relative_cost": budget,
+            },
             branch_limits,
         )
         errors.extend(check["reasons"])
-        total_limit = (config.get("budgets") or {}).get("total_relative_cost")
-        used = ((state.get("budget_usage") or {}).get("total_relative_cost") or 0) + (
-            state.get("reserved_relative_cost") or 0
-        )
-        if (
-            budget_is_hard(branch_limits)
-            and total_limit is not None
-            and used + budget > total_limit
-        ):
-            errors.append("reserved_total_cost_limit")
     if tool == "select_dft_candidates" and registry.get(tool, {}).get("owner") != "decision_layer":
         errors.append("dft_selection_owner_invalid")
     if tool == "allocate_mc_bohb":

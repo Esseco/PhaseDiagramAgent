@@ -7,7 +7,7 @@ from phase_agent.analysis.phase.phase_quality_disposition import filter_excluded
 
 
 def test_failure_is_a_separate_bound_dft_candidate_but_not_a_hull_record():
-    with TemporaryDirectory(dir=Path.cwd()) as folder:
+    with TemporaryDirectory() as folder:
         path = Path(folder) / 'frame.vasp'
         path.write_text('structure', encoding='utf8')
         digest = sha256(path.read_bytes()).hexdigest()

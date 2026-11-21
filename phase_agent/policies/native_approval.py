@@ -4,8 +4,8 @@ from phase_agent.policies.file_approval import proposal_hash
 
 
 def native_approval_gate(frame, policy):
-    if policy.get("authorization_source") == "confirmed_policy":
-        return None  # Configuration authorization is never recorded as a human decision.
+    if policy.get("authorization_source") in {"confirmed_policy", "approved_extrapolation_recovery"}:
+        return None  # Previously verified authorization is not a new human decision.
     if frame["mode"] != "interactive":
         return None
     context = frame.get("context") or {}

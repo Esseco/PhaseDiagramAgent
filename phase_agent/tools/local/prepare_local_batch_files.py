@@ -12,6 +12,32 @@ from phase_agent.tools.step_runner.file_protocol import write_json
 
 
 def prepare_local_batch_files(*, action, context):
+    if (action.get("parameters") or {}).get("mode") == "parent_first_recovery_inputs":
+        from phase_agent.tools.local.prepare_parent_first_recovery import (
+            prepare_parent_first_recovery,
+        )
+
+        return prepare_parent_first_recovery(action=action, context=context)
+    if (action.get("parameters") or {}).get("mode") == "perturbation_recovery_inputs":
+        # Legacy order perturbs locally and then relaxes every perturbation. New
+        # recovery requires HPC parent relaxation before perturbation and DIRECT.
+        return {
+            "status": "not_configured",
+            "submitted": False,
+            "reason": "legacy_perturb_before_relax_disabled_require_hpc_parent_first",
+        }
+    if (action.get("parameters") or {}).get("mode") == "direct_extrapolation":
+        if (action.get("parameters") or {}).get("recovery_route") == "perturbation":
+            return {
+                "status": "not_configured",
+                "submitted": False,
+                "reason": "local_perturbation_direct_disabled_require_hpc_sampling",
+            }
+        from phase_agent.tools.workflows.direct_extrapolation_sampling import (
+            prepare_direct_sampling,
+        )
+
+        return prepare_direct_sampling(action=action, context=context)
     if (action.get("parameters") or {}).get("mode") == "training_handoff_inputs":
         from phase_agent.tools.local.prepare_training_followup import prepare_training_followup
 
@@ -36,6 +62,10 @@ def prepare_local_batch_files(*, action, context):
         from phase_agent.tools.relax_mc_batch.results import import_results
 
         return import_results(action=action, context=context)
+    if (action.get("parameters") or {}).get("mode") == "mc_energy_repair_inputs":
+        from phase_agent.tools.local.prepare_mc_energy_repair import prepare
+
+        return prepare(action=action, context=context)
     if (action.get("parameters") or {}).get("mode") == "model_refresh_inputs":
         from phase_agent.tools.local.prepare_model_refresh import prepare_model_refresh
 

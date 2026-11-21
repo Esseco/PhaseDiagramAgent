@@ -212,8 +212,35 @@ def reconcile_task_results(state: dict | None, recovered_results=None, *, _owned
                 reservation["status"] = "submitted" if status == "pending" else "running"
             reconciled.append({"status": status, "task_id": task_id, "task_key": task_key})
     current["pending_tasks"] = active_pending_tasks(tasks)
+    mark_recovered_batches(current)
     if current.get("tiered_mc_state"):
         from phase_agent.science.mc.second_round_state import reconciled_mc_state
 
         current["tiered_mc_state"] = reconciled_mc_state(current)
     return {"state": current, "reconciled": reconciled}
+
+
+def mark_recovered_batches(state):
+    """Close only batches whose own task results were all verified and reconciled."""
+    processed = set(state.get("processed_task_ids") or [])
+    by_id = {}
+    for task in state.get("tasks") or []:
+        by_id.setdefault(task.get("task_id"), []).append(task)
+    changed = 0
+    for batch in state.get("slurm_batches") or []:
+        if batch.get("status") not in {"prepared", "synced", "submitted", "running", "completed"}:
+            continue
+        ids = batch.get("task_ids") or []
+        if not ids or len(ids) != len(set(ids)) or not set(ids) <= processed:
+            continue
+        if not all(
+            len(by_id.get(task_id, [])) == 1
+            and by_id[task_id][0].get("batch_id") == batch.get("batch_id")
+            and by_id[task_id][0].get("status") in {"completed", "failed"}
+            and not by_id[task_id][0].get("recovery_cancelled")
+            for task_id in ids
+        ):
+            continue
+        batch["status"] = "results_synced"
+        changed += 1
+    return changed

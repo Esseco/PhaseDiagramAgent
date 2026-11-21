@@ -34,7 +34,7 @@ def _build_legacy_upload_batch_directory(
     layout = state.setdefault("upload_layout", {})
     model_rounds = layout.setdefault("model_rounds", {})
     for batch in state.get("slurm_batches") or []:
-        prior_model = str(batch.get("model_version") or "unversioned")
+        prior_model = str(batch.get("upload_epoch_model_version") or batch.get("model_version") or "unversioned")
         if prior_model not in model_rounds:
             saved_round = batch.get("mlip_round")
             model_rounds[prior_model] = (

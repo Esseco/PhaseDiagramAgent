@@ -6,7 +6,7 @@ from time import monotonic
 
 from phase_agent.policies.initial_coverage import cell_key
 
-from phase_agent.policies.region_sampling import CONTROLS, branch_key, errors
+from phase_agent.policies.region_sampling import CONTROLS, branch_key, errors, sampling_limit
 
 
 class Diversity:
@@ -71,6 +71,34 @@ def sample_regions(
     descriptor=None,
     clock=monotonic,
 ):
+    from phase_agent.science.structures.generate_branch_structure import sampling_structure_cache
+
+    with sampling_structure_cache() as cache:
+        chosen, report = _sample_regions(
+            manager,
+            references,
+            params,
+            system_config=system_config,
+            strategy_options=strategy_options,
+            producer=producer,
+            descriptor=descriptor,
+            clock=clock,
+        )
+    report["fixed_tm_structure_cache"] = {"hits": cache["hits"], "misses": cache["misses"]}
+    return chosen, report
+
+
+def _sample_regions(
+    manager,
+    references,
+    params,
+    *,
+    system_config=None,
+    strategy_options=None,
+    producer=None,
+    descriptor=None,
+    clock=monotonic,
+):
     problems = errors(params)
     if problems:
         raise ValueError(";".join(problems))
@@ -87,46 +115,34 @@ def sample_regions(
     started = clock()
     framework_options = {}
     if producer is None:
-        from phase_agent.science.structures.enumerate_legal_frameworks import (
-            enumerate_legal_frameworks,
-        )
+        # Frozen preview already checked legality; group its metadata without expanding cells.
         from fractions import Fraction
         import json
 
-        allowed = set()
+        grouped = {}
         for region in params.get("region_preview", {}).get("regions", []):
             phase = next(
                 r["phase"] for r in params["regions"] if r["region_id"] == region["region_id"]
             )
-            allowed.update(
-                (
-                    phase,
-                    json.dumps(c["H"], separators=(",", ":")),
-                    str(Fraction(c["x"])),
+            for cell in region["cells"]:
+                key = (phase, json.dumps(cell["H"]))
+                row = grouped.setdefault(
+                    key, {"P": phase, "H": cell["H"], "det_H": cell["det_H"], "allowed_x": set()}
                 )
-                for c in region["cells"]
-            )
-        if not allowed and params["regions"]:
+                row["allowed_x"].add(str(Fraction(cell["x"])))
+        frameworks = [
+            {**row, "allowed_x": sorted(row["allowed_x"], key=Fraction)} for row in grouped.values()
+        ]
+        if not frameworks:
             raise ValueError("受控生成必须使用已冻结的合法区域元数据")
-        frameworks = []
-        for row in enumerate_legal_frameworks(manager.boundary, references):
-            xs = [
-                x
-                for x in row["allowed_x"]
-                if (
-                    row["P"],
-                    json.dumps(row["H"], separators=(",", ":")),
-                    str(Fraction(x)),
-                )
-                in allowed
-            ]
-            if xs:
-                frameworks.append({**row, "allowed_x": xs})
         framework_options["framework_enumerator"] = lambda *a: frameworks
     producer = producer or propose_branches
-    descriptor = descriptor or Diversity(references)
-    shadow = copy(manager)
-    shadow.data = deepcopy(manager.data)
+    if descriptor is None:
+        tm_ratio = manager.boundary.get("TM_ratio") or {}
+        descriptor = (
+            (lambda row: branch_key(row)[:3]) if len(tm_ratio) == 1 else Diversity(references)
+        )
+    shadow = manager
     parents = sorted(manager.data["branches"])
     from phase_agent.evidence.near_hull_parents import PARENT_STRATEGIES
 
@@ -138,15 +154,8 @@ def sample_regions(
         and not evidence_by_parent
     ):
         raise ValueError("near_hull_parent_evidence_required")
-    known = {branch_key(row) for row in manager.data["branches"].values()}
-    diversity = {descriptor(row) for row in manager.data["branches"].values()}
     controls = params.get("sampling_controls") or CONTROLS
-    max_new_branches = params.get("max_new_branches")
-    if max_new_branches is None:
-        max_new_branches = controls["review_after_new_branches"]
-    if type(max_new_branches) is not int or max_new_branches <= 0:
-        raise ValueError("max_new_branches 必须是正整数")
-    max_new_branches = min(max_new_branches, controls["review_after_new_branches"])
+    max_new_branches = sampling_limit(params, controls)
     regions = sorted(params["regions"], key=lambda r: (r["priority"], r["region_id"]))
     reports = {
         r["region_id"]: {
@@ -176,7 +185,7 @@ def sample_regions(
     )
     covered = set()
     chosen, attempts, batches = [], 0, 0
-    stop = "regions_saturated_under_descriptor"
+    stop = "requested_samples_complete"
     while (
         any(reports[r["region_id"]]["stop_reason"] is None for r in regions)
         and stop != "initial_coverage_complete"
@@ -210,13 +219,25 @@ def sample_regions(
             if attempts >= controls["max_attempts"]:
                 stop = "paused_attempt_guard"
                 break
-            if len(chosen) >= max_new_branches:
-                stop = "paused_branch_review_guard"
+            if attempts >= max_new_branches:
+                stop = "sampling_budget_complete"
                 break
             if clock() - started >= controls["max_seconds"]:
                 stop = "paused_time_guard"
                 break
-            work = min(controls["batch_attempts"], controls["max_attempts"] - attempts)
+            remaining = region["sample_count"] - report["attempts"]
+            if remaining <= 0:
+                report["stop_reason"] = "requested_samples_complete"
+                continue
+            work = min(
+                remaining,
+                controls["batch_attempts"],
+                controls["max_attempts"] - attempts,
+                max_new_branches - attempts,
+            )
+            if work <= 0:
+                stop = "sampling_budget_complete"
+                break
             if shares:
                 # Small reviews must give low-share strategies a chance before the guard fills.
                 work = min(work, max(1, int(max_new_branches * shares[region["strategy"]] / 2)))
@@ -242,25 +263,6 @@ def sample_regions(
             gained = 0
             for item in produced[:work]:
                 key = branch_key(item)
-                if key in known or (initial.get("required") and key[:3] in covered):
-                    report["duplicates"] += 1
-                    continue
-                known.add(key)
-                shadow.add_branch(
-                    P=item["P"],
-                    H=item["H"],
-                    x=item["x"],
-                    T=item["T"],
-                    composition=item.get("composition"),
-                )
-                feature = descriptor(item)
-                if feature in diversity and not initial.get("required"):
-                    report["redundant_descriptor"] += 1
-                    continue
-                if len(chosen) >= max_new_branches:
-                    stop = "paused_branch_review_guard"
-                    break
-                diversity.add(feature)
                 covered.add(key[:3])
                 source = evidence_by_parent.get(item.get("parent_branch_id"))
                 chosen.append(
@@ -272,20 +274,38 @@ def sample_regions(
                 )
                 report["accepted"] += 1
                 gained += 1
-                if initial.get("required") and expected <= covered:
-                    stop = "initial_coverage_complete"
-                    break
+            if report["attempts"] >= region["sample_count"]:
+                report["stop_reason"] = "requested_samples_complete"
+            if len(produced) < work:
+                report["stop_reason"] = "insufficient_candidates"
             report["stagnant_batches"] = 0 if gained else report["stagnant_batches"] + 1
             if report["stagnant_batches"] >= controls["stagnant_batches"]:
                 report["stop_reason"] = "no_new_coverage_or_descriptor_in_consecutive_batches"
-            if stop.startswith("paused_") or stop == "initial_coverage_complete":
+            if stop.startswith("paused_") or stop in {
+                "initial_coverage_complete",
+                "sampling_budget_complete",
+            }:
                 break
-        if stop.startswith("paused_") or stop == "initial_coverage_complete":
+        if stop.startswith("paused_") or stop in {
+            "initial_coverage_complete",
+            "sampling_budget_complete",
+        }:
             break
-    if initial.get("required") and not expected <= covered and not stop.startswith("paused_"):
-        stop = "paused_initial_coverage_incomplete"
+    if not chosen and not stop.startswith("paused_"):
+        stop = "paused_no_candidates"
     for report in reports.values():
         report["stop_reason"] = report["stop_reason"] or stop
+    requested = {row["region_id"]: row["sample_count"] for row in regions}
+    for report in reports.values():
+        report["requested"] = requested[report["region_id"]]
+        report["unfilled"] = max(0, report["requested"] - report["accepted"])
+    unfilled = sum(report["unfilled"] for report in reports.values())
+    if (
+        stop == "requested_samples_complete"
+        and unfilled
+        and not (initial.get("required") and expected <= covered)
+    ):
+        stop = "regions_finished_with_shortfall"
     return chosen, {
         "initial_coverage": {
             **initial,
@@ -299,6 +319,8 @@ def sample_regions(
         "stop_reason": stop,
         "attempts": attempts,
         "accepted_before_final_dedup": len(chosen),
+        "requested_candidate_count": sum(requested.values()),
+        "unfilled_requested_candidates": unfilled,
         "strategy_shares_target": params.get("strategy_shares"),
         "strategy_accepted_counts": {
             strategy: sum(
@@ -307,5 +329,5 @@ def sample_regions(
             for strategy in sorted({r["strategy"] for r in regions})
         },
         "regions": list(reports.values()),
-        "limitation": "初始TM近邻相关性是便宜的多样性代理，不代表能量或物理收敛；随机停滞不证明穷尽空间。",
+        "limitation": "候选按预算生成后统一去重；未覆盖区域不代表空间已穷尽。",
     }

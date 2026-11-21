@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 
 from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
@@ -18,7 +20,7 @@ def test_size_and_mc_work_change_estimate():
         estimate_stage_cost("dft_single_point", atom_count=float("nan"))
 
 
-def test_confirmed_costs_propagate_and_running_relax_consumes_stage_capacity():
+def test_confirmed_costs_propagate_and_running_relax_consumes_stage_capacity(tmp_path):
     budgets = default_budget_rules()
     budgets["enforcement"] = "hard"
     budgets["stage_limits"]["dft_single_point"]["task_cost"] = 30
@@ -26,8 +28,20 @@ def test_confirmed_costs_propagate_and_running_relax_consumes_stage_capacity():
     config["selection_policy"] = {"max_relax_fraction": 1.0}  # Isolate stage capacity, not selection policy.
     assert config["action_costs"]["DFT_SINGLE_POINT"] == 30
     state = {"budget_reservations": {"running": {"status": "running", "stage": "dft_relax", "reserved_cost": 900}}}
+    frame = tmp_path / "frame.vasp"
+    frame.write_bytes(b"synthetic-geometry")
+    digest = hashlib.sha256(frame.read_bytes()).hexdigest()
+    state["active_model_version"] = "m"
+    state["tasks"] = [{
+        "status": "completed", "model_version": "m",
+        "outputs": {"structure_checksum": digest, "extrapolation_monitor": {
+            "extrapolation_failure": False, "failures": [],
+            "final_feature_difference": 0.2, "feature_difference_threshold": 1.0,
+        }},
+    }]
     proposal = {"decisions": [{"candidate_id": str(i), "action": "DFT_RELAX"} for i in range(2)]}
-    metrics = [{"candidate_id": str(i), "atom_count": 40, "predicted_Ehull": 0.01,
+    metrics = [{"candidate_id": str(i), "structure_path": str(frame),
+                "structure_sha256": digest, "model_version": "m", "atom_count": 40, "predicted_Ehull": 0.01,
                 "geometry_optimization_evidence": {
                     "source_task_id": f"prior-dft-{i}",
                     "residual_force_ev_per_angstrom": 0.2,

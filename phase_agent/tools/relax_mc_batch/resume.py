@@ -136,6 +136,7 @@ def resume_batch(root, *, submit=False, expected_plan=None, exclude_nodes=(), io
         )
         control.pop("job_id", None)
         control.pop("submission_state", None)
+        control.pop("phase_groups", None)
         meta["status"] = "resuming"
         checkpoint(root, state, manager)
         by_id = {b["batch_id"]: b for b in state["slurm_batches"]}

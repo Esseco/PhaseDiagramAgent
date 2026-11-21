@@ -3,8 +3,10 @@
 from collections import Counter
 
 
-def summarize_task_stages(state):
-    accepted = set(state.get("processed_task_ids") or [])
+def summarize_task_stages(state, *, _accepted_ids=None):
+    accepted = (
+        set(state.get("processed_task_ids") or []) if _accepted_ids is None else _accepted_ids
+    )
     groups = {}
     for task in state.get("tasks") or []:
         stage = task.get("stage") or "unknown"

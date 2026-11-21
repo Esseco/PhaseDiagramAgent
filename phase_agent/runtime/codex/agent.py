@@ -71,6 +71,7 @@ class CodexAgent:
         # Preserve a project-owned identity when the launcher parent exited but
         # its Studio child is still serving; _owned_process validates the child.
         import json
+        import psutil
 
         identity = service_directory(self.runtime_config) / "service.json"
         try:
@@ -79,8 +80,6 @@ class CodexAgent:
                 value.get("runtime_config")
                 and Path(value["runtime_config"]).resolve() == self.runtime_config
             ):
-                import psutil
-
                 child = psutil.Process(int(value.get("child_pid")))
                 if "phase_agent.runtime.studio_server" in child.cmdline():
                     return value

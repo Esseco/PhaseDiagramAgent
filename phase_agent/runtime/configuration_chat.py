@@ -50,7 +50,7 @@ Scientific scope is mandatory before planning. Interpret user meaning, not keywo
 
 editable_field_catalog是字段契约：editable=false表示程序派生事实，修改derived_from指向的源字段；replace_types表示允许整体替换的类型。相边界与元素比例属于用户选择，派生约束由程序同步。配置按中文含义和作用范围定位字段，不能为了满足数量擅自扩大预算或全局边界。候选生成量、入选量、初态量和每作业分组量是不同参数；本轮动作条件与持久配置也要区分。
 
-首次配置重点是环境、相/元素边界、母结构、远端模型及必要计算设置。本地环境沿用已列出的默认值，超算环境由用户提供。环境名、远端路径是元数据，不在本机加载远端模型。当前目录和文件以setup_facts与verified_config_source为准，不引用其他项目的信息。
+首次配置重点是环境、相/元素边界、母结构、远端模型及必要计算设置。本地环境沿用已列出的默认值，超算环境由用户提供。Na 电压参考默认值为 -1.288 eV/atom；如果该参考不适用于当前体系，请在确认前明确修改 `energy_conventions.voltage_references.Na` 并说明来源。环境名、远端路径是元数据，不在本机加载远端模型。当前目录和文件以setup_facts与verified_config_source为准，不引用其他项目的信息。
 
 配置修改直接返回patch及write_requested=true；仅答疑或提建议时不请求写入。程序校验字段、值和文件版本后写入未确认草稿。缺母结构不阻止保存明确配置；保存不代表生成H、审核或确认。不要声称已写入或已计算，程序负责报告结果。
 
@@ -1223,6 +1223,87 @@ class ConfigurationChatHandler:
 
         return reply
 
+    def import_editable_config_json(self, session, *, user_message=None):
+        """Load, validate, and import ``editable_config_path`` into the draft session."""
+
+        if self.editable_config_path is None:
+            raise ValueError("未配置可编辑 JSON 草稿路径")
+
+        from phase_agent.configuration.schema.validate_search_config import validate_search_config
+        from phase_agent.configuration.session.load_editable_config_json import (
+            _strip_jsonc_comments,
+            load_editable_config_json,
+        )
+        from phase_agent.configuration.session.materialize_layered_h import (
+            materialize_layered_h,
+        )
+        from phase_agent.configuration.session.project_config_json import (
+            FORMAT_ID as PROJECT_FORMAT_ID,
+        )
+        from phase_agent.configuration.session.replace_config_from_json import (
+            mother_structure_digest,
+            replace_config_from_json,
+        )
+        from phase_agent.configuration.session.resolve_phase_reference_directory import (
+            resolve_phase_reference_directory,
+        )
+        from phase_agent.configuration.session.summarize_config_for_agent import (
+            summarize_config_for_agent,
+        )
+
+        source_hash_before = self._editable_config_hash()
+        document = json.loads(
+            _strip_jsonc_comments(self.editable_config_path.read_text(encoding="utf-8"))
+        )
+        config = load_editable_config_json(
+            self.editable_config_path,
+            session.get("config") or {},
+            default_storage=default_workspace_storage(self.workspace_root_default),
+        )
+        config, _ = _fill_default_mlip_versions(config)
+        config = resolve_phase_reference_directory(config, base_directory=self.base_directory)
+        mother_digest_before = mother_structure_digest(config)
+        config = materialize_layered_h(config)
+        if mother_structure_digest(config) != mother_digest_before:
+            raise ValueError("母结构文件在生成 H 期间发生变化，请确认文件稳定后重新读取")
+
+        audit = validate_search_config(config, stage="startup")
+        imported_config_hash = self._editable_config_hash()
+        if source_hash_before != imported_config_hash:
+            raise ValueError("配置文件在读取或生成 H 期间发生变化，请保存后重新读取")
+
+        verified_source = summarize_config_for_agent(
+            config,
+            source_path=self.editable_config_path,
+            source_hash=imported_config_hash,
+            generated_h=bool((config.get("system") or {}).get("H_generation", {}).get("enabled")),
+        )
+        updated = replace_config_from_json(
+            session,
+            config,
+            source_path=str(self.editable_config_path),
+            source_hash=imported_config_hash,
+        )
+        is_project_format = document.get("_format") == PROJECT_FORMAT_ID
+        if is_project_format:
+            updated = dict(updated)
+            updated["config_profile"] = {
+                "name": document["profile"],
+                "digest": document["profile_digest"],
+            }
+        if user_message is not None:
+            updated = self._with_turn(updated, user_message, "")
+        updated = self._save(updated)
+        return {
+            "session": updated,
+            "verified_source": verified_source,
+            "audit": audit,
+            "imported_config_hash": imported_config_hash,
+            "document": document,
+            "config": config,
+            "is_project_format": document.get("_format") == PROJECT_FORMAT_ID,
+        }
+
     def _import_and_review_config_json(
         self, session, user_message, *, continue_if_ready=False, conversation_id=None
     ):
@@ -1230,101 +1311,22 @@ class ConfigurationChatHandler:
         if self.editable_config_path is None:
             return "未配置可编辑 JSON 草稿路径；配置草稿未更改。"
 
-        from phase_agent.configuration.schema.validate_search_config import validate_search_config
-
-        from phase_agent.configuration.session.load_editable_config_json import (
-            load_editable_config_json,
-        )
-
         from phase_agent.configuration.session.replace_config_from_json import (
-            replace_config_from_json,
-        )
-
-        from phase_agent.configuration.session.resolve_phase_reference_directory import (
-            resolve_phase_reference_directory,
-        )
-
-        from phase_agent.configuration.session.summarize_config_for_agent import (
-            summarize_config_for_agent,
+            config_digest,
         )
 
         try:
-            from phase_agent.configuration.session.load_editable_config_json import (
-                _strip_jsonc_comments,
-            )
-
-            from phase_agent.configuration.session.project_config_json import (
-                FORMAT_ID as PROJECT_FORMAT_ID,
-            )
-
-            source_hash_before = self._editable_config_hash()
-
-            document = json.loads(
-                _strip_jsonc_comments(self.editable_config_path.read_text(encoding="utf-8"))
-            )
-
-            config = load_editable_config_json(
-                self.editable_config_path,
-                session.get("config") or {},
-                default_storage=default_workspace_storage(self.workspace_root_default),
-            )
-
-            config, _ = _fill_default_mlip_versions(config)
-
-            config = resolve_phase_reference_directory(config, base_directory=self.base_directory)
-
-            from phase_agent.configuration.session.replace_config_from_json import (
-                mother_structure_digest,
-            )
-
-            mother_digest_before = mother_structure_digest(config)
-
-            from phase_agent.configuration.session.materialize_layered_h import (
-                materialize_layered_h,
-            )
-
-            config = materialize_layered_h(config)
-
-            if mother_structure_digest(config) != mother_digest_before:
-                raise ValueError("母结构文件在生成 H 期间发生变化，请确认文件稳定后重新读取")
-
-            audit = validate_search_config(config, stage="startup")
-
-            imported_config_hash = self._editable_config_hash()
-
-            if source_hash_before != imported_config_hash:
-                raise ValueError("配置文件在读取或生成 H 期间发生变化，请保存后重新读取")
-
-            verified_source = summarize_config_for_agent(
-                config,
-                source_path=self.editable_config_path,
-                source_hash=imported_config_hash,
-                generated_h=bool(
-                    (config.get("system") or {}).get("H_generation", {}).get("enabled")
-                ),
-            )
-
+            imported = self.import_editable_config_json(session, user_message=user_message)
         except (OSError, TypeError, ValueError, OverflowError, KeyError) as error:
             return f"配置 JSON 未导入：{error}\n当前草稿未更改。"
 
-        updated = replace_config_from_json(
-            session,
-            config,
-            source_path=str(self.editable_config_path),
-            source_hash=imported_config_hash,
-        )
-
-        if document.get("_format") == PROJECT_FORMAT_ID:
-            updated = dict(updated)
-
-            updated["config_profile"] = {
-                "name": document["profile"],
-                "digest": document["profile_digest"],
-            }
-
-        updated = self._with_turn(updated, user_message, "")
-
-        updated = self._save(updated)
+        updated = imported["session"]
+        verified_source = imported["verified_source"]
+        audit = imported["audit"]
+        imported_config_hash = imported["imported_config_hash"]
+        document = imported["document"]
+        config = imported["config"]
+        is_project_format = imported["is_project_format"]
 
         agent_reply = ""
 
@@ -1458,7 +1460,7 @@ class ConfigurationChatHandler:
             f"实际 H 数量：{h_counts}。"
         )
 
-        if document.get("_format") == PROJECT_FORMAT_ID:
+        if is_project_format:
             selected = [
                 f"{section}.{key}"
                 for section, values in document.get("config", {}).items()

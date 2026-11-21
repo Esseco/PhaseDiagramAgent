@@ -6,10 +6,15 @@ from phase_agent.science.dft.spin_acceptance import spin_standard_passed
 
 
 def cumulative_training_records(state):
+    from phase_agent.evidence.dft_extrapolation import failed_dft_task_ids
+
+    excluded_tasks = failed_dft_task_ids(state)
     new = state.get("new_dft_records") or []
     new_ids = {r.get("data_id") for r in new if r.get("data_id")}
     rows, seen = [], set()
     for record in [*(state.get("dft_training_records") or []), *new]:
+        if record.get("task_id") in excluded_tasks:
+            continue
         identity = record.get("data_id")
         if identity and identity in seen:
             continue  # The same ledger record is mirrored in the new-data queue.

@@ -59,7 +59,7 @@ def write_training_submission(directory, environment, *, template=None):
         f"Slurm数组包含{count}个独立训练任务，每个使用1张GPU，最多同时运行{concurrency}个；主模型复用已指定committee成员，不重复训练。\n"
         "全部数组任务结束后，依赖作业collect_results.sh使用1张GPU汇总和评估；失败或缺少完成记录时明确报告，不激活不完整模型。\n"
         "确认远端原模型文件存在且mace环境支持foundation_head等参数。\n"
-        f"正式committee全部数据参与训练，{plan['main_model']['final_model']}同时为主模型；同文件validation仅训练监视，不是泛化误差。\n"
+        f"正式committee{'仅使用训练部分；独立测试集已留出、尚未评估' if plan.get('independent_holdout') else '全部数据参与训练'}，{plan['main_model']['final_model']}同时为主模型；同文件validation仅训练监视，不是泛化误差。\n"
         "完成后将对应 *_output 文件夹整体传回登记位置，说“已回传”并确认回收范围后批准回收；无需手动解包，不需要下载模型文件。\n"
         "模型保留在超算com_*训练目录；models.json记录绝对远端路径、大小和SHA256，后续任务在超算读取。不要移动或删除这些模型。\n"
         "泛化误差只参考main_cv_*留出数据；模型激活仍需独立验证与审批。\n",

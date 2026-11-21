@@ -15,3 +15,19 @@ def test_current_preview_is_not_stale():
     proposal = {"recommended_action": "select_dft_candidates", "action_parameters": {
         "dft_input_preview": {"schema_version": 2, "selected_structures": [{"candidate_id": "s"}]}}}
     assert not stale_dft_preview(proposal)
+
+
+
+def test_current_selection_preview_is_valid_before_local_inputs_exist():
+    proposal = {"recommended_action": "select_dft_candidates", "action_parameters": {
+        "prepare_inputs_after_approval": True,
+        "dft_selection_preview": {
+            "schema_version": 2, "selected_structures": [{"candidate_id": "s"}],
+        },
+    }}
+    assert not stale_dft_preview(proposal)
+    proposal["action_parameters"]["prepare_inputs_after_approval"] = False
+    assert stale_dft_preview(proposal)
+    proposal["action_parameters"]["prepare_inputs_after_approval"] = True
+    proposal["action_parameters"]["dft_selection_preview"]["schema_version"] = 1
+    assert stale_dft_preview(proposal)

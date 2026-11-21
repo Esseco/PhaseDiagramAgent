@@ -176,3 +176,19 @@ def test_exact_selection_restored_only_after_bound_no_effect_review(tmp_path, ch
         assert not begin_execution(path, identity)["allowed"]  # Original call is never replayed.
     else:
         assert result is None
+
+
+def test_direct_recovery_preview_ignores_unrelated_dh_groups(monkeypatch):
+    from phase_agent.tools.workflows import prepare_dft_proposal as module
+    from phase_agent.tools.workflows import validate_dft_agent_decisions as validator
+    from phase_agent.tools.workflows import dft_coverage_review
+    monkeypatch.setattr(module, 'attach_dft_preview', lambda action, state, config: (action, None))
+    monkeypatch.setattr(dft_coverage_review, 'coverage_errors', lambda action, rows: ['unrelated_dh'])
+    action = {'tool':'select_dft_candidates','parameters':{'decisions':[{'candidate_id':'picked','action':'DFT_SINGLE_POINT'}]}}
+    state = {'qbc_candidates':[{'candidate_id':'picked'}, {'candidate_id':'unrelated'}]}
+    monkeypatch.setattr(validator, '_is_direct_recovery_selection', lambda state, ids: ids == {'picked'})
+    prepared, error = module._preview_with_complete_feedback(action, state, {})
+    assert prepared == action and error is None
+    monkeypatch.setattr(validator, '_is_direct_recovery_selection', lambda state, ids: False)
+    _, error = module._preview_with_complete_feedback(action, state, {})
+    assert 'unrelated_dh' in error

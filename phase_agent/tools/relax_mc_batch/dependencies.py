@@ -67,7 +67,28 @@ def submit_analysis(root, state, manager, manifest, io, batches):
     control = state["relax_mc_remote"]["phase_controllers"][str(phase)]
     if control.get("submission_state") == "submitting" and not control.get("job_id"):
         raise RuntimeError("analysis_receipt_uncertain; inspect Slurm before retry")
+    dependency_ids = [b["job_id"] for b in batches]
     if not control.get("job_id"):
+        from phase_agent.tools.relax_mc_batch.phase_groups import prepare_groups
+
+        grouped = control.get("phase_groups")
+        if grouped is None:
+            grouped = prepare_groups(root, state, manager, manifest, batches, phase)
+            if grouped:
+                control["phase_groups"] = grouped
+                checkpoint(root, state, manager)
+        if grouped:
+            if grouped.get("submission_state") == "submitting" and not grouped.get("job_id"):
+                raise RuntimeError("phase_group_receipt_uncertain; inspect Slurm before retry")
+            if not grouped.get("job_id"):
+                grouped["submission_state"] = "submitting"
+                checkpoint(root, state, manager)
+                grouped["job_id"] = io.submit(
+                    grouped["script_path"], dependency="afterany:" + ":".join(dependency_ids)
+                )
+                grouped["submission_state"] = "submitted"
+                checkpoint(root, state, manager)
+            dependency_ids = [grouped["job_id"]]
         path = root / f"analyze_phase_{phase}.sh"
         command = (
             python_environment(root)
@@ -85,9 +106,7 @@ def submit_analysis(root, state, manager, manifest, io, batches):
         )
         control["submission_state"] = "submitting"
         checkpoint(root, state, manager)
-        control["job_id"] = io.submit(
-            path, dependency="afterany:" + ":".join(b["job_id"] for b in batches)
-        )
+        control["job_id"] = io.submit(path, dependency="afterany:" + ":".join(dependency_ids))
         control["submission_state"] = "submitted"
         checkpoint(root, state, manager)
     return {
@@ -221,6 +240,17 @@ def advance(root, manifest, io, *, phase=None, recollect_final=False):
         checkpoint(root, state, manager)
         try:
             if phase is not None:
+                control = meta["phase_controllers"][str(phase)]
+                if control.get("phase_groups"):
+                    from phase_agent.tools.remote.phase_analysis_wave import verify_groups
+
+                    from phase_agent.tools.remote.integrity import file_checksum
+
+                    group = control["phase_groups"]
+                    spec = root / group["spec_relative"]
+                    if file_checksum(spec) != group["spec_checksum"]:
+                        raise ValueError("phase_analysis_frozen_spec_changed")
+                    verify_groups(root, spec)
                 state, results = collect_phase(root, state, manager, manifest, io)
                 meta = state["relax_mc_remote"]
                 if meta.get("scheduler_query_error"):
@@ -265,7 +295,6 @@ def advance(root, manifest, io, *, phase=None, recollect_final=False):
                         if plan["status"]
                         in {
                             "phase_diagram_unavailable",
-                            "continuation_pool_below_minimum",
                             "tasks_in_progress",
                         }
                         else "completed"

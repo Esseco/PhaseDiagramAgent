@@ -96,7 +96,9 @@ def test_financial_reconciliation_refuses_to_guess_from_an_older_overwrite(tmp_p
     )
     assert read_json(path)["reserved_relative_cost"] == 0
     path.write_text(json.dumps(old), encoding="utf-8")
-    with pytest.raises(ValueError, match="stale_business_state_after_result_or_financial_reconciliation"):
+    with pytest.raises(
+        ValueError, match="stale_business_state_after_result_or_financial_reconciliation"
+    ):
         read_json(path)
 
 
@@ -327,6 +329,7 @@ def test_new_region_result_is_recoverable_and_proposal_does_not_dump_cell_matric
     ledger = json.loads((path.parent / "ledgers/phase_data.json").read_text())
     region = {
         "region_id": "r",
+        "sample_count": 1,
         "priority": 1,
         "strategy": "coverage",
         "phase": "O3",

@@ -37,7 +37,8 @@ def test_compact_shows_metrics_and_action_without_full_report():
     assert "31/34" in text and "9.6777/11.208" in text
     assert "回复同意执行。" in text
     assert "synthetic/" not in text and "<details>" not in text
-    assert len(text.splitlines()) <= 6
+    assert "磁矩：合格27，异常4。" in text
+    assert len([line for line in text.splitlines() if line]) == 6
 
 
 def test_confirmation_reports_status_without_repeating_science():

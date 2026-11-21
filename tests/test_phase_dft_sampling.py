@@ -154,12 +154,13 @@ def test_review_plot_preserves_points_and_makes_sparse_phases_visible(tmp_path, 
         return original_plot(*args, **kwargs)
     def save(figure, *args, **kwargs):
         legends.extend(t.get_text() for legend in figure.legends for t in legend.get_texts())
+        legends.extend(t.get_text() for ax in figure.axes if ax.get_legend() for t in ax.get_legend().get_texts())
         return original_save(figure, *args, **kwargs)
     monkeypatch.setattr(Process_Phasediagram, "plot_phase_diagram", plot)
     monkeypatch.setattr(Figure, "savefig", save)
     result = publish_quality_comparison(state, report, directory=tmp_path)
     assert result["status"] == "completed" and state == before
-    assert len(received) == 2 and all(r["unstable_alpha"] >= .6 for r in received)
+    assert len(received) == 1 and received[0]["unstable_alpha"] >= .6
     assert any("(n=" in text for text in legends)
     assert len(result["plot_paths"]) == 1 and result["plot_paths"][0].endswith(".png")
 

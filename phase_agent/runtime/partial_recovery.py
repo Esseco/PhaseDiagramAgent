@@ -106,7 +106,9 @@ def partial_recovery_facts(state):
             scope=scope,
         )
         if fact["partial"]:
-            fact["retryable_task_ids"] = sorted(set(fact["failed_task_ids"]) & retryable)
+            fact.update(choice_required=False, retryable_task_ids=[],
+                        continue_action=None, fill_action=None,
+                        instruction="已确认失败的 DFT 不参与分析；保留失败记录，不自动重试。")
             facts.append(fact)
 
     for bundle_id, batch in (state.get("relax_mc_batches") or {}).items():

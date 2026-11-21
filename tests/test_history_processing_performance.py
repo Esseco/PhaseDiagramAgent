@@ -302,3 +302,29 @@ def test_owned_already_imported_mc_avoids_copy_but_rechecks_binding(tmp_path):
     assert import_results(action=action, context=context, _owned=True)["state"] is state
     with pytest.raises(ValueError, match="batch_model_or_config_version_mismatch"):
         import_results(action=action, context={**context, "config_version": "c2"}, _owned=True)
+
+
+def test_owned_identification_still_rechecks_geometry(tmp_path):
+    from pymatgen.core import Lattice, Structure
+    from phase_agent.analysis.phase.ensure_phase_identification import ensure_phase_identification
+
+    path = tmp_path / "final.vasp"
+    Structure(
+        Lattice.cubic(4),
+        ["Na", "Fe", "O", "O"],
+        [[0, 0, 0], [0.25, 0.25, 0.25], [0.5, 0.5, 0.5], [0.75, 0.75, 0.75]],
+    ).to(filename=path, fmt="poscar")
+    manager = SimpleNamespace(boundary={"P": ["P3"]}, data={"branches": {}, "structures": {}})
+    task = {
+        "task_id": "t1",
+        "stage": "deep_search",
+        "status": "completed",
+        "outputs": {"structure_path": str(path), "large_trace": NoCopy([1])},
+    }
+    state = {"tasks": [task], "phase_records": []}
+    current, _ = ensure_phase_identification(state, manager, _owned=True)
+    assert current is state
+    assert current["tasks"][0]["actual_phase"] == "P3"
+    path.unlink()
+    current, _ = ensure_phase_identification(state, manager, _owned=True)
+    assert current["tasks"][0]["phase_identification_status"] == "unknown"

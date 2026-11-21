@@ -210,14 +210,17 @@ def test_cleanup_updates_the_same_turn_facts_as_persisted_state(tmp_path):
 
 def blocked_authorization(tmp_path, *, native=False):
     state, session, context, registry = setup(tmp_path)
+    # A concurrent task consumes the single available slot; compute cost no
+    # longer blocks the approved preparation.
+    for config in (context["effective_config"], session["confirmed_snapshot"]["config"]):
+        config["budgets"]["stage_limits"]["relax_and_feature"]["max_tasks"] = 1
     if native:
         context["state_path"] = str(tmp_path / "state.json")
         state["confirmed_config_version"] = "c"
         state["confirmed_config"] = deepcopy(session["confirmed_snapshot"]["config"])
         write_json(context["state_path"], state)
-    limit = context["effective_config"]["budgets"]["total_relative_cost"]
     state["budget_reservations"] = {
-        "other": {"stage": "relax_and_feature", "status": "reserved", "reserved_cost": limit}
+        "other": {"stage": "relax_and_feature", "status": "reserved", "reserved_cost": 0}
     }
     first = run_model_refresh_gate(state, session, registry=registry, context=context)
     blocked = run_model_refresh_gate(

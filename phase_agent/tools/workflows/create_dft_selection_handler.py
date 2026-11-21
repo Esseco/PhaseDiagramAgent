@@ -84,6 +84,14 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             config=config,
             config_version=context["config_version"],
             remaining_budget=remaining,
+            require_all_ground_states=(
+                (
+                    parameters.get("dft_selection_preview")
+                    or parameters.get("dft_input_preview")
+                    or {}
+                ).get("ground_state_policy")
+                == "all_eligible_gs_v1"
+            ),
         )
         if not validation["valid"] or validation["rejected"]:
             return {
@@ -102,11 +110,17 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 "tasks": [],
             }
         from phase_agent.tools.workflows.dft_selection_plot import require_dft_selection_plot
+
         plot_state = {**state, "qbc_candidates": candidates}
         try:
             require_dft_selection_plot(plot_state, validation["accepted"])
         except (ValueError, OSError, TypeError, KeyError, ImportError) as error:
-            return {"status": "rejected", "state": state, "tasks": [], "reason": "dft_selection_plot_required: " + str(error)}
+            return {
+                "status": "rejected",
+                "state": state,
+                "tasks": [],
+                "reason": "dft_selection_plot_required: " + str(error),
+            }
         reviewed_settings = None
         review = action.get("dft_template_review")
         if context.get("execution_mode") == "interactive" and not prepare_after_approval:
@@ -152,8 +166,12 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 input_structure_sha256[decision["task_key"]] = actual
         except (ValueError, OSError, TypeError) as error:
             return {
-                "status": "rejected", "state": state, "tasks": [],
-                "metrics": metrics_result, "validation": validation, "reason": str(error),
+                "status": "rejected",
+                "state": state,
+                "tasks": [],
+                "metrics": metrics_result,
+                "validation": validation,
+                "reason": str(error),
             }
         state = call_with_optimizations(
             reserve_dft_actions, state, validation["accepted"], _optimizations={"_owned": True}
@@ -173,7 +191,10 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 "task_key": decision["task_key"],
                 "input_structure_sha256": input_structure_sha256[decision["task_key"]],
                 "object_id": decision["candidate_id"],
-                "structure_id": (candidates_by_id.get(decision["candidate_id"]) or {}).get("structure_id") or decision["candidate_id"],
+                "structure_id": (candidates_by_id.get(decision["candidate_id"]) or {}).get(
+                    "structure_id"
+                )
+                or decision["candidate_id"],
                 "branch_id": decision.get("branch_id")
                 or next(
                     (
@@ -205,6 +226,15 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                     ).encode()
                 ).hexdigest()[:12],
             }
+            cycle = state.get("extrapolation_recovery_cycle") or {}
+            selected_recovery_ids = {r.get("candidate_id") for r in cycle.get("selected") or []}
+            if (
+                cycle.get("status") == "awaiting_reviewed_dft_labels"
+                and decision["candidate_id"] in selected_recovery_ids
+            ):
+                # The source relaxation may use MH-1; DFT feedback remains bound
+                # to the failed search model that this training cycle repairs.
+                task["model_version"] = cycle.get("invalid_model_version")
             selected = next(
                 (
                     row
@@ -214,10 +244,19 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
                 ),
                 {},
             )
+            task["extrapolation_model_version"] = selected.get("model_version") or state.get(
+                "active_model_version"
+            )
             if selected.get("source_search_task_id"):
                 task["source_search_task_id"] = selected["source_search_task_id"]
             if selected.get("structure_path"):
                 task["structure_path"] = selected["structure_path"]
+            if selected.get("selection_mode"):
+                task["selection_mode"] = selected["selection_mode"]
+            if selected.get("selection_mode") == "phase_diagram_gs" or selected.get(
+                "is_ground_state"
+            ):
+                task["is_ground_state"] = True
             if reviewed_settings is not None:
                 task["reviewed_submit_script"] = reviewed_settings["submit_script"]
                 task["dft_template_digest"] = review["digest"]
@@ -242,7 +281,7 @@ def create_dft_selection_handler(*, candidates_provider=None, qbc_evaluator=None
             prepared = call_with_optimizations(
                 prepare_dft_upload_batches,
                 action={"target_ids": [row["task_id"] for row in tasks] + retry_input_ids},
-                context={**context, "event_state": state},
+                context={**context, "event_state": state, "_approved_unknown_gs_selection": action},
                 _optimizations={"_owned": True},
             )
             from phase_agent.tools.workflows.dft_selection_artifacts import preparation_artifacts
@@ -292,6 +331,9 @@ def _state_candidates(state, manager, action):
                     "qbc": deepcopy(metadata.get("qbc")),
                 }
             )
+    from phase_agent.analysis.phase.phase_dft_candidates import bind_ground_state_frames
+
+    available = bind_ground_state_frames(state, available)
     requested = set(action.get("target_ids") or [])
     if requested:
         # Review the full decision table without adding extra calculation targets.
@@ -308,15 +350,7 @@ def _state_candidates(state, manager, action):
 
 
 def _remaining_dft_budget(state, config):
-    limits = config.get("budget_limits") or {}
-    total = limits.get("total_relative_cost")
-    from phase_agent.tools.budget.check_budget import budget_is_hard
-
-    if total is None or not budget_is_hard(limits):
-        return float("inf")
-    used = float((state.get("budget_usage") or {}).get("total_relative_cost", 0) or 0)
-    reserved = float(state.get("reserved_relative_cost", 0) or 0)
-    return max(0.0, float(total) - used - reserved)
+    return float("inf")
 
 
 def _input_working_state(context):

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import random
+from collections import OrderedDict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -18,6 +21,20 @@ from phase_agent.science.structures.boundary_utils import (
     normalize_H,
     normalize_fraction,
 )
+
+
+_sampling_cache = ContextVar("branch_sampling_structure_cache", default=None)
+
+
+@contextmanager
+def sampling_structure_cache():
+    """Reuse deterministic fixed-TM candidates only within one sampling invocation."""
+    value = {"structures": OrderedDict(), "hits": 0, "misses": 0}
+    token = _sampling_cache.set(value)
+    try:
+        yield value
+    finally:
+        _sampling_cache.reset(token)
 
 
 def generate_branch_structure(
@@ -46,11 +63,33 @@ def generate_branch_structure(
     if matrix not in allowed_supercells(boundary["H"], phase):
         raise ValueError(f"H={matrix!r} 不在相 {phase!r} 的允许范围")
 
+    if preserve_reference_tm and T is not None:
+        raise ValueError("固定 T 时不能同时传入重新排列的 T")
+    cache = _sampling_cache.get()
+    source = references[phase]
+    key = None
+    if cache is not None and preserve_reference_tm and isinstance(source, (str, Path)):
+        path = Path(source).resolve()
+        info = path.stat()
+        key = (
+            str(path),
+            info.st_size,
+            info.st_mtime_ns,
+            phase,
+            tuple(tuple(row) for row in matrix),
+            normalize_fraction(x),
+            tuple(sorted((element_ratio or boundary["TM_ratio"]).items())),
+            None if oxidation_states is None else tuple(sorted(oxidation_states.items())),
+        )
+        if key in cache["structures"]:
+            cache["hits"] += 1
+            cache["structures"].move_to_end(key)
+            return cache["structures"][key].copy()
+        cache["misses"] += 1
+
     structure = load_structure(references[phase])
     structure.make_supercell(matrix)
     if preserve_reference_tm:
-        if T is not None:
-            raise ValueError("固定 T 时不能同时传入重新排列的 T")
         from phase_agent.science.structures.identify_branch import extract_T
 
         extract_T(structure, element_ratio or boundary["TM_ratio"])
@@ -58,6 +97,10 @@ def generate_branch_structure(
         _assign_tm(structure, element_ratio or boundary["TM_ratio"], seed, T)
     structure = _assign_na(structure, x, oxidation_states)
     structure.sort()
+    if key is not None:
+        cache["structures"][key] = structure.copy()
+        if len(cache["structures"]) > 256:
+            cache["structures"].popitem(last=False)
     return structure
 
 

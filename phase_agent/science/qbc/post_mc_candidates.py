@@ -1,10 +1,14 @@
 """Build DFT context from recovered MC structures, never original initial files."""
 
+from hashlib import sha256
 from pathlib import Path
 
 
 def post_mc_candidates(state, model_version):
-    diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    from phase_agent.evidence.model_diagram_scope import selection_state
+
+    state = selection_state(state)
+    diagram = state["phase_diagrams"]["mlip"]
     if diagram.get("model_version") != model_version or diagram.get("status") != "completed":
         return []
     entries = diagram.get("entries") or []
@@ -20,21 +24,31 @@ def post_mc_candidates(state, model_version):
                 prior.get("segment_index") or 0
             ):
                 by_branch[task.get("branch_id")] = task
+    entries_by_path = {}
+    for entry in entries:
+        entries_by_path.setdefault(entry.get("structure_path"), []).append(entry)
     candidates = []
     for task in by_branch.values():
         output = task.get("outputs") or {}
         path = output.get("structure_path") or output.get("final_structure_path")
         matches = [
             entry
-            for entry in entries
-            if entry.get("structure_path") == path
-            and entry.get("phase_identification_status") == "identified"
+            for entry in entries_by_path.get(path, [])
+            if entry.get("phase_identification_status") == "identified"
             and entry.get("ehull_unit") == "eV/atom"
             and entry.get("ehull") is not None
         ]
         if not path or not Path(path).is_file() or len(matches) != 1:
             continue
         entry = matches[0]
+        # A reused path cannot bind a result to a subsequently changed geometry.
+        digest = entry.get("structure_sha256")
+        if digest:
+            try:
+                if sha256(Path(path).read_bytes()).hexdigest() != digest.removeprefix("sha256:"):
+                    continue
+            except OSError:
+                continue
         candidates.append(
             {
                 "candidate_id": task.get("structure_id"),
@@ -42,6 +56,7 @@ def post_mc_candidates(state, model_version):
                 "branch_id": task.get("branch_id"),
                 "source_search_task_id": task.get("task_id"),
                 "structure_path": path,
+                "structure_sha256": entry.get("structure_sha256"),
                 "composition": entry.get("composition"),
                 "atom_count": entry.get("atom_count")
                 or sum((entry.get("composition") or {}).values()),
@@ -50,6 +65,10 @@ def post_mc_candidates(state, model_version):
                 "hull_impact": 1.0 / (1.0 + max(0.0, float(entry["ehull"])) / 0.01),
                 "predicted_Ehull": entry["ehull"],
                 "ehull_unit": "eV/atom",
+                "model_version": model_version,
+                "energy_source_version": entry.get("source_version") or (
+                    model_version if not diagram.get("mixed_model_versions") else None
+                ),
                 "phase_diagram_version": diagram.get("version"),
                 "qbc": output.get("qbc") or {"status": "not_configured"},
                 "geometry_optimization_evidence": _geometry_evidence(state, task),

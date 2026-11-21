@@ -471,6 +471,8 @@ def _submission_index_payload(root, state):
         "submission_root": str(root),
         "active_model_version": state.get("active_model_version"),
         "model_rounds": (state.get("upload_layout") or {}).get("model_rounds") or {},
+        "scientific_epochs": (state.get("upload_layout") or {}).get("scientific_epochs") or {},
+        "extrapolation_rounds": (state.get("upload_layout") or {}).get("extrapolation_rounds") or {},
         "path_format": {
             "type": "object",
             "fields": {
@@ -539,7 +541,7 @@ def _submission_markdown(index, state):
             task
             for task in members
             if active_model
-            and (task.get("model_version") or task_models.get(task.get("task_id"))) == active_model
+            and (task.get("upload_epoch_model_version") or task.get("model_version") or task_models.get(task.get("task_id"))) == active_model
         ]
         pending = {task["task_id"] for task in current_members if waiting(task)} - recovered_ids
         register(
@@ -552,13 +554,13 @@ def _submission_markdown(index, state):
     for batch in state.get("slurm_batches") or []:
         members = [tasks[task_id] for task_id in batch.get("task_ids") or [] if task_id in tasks]
         current = active_model and (
-            batch.get("model_version") == active_model
-            or any(task.get("model_version") == active_model for task in members)
+            (batch.get("upload_epoch_model_version") or batch.get("model_version")) == active_model
+            or any((task.get("upload_epoch_model_version") or task.get("model_version")) == active_model for task in members)
         )
         unfinished = any(
             waiting(task)
             and task.get("task_id") not in recovered_ids
-            and (task.get("model_version") or batch.get("model_version")) == active_model
+            and (task.get("upload_epoch_model_version") or task.get("model_version") or batch.get("model_version")) == active_model
             for task in members
         )
         register(
@@ -743,6 +745,7 @@ def write_submission_index(root, state):
         root,
         (state.get("upload_layout") or {}).get("model_rounds") or {},
         _registered_task_directories(root, state),
+        scientific_epochs=(state.get("upload_layout") or {}).get("scientific_epochs") or {},
     )
     publish_epoch_guides(root, state)
     return path

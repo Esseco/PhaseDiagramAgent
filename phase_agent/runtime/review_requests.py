@@ -77,23 +77,37 @@ def additional_reviews(state, session=None):
     for plan_id, record in (state.get("pending_execution_recoveries") or {}).items():
         proposal = record["proposal"]
         no_effect = proposal["resolution"] == "verified_no_effect"
+        abandoned = proposal["resolution"] == "verified_abandoned_staging"
+        staging = proposal["checks"].get("abandoned_staging", {}) if abandoned else {}
+        title = ("结束经核对无副作用的旧动作" if no_effect else
+                 "保留并弃用旧暂存帧" if abandoned else "复用已登记任务与结果")
+        boundary = (
+            "原回执和旧暂存帧保留，旧调用禁止重放；旧帧不用于后续流程，不提交任务。"
+            if abandoned else
+            "原回执保留，旧调用禁止重放；不提交任务、不改科学结果。"
+            + ("仅释放该动作尚未结算的预算预留。" if no_effect else "已有任务继续回收，预算不在此结算。")
+        )
         row = _row(
             plan_id,
             "execution_recovery",
             deepcopy(proposal),
-            "结束经核对无副作用的旧动作" if no_effect else "复用已登记任务与结果",
+            title,
             f"旧动作 {proposal['identity']['invocation_id']}；仅修复恢复记录",
-            "原回执保留，旧调用禁止重放；不提交任务、不改科学结果。"
-            + (
-                "仅释放该动作尚未结算的预算预留。"
-                if no_effect
-                else "已有任务继续回收，预算不在此结算。"
-            ),
+            boundary,
             proposal["attestation"]["evidence_note"],
             sensitive=True,
         )
         row["revision"] = record.get("revision", 0)
         row["review_card"]["evidence_refs"] = proposal["checks"]
+        if abandoned:
+            if staging.get("kind") == "abandoned_unsubmitted_refresh_staging":
+                row["review_card"]["scope"] += f"；{staging['task_count']} 个未提交的旧刷新任务文件"
+            elif staging.get("kind") == "abandoned_region_generation_staging":
+                row["review_card"]["scope"] += f"；弃用 {staging['structure_count']} 个未登记结构（{staging['file_count']} 个本地文件），保留文件供追溯"
+            elif staging.get("kind") == "abandoned_exact_candidate_relax_staging":
+                row["review_card"]["scope"] += f"；保留 {len(staging['frames'])} 个未登记候选帧输入，另有 {len(staging['missing_candidate_ids'])} 帧未准备"
+            else:
+                row["review_card"]["scope"] += f"；{staging['parent_count']} 个母帧，{staging['frame_count']} 个旧暂存帧"
         if no_effect:
             released = sum(
                 item.get("reserved_cost", item.get("relative_cost", 0))
@@ -147,8 +161,8 @@ def _row(plan_id, kind, identity, title, scope, boundary, reason, *, sensitive, 
     }
 
 
-def review_additional(handler, state, row, decision, comment):
-    from phase_agent.tools.step_runner.file_protocol import write_json
+def review_additional(handler, state, row, decision, comment, *, expected_identity=None):
+    from phase_agent.tools.step_runner.file_protocol import write_json, write_json_if_version
 
     kind = row["review_kind"]
     if kind == "execution_recovery":
@@ -163,9 +177,10 @@ def review_additional(handler, state, row, decision, comment):
             str(Path(handler.state_path).parent / "langgraph_lifecycle.sqlite") + ".lock",
             timeout=10,
         ):
-            import hashlib
+            from phase_agent.persistence.state.read_versions import read_identity
 
-            source_sha256 = hashlib.sha256(Path(handler.state_path).read_bytes()).hexdigest()
+            current_identity = read_identity(handler.state_path, strong=True)
+            source_sha256 = current_identity[2][0]
             current = read_json(handler.state_path, {}) or {}
             fresh = (current.get("pending_execution_recoveries") or {}).get(row["plan_id"]) or {}
             if proposal_hash(fresh.get("proposal") or {}) != row["proposal_hash"]:
@@ -189,7 +204,7 @@ def review_additional(handler, state, row, decision, comment):
                     restore_allowed=result["status"] == "reconciled_existing_effects",
                 )
             else:
-                write_json(handler.state_path, result["state"])
+                write_json_if_version(handler.state_path, result["state"], current_identity)
         return {"status": result["status"], "reason": result.get("reason")}
     if kind in {"model_activation", "training_direction"} and decision != "reject":
         from phase_agent.tools.state.execution_receipts import recovery_report
@@ -251,7 +266,10 @@ def review_additional(handler, state, row, decision, comment):
         )
         updated = result["state"]
         status = "direction_reviewed" if updated != state else "not_executed"
-    write_json(handler.state_path, updated)
+    if expected_identity is None:
+        write_json(handler.state_path, updated)
+    else:
+        write_json_if_version(handler.state_path, updated, expected_identity)
     if kind == "model_activation" and status == "activated" and decision != "reject":
         from phase_agent.runtime.model_activation_followup import propose_refresh_after_activation
 
@@ -263,34 +281,67 @@ def review_additional(handler, state, row, decision, comment):
     return {"status": status, "result": result}
 
 
-def pending_reviews(state, session=None, *, state_path=None):
-    """Versioned queue shared by HTTP, chat and Studio status."""
-    from phase_agent.runtime.review_presentation import review_card
+_verified_approval_version = None
+
+
+def _approval_source(state):
+    from phase_agent.persistence.state.field_index import IndexedState
+
+    if type(state) is IndexedState and state.manifest_digest:
+        return state.path.resolve(), state.identity, state.manifest_digest
+    return None
+
+
+def approval_state_version(state):
+    # Indexed callers verify the complete source before exposing or acting on
+    # this version. Keep only the ID, never the parsed project state.
     from phase_agent.tools.step_runner.build_status_summary import build_status_summary
 
-    version = build_status_summary(state, config_version=state.get("confirmed_config_version"))[
+    key = _approval_source(state)
+    cached = _verified_approval_version
+    if key is not None and cached and cached[0] == key:
+        return cached[1]
+    return build_status_summary(state, config_version=state.get("confirmed_config_version"))[
         "summary_id"
     ]
+
+
+def remember_approval_state_version(state, version):
+    global _verified_approval_version
+
+    key = _approval_source(state)
+    if key is not None:
+        _verified_approval_version = key, version
+
+
+def pending_reviews(state, session=None, *, state_path=None, state_version=None):
+    """Versioned queue shared by HTTP, chat and Studio status."""
+    from phase_agent.runtime.review_presentation import review_card
+
+    version = state_version if state_version is not None else approval_state_version(state)
     rows = []
     for key, record in (state.get("pending_execution_policies") or {}).items():
         proposal = record.get("agent_proposal") or {}
+        presentation = review_card(key, record)
         rows.append(
             {
                 "plan_id": key,
                 "invocation_id": key,
                 "review_kind": "scientific_action",
                 "revision": record.get("revision", 0),
-                "review_card": review_card(key, record),
+                "review_card": presentation,
                 "recommended_action": proposal.get("recommended_action"),
                 "target_ids": ((proposal.get("raw_action") or {}).get("target_ids") or []),
                 "parameters": proposal.get("action_parameters"),
                 "reason": proposal.get("reason"),
                 "estimated_cost": proposal.get("estimated_cost"),
                 "missing_evidence": proposal.get("missing_evidence"),
-                "proposal_hash": proposal_hash(proposal),
+                "proposal_hash": presentation["proposal_hash"],
             }
         )
     rows.extend(additional_reviews(state, session))
+    if not rows:
+        return rows
     from phase_agent.evidence.project_authority import current_project, project_identity
 
     card = current_project(state, session, state_path=state_path)

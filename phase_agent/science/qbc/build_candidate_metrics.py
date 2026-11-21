@@ -16,6 +16,10 @@ def build_qbc_candidate_metrics(candidates: list[dict], *, qbc_evaluator=None) -
             continue
         row = {
             "candidate_id": candidate_id,
+            "structure_path": candidate.get("structure_path"),
+            "structure_sha256": candidate.get("structure_sha256"),
+            "model_version": candidate.get("model_version"),
+            "extrapolation_failure": candidate.get("extrapolation_failure"),
             "branch_id": candidate.get("branch_id"),
             "atom_count": candidate.get("atom_count")
             if candidate.get("structure") is None

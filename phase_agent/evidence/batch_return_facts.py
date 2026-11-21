@@ -23,11 +23,19 @@ def batch_return_facts(state):
         matching_plan = (
             not row.get("plan_checksum") or summary.get("plan_checksum") == row["plan_checksum"]
         )
+        complete = row.get("status") == "completed" and summary.get("status") == "completed"
+        if row.get("status") == "paused" and row.get("formal_recovery_status") == "accepted":
+            from phase_agent.tools.relax_mc_batch.completion_gate import completion_error
+
+            tasks = [
+                task for task in state.get("tasks") or []
+                if task.get("relax_mc_bundle_id") == row.get("bundle_id")
+            ]
+            complete = completion_error(summary, tasks) is None
         if (
-            row.get("status") == "completed"
+            complete
             and row.get("import_checksum")
             and not row.get("return_error")
-            and summary.get("status") == "completed"
             and summary.get("model_version") == model
             and matching_plan
         ):

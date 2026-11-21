@@ -34,7 +34,7 @@ class SlurmBatchRunner:
         dispatcher: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         submit: bool = False,
         sbatch_command: list[str] | tuple[str, ...] = ("sbatch",),
-        max_batch_tasks: int = 100,
+        max_batch_tasks: int | None = None,
         stage_batch_sizes: dict[str, int] | None = None,
         max_batch_cost: float | None = None,
         slurm_options: dict[str, Any] | None = None,
@@ -44,7 +44,7 @@ class SlurmBatchRunner:
     ):
         if not worker_command:
             raise ValueError("worker_command 不能为空")
-        if max_batch_tasks <= 0:
+        if max_batch_tasks is not None and max_batch_tasks <= 0:
             raise ValueError("max_batch_tasks 必须为正整数")
         if max_batch_cost is not None and max_batch_cost <= 0:
             raise ValueError("max_batch_cost 必须为正数")
@@ -53,7 +53,8 @@ class SlurmBatchRunner:
         self.dispatcher = dispatcher
         self.submit = bool(submit)
         self.sbatch_command = [str(item) for item in sbatch_command]
-        self.max_batch_tasks = int(max_batch_tasks)
+        self.max_batch_tasks_explicit = max_batch_tasks is not None
+        self.max_batch_tasks = int(max_batch_tasks) if max_batch_tasks is not None else 100
         self.stage_batch_sizes = {
             str(stage): int(size) for stage, size in (stage_batch_sizes or {}).items()
         }
@@ -104,7 +105,18 @@ class SlurmBatchRunner:
 
         write_unix_shell_script(
             script_path,
-            self._script(batch_id, manifest_path, len(manifest), selected[0].get("stage")),
+            self._script(
+                batch_id,
+                manifest_path,
+                len(manifest),
+                selected[0].get("stage"),
+                single_point=(
+                    selected[0].get("stage") == "relax_and_feature"
+                    and (selected[0].get("parameters") or {}).get("model_refresh_operation")
+                    == "predict"
+                    and (selected[0].get("parameters") or {}).get("refresh_force_threshold") is None
+                ),
+            ),
         )
         script_path.chmod(0o750)
         batch = {
@@ -186,10 +198,21 @@ class SlurmBatchRunner:
             key = _compatibility_key(task)
             if anchor_key is None:
                 anchor_key = key
-                stage_limit = self.stage_batch_sizes.get(task.get("stage"), self.max_batch_tasks)
-                batch_limit = (
-                    1 if task.get("stage") in DFT_STAGES else min(self.max_batch_tasks, stage_limit)
-                )
+                if task.get("stage") in DFT_STAGES:
+                    batch_limit = 1
+                elif (
+                    task.get("stage") == "relax_and_feature"
+                    and (task.get("parameters") or {}).get("model_refresh_operation") == "predict"
+                    and (task.get("parameters") or {}).get("refresh_force_threshold") is None
+                ):
+                    batch_limit = self.stage_batch_sizes.get("mlip_single_point", 500)
+                    if self.max_batch_tasks_explicit:
+                        batch_limit = min(self.max_batch_tasks, batch_limit)
+                else:
+                    stage_limit = self.stage_batch_sizes.get(
+                        task.get("stage"), self.max_batch_tasks
+                    )
+                    batch_limit = min(self.max_batch_tasks, stage_limit)
             if key != anchor_key:
                 continue
             planned = float(
@@ -271,7 +294,7 @@ class SlurmBatchRunner:
             "result_path": str(result_path),
         }
 
-    def _script(self, batch_id, manifest_path, count, stage):
+    def _script(self, batch_id, manifest_path, count, stage, *, single_point=False):
         profile = self._profile_for_stage(stage)
         options = {
             "job-name": batch_id,
@@ -312,6 +335,16 @@ class SlurmBatchRunner:
                 f"set +e\n{vasp_command}\nvasp_exit_code=$?\nset -e\n"
                 f'{parser_command} --directory . --result-path result.json --exit-code "$vasp_exit_code"\n'
                 'exit "$vasp_exit_code"\n'
+            )
+        elif single_point:
+            try:
+                executor = self.worker_command[self.worker_command.index("--executor") + 1]
+            except (ValueError, IndexError) as error:
+                raise ValueError("single-point batch requires an explicit executor") from error
+            body = (
+                f"{shlex.quote(self.worker_command[0])} -m phase_agent.tools.remote.run_mlip_batch "
+                f"--slurm-predict --manifest {shlex.quote(str(manifest_path))} "
+                f"--executor {shlex.quote(executor)}\n"
             )
         elif grouped_mlip:
             body = (

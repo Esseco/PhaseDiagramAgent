@@ -90,6 +90,7 @@ def region(phase, low=0, high=1):
     return {
         "region_id": phase,
         "priority": 1,
+        "sample_count": 1,
         "strategy": "coverage",
         "phase": phase,
         "min_det_H": 1,

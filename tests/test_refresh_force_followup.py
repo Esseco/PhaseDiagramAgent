@@ -26,7 +26,7 @@ def test_far_requires_force_evidence():
         supplemental_relaxation_required(0.02, [])
 
 
-def test_far_historical_flag_does_not_override_current_far_sampling():
+def test_full_refresh_preserves_far_structures_even_with_historical_flags():
     rows = [
         {
             "structure_id": str(i),
@@ -40,7 +40,8 @@ def test_far_historical_flag_does_not_override_current_far_sampling():
         for i in range(20)
     ]
     plan = build_model_refresh_plan(rows, old_version="old", new_version="new")
-    assert len(plan["candidates"]) == 2
+    assert len(plan["candidates"]) == 20
+    assert {row["structure_id"] for row in plan["candidates"]} == {str(i) for i in range(20)}
     assert plan["policy"]["far_force_threshold"] == 0.2
 
 

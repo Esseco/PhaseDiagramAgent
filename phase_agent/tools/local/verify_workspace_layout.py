@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from phase_agent.configuration.session.resolve_workspace_paths import resolve_workspace_paths
+from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
 
 
 def verify_workspace_layout(workspace, *, backup=None):
@@ -18,7 +19,7 @@ def verify_workspace_layout(workspace, *, backup=None):
         paths["ledger"],
         root / settings["config_session_path"],
         root / settings["editable_config_draft_path"],
-        paths["phase_diagrams"] / "output_index.md",
+        analysis_metadata_directory(paths["phase_diagrams"]) / "output_index.md",
     ]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:

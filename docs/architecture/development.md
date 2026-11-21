@@ -42,6 +42,8 @@
 
 静态检查与格式：`python -m ruff check phase_agent`、`python -m ruff format --check phase_agent`。默认使用 py1；回归使用假模型/假超算。源代码改动不能证明真实 API 或超算已验证。源码部署先核对基线并外置备份，不修改科学项目的数据和检查点。
 
+假模型回归可将 `tests/fake_only_guard` 前置到测试进程的 `PYTHONPATH`，拦截已知 MACE、CHGNet、M3GNet、SevenNet、ORB 等真实模型加载入口；测试应注入假模型，意外触发拦截要修复测试，不得当作通过。使用 `python -I` 或 `-S` 的子进程不会加载该防线，必须另外核实其自带假模型。防线不保证覆盖所有第三方加载方式，也不代替禁止真实计算与访问科研项目的操作边界。
+
 
 ### Generation and approval invariants
 

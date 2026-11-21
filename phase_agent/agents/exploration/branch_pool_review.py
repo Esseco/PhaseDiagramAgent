@@ -14,6 +14,7 @@ INSTRUCTION = (
     "可明确给default_existing_branch_decision=continue_search或defer、default_existing_branch_reason及default_existing_branch_evidence_refs，程序把未列成员按Agent此项明确决定展开；不设默认时须完整分组。最终各ID恰好一次，不只按相机械分组。"
     "基态及近简并优先考虑，不把刷新当MC完成；x=0没有Na/空位MC；同模型已完成任务不得重置。"
     "reuse_existing要求regions=[]及defer_reason；supplement要求具体regions，说明新branch的必要性与区域依据，"
+    "优先参考coverage_and_marginal_matrix中的unexplored空白区与high_gain高边际收益区，避免向saturated饱和区盲目堆砌新branch，"
     "不先定总数或配额，实际数生成后统计。可同时建议部分旧branch续搜与按需新增。"
     "本次动作仅生成提案；旧branch的分组仅为搜索建议，未授权准备输入或计算。"
     "x=0且无Na/空位时，只有明确decision=relax_only并在parameters.relax_only_x_values声明0，才可作为固定组成Relax-only路径；"
@@ -94,7 +95,91 @@ def pool_context(state, branches=None):
             for (phase, size, x), count in sorted(groups.items())
         ]
         result["missing_ledger_branch_count"] = len(ids - set(branches))
+    result["coverage_and_marginal_matrix"] = coverage_and_marginal_matrix(
+        state, result["existing_branches"], latest_branch_ids=ids
+    )
     return result
+
+
+def _x_bin(value) -> str:
+    try:
+        from fractions import Fraction
+
+        num = float(Fraction(str(value)))
+        return f"{round(num, 1):.1f}"
+    except (ValueError, ZeroDivisionError, TypeError):
+        return "unknown"
+
+
+def coverage_and_marginal_matrix(
+    state: dict,
+    existing_branches: list[dict],
+    *,
+    latest_branch_ids: set[str] | None = None,
+) -> list[dict]:
+    """Summarize (phase, x_Na_bin) coverage and per-cell marginal gain without LLM calls."""
+    latest_ids = latest_branch_ids or set()
+    cells: dict[tuple[str, str], dict] = {}
+    boundary = (state.get("confirmed_config") or {}).get("boundary") or {}
+    declared_phases = [str(p) for p in boundary.get("P") or [] if p]
+    for row in existing_branches or []:
+        phase = str(row.get("phase") or "unknown")
+        x_bin = _x_bin(row.get("x"))
+        cell = cells.setdefault(
+            (phase, x_bin),
+            {
+                "phase": phase,
+                "x_Na_bin": x_bin,
+                "branch_count": 0,
+                "mc_completed_count": 0,
+                "near_hull_count": 0,
+                "best_ehull_mev": None,
+                "marginal_gain_last_round": 0,
+            },
+        )
+        cell["branch_count"] += 1
+        mc_states = row.get("mc_task_states") or {}
+        if mc_states.get("current_model:completed", 0) > 0:
+            cell["mc_completed_count"] += 1
+        ehull = row.get("current_model_ehull_ev_per_atom")
+        near_hull = isinstance(ehull, (int, float)) and ehull <= 0.020
+        if near_hull:
+            cell["near_hull_count"] += 1
+        if isinstance(ehull, (int, float)):
+            mev = round(float(ehull) * 1000.0, 2)
+            if cell["best_ehull_mev"] is None or mev < cell["best_ehull_mev"]:
+                cell["best_ehull_mev"] = mev
+        if row.get("branch_id") in latest_ids and (
+            near_hull or row.get("is_hull_ground_state") or row.get("near_degenerate")
+        ):
+            cell["marginal_gain_last_round"] += 1
+
+    present_phases = {p for p, _ in cells}
+    for phase in declared_phases:
+        if phase not in present_phases:
+            cells[(phase, "all")] = {
+                "phase": phase,
+                "x_Na_bin": "all",
+                "branch_count": 0,
+                "mc_completed_count": 0,
+                "near_hull_count": 0,
+                "best_ehull_mev": None,
+                "marginal_gain_last_round": 0,
+            }
+
+    matrix = []
+    for key in sorted(cells):
+        cell = cells[key]
+        if cell["branch_count"] == 0:
+            status = "unexplored"
+        elif cell["mc_completed_count"] == 0:
+            status = "needs_mc"
+        elif cell["marginal_gain_last_round"] > 0:
+            status = "high_gain"
+        else:
+            status = "saturated"
+        matrix.append({**cell, "exploration_status": status})
+    return matrix
 
 
 def expand_review_indices(action, context):
@@ -211,7 +296,7 @@ def review_errors(action, context):
                     or []
                     if row.get("has_mobile_ions") is False
                 }
-                if unavailable.intersection(ids):
+                if group.get("decision") == "continue_search" and unavailable.intersection(ids):
                     group["decision"] = "relax_only"
                 if (
                     group.get("decision") not in {"continue_search", "defer", "relax_only"}

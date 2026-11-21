@@ -1,5 +1,7 @@
 import json
 import tempfile
+
+import pytest
 from pathlib import Path
 
 from phase_agent.runtime.codex.mcp import CodexMcpServer
@@ -31,19 +33,63 @@ def test_mcp_lists_only_existing_codex_control_tools():
     names = {tool["name"] for tool in result["result"]["tools"]}
     assert names == {
         "phase_status",
+        "phase_recover_phase_evidence",
+        "phase_publish_current_hull",
+        "phase_overview",
+        "phase_direct_review_report",
+        "phase_perturbation_recovery_candidates",
+        "phase_register_dft_failure_analysis",
+        "phase_dft_recalculation_review",
+        "phase_remove_quality_records",
+        "phase_propose_reopened_refresh",
+        "phase_register_same_frame_comparisons",
+        "phase_reconcile_recovery_refresh_epoch",
+        "phase_rebuild_outside_refresh_hull",
+        "phase_adopt_epoch_recovery_policy",
+        "phase_confirm_project_config",
+        "phase_migrate_project_dft_nelm",
+        "phase_set_project_dft_nelm",
+        "phase_register_diagnostic_retry",
+        "phase_regenerate_training_preflight",
+        "phase_team_restore_dft_audit",
+        "phase_settle_cancelled_dft_reservations",
+        "phase_register_dft_wait_waiver",
+        "phase_register_scheduler_terminal_evidence",
+        "phase_register_prepared_unsubmitted_evidence",
+        "phase_name_direct_dft_handoff",
+        "phase_bind_direct_candidates",
+        "phase_archive_failed_epoch",
+        "phase_preview_completed_refresh",
+        "phase_reopen_completed_refresh",
+        "phase_quarantine_extrapolation_refresh",
         "phase_recover",
+        "phase_recovery_diagnostic",
         "phase_team_start",
         "phase_team_reconcile",
         "phase_refresh_dft_candidates",
+        "phase_authorize_exact_candidate_relax",
+        "phase_authorize_unknown_gs_dft",
+        "phase_register_endpoint_supplement",
+        "phase_restore_relocation_metadata",
+        "phase_repair_refresh_handoff",
+        "phase_prepare_cpu_recovery",
+        "phase_repair_dft_handoff",
         "phase_team_read",
+        "phase_team_evidence",
         "phase_team_advise",
+        "phase_team_clarify",
         "phase_team_draft",
         "phase_team_simulate",
+        "phase_team_plot_dft",
         "phase_team_feedback",
         "phase_team_propose",
         "phase_memory_propose",
         "phase_memory_review",
         "phase_review_relax_mc_return",
+        "phase_register_relax_mc_threshold_transition",
+        "phase_minimize_unsent_relax_mc_delivery",
+        "phase_register_relax_mc_input_attestation",
+        "phase_preview_relax_mc_threshold_continuation",
         "phase_hpc_recovery",
         "phase_context",
         "phase_set_remote_workspace",
@@ -52,6 +98,7 @@ def test_mcp_lists_only_existing_codex_control_tools():
         "phase_memory",
         "phase_propose",
         "phase_decide",
+        "phase_operation_status",
         "phase_report",
         "phase_plot",
         "phase_list_projects",
@@ -63,7 +110,7 @@ def test_mcp_lists_only_existing_codex_control_tools():
 
 
 def test_mcp_rejects_control_calls_until_a_project_is_selected():
-    with tempfile.TemporaryDirectory(dir=r"E:\Py-Code") as root:
+    with tempfile.TemporaryDirectory() as root:
         server = CodexMcpServer(project_roots=[root], codex_factory=lambda _: FakeCodex())
         result = server.handle(
             {
@@ -78,7 +125,7 @@ def test_mcp_rejects_control_calls_until_a_project_is_selected():
 
 
 def test_mcp_lists_and_selects_a_project_runtime():
-    with tempfile.TemporaryDirectory(dir=r"E:\Py-Code") as root:
+    with tempfile.TemporaryDirectory() as root:
         project = Path(root) / "NaCoO2"
         project.mkdir()
         runtime = project / "agent_runtime.json"
@@ -127,7 +174,7 @@ def test_mcp_lists_and_selects_a_project_runtime():
 
 
 def test_mcp_legacy_runtime_config_still_selects_on_startup():
-    with tempfile.TemporaryDirectory(dir=r"E:\Py-Code") as root:
+    with tempfile.TemporaryDirectory() as root:
         runtime = Path(root) / "agent_runtime.json"
         runtime.write_text("{}", encoding="utf-8")
         server = CodexMcpServer(
@@ -146,7 +193,7 @@ def test_mcp_legacy_runtime_config_still_selects_on_startup():
 
 
 def test_mcp_creates_and_selects_a_project_without_running_science():
-    with tempfile.TemporaryDirectory(dir=r"E:\Py-Code") as root:
+    with tempfile.TemporaryDirectory() as root:
         runtime = Path(root) / "Created" / "agent_runtime.json"
 
         def creator(workspace_root, execution_mode):
@@ -319,3 +366,132 @@ def test_stdio_redirects_actual_electrostatic_library_message(monkeypatch, capsy
     captured = capsys.readouterr()
     assert json.loads(captured.out)["result"] == ["candidate"]
     assert "electrostatic ground statete structures found" in captured.err
+
+
+def test_mcp_overview_uses_control_entry(tmp_path):
+    from threading import RLock
+    from types import SimpleNamespace
+    from phase_agent.runtime.local_agent_control import LocalAgentControl
+
+    state = tmp_path / "workflow_state" / "state.json"
+    state.parent.mkdir()
+    state.write_text(json.dumps({"active_model_version": "m1", "tasks": [{"status": "completed"}]}), encoding="utf-8")
+    handler = SimpleNamespace(state_path=state, lock=RLock(), workflow_kwargs={})
+    codex = FakeCodex()
+    codex.control = LocalAgentControl(handler)
+    server = CodexMcpServer(codex)
+    request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "phase_overview", "arguments": {}}}
+    first = server.handle(request)
+    payload = json.loads(first["result"]["content"][0]["text"])
+    assert payload["cache_status"] == "rebuilt"
+    assert payload["model_version"] == "m1"
+    second = server.handle(request)
+    assert json.loads(second["result"]["content"][0]["text"])["cache_status"] == "hit"
+
+
+def test_read_only_mcp_overview_does_not_create_index(tmp_path):
+    state = tmp_path / "workflow_state" / "state.json"
+    state.parent.mkdir()
+    state.write_text(json.dumps({"active_model_version": "m1"}), encoding="utf-8")
+    config = tmp_path / "agent_runtime.json"
+    config.write_text(json.dumps({"state_path": "workflow_state/state.json", "ledger_path": "workflow_state/ledgers/phase_data.json"}), encoding="utf-8")
+    server = CodexMcpServer(runtime_config=config, read_only=True)
+    request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "phase_overview", "arguments": {}}}
+    result = json.loads(server.handle(request)["result"]["content"][0]["text"])
+    assert result["cache_status"] == "computed_read_only"
+    assert result["detail_sources"]["ledger"].endswith("phase_data.json")
+    assert not (state.parent / "context_overview.json").exists()
+    assert not (state.parent / "langgraph_lifecycle.sqlite.lock").exists()
+
+
+def test_mcp_forwards_perturbation_candidate_query():
+    from types import SimpleNamespace
+    server = CodexMcpServer(FakeCodex())
+    server.codex.control = SimpleNamespace(perturbation_recovery_candidates=lambda max_det_H: {"max_det_H": max_det_H, "candidates": []})
+    result = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "phase_perturbation_recovery_candidates", "arguments": {"max_det_H": 3}}})
+    payload = json.loads(result["result"]["content"][0]["text"])
+    assert payload == {"max_det_H": 3, "candidates": []}
+
+
+def test_mcp_forwards_bound_dft_failure_analysis():
+    from types import SimpleNamespace
+    server = CodexMcpServer(FakeCodex())
+    server.codex.control = SimpleNamespace(register_dft_failure_analysis=lambda **kwargs: {'status':'recorded', **kwargs})
+    diagnosis = {'assessment':'failure analysis','evidence':['execution.operation_outcome'],
+                 'recommendation':'return_to_strategic','limitations':'logs needed'}
+    result = server.handle({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{
+        'name':'phase_register_dft_failure_analysis','arguments':{'failure_evidence_digest':'digest','diagnosis':diagnosis}}})
+    payload = json.loads(result['result']['content'][0]['text'])
+    assert payload == {'status':'recorded','failure_evidence_digest':'digest','diagnosis':diagnosis}
+
+
+def test_mcp_forwards_prepared_unsubmitted_evidence():
+    from types import SimpleNamespace
+
+    server = CodexMcpServer(FakeCodex())
+    server.codex.control = SimpleNamespace(
+        register_prepared_unsubmitted_evidence=lambda observation: {"status": "recorded", "observation": observation}
+    )
+    observation = {"task_ids": ["t1"], "source": "electerm_ssh"}
+    result = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "phase_register_prepared_unsubmitted_evidence", "arguments": {"observation": observation}}})
+    payload = json.loads(result["result"]["content"][0]["text"])
+    assert payload == {"status": "recorded", "observation": observation}
+
+
+def test_cpu_recovery_mcp_dispatch_uses_control_without_scientific_runtime():
+    from types import SimpleNamespace
+    calls = []
+    def prepare(**kwargs):
+        calls.append(kwargs)
+        return {"status": "prepared", "submitted": False}
+    fake = SimpleNamespace(control=SimpleNamespace(prepare_phase_cpu_recovery=prepare))
+    server = CodexMcpServer(fake)
+    args = {"source_sha256": "a" * 64, "spec_sha256": "b" * 64,
+            "task_count": 201, "remote_root": "/scratch/epoch4/Batch03_input"}
+    assert server._call_tool("phase_prepare_cpu_recovery", args)["status"] == "prepared"
+    assert calls == [args]
+
+
+def test_phase_evidence_recovery_and_publication_mcp_dispatch():
+    codex = FakeCodex()
+    codex.recover_phase_evidence = lambda **kwargs: {"received": kwargs}
+    codex.publish_phase = lambda: {"status": "completed"}
+    server = CodexMcpServer(codex)
+    args = {"expected_model": "m", "task_ids": ["t"]}
+    assert server._call_tool("phase_recover_phase_evidence", args) == {"received": args}
+    assert server._call_tool("phase_publish_current_hull", {}) == {"status": "completed"}
+    with pytest.raises(ValueError):
+        server._call_tool("phase_publish_current_hull", {"unexpected": True})
+
+
+def test_recovery_failures_default_to_four_fields(tmp_path):
+    from types import SimpleNamespace
+
+    batch = "submissions/epoch1/delivery/Batch_output"
+    archived = tmp_path / batch / "diagnostics.zip"
+    detailed = {"status": "observed", "result_collection": {
+        "recovered_count": 0, "transfer_errors": [{
+            "archive": str(archived), "reason": "remote_dispatch_failed:queue limit\nextra error"
+        }],
+    }}
+    control = SimpleNamespace(state_path=tmp_path / "workflow_state/state.json")
+    server = CodexMcpServer(SimpleNamespace(recover=lambda: detailed, control=control))
+    assert server._call_tool("phase_recover", {}) == {
+        "failure_step": "dispatch", "batch_id": batch,
+        "first_error": "queue limit", "resume_from": "verify_scheduler_receipt",
+    }
+    assert server._call_tool("phase_recover", {"include_details": True}) == detailed
+
+
+def test_mcp_minimal_delivery_dispatch_forwards_user_evidence():
+    class RevisionCodex(FakeCodex):
+        def minimize_unsent_relax_mc_delivery(self, **arguments):
+            return {"status": "revised", "arguments": arguments, "submitted": False}
+
+    server = CodexMcpServer(RevisionCodex())
+    args = {"bundle_id": "relax-mc-example", "source_sha256": "a" * 64, "confirmed_unsubmitted": True}
+    reply = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": "phase_minimize_unsent_relax_mc_delivery", "arguments": args}})
+    result = json.loads(reply["result"]["content"][0]["text"])
+    assert result == {"status": "revised", "arguments": args, "submitted": False}

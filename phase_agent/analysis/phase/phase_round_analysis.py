@@ -20,7 +20,17 @@ from phase_agent.tools.step_runner.file_protocol import write_json
 def publish_relax_mc_analysis(state, bundle_id, *, directory=None):
     # Derived plotting/report failures must not turn verified imports into failures.
     try:
-        return _publish(state, bundle_id, directory=directory)
+        result = _publish(state, bundle_id, directory=directory)
+        if result.get("status") == "completed":
+            root = directory or state.get("analysis_output_directory")
+            if root:
+                try:
+                    from phase_agent.analysis.feedback.analysis_events import relax_event
+
+                    result["analysis_step"] = relax_event(state, root, bundle_id, result)
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    result["analysis_step"] = {"status": "unavailable", "reason": str(error)}
+        return result
     except Exception as error:
         return {
             "status": "diagnostic_unavailable",
@@ -41,10 +51,18 @@ def _publish(state, bundle_id, *, directory=None):
     ready = (
         model
         and batch.get("model_version") == model
-        and batch.get("status") == "completed"
+        and (
+            batch.get("status") == "completed" or batch.get("formal_recovery_status") == "accepted"
+        )
         and batch.get("import_checksum")
         and not batch.get("return_error")
-        and summary.get("status") == "completed"
+        and (
+            summary.get("status") == "completed"
+            or (
+                summary.get("status") == "paused"
+                and summary.get("reason") == "continuation_pool_below_minimum"
+            )
+        )
         and summary.get("model_version") == model
         and (
             not batch.get("plan_checksum") or summary.get("plan_checksum") == batch["plan_checksum"]
@@ -147,6 +165,14 @@ def _publish(state, bundle_id, *, directory=None):
         report["report_checksum"] = _digest(report)
         write_json(review_path, report)
         _atomic_text(markdown_path, review_markdown(report, bundle_id=bundle_id, plot_paths=paths))
+        remote_sampling = (state.get("remote_dft_sampling") or {}).get(bundle_id) or {}
+        sampling_summary_path = None
+        if remote_sampling.get("status") == "accepted":
+            sampling_summary_path = receipt.with_name(receipt.stem + ".remote_dft_sampling.json")
+            write_json(
+                sampling_summary_path,
+                {k: v for k, v in remote_sampling.items() if k != "selected"},
+            )
         result = {
             **identity,
             "status": "completed" if completed else "diagnostic_unavailable",
@@ -154,6 +180,11 @@ def _publish(state, bundle_id, *, directory=None):
             "diagnostic_rule_version": RULE_VERSION,
             "plot_rule_version": PLOT_RULE_VERSION,
             "plot_paths": paths,
+            **(
+                {"remote_dft_sampling_summary_path": str(sampling_summary_path)}
+                if sampling_summary_path is not None
+                else {}
+            ),
             "quality_evidence": {
                 "status": report["status"],
                 "decision_role": report["decision_role"],

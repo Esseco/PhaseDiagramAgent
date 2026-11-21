@@ -1,0 +1,8 @@
+# Excluding unidentified phases from hulls
+
+New rule: phase identification failures and unknown phase labels must not enter newly built MLIP/DFT hulls or phase-diagram-derived DFT candidate sets. Preserve original tasks, structures, energy records, failure reasons and historical publications. A saved snapshot containing an unidentified phase must be rebuilt before new plotting, quality analysis or Relax/MC planning. Legacy records that have a recognized phase and lack the newer status field remain supported.
+
+The build, snapshot, export, DFT candidate and Relax/MC history gates enforce this policy. The project control entry can rebuild a completed refresh with `reason=exclude unidentified phase frames`, requiring the exact previously published hull/model and the complete set of excluded record IDs; it preserves the former global and independent-model hulls. Only replacement entries from the excluded structures are permitted. The currently running service may not load changed code until restarted by the user.
+
+Status: synthetic rule and rebuild tests pass; the Ni project has not been rebuilt with this rule because its lifecycle lock remains held. Rebuild through the existing project Agent entry after the current operation releases the lock, verify all excluded IDs and version binding, and publish separate main and D/H plots. Do not change frozen old results or write project state directly.
+A verified latest model-refresh frame with unknown phase also supersedes its exact input frame: exclude both from the current hull instead of falling back to older-model energy. Preserve all raw records and provenance.

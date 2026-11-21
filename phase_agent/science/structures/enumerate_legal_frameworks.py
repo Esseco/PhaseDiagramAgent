@@ -31,20 +31,27 @@ def enumerate_legal_frameworks(
 
     frameworks = []
     for phase in sorted(phases):
+        reference = load_structure(references[phase])
+        base_oxygen = sum(site.is_ordered and site.specie.symbol == "O" for site in reference)
+        base_sodium = sum(site.is_ordered and site.specie.symbol == "Na" for site in reference)
+        base_tm = sum(
+            site.is_ordered and Element(site.specie.symbol).is_transition_metal
+            for site in reference
+        )
+        from phase_agent.science.structures.rank_na_orderings_by_electrostatics import (
+            count_supercell_na_layers,
+        )
+
         for H in allowed_supercells(boundary["H"], phase):
-            structure = load_structure(references[phase])
-            structure.make_supercell(H)
-            oxygen = sum(site.is_ordered and site.specie.symbol == "O" for site in structure)
-            sodium = sum(site.is_ordered and site.specie.symbol == "Na" for site in structure)
-            tm_count = sum(
-                site.is_ordered and Element(site.specie.symbol).is_transition_metal
-                for site in structure
-            )
+            size = det_H(H)
+            oxygen, sodium, tm_count = base_oxygen * size, base_sodium * size, base_tm * size
+            layer_count = count_supercell_na_layers(reference, H)
             _check_tm_ratio(tm_count, boundary["TM_ratio"])
             x_values = {
                 Fraction(2 * count, oxygen)
                 for count in range(sodium + 1)
                 if oxygen
+                and (count == 0 or count >= layer_count)
                 and Fraction(2 * count, oxygen) <= 1
                 and phase in allowed_phases_at_x(boundary["P"], Fraction(2 * count, oxygen))
             }
@@ -59,7 +66,7 @@ def enumerate_legal_frameworks(
                     "tm_site_count": tm_count,
                     "na_site_count": sodium,
                     "oxygen_count": oxygen,
-                    "atom_count_full": len(structure),
+                    "atom_count_full": len(reference) * size,
                 }
             )
     return frameworks

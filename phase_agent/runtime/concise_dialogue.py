@@ -84,6 +84,17 @@ def approval_reply(proposal, state, *, state_path=None, config=None):
         scope_lines = [
             f"设置：最多 {settings.get('relax_steps', 500)} 步，{settings.get('optimizer', 'LBFGS')}；未收敛结果排除，不自动延长或重试。"
         ]
+    if tool == "restart_failed_task" and params.get("repair_profile") == "dft_recalculation":
+        action = proposal.get("raw_action") or {}
+        targets = action.get("target_ids") or []
+        strategies = params.get("strategies") or {}
+        diagnosis = params.get("diagnosis") or {}
+        scope_lines.extend([
+            "补算任务及策略：" + "、".join(f"{task}={strategies.get(task, '未知')}" for task in targets),
+            "Simulation 分析：" + str(diagnosis.get("assessment") or "未提供"),
+            "分析局限：" + str(diagnosis.get("limitations") or "未知"),
+            "本次审批仅登记补算任务；输入准备、上传和提交仍需各自授权。",
+        ])
     from phase_agent.policies.training_input_action import is_training_input_action
 
     if is_training_input_action(proposal.get("raw_action") or {"tool": tool, "parameters": params}):

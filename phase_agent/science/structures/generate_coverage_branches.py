@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from random import Random
 from typing import Any
 
 from phase_agent.science.structures.boundary_utils import det_H
@@ -44,8 +45,10 @@ def generate_coverage_branches(
                     framework,
                 )
             )
+    random = Random(seed)
     for regions in regions_by_phase.values():
-        regions.sort(key=lambda item: item[:5])
+        random.shuffle(regions)
+        regions.sort(key=lambda item: item[:3])
 
     # Cover every allowed phase early; within a phase, prefer smaller cells.
     candidates = []

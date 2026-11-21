@@ -91,21 +91,7 @@ def proposal_errors(action, payload):
 
     errors.extend(round_budget_review_errors(action, payload.get("decision_context") or {}))
     tool = action.get("tool") or action.get("action_type")
-    mc = (payload.get("decision_context") or {}).get("mc_entry_conditions") or {}
-    if (
-        mc.get("required")
-        and not mc.get("ready")
-        and (
-            tool == "allocate_mc_bohb"
-            or (
-                tool == "prepare_local_batch_files"
-                and (action.get("parameters") or {}).get("mode") == "mc_inputs"
-            )
-        )
-    ):
-        errors.append(
-            "action.prerequisite: MC requires recovered Relax results and current-model MLIP hull; first propose separate relax_inputs preparation, without MC allocation"
-        )
+    errors.extend(prerequisite_errors(action, payload.get("decision_context") or {}))
     if tool not in payload["allowed_tools"]:
         errors.append("action.tool: not allowed in this request")
     if (payload.get("decision_context") or {}).get("post_dft_assessment"):
@@ -163,3 +149,27 @@ def preserve_proposal_evidence(error, action):
     tool = action.get("tool") or action.get("action_type")
     if tool in REVIEW_TOOLS and not post_dft_review_errors(action, include_parameters=False):
         error.post_dft_review = deepcopy(action["post_dft_review"])
+
+
+def prerequisite_errors(action, context):
+    """Read-only known gates shared by ordinary and native new proposals."""
+    from phase_agent.tools.dispatch.scientific_operations import new_operation_errors
+
+    errors = new_operation_errors(action)
+    tool = action.get("tool") or action.get("action_type")
+    mc = context.get("mc_entry_conditions") or {}
+    if (
+        mc.get("required")
+        and not mc.get("ready")
+        and (
+            tool == "allocate_mc_bohb"
+            or (
+                tool == "prepare_local_batch_files"
+                and (action.get("parameters") or {}).get("mode") == "mc_inputs"
+            )
+        )
+    ):
+        errors.append(
+            "action.prerequisite: MC requires recovered Relax results and current-model MLIP hull; first propose separate relax_inputs preparation, without MC allocation"
+        )
+    return errors

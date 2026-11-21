@@ -2,7 +2,6 @@
 
 from copy import deepcopy
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 import uuid
@@ -19,10 +18,52 @@ from phase_agent.runtime.runtime_config_io import (
 )
 
 
+def _state_file_identity(path):
+    from phase_agent.persistence.state.read_versions import file_identity
+
+    return file_identity(path)
+
+
+def _read_runtime_state(path):
+    before = _state_file_identity(path)
+    value = _load_json_object(path, "state") if before is not None else {}
+    if _state_file_identity(path) != before:
+        raise ValueError("runtime_state_changed_during_read")
+    return value, before
+
+
+def _refresh_runtime_state(path, prior_path, state, identity, *, reusable):
+    """Reuse a verified startup snapshot only while its source remains unchanged."""
+    if (
+        reusable
+        and Path(path).resolve() == Path(prior_path).resolve()
+        and _state_file_identity(path) == identity
+    ):
+        return state
+    # Release the old snapshot before parsing another potentially large file.
+    return None
+
+
 def compose_runtime(
-    config_path=None, *, chat_handler_factory, model_switcher_factory, runtime_factory
+    config_path=None,
+    *,
+    chat_handler_factory,
+    model_switcher_factory,
+    runtime_factory,
+    operator="agent",
 ):
     """Compose the built-in runtime from a local, non-secret JSON file."""
+    if operator not in {"agent", "codex"}:
+        raise ValueError("invalid_runtime_operator")
+    from phase_agent.runtime.codex.no_project_model import NoProjectModel
+
+    def reload_runtime(path):
+        return (
+            runtime_factory(path, operator="codex")
+            if operator == "codex"
+            else runtime_factory(path)
+        )
+
     configured = (
         config_path or os.environ.get("PHASE_AGENT_RUNTIME_CONFIG") or "settings/agent_runtime.json"
     )
@@ -48,7 +89,8 @@ def compose_runtime(
         if settings.get("phase_references_path")
         else None
     )
-    state = _load_json_object(state_path, "state") if state_path.is_file() else {}
+    initial_state_path = state_path
+    state, initial_state_identity = _read_runtime_state(state_path)
     if state and settings.get("local_path_relocations"):
         from phase_agent.configuration.session.relocate_workspace_paths import (
             relocate_workspace_paths,
@@ -127,12 +169,20 @@ def compose_runtime(
         client_parameters = configuration_client_settings(
             deepseek, system_prompt=CONFIG_AGENT_SYSTEM_PROMPT
         )
-        agent_client = create_optional_runtime_client(client_parameters)
-        model_switcher = model_switcher_factory(
-            config_file,
-            deepseek,
-            system_prompt=CONFIG_AGENT_SYSTEM_PROMPT,
-            thinking=deepseek.get("configuration_thinking", "disabled"),
+        agent_client = (
+            NoProjectModel()
+            if operator == "codex"
+            else create_optional_runtime_client(client_parameters)
+        )
+        model_switcher = (
+            None
+            if operator == "codex"
+            else model_switcher_factory(
+                config_file,
+                deepseek,
+                system_prompt=CONFIG_AGENT_SYSTEM_PROMPT,
+                thinking=deepseek.get("configuration_thinking", "disabled"),
+            )
         )
         workflow_kwargs = {
             "state_path": str(state_path),
@@ -149,7 +199,7 @@ def compose_runtime(
             editable_config_directory=draft_paths.editable_config_directory,
             workspace_root_default=workspace_root,
             agent_client=agent_client,
-            runtime_factory=lambda: runtime_factory(config_file),
+            runtime_factory=lambda: reload_runtime(config_file),
             current_deepseek_model=deepseek.get("model", "deepseek-v4-pro"),
             deepseek_model_switcher=model_switcher,
         )
@@ -190,7 +240,20 @@ def compose_runtime(
                 "或先由用户手动迁移并核对后再继续。"
             )
     state_path, ledger_path = selected_state_path, selected_ledger_path
-    state = _load_json_object(state_path, "state") if state_path.is_file() else {}
+    reused = _refresh_runtime_state(
+        state_path,
+        initial_state_path,
+        state,
+        initial_state_identity,
+        reusable=not settings.get("local_path_relocations"),
+    )
+    if reused is None:
+        # Do not retain the old large snapshot while reading the changed source.
+        del state
+        state, _ = _read_runtime_state(state_path)
+    else:
+        state = reused
+    del reused
     if state and settings.get("local_path_relocations"):
         from phase_agent.configuration.session.relocate_workspace_paths import (
             relocate_workspace_paths,
@@ -295,12 +358,20 @@ def compose_runtime(
     runtime_config.setdefault("qbc", {})["output_path"] = str(resolved_storage["qbc_results"])
     deepseek = settings.get("deepseek") or {}
     client_parameters = search_client_settings(deepseek)
-    agent_client = create_optional_runtime_client(client_parameters)
-    model_switcher = model_switcher_factory(
-        config_file,
-        deepseek,
-        system_prompt=None,
-        thinking=deepseek.get("thinking"),
+    agent_client = (
+        NoProjectModel()
+        if operator == "codex"
+        else create_optional_runtime_client(client_parameters)
+    )
+    model_switcher = (
+        None
+        if operator == "codex"
+        else model_switcher_factory(
+            config_file,
+            deepseek,
+            system_prompt=None,
+            thinking=deepseek.get("thinking"),
+        )
     )
     kwargs = {
         "manager": manager,
@@ -340,12 +411,7 @@ def compose_runtime(
             "confirmed_config": deepcopy(snapshot["config"]),
             "confirmed_config_version": snapshot["config_version"],
         }
-        temporary = new_state.with_name(new_state.name + ".tmp")
-        temporary.write_text(
-            json.dumps(initial_state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(new_state)
+        write_json(new_state, initial_state)
         from phase_agent.runtime.isolated_run_paths import (
             isolate_runtime_outputs,
             publish_run_descriptor,
@@ -355,7 +421,7 @@ def compose_runtime(
         descriptor = publish_run_descriptor(
             settings, session, fresh_storage, source_config=config_file
         )
-        return runtime_factory(descriptor)
+        return reload_runtime(descriptor)
 
     configured_mode = settings.get("execution_mode", "debug")
     execution_mode = "interactive" if configured_mode == "debug" else "autonomous"
@@ -394,7 +460,7 @@ def compose_runtime(
             )
             current["pending_execution_policies"] = {}
             write_json(state_path, current)
-        return runtime_factory(config_file)
+        return reload_runtime(config_file)
 
     handler = chat_handler_factory(
         kwargs,

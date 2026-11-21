@@ -232,3 +232,19 @@ def test_cancellation_reason_is_available_in_bounded_agent_context():
     assert facts[0]["task_id"] == "missing"
     assert facts[0]["user_message"] == "不再回收"
     assert facts[0]["remote_cancel_sent"] is False
+
+
+
+def test_owned_dft_question_refresh_preserves_partial_recovery_evidence():
+    from phase_agent.tools.state.dft_recovery_decision import update_dft_recovery_question
+
+    state = task_state()
+    state["historical_payload"] = [{"structure": [1, 2, 3]}]
+    expected = update_dft_recovery_question(state)
+    assert state.get("pending_dft_recovery_question") is None
+    assert expected["pending_dft_recovery_question"]["pending_task_ids"] == ["missing"]
+    history = state["historical_payload"]
+    owned = update_dft_recovery_question(state, _owned=True)
+    assert owned is state
+    assert owned == expected
+    assert owned["historical_payload"] is history

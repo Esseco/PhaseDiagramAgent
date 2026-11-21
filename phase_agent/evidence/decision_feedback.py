@@ -80,6 +80,48 @@ def recent_decision_feedback(state, *, limit=5):
             g for g in state.get("generation_history") or [] if key and g.get("task_key") == key
         ]
         execution = record.get("execution_result") or {}
+        scientific_outcome = None
+        if payload.get("bundle_id") and (state.get("remote_dft_sampling") or {}).get(
+            payload["bundle_id"]
+        ):
+            rs = state["remote_dft_sampling"][payload["bundle_id"]]
+            scientific_outcome = {
+                "remote_sampling_status": rs.get("status"),
+                "gs_count": rs.get("gs_count"),
+                "kmeans_count": rs.get("kmeans_count"),
+                "excluded_hull_outlier_count": rs.get("excluded_hull_outlier_count"),
+            }
+        elif (
+            tool == "select_dft_candidates"
+            and tasks
+            and all(t.get("status") in {"completed", "failed", "cancelled"} for t in tasks)
+        ):
+            from phase_agent.evidence.post_dft_assessment import post_dft_assessment
+
+            assessed = post_dft_assessment(state)
+            if assessed and set(assessed.get("recovered_task_ids") or []) & {
+                t.get("task_id") for t in tasks
+            }:
+                scientific_outcome = {
+                    "gs_paired": assessed.get("gs_paired_structures"),
+                    "gs_energy_mae_eV_per_atom": (
+                        (assessed.get("gs_metrics") or {}).get("energy_per_atom") or {}
+                    ).get("mae"),
+                    "sample_paired": assessed.get("sample_paired_structures"),
+                    "sample_energy_mae_eV_per_atom": (
+                        (assessed.get("sample_metrics") or {}).get("energy_per_atom") or {}
+                    ).get("mae"),
+                }
+        hypothesis_status = "pending"
+        if tasks and all(t.get("status") in {"completed", "failed", "cancelled"} for t in tasks):
+            if counts.get("failed", 0) > counts.get("completed", 0):
+                hypothesis_status = "refuted"
+            elif counts.get("completed", 0) > 0:
+                hypothesis_status = "supported"
+        elif execution.get("status") == "failed":
+            hypothesis_status = "refuted"
+        elif scientific_outcome and scientific_outcome.get("remote_sampling_status") == "accepted":
+            hypothesis_status = "supported"
         rows.append(
             {
                 "record_id": record.get("record_id"),
@@ -97,6 +139,8 @@ def recent_decision_feedback(state, *, limit=5):
                     )
                     if generated
                     else None,
+                    "hypothesis_status": hypothesis_status,
+                    **({"scientific_outcome": scientific_outcome} if scientific_outcome else {}),
                 },
                 "instruction": "Only task_key-matched recorded outcomes. Input preparation is not calculation completion. Compare model/config scope before reusing experience; missing measurements stay unknown. Assess whether these outcomes support the earlier expectation.",
             }

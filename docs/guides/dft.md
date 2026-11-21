@@ -176,3 +176,12 @@ python -m phase_agent.tools.remote.predict_dft_final_frame \
 
 验证：`tests/test_post_dft_assessment.py` 覆盖轮次/模型隔离、部分回收关闭、缺失误差、重试缓存、训练门禁、正式 LLM 阶段路由。完整回归不包含暂不启用的 BOHB 集成测试。
 
+
+
+## 失败 DFT 的补算审阅
+
+用户提出补算时，先读取失败任务和已有回执。Codex 可调用 `phase_dft_recalculation_review`，传入明确的 `target_ids`，将返回的 `diagnosis_request` 交给原生 Simulation。普通 Agent 在形成方案前调用 Simulation 诊断；不能把无客户端或诊断缺失当作已分析。达到原批次失败率门槛时仍须通过既有失败分析登记。
+
+用户决定是否继续。需要补算时，以 `restart_failed_task` 提出一个具体方案，`parameters.repair_profile` 为 `dft_recalculation`，逐项列出 `strategies`，每项可用 `original`、`mixing_parameters`、`vasp_symmetry_single_gpu`、`nelm_200` 或 `nelm_200_slow_mixing`。原生团队将审阅返回的 `failure_evidence_digest` 和真实 Simulation `diagnosis` 一并放入参数。模型不能自动选择改动参数并跳过用户审阅。方案须覆盖原任务成本估算，实际成本可能因修复参数变化而不同。
+
+本次审批只登记失败任务的有界重试和预算预留。生成输入须按已登记重试任务走原准备入口与独立审批；上传、提交仍按原权限执行。原任务、成功结果、历史审批及回执保留。任务状态、失败证据、原模型或配置、已有重试变化时应重新审阅；未知费用或版本、原任务版本与当前模型或配置不一致、目标不是已结束失败 DFT、预算不足时阻断。已有后续重试的原任务不能再次登记补算；先检查后续重试，若其失败则以该次失败任务重新审阅。

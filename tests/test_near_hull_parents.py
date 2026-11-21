@@ -38,7 +38,10 @@ def evidence_state():
         "tasks": tasks,
         "phase_records": records,
         "phase_diagrams": {
-            "mlip": {"status": "completed", "model_version": "m", "version": "h1", "entries": rows}
+            "mlip": {"status": "completed", "model_version": "m", "version": "global", "entries": rows}
+        },
+        "phase_diagrams_by_model": {
+            "m": {"status": "completed", "model_version": "m", "version": "h1", "entries": [row for row in rows if row["source_version"] == "m"]}
         },
     }, branches
 
@@ -59,7 +62,7 @@ def test_stale_diagram_and_missing_version_fail_closed():
     with pytest.raises(ValueError, match="current_model"):
         parent_evidence(state, branches)
     state["phase_diagrams"]["mlip"]["model_version"] = "m"
-    del state["phase_diagrams"]["mlip"]["version"]
+    del state["phase_diagrams_by_model"]["m"]["version"]
     with pytest.raises(ValueError, match="versioned"):
         parent_evidence(state, branches)
 
@@ -78,3 +81,22 @@ def test_invalid_actual_structure_is_excluded_with_reason(monkeypatch):
     assert result["invalid_parent_structures_excluded"] == [
         {"branch_id": "b0", "reason": "actual_H_does_not_match"}
     ]
+
+
+def test_current_model_independent_hull_controls_parent_gap():
+    state, branches = evidence_state()
+    independent = state["phase_diagrams_by_model"]["m"]
+    independent["entries"] = [dict(row) for row in independent["entries"]]
+    independent["entries"][0]["ehull"] = 0.006
+    independent["entries"][1]["ehull"] = 0.004
+    result = parent_evidence(state, branches)
+    assert [row["branch_id"] for row in result["parents"]] == ["b1"]
+    assert result["phase_diagram_version"] == "h1"
+    assert result["parents"][0]["ehull_ev_per_atom"] == 0.004
+
+
+def test_mixed_global_hull_without_independent_hull_fails_closed():
+    state, branches = evidence_state()
+    del state["phase_diagrams_by_model"]
+    with pytest.raises(ValueError, match="独立相图"):
+        parent_evidence(state, branches)

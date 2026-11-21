@@ -1,6 +1,7 @@
 """Continuous chat regression with real persistence; external compute is synthetic."""
 
 from copy import deepcopy
+import hashlib
 
 from ase import Atoms
 from ase.io import write
@@ -28,6 +29,41 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
     def model(payload):
         calls.append(payload)
         assert returned[0], "No new scientific decision before refresh has returned"
+        mode = payload.get("mode")
+        if mode == "team_consultation":
+            return {
+                "consult": ["exploration", "reliability"],
+                "question": "Assess the synthetic post-refresh decision",
+                "snapshot_id": payload["evidence_snapshot"]["snapshot_id"],
+            }
+        if mode == "expert_assessment":
+            return {
+                "role": payload["agent_role"],
+                "snapshot_id": payload["evidence_snapshot"]["snapshot_id"],
+                "assessment": "Synthetic refresh evidence is available.",
+                "recommendation": "defer",
+                "options": [],
+                "evidence_refs": [],
+                "expected_outcome": "The proposal can be assessed.",
+                "limitations": "No real calculation was performed.",
+            }
+        if mode == "simulation_plan":
+            return {
+                "action_hash": payload["action_hash"],
+                "context_binding": payload.get("context_binding"),
+                "rationale": "Validate the synthetic action.",
+                "steps": [
+                    {"kind": "preflight", "description": "Check scope"},
+                    {
+                        "kind": "invoke",
+                        "description": "Call registered tool",
+                        "tool": payload["action"]["tool"],
+                    },
+                    {"kind": "verify", "description": "Check result"},
+                ],
+                "checks": ["Check registered evidence"],
+                "failure_policy": "return_to_strategic",
+            }
         latest = read_json(handler.state_path, {})
         generations = latest.get("generation_history") or []
         from tests.test_round_budget_review import review as budget_review
@@ -72,6 +108,7 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
                         "phase": "O3",
                         "min_det_H": 1,
                         "max_det_H": 1,
+                        "sample_count": 1,
                         "na_min": 0,
                         "na_max": 1,
                         "reason": "合成覆盖缺口",
@@ -102,6 +139,8 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
             "expected_purpose": "生成新 branch",
         }
 
+    model.supports_expert_advice = True
+    model.supports_simulation = True
     handler = make_handler(tmp_path, model)
     snapshot = handler.workflow_kwargs["config_session"]["confirmed_snapshot"]
     config = snapshot["config"]
@@ -141,8 +180,49 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
             pbc=True,
         ),
     )
+    oxygen_path = tmp_path / "oxygen-endpoint.vasp"
+    write(
+        oxygen_path,
+        Atoms(
+            "FeO2",
+            positions=[[0, 0, 0], [1.1, 1, 1], [2, 2.1, 2]],
+            cell=[5, 5, 5],
+            pbc=True,
+        ),
+    )
+    sodium_path = tmp_path / "sodium-endpoint.vasp"
+    write(
+        sodium_path,
+        Atoms(
+            "Na2FeO2",
+            positions=[
+                [0, 0, 0],
+                [0.8, 0.8, 0.8],
+                [1.8, 1.8, 1.8],
+                [2.8, 2.8, 2.8],
+                [3.8, 3.8, 3.8],
+            ],
+            cell=[5, 5, 5],
+            pbc=True,
+        ),
+    )
     sid = manager.add_structure(branch_id=branch, arrangement="synthetic", source_path=path)
-    state["dedup_gate"] = {"status": "ready", "valid_structure_ids": [sid]}
+    oxygen_sid = manager.add_structure(
+        branch_id=branch,
+        arrangement="oxygen-endpoint",
+        source_path=oxygen_path,
+        composition={"Fe": 1, "O": 2},
+    )
+    sodium_sid = manager.add_structure(
+        branch_id=branch,
+        arrangement="sodium-endpoint",
+        source_path=sodium_path,
+        composition={"Na": 2, "Fe": 1, "O": 2},
+    )
+    state["dedup_gate"] = {
+        "status": "ready",
+        "valid_structure_ids": [sid, oxygen_sid, sodium_sid],
+    }
     state["phase_diagrams"] = {
         "mlip": {
             "status": "completed",
@@ -158,6 +238,55 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
             ],
         }
     }
+    # Current epoch refresh requires a version-bound historical phase record;
+    # keep this synthetic legacy fixture compatible with that strict contract.
+    state["phase_records"] = [
+        {
+            "record_id": "legacy-base-s1",
+            "structure_id": sid,
+            "structure_path": str(path),
+            "structure_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "source_version": "base",
+            "model_version": "base",
+            "energy_method": "mlip",
+            "status": "completed",
+            "checks_passed": True,
+            "energy": -1.0,
+            "energy_unit": "eV",
+            "composition": {"Na": 1, "Fe": 1, "O": 2},
+            "ehull": 0.005,
+            "ehull_unit": "eV/atom",
+            "phase": "O3",
+        },
+        {
+            "record_id": "legacy-base-o-endpoint",
+            "structure_id": oxygen_sid,
+            "structure_path": str(oxygen_path),
+            "structure_sha256": hashlib.sha256(oxygen_path.read_bytes()).hexdigest(),
+            "source_version": "base",
+            "model_version": "base",
+            "energy_method": "mlip",
+            "status": "completed",
+            "checks_passed": True,
+            "energy": -0.5,
+            "energy_unit": "eV",
+            "composition": {"Fe": 1, "O": 2},
+        },
+        {
+            "record_id": "legacy-base-na-endpoint",
+            "structure_id": sodium_sid,
+            "structure_path": str(sodium_path),
+            "structure_sha256": hashlib.sha256(sodium_path.read_bytes()).hexdigest(),
+            "source_version": "base",
+            "model_version": "base",
+            "energy_method": "mlip",
+            "status": "completed",
+            "checks_passed": True,
+            "energy": -0.7,
+            "energy_unit": "eV",
+            "composition": {"Na": 2, "Fe": 1, "O": 2},
+        },
+    ]
     write_json(handler.state_path, state)
 
     process_ids = []
@@ -317,7 +446,7 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
         if Path(value).is_absolute()
     ]
     assert scripts and all(Path(script).is_file() for script in scripts), reply
-    assert len(saved["tasks"]) == 1
+    assert len(saved["tasks"]) == 3
     assert not calls
     task_ids = [t["task_id"] for t in saved["tasks"]]
     reply = send("同意")
@@ -337,48 +466,89 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
     # The next chat still uses the real lifecycle, refresh evidence gate,
     # follow-up proposal validation, saved approval and generation tool.
     saved = read_json(handler.state_path, {})
+    structures_by_id = {
+        sid: (path, {"Na": 1, "Fe": 1, "O": 2}, "O3"),
+        oxygen_sid: (oxygen_path, {"Fe": 1, "O": 2}, "O3"),
+        sodium_sid: (sodium_path, {"Na": 2, "Fe": 1, "O": 2}, "O3"),
+    }
+    for task in saved["tasks"]:
+        structure_id = task["structure_id"]
+        structure_path = structures_by_id[structure_id][0]
+        atom_count = {sid: 4, oxygen_sid: 3, sodium_sid: 5}[structure_id]
+        candidate = next(
+            row
+            for row in saved["model_refresh"]["plan"]["candidates"]
+            if row["structure_sha256"] == task["input_structure_sha256"]
+        )
+        threshold = 0.1 if candidate.get("ehull") is None or candidate["ehull"] <= 0.010 else 0.2
+        task.update(
+            status="completed",
+            converged=True,
+            checks_passed=True,
+            outputs={
+                "single_point_completed": True,
+                "forces": [[0, 0, 0]],
+                "forces_unit": "eV/angstrom",
+                "structure_path": str(structure_path),
+                "refresh_force_followup": {
+                    "force_max_ev_per_angstrom": 0.05,
+                    "input_structure_sha256": task["input_structure_sha256"],
+                    "threshold_ev_per_angstrom": threshold,
+                    "relaxed": False,
+                    "initial_prediction": {
+                        "single_point_completed": True,
+                        "forces": [[0.05, 0.0, 0.0]]
+                        + [[0.0, 0.0, 0.0] for _ in range(atom_count - 1)],
+                        "forces_unit": "eV/angstrom",
+                        "structure_checksum": task["input_structure_sha256"],
+                        "mlip_version": saved["active_model_version"],
+                    },
+                },
+            },
+        )
     task = saved["tasks"][0]
-    task.update(
-        status="completed",
-        converged=True,
-        checks_passed=True,
-        outputs={
-            "single_point_completed": True,
-            "forces": [[0, 0, 0]],
-            "structure_path": str(path),
-        },
-    )
     model_version = saved["active_model_version"]
-    saved["phase_records"] = [
-        {
-            "record_id": "r1",
-            "source_task_id": task["task_id"],
-            "source_version": model_version,
-            "model_version": model_version,
-            "energy_method": "mlip",
-            "status": "completed",
-            "phase_identification_status": "identified",
-            "energy": -1,
-            "energy_unit": "eV",
-            "structure_id": sid,
-            "structure_path": str(path),
-            "phase": "O3",
-            "composition": {"Na": 1, "Fe": 1, "O": 2},
-        }
-    ]
+    task_by_structure = {task["structure_id"]: task for task in saved["tasks"]}
+    saved["phase_records"] = []
+    for index, (structure_id, (structure_path, composition, phase)) in enumerate(
+        structures_by_id.items(), start=1
+    ):
+        saved["phase_records"].append(
+            {
+                "record_id": f"r{index}",
+                "source_task_id": task_by_structure[structure_id]["task_id"],
+                "source_version": model_version,
+                "model_version": model_version,
+                "energy_method": "mlip",
+                "status": "completed",
+                "checks_passed": True,
+                "phase_identification_status": "identified",
+                "energy": -1.0 - index * 0.1,
+                "energy_unit": "eV",
+                "structure_id": structure_id,
+                "structure_path": str(structure_path),
+                "structure_sha256": hashlib.sha256(structure_path.read_bytes()).hexdigest(),
+                "phase": phase,
+                "composition": composition,
+            }
+        )
     saved["phase_diagrams"]["mlip"] = {
         "status": "completed",
         "model_version": model_version,
+        "energy_policy": "latest_valid_per_structure_v1",
         "entries": [
             {
-                "record_id": "r1",
+                "record_id": record["record_id"],
+                "structure_sha256": record["structure_sha256"],
+                "source_version": record["source_version"],
                 "ehull": 0.005,
                 "ehull_unit": "eV/atom",
-                "normalized_total_energy": -1,
-                "structure_id": sid,
-                "structure_path": str(path),
-                "phase": "O3",
+                "normalized_total_energy": record["energy"],
+                "structure_id": record["structure_id"],
+                "structure_path": record["structure_path"],
+                "phase": record["phase"],
             }
+            for record in saved["phase_records"]
         ],
     }
     write_json(handler.state_path, saved)
@@ -391,19 +561,21 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
         from phase_agent.tools.budget.settle_budget import settle_budget
 
         # Match production return settlement; unknown actual cost is not zero.
-        settled = settle_budget(
-            saved,
-            task_key=saved["tasks"][0]["task_key"],
-            settlement_id="synthetic-refresh-return",
-            task_status="completed",
-            actual_cost=None,
-            estimated_cost=saved["tasks"][0]["planned_relative_cost"],
-        )
-        assert settled["status"] == "settled"
-        saved = settled["state"]
+        for index, current_task in enumerate(saved["tasks"], start=1):
+            settled = settle_budget(
+                saved,
+                task_key=current_task["task_key"],
+                settlement_id=f"synthetic-refresh-return-{index}",
+                task_status="completed",
+                actual_cost=None,
+                estimated_cost=current_task["planned_relative_cost"],
+            )
+            assert settled["status"] == "settled"
+            saved = settled["state"]
         write_json(handler.state_path, saved)
-        hold = saved["model_refresh"]["supplemental_reservation_key"]
-        assert saved["budget_reservations"][hold]["status"] == "reserved"
+        hold = saved["model_refresh"].get("supplemental_reservation_key")
+        if hold:
+            assert saved["budget_reservations"][hold]["status"] == "reserved"
         assert all(t["status"] == "completed" for t in saved["tasks"])
         with CompactSqliteSaver.from_conn_string(
             str(tmp_path / "langgraph_lifecycle.sqlite")
@@ -431,16 +603,44 @@ def test_training_return_through_refresh_approval_with_real_chat_and_runner(
     def analyze(frame):
         frame = actual_analysis(frame)
         current = frame["feedback"]["state"]
-        current["tasks"][0].update(
-            status="completed",
-            converged=True,
-            checks_passed=True,
-            outputs={
-                "single_point_completed": True,
-                "forces": [[0, 0, 0]],
-                "structure_path": str(path),
-            },
-        )
+        for current_task in current["tasks"]:
+            if not current_task.get("input_structure_sha256"):
+                continue
+            atom_count = {sid: 4, oxygen_sid: 3, sodium_sid: 5}.get(
+                current_task.get("structure_id"), 4
+            )
+            current_task.update(
+                status="completed",
+                converged=True,
+                checks_passed=True,
+                outputs={
+                    "single_point_completed": True,
+                    "forces": [[0, 0, 0]],
+                    "forces_unit": "eV/angstrom",
+                    "structure_path": current_task.get("structure_path"),
+                    "refresh_force_followup": {
+                        "force_max_ev_per_angstrom": 0.05,
+                        "input_structure_sha256": current_task["input_structure_sha256"],
+                        "threshold_ev_per_angstrom": next(
+                            (
+                                0.1 if row.get("ehull") is None or row["ehull"] <= 0.010 else 0.2
+                                for row in current["model_refresh"]["plan"]["candidates"]
+                                if row["structure_sha256"] == current_task["input_structure_sha256"]
+                            ),
+                            0.1,
+                        ),
+                        "relaxed": False,
+                        "initial_prediction": {
+                            "single_point_completed": True,
+                            "forces": [[0.05, 0.0, 0.0]]
+                            + [[0.0, 0.0, 0.0] for _ in range(atom_count - 1)],
+                            "forces_unit": "eV/angstrom",
+                            "structure_checksum": current_task["input_structure_sha256"],
+                            "mlip_version": current["active_model_version"],
+                        },
+                    },
+                },
+            )
         current["phase_records"] = deepcopy(saved["phase_records"])
         current["phase_diagrams"]["mlip"] = deepcopy(saved["phase_diagrams"]["mlip"])
         return frame

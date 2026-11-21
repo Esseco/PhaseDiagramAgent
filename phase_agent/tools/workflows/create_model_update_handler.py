@@ -7,6 +7,37 @@ from phase_agent.science.training.update_mlip import update_mlip
 from phase_agent.science.training.validate_mlip import validate_mlip
 
 
+def complete_candidate_activation(current, stored, *, approval_reason):
+    """Apply the canonical activation side effects to an owned state.
+
+    Both explicit user activation and an explicitly approved training
+    transition use this helper, so model refresh markers and epoch provenance
+    cannot diverge between the two paths.
+    """
+
+    activation = activate_validated_model(
+        current,
+        stored["model"],
+        stored["validation"],
+        approval_reason=approval_reason,
+        copy_state=False,
+    )
+    if activation["status"] != "activated":
+        return activation
+    activated_state = activation["state"]
+    activated_state["active_model"] = deepcopy(stored["model"])
+    activated_state["last_trained_dataset_version"] = stored.get("dft_data_version")
+    activated_state["new_dft_records"] = []
+    _append_model_epoch(
+        activated_state,
+        stored["model"],
+        stored["validation"],
+        stored.get("old_model_version"),
+    )
+    activation["reevaluation"] = {"status": "awaiting_refresh_approval"}
+    return activation
+
+
 def create_model_update_handler(
     *,
     trainer=None,
@@ -23,7 +54,10 @@ def create_model_update_handler(
     """
 
     def handler(*, trigger, state, manager, config):
-        current = deepcopy(state)
+        # The approved activation path owns the freshly loaded state and only
+        # changes model-dependent collections.  Training and rejection keep the
+        # defensive deep copy used by older callers.
+        current = state if trigger.get("action") == "ACTIVATE_CANDIDATE_MODEL" else deepcopy(state)
         if trigger.get("action") == "REJECT_CANDIDATE_MODEL":
             version = trigger.get("candidate_model_version")
             stored = (current.get("candidate_models") or {}).get(version)
@@ -62,24 +96,11 @@ def create_model_update_handler(
                     "reason": "candidate_model_unknown",
                     "state": current,
                 }
-            activation = activate_validated_model(
+            activation = complete_candidate_activation(
                 current,
-                stored["model"],
-                stored["validation"],
+                stored,
                 approval_reason=trigger.get("user_approval_reason"),
             )
-            if activation["status"] == "activated":
-                activated_state = activation["state"]
-                activated_state["active_model"] = deepcopy(stored["model"])
-                activated_state["last_trained_dataset_version"] = stored.get("dft_data_version")
-                activated_state["new_dft_records"] = []
-                _append_model_epoch(
-                    activated_state,
-                    stored["model"],
-                    stored["validation"],
-                    stored.get("old_model_version"),
-                )
-                activation["reevaluation"] = {"status": "awaiting_refresh_approval"}
             return {
                 "status": activation["status"],
                 "activation": activation,
@@ -119,8 +140,19 @@ def create_model_update_handler(
         if not training_parameters.get("foundation_model"):
             training_parameters["foundation_model"] = old_model.get("model_path")
         finetune_config["main_model_index"] = 0
+        from phase_agent.evidence.dft_extrapolation import failed_dft_task_ids
+
+        excluded_tasks = failed_dft_task_ids(current)
+        historical = [
+            record for record in historical if record.get("task_id") not in excluded_tasks
+        ]
+        eligible_new = [
+            record
+            for record in (current.get("new_dft_records") or [])
+            if record.get("task_id") not in excluded_tasks
+        ]
         training = update_mlip(
-            list(current.get("new_dft_records") or []),
+            eligible_new,
             historical_data=historical,
             trainer=trainer,
             base_model=old_model,

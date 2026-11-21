@@ -40,7 +40,7 @@ def revised(ids, key="human-revision"):
     }
 
 
-def run_revision(monkeypatch, responses):
+def run_revision(monkeypatch, responses, tmp_path):
     import phase_agent.tools.workflows.tool_proposal_revision as module
 
     monkeypatch.setattr(module, "update_state_snapshot", lambda state, **kwargs: deepcopy(state))
@@ -74,8 +74,25 @@ def run_revision(monkeypatch, responses):
             for value in ("near", "audit")
         ],
     }
+    from tests.dft_plot_fixture import add_dft_plot_evidence
+
+    add_dft_plot_evidence(current, tmp_path)
     before = deepcopy(current)
-    client = Mock(side_effect=responses)
+    revision_client = Mock(side_effect=responses)
+    from tests.test_role_permissions_and_research_plan import SimulationModel
+
+    class Client:
+        supports_simulation = True
+
+        def __init__(self):
+            self.simulation = SimulationModel()
+
+        def __call__(self, request):
+            if request.get("mode") in {"simulation_plan", "simulation_diagnosis"}:
+                return self.simulation(request)
+            return revision_client(request)
+
+    client = Client()
     handler = Mock(side_effect=AssertionError("no handler may execute during revision"))
 
     def fake_revise(proposal, opinion, *, agent_client, state, allowed_tools, **kwargs):
@@ -108,13 +125,13 @@ def run_revision(monkeypatch, responses):
     )
     handler.assert_not_called()
     assert result["state"]["tasks"] == before["tasks"]
-    return result, before, client
+    return result, before, revision_client
 
 
-def test_missing_audit_candidate_is_revised_once_by_fake_agent(monkeypatch):
+def test_missing_audit_candidate_is_revised_once_by_fake_agent(monkeypatch, tmp_path):
     result, before, client = run_revision(
         monkeypatch,
-        [revised(["near"]), revised(["near", "audit"], "model-correction")],
+        [revised(["near"]), revised(["near", "audit"], "model-correction")], tmp_path,
     )
     assert result["status"] == "awaiting_approval"
     assert result["revision"] == 4
@@ -144,8 +161,8 @@ def test_missing_audit_candidate_is_revised_once_by_fake_agent(monkeypatch):
         {"revision_status": "revision_failed", "analysis": "fake model unavailable"},
     ],
 )
-def test_failed_bounded_correction_keeps_original_pending(monkeypatch, second):
-    result, before, client = run_revision(monkeypatch, [revised(["near"]), second])
+def test_failed_bounded_correction_keeps_original_pending(monkeypatch, second, tmp_path):
+    result, before, client = run_revision(monkeypatch, [revised(["near"]), second], tmp_path)
     assert result["status"] == "rejected"
     assert "independent_dft_audit_required" in result["reason"]
     assert client.call_count == 2
@@ -153,9 +170,19 @@ def test_failed_bounded_correction_keeps_original_pending(monkeypatch, second):
     assert result["state"]["action_records"] == before["action_records"]
 
 
-def test_valid_revision_does_not_request_an_extra_fake_model_call(monkeypatch):
-    result, before, client = run_revision(monkeypatch, [revised(["audit"], "valid-first")])
+def test_valid_revision_does_not_request_an_extra_fake_model_call(monkeypatch, tmp_path):
+    result, before, client = run_revision(monkeypatch, [revised(["audit"], "valid-first")], tmp_path)
     assert result["status"] == "awaiting_approval"
     client.assert_called_once()
     assert result["action"]["task_key"] == "valid-first"
     assert result["execution"] is None
+
+
+@pytest.fixture(autouse=True)
+def normal_extrapolation_for_unrelated_selection_tests(monkeypatch):
+    # These tests isolate decision identity/audit behavior; exact-frame
+    # extrapolation checks have their own dedicated regression tests.
+    monkeypatch.setattr(
+        "phase_agent.evidence.dft_extrapolation.candidate_extrapolation",
+        lambda candidate, state: {"status": "normal", "reason": "synthetic"},
+    )

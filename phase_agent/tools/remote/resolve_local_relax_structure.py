@@ -34,6 +34,20 @@ def resolve_local_relax_structure(result, task_directory):
                 failures.append({**item, 'structure_path': str(local.resolve())})
             if failures:
                 payload['outputs']['extrapolation_failures'] = failures
+            observations = []
+            for item in outputs.get("relaxation_observations") or []:
+                raw_item = Path(str(item.get("structure_path") or "").replace("\\", "/"))
+                local = root / raw_item.name
+                if raw_item.name and local.is_file():
+                    from phase_agent.tools.remote.integrity import file_checksum
+                    if (not raw_item.name.startswith("mc_relaxation_frame_")
+                        or raw_item.suffix.lower() != ".vasp" or local.resolve().parent != root
+                        or file_checksum(local) != item.get("structure_checksum")):
+                        return None
+                    item = {**item, "structure_path": str(local.resolve())}
+                observations.append(item)
+            if observations:
+                payload["outputs"]["relaxation_observations"] = observations
             payload["result_path"] = str(candidate.resolve())
             return payload
     return None

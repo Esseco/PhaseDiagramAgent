@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from phase_agent.science.structures.propose_branches import propose_branches
@@ -38,6 +39,7 @@ def run_branch_generation(
     generation_plan: list[dict] | None = None,
     prepared_candidates: list[dict] | None = None,
     sampling_report: dict | None = None,
+    timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """调度完整流程；不运行 MLIP 或 DFT。"""
     from phase_agent.science.structures.initialize_branch_structures import (
@@ -59,6 +61,9 @@ def run_branch_generation(
             framework_enumerator=framework_enumerator,
             max_det_H=max_det_H,
         )
+
+    if sum(quotas.values()) > 1000 or (prepared_candidates is not None and len(prepared_candidates) > 1000):
+        raise ValueError("每轮 branch 生成数量不能超过 1000")
 
     allocation_reports = []
     if prepared_candidates is not None:
@@ -121,26 +126,39 @@ def run_branch_generation(
             proposed.extend(produced)
     else:
         proposed = produce(quotas, seed, strategy_options)
+    timings = timings if timings is not None else {}
+    timings.setdefault("initial_electrostatic_ranking", 0.0)
+    started_stage = perf_counter()
     branch_dedup = deduplicate_candidates(
         proposed,
         manager=manager,
         phase_references=phase_references,
         symmetry_permutations=symmetry_permutations,
+        branch_only=True,
     )
+    timings["branch_deduplication"] = perf_counter() - started_stage
+    # Branch generation is already constrained by the approved quotas.  Do not
+    # run the expensive cost/ranking/selection loop a second time here: it can
+    # only discard generated branches and used to dominate the latency of this
+    # stage.  Select every unique branch and leave budgeted selection to the
+    # downstream calculation scheduler.
+    started_stage = perf_counter()
     branches = []
     for candidate in branch_dedup["unique_candidates"]:
         candidate["initial_state_count"] = min(initial_states_per_branch, 3)
         branches.append(candidate)
-    costed = estimate_candidate_cost(branches, config=cost_config)
-    options = dict(selection_config or {})
-    selected = select_candidates(
-        costed,
-        manager=manager,
-        batch_size=batch_size,
-        cost_budget=cost_budget,
-        seed=seed,
-        **options,
-    )
+    selected = {
+        "selected_candidates": branches,
+        "rejected_candidates": [],
+        "summary": {
+            "mode": "generate_then_deduplicate",
+            "requested_batch_size": batch_size,
+            "cost_budget_ignored": cost_budget is not None,
+            "selected": len(branches),
+        },
+    }
+    timings["candidate_cost_and_selection"] = perf_counter() - started_stage
+    started_stage = perf_counter()
     initialized = []
     initialization_failures = []
     preserve_tm = (
@@ -156,6 +174,7 @@ def run_branch_generation(
                     initial_states_per_branch=initial_states_per_branch,
                     seed=seed + 50_000 + index,
                     preserve_reference_tm=preserve_tm,
+                    timings=timings,
                 )
             )
         except Exception as error:
@@ -168,18 +187,23 @@ def run_branch_generation(
                     "reason": f"{type(error).__name__}: {error}",
                 }
             )
+    timings["initialization"] = perf_counter() - started_stage
+    started_stage = perf_counter()
     structure_dedup = deduplicate_candidates(
         initialized,
         manager=manager,
         phase_references=phase_references,
         symmetry_permutations=symmetry_permutations,
     )
+    timings["structure_deduplication"] = perf_counter() - started_stage
+    started_stage = perf_counter()
     registered = register_candidate_batch(
         manager,
         structure_dedup["unique_candidates"],
         structure_directory=structure_directory,
         ledger_path=ledger_path,
     )
+    timings["registration"] = perf_counter() - started_stage
     from collections import Counter
     from phase_agent.science.structures.boundary_utils import allowed_phases
 
@@ -224,8 +248,14 @@ def run_branch_generation(
             ),
             "max_det_H": max_det_H,
             "sampling_report": sampling_report,
+            "timings_seconds": {key: round(value, 4) for key, value in timings.items()},
+            "timings_note": "墙钟时间；initial_electrostatic_ranking 是 initialization 的子集，sampling 包含候选静电排序。",
             "allocation_reports": allocation_reports,
-            "unfilled_quota": sum(row["unfilled"] for row in allocation_reports),
+            "unfilled_quota": (
+                sampling_report["unfilled_requested_candidates"]
+                if sampling_report and "unfilled_requested_candidates" in sampling_report
+                else sum(row["unfilled"] for row in allocation_reports)
+            ),
             "phase_coverage": phase_coverage,
             "initialization_failed_branches": len(initialization_failures),
             "selection_rejections": dict(rejected_by_reason),

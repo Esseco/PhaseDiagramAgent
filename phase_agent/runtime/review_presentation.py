@@ -80,6 +80,10 @@ def review_card(plan_id, record):
         scope = f"计划生成 {params['total_quota']} 个 branch，实际数量生成后核验"
     if preview:
         scope = f"首批刷新 {len(preview.get('candidates') or [])} 个结构；暂缓 {preview.get('deferred', '未记录')} 个"
+        if "reused_results" in preview:
+            scope += (
+                f"；复用 {len(preview['reused_results'])} 条已完成结果，准备 {len(targets)} 个输入"
+            )
         if "supplemental_relax_parameters" in params:
             scope = f"追加弛豫 {len(targets)} 个单点候选；首批结果保留"
     boundary = "完成本次动作后停止；后续新动作需另行审阅。"
@@ -108,6 +112,24 @@ def review_card(plan_id, record):
         scope = "暂不新增branch，优先复用已有池"
         boundary = "仅确认暂缓新增；后续搜索输入需另行提案和审批，不计算或提交。"
 
+    cost = proposal.get("estimated_cost")
+    dft_preview = params.get("dft_input_preview") or params.get("dft_selection_preview") or {}
+    preview_cost = dft_preview.get("relative_cost")
+    if (
+        tool == "select_dft_candidates"
+        and isinstance(cost, dict)
+        and cost.get("estimated_total_cost") == 0
+        and type(preview_cost) in (int, float)
+        and preview_cost > 0
+    ):
+        # Legacy recorded estimate omitted the frozen selection preview. Repair
+        # presentation only; never rewrite the approved proposal or its hash.
+        cost = {
+            **cost,
+            "estimated_total_cost": preview_cost,
+            "workload": dft_preview.get("workload") or cost.get("workload"),
+            "calibration": "validated DFT selection preview",
+        }
     return {
         "plan_id": plan_id,
         "revision": record.get("revision", 0),
@@ -125,7 +147,7 @@ def review_card(plan_id, record):
         "target_count": None if region_mode else len(targets),
         "region_count": len(params.get("regions") or []) if region_mode else None,
         "target_ids": targets,
-        "estimated_cost": proposal.get("estimated_cost"),
+        "estimated_cost": cost,
         "budget": action.get("budget"),
         "approval_boundary": boundary,
         "sensitive": is_sensitive_proposal(proposal),

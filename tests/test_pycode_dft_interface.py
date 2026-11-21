@@ -13,6 +13,7 @@ def test_relax_uses_selected_path_and_gga_none(tmp_path):
         assert structure == source
         directory.mkdir()
         (directory / "workflow.py").write_text("pass")
+        (directory / "workflow.json").write_text("{}")
     output = prepare_pycode_relax({"stage": "dft_relax", "structure_path": str(source),
         "work_directory": str(target)}, manager=SimpleNamespace(data={}), generator=generator)
     assert received["calculation"] == "relax"
@@ -33,12 +34,17 @@ def test_single_point_is_not_relaxed(tmp_path):
         received.update(kwargs)
         directory.mkdir()
         (directory / "workflow.py").write_text("pass")
+        (directory / "workflow.json").write_text("{}")
     result = prepare_pycode_relax({"stage": "dft_single_point", "structure_path": str(source),
         "work_directory": str(tmp_path / "task")}, manager=SimpleNamespace(data={}), generator=generator)
     assert received["calculation"] == "static"
     assert received["incar_settings"]["static"]["NSW"] == 0
     assert received["incar_settings"]["static"]["IBRION"] == -1
     assert received["incar_settings"]["static"]["ALGO"] == "Normal"
+    import json
+    settings = json.loads((tmp_path / "task" / "workflow.json").read_text())
+    assert settings["run_vasp_kwargs"]["static"] == {
+        "max_errors": 2, "custodian_kwargs": {"max_errors_per_job": 2}}
     assert result["backend"] == "pycode_atomate2_static"
 
 
@@ -80,3 +86,18 @@ def test_real_pycode_generator_supports_static(tmp_path):
     runner = runner_path.read_text(encoding="utf-8")
     assert '"static": ["static"]' in runner
     compile(runner, "atomate_runner.py", "exec")
+
+
+def test_static_explicit_nelm_overrides_default():
+    from phase_agent.science.dft.incar_policy import layered_oxide_incar
+
+    assert layered_oxide_incar({"NELM": 150}, static=True)["NELM"] == 150
+    assert layered_oxide_incar({}, static=True)["NELM"] == 200
+
+
+def test_relax_nelm_default_and_explicit_override():
+    from phase_agent.science.dft.incar_policy import layered_oxide_incar
+
+    assert layered_oxide_incar({}, static=False)["NELM"] == 200
+    assert layered_oxide_incar({"NELM": 180}, static=False)["NELM"] == 180
+    assert layered_oxide_incar({"NELM": 180}, static=True)["NELM"] == 180

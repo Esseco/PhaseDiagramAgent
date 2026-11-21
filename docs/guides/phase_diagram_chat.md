@@ -8,7 +8,7 @@
 
 语义由原对话模型理解，输出严格的 `kind=phase_diagram` 契约，`operation` 为 `plot`、`locate` 或 `export_csv`，`method` 为 `mlip`（默认）、`dft` 或 `combined`。可选 formats 仅允许 png、pdf、svg，默认仅 png，由模型根据用户明确的格式要求填写；普通绘图和自动轮次均不附送矢量图。程序不接受任意输出目录或科学工具字段。原 CSV 关键词预处理已移除；绘图、位置查询、CSV 导出均由同一个 agent 根据语义选择，包含近义表达。
 
-绘图调用 py1 中已安装的本地 `Process_Phasediagram.plot_phase_diagram`（当前来自 `E:/Py-Code/Process_Phasediagram/plotting.py`），固定开启 `phase_hulls=True`。复用已保存的形成能、相识别和全局稳定性；输入 eV/O2 乘以 1000 转为 meV/O2。各相独立绘制下凸包虚线，全局稳定点保留黑框和总凸包黑实线；不重新识别相或修改全局稳定性。回复显示登记的模型 epoch 和版本，不从目录数量推断。图片放在当前相图 CSV 同级的 `plots/` 下，文件名包含相图版本摘要。缺少数据、尚未完成相识别或当前模型与相图不一致时返回具体原因。查询旧相图路径时附版本提醒。
+绘图调用 py1 中已安装的本地 `Process_Phasediagram.plot_phase_diagram`（当前来自 `E:/Py-Code/Process_Phasediagram/plotting.py`），固定开启 `phase_hulls=True`。复用已保存的形成能、相识别和全局稳定性；MLIP主图必须逐条绘制当前正式相图快照中的全部合格结构，包括高于凸包的点，禁止只保留GS或near-hull；D/H排除仅用于独立假设对照图；输入 eV/O2 乘以 1000 转为 meV/O2。各相独立绘制下凸包虚线，全局稳定点保留黑框和总凸包黑实线；不重新识别相或修改全局稳定性。回复显示登记的模型 epoch 和版本，不从目录数量推断。图片放在当前相图 CSV 同级的 `plots/` 下，文件名包含相图版本摘要。缺少数据、尚未完成相识别或当前模型与相图不一致时返回具体原因。查询旧相图路径时附版本提醒。
 
 此操作不推进搜索、生成计算任务或批准方案。既有服务由用户手动管理，更新后的代码在下次手动启动时加载。
 

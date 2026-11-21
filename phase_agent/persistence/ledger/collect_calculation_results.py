@@ -161,12 +161,14 @@ def _phase_record(manager, structure_id, result_id, stage, result):
         return None
     outputs = result.get("outputs") or {}
     energy = outputs.get("energy")
+    from phase_agent.persistence.ledger.mc_energy_repair import verified_mc_energy_repair
+
     evaluated_refresh = (
         stage == "relax_and_feature"
         and result.get("model_refresh_id")
         and (result.get("parameters") or {}).get("model_refresh_operation") == "predict"
         and outputs.get("single_point_completed") is True
-    )
+    ) or verified_mc_energy_repair(result)
     if energy is None or (
         stage != "deep_search" and result.get("converged") is not True and not evaluated_refresh
     ):

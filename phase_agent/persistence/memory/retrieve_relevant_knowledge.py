@@ -18,6 +18,8 @@ def retrieve_relevant_knowledge(
     limit=8,
     query="",
     token_budget=2000,
+    diagnostics=None,
+    required_constraints=None,
 ):
     if not 1 <= int(limit) <= 10:
         raise ValueError("knowledge limit must be between 1 and 10")
@@ -35,6 +37,11 @@ def retrieve_relevant_knowledge(
         "model_version": model_version,
         "project_id": project_id or scope["project_id"],
     }
+
+    def filtered(row, reason):
+        if diagnostics is not None and len(diagnostics) < 128:
+            diagnostics.append({"knowledge_id": row.get("knowledge_id"), "reason": reason})
+
     ranked = []
     if type(token_budget) is not int or token_budget < 1:
         raise ValueError("memory token_budget must be a positive integer")
@@ -54,6 +61,9 @@ def retrieve_relevant_knowledge(
         and row.get("status") == "active"
         and row.get("approved_by_user") is True
     ]
+    for row in records:
+        if isinstance(row, dict) and row.get("status") != "active":
+            filtered(row, "status:" + str(row.get("status")))
     by_id = defaultdict(list)
     for row in eligible:
         by_id[row["knowledge_id"]].append(row)
@@ -67,12 +77,25 @@ def retrieve_relevant_knowledge(
         and row.get("applicability", {}) == old.get("applicability", {})
         and project_scope_matches(row, old)
     }
+    from phase_agent.persistence.memory.verify_evidence_refs import (
+        EvidenceResolver,
+        revalidation_reason,
+    )
+
+    resolver = EvidenceResolver(state)
     for row in eligible:
+        reason = revalidation_reason(row, resolver)
+        if reason:
+            filtered(row, "needs_revalidation:" + reason)
+            continue
         if row.get("knowledge_id") in superseded:
+            filtered(row, "superseded")
             continue
         if row.get("model_dependent") and row.get("model_version") != model_version:
+            filtered(row, "model_scope_mismatch")
             continue
         if row.get("scope") in {"project", "system"} and row.get("system_id") != system_id:
+            filtered(row, "system_scope_mismatch")
             continue
         applicability = row.get("applicability") or {}
         if applicability_errors(applicability):
@@ -99,6 +122,23 @@ def retrieve_relevant_knowledge(
             if key in context
         ):
             continue
+        if (
+            required_constraints is not None
+            and row.get("scope") == "user"
+            and row.get("category")
+            in {
+                "human_system_knowledge",
+                "frozen_parameter_advice",
+                "constraint",
+                "user_constraint",
+            }
+        ):
+            required_constraints.append(
+                {
+                    key: deepcopy(row.get(key))
+                    for key in ("knowledge_id", "statement", "applicability", "revision_id")
+                }
+            )
         score = {"project": 40, "user": 30, "system": 20, "global": 10}.get(row.get("scope"), 0)
         score += {"validated": 4, "project_observed": 2, "heuristic": 1}.get(row.get("maturity"), 0)
         score += len([key for key in applicability if key in context and context[key] is not None])
@@ -119,6 +159,7 @@ def retrieve_relevant_knowledge(
         # Conservative character budget, not a provider-specific token count.
         cost = len(json.dumps(row, ensure_ascii=False))
         if used + cost > token_budget:
+            filtered(row, "retrieval_budget")
             continue
         selected.append(row)
         used += cost

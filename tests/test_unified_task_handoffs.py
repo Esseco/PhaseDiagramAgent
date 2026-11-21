@@ -31,7 +31,9 @@ def test_dft_preparation_finishes_with_one_unified_package(tmp_path, monkeypatch
         for name in ("POSCAR", "INCAR", "KPOINTS", "POTCAR", "workflow.py"):
             text = (
                 "Na\n1\n1 0 0\n0 1 0\n0 0 1\nNa\n1\nDirect\n0 0 0\n"
-                if name == "POSCAR" else "print('fake workflow')\n" if name == "workflow.py"
+                if name == "POSCAR"
+                else "print('fake workflow')\n"
+                if name == "workflow.py"
                 else "fake input"
             )
             (folder / name).write_text(text)
@@ -40,6 +42,11 @@ def test_dft_preparation_finishes_with_one_unified_package(tmp_path, monkeypatch
     monkeypatch.setattr(
         "phase_agent.tools.local.prepare_dft_upload_batches.prepare_pycode_relax", inputs
     )
+    from hashlib import sha256
+
+    frame = tmp_path / "frame.vasp"
+    frame.write_text("Na\n1\n1 0 0\n0 1 0\n0 0 1\nNa\n1\nDirect\n0 0 0\n")
+    digest = sha256(frame.read_bytes()).hexdigest()
     state = {
         "confirmed_config_version": "v1",
         "tasks": [
@@ -49,7 +56,23 @@ def test_dft_preparation_finishes_with_one_unified_package(tmp_path, monkeypatch
                 "stage": "dft_single_point",
                 "status": "pending",
                 "model_version": "m1",
-            }
+                "structure_path": str(frame),
+                "input_structure_sha256": digest,
+            },
+            {
+                "task_id": "monitor",
+                "stage": "relax_and_feature",
+                "status": "completed",
+                "model_version": "m1",
+                "outputs": {
+                    "structure_checksum": digest,
+                    "extrapolation_monitor": {
+                        "extrapolation_failure": False,
+                        "final_feature_difference": 0.2,
+                        "failures": [],
+                    },
+                },
+            },
         ],
         "budget_reservations": {"dft:1": {"status": "reserved"}},
     }

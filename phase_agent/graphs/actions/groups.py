@@ -2,7 +2,7 @@
 
 GROUPS = {
     "branch_search": {"generate_branches", "prepare_dedup_batch"},
-    "structure_and_batch_inputs": {"select_candidates", "prepare_local_batch_files"},
+    "structure_and_batch_inputs": {"select_candidates", "prepare_local_batch_files", "prepare_nepkit_initial_dataset"},
     "mc_search": {"allocate_mc_bohb"},
     "dft_inputs": {"select_dft_candidates"},
     "mlip_finetune": {"update_mlip"},
@@ -49,3 +49,4 @@ def build_action_group(names, dispatch, group, *, operations=None):
         graph.add_node("operation__" + name, dispatch)
         graph.add_edge("operation__" + name, END)
     return graph.compile(checkpointer=False, name=group)
+

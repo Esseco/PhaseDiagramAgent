@@ -6,34 +6,51 @@ import hashlib
 import json
 import math
 
+from phase_agent.policies.initial_coverage import SAMPLING_SCALE_INSTRUCTION
+
 VERSION = "region-adaptive-branch-v2"
 MODE = "region_adaptive"
 CONTROLS = {
     "batch_attempts": 16,
+    "sampling_policy_version": 4,
     "stagnant_batches": 3,
     "max_attempts": 4096,
     "review_after_new_branches": 1000,
     "max_seconds": 300,
 }
 INSTRUCTION = (
-    "首轮只允许coverage：先选择扩胞，再覆盖其全部合法Na组分和竞争相；不允许按相裁掉Na区间。"
+    "首轮优先coverage：根据需求选择扩胞及Na组分和竞争相。"
     "新模型刷新完成后的首次新branch生成是必需步骤，须先审批生成并展示实际结果，再单独审批Relax/MC输入；本阶段不允许暂缓新增。"
     "完成首次生成后，Branch按需决策：每轮优先考虑新增，但不强制；先比较旧branch新模型结果与新增收益。需要新增时，再依据有效证据和记忆选择区域与优先级。"
     "parameters.sampling_mode=region_adaptive，regions为1至12个对象，每项含region_id、priority(1最高)、"
-    "strategy、phase、min_det_H、max_det_H、na_min、na_max、reason和evidence_refs。"
+    "sample_count（本轮补充候选数，须在reason说明依据）、strategy、phase、min_det_H、max_det_H、na_min、na_max、reason和evidence_refs。"
     "strategy仅coverage/composition/competing_phase/periodic_extension/tm_ordering。"
+    "Na=0豁免层占位；其他Na含量必须在每个候选Na层至少放置一个Na，无法满足的组合不得纳入生成或下游输入。"
     "composition、competing_phase、tm_ordering仅从当前模型正式相图Ehull不大于0.005 eV/atom的可核验结构出发；"
     "composition只改变相邻合法Na含量并继承父结构Na占位；相变或无法确认超胞的父结构须记录并排除。"
     "每项phase必须是项目boundary.P允许的单个相字符串（如O1、O3、P2、P3、OP2，具体以项目边界为准），大小写严格；不能省略、传列表或填写all/多相，多个相须拆成不同region，且遵守项目边界。Na范围是Na/O2。禁止quota、quotas、total_quota、batch_size、generation_plan，"
     "多策略时parameters.strategy_shares为策略到正数比例的对象，合计为1；单策略可省略。"
     "Agent应根据当前相图、覆盖、经验与合法性确定比例并解释理由，不能给禁用策略分配比例。"
     "比例是目标而非固定数量，候选不足时报告实际比例及原因，不得凑数。"
-    "不先定600或任何总数，不把100–1000当必须达到的数量。程序分小批生成，按新增覆盖和初始TM近邻"
-    "相关性描述符的多样性控制继续/停止；连续无新颖性停止该区域。达到资源保护阈值暂停等待审阅，"
+    "根据需求在各区域采样，每轮生成最多1000个候选，生成后统一去重，不要求穷举。"
+    "达到资源保护阈值暂停等待审阅，"
     "不声称物理收敛。生成后才统计实际branch及相/H/Na分布。"
     "每个branch初态1至3个，默认3，不沿用旧初态4。不能凭空声称缺口、能量优势或历史收益；无证据标注探索假设。允许regions=[]并给defer_reason，"
     "表示现有池应先消化，不执行新生成。获批后生成登记branch并准备对应Relax/MC输入，不运行或提交超算。"
 )
+
+INSTRUCTION += SAMPLING_SCALE_INSTRUCTION
+
+
+def sampling_limit(params, controls=None):
+    """Work guard shared by preview and execution; not a scientific target."""
+    controls = controls or CONTROLS
+    limit = sum(row["sample_count"] for row in params.get("regions") or [])
+    if params.get("max_new_branches") is not None and params["max_new_branches"] != limit:
+        raise ValueError("branch_limit_must_match_requested_samples")
+    if type(limit) is not int or limit <= 0:
+        raise ValueError("max_new_branches 必须是正整数")
+    return min(limit, controls["review_after_new_branches"], 1000)
 
 
 def is_region(action):
@@ -70,6 +87,7 @@ def errors(params):
     ids = set()
     allowed = {
         "region_id",
+        "sample_count",
         "priority",
         "strategy",
         "phase",
@@ -98,6 +116,8 @@ def errors(params):
                     normalize_H(matrix)
             except (ValueError, TypeError):
                 output.append(prefix + ":invalid_supercells")
+        if type(row.get("sample_count")) is not int or not 1 <= row["sample_count"] <= 1000:
+            output.append(prefix + ":sample_count_requires_1_to_1000")
         identity = row.get("region_id")
         if not isinstance(identity, str) or not identity.strip() or identity in ids:
             output.append(prefix + ":invalid_or_duplicate_id")
@@ -154,6 +174,15 @@ def errors(params):
             output.append(
                 "strategy_shares_require_positive_fractions_summing_to_one_for_used_strategies"
             )
+    if (
+        sum(
+            row.get("sample_count", 0)
+            for row in rows
+            if isinstance(row, dict) and type(row.get("sample_count")) is int
+        )
+        > 1000
+    ):
+        output.append("requested_samples_exceed_1000")
     if "sampling_controls" in params and params["sampling_controls"] != CONTROLS:
         output.append("sampling_controls_changed_requires_revision")
     initial = params.get("initial_states_per_branch", 3)
@@ -214,6 +243,11 @@ def ledger_context(manager):
 
 def preview(params, manager, references, config, state):
     """Legality and coverage from parent metadata; never expands a structure."""
+    from phase_agent.policies.initial_coverage import review
+
+    initial_errors, _ = review(params, {"required": not manager.data["branches"]})
+    if initial_errors:
+        raise ValueError(";".join(initial_errors))
     problems = errors(params)
     if problems:
         raise ValueError(";".join(problems))
@@ -239,7 +273,7 @@ def preview(params, manager, references, config, state):
     space = system.get("configuration_space") or {}
     roles, fixed = space.get("roles") or {}, space.get("fixed_values") or {}
     limits = (config.get("budgets") or {}).get("structure_limits") or {}
-    cached, rows = {}, []
+    cached, rows, layer_counts, reference_cache = {}, [], {}, {}
     existing = {branch_key(row)[:3] for row in manager.data["branches"].values()}
     for region in params["regions"]:
         phase = region["phase"]
@@ -249,6 +283,7 @@ def preview(params, manager, references, config, state):
             from pymatgen.core import Element
 
             reference = load_structure(references[phase])
+            reference_cache[phase] = reference
             cached[phase] = (
                 len(reference),
                 sum(s.specie.symbol == "O" for s in reference),
@@ -288,7 +323,21 @@ def preview(params, manager, references, config, state):
                 continue
             if roles.get("H") == "fixed" and matrix != fixed["H"]:
                 continue
+            layer_key = (
+                phase,
+                "in_plane"
+                if [row[2] for row in matrix] == [0, 0, 1]
+                else json.dumps(matrix, separators=(",", ":")),
+            )
+            if layer_key not in layer_counts:
+                from phase_agent.science.structures.rank_na_orderings_by_electrostatics import (
+                    count_supercell_na_layers,
+                )
+
+                layer_counts[layer_key] = count_supercell_na_layers(reference_cache[phase], matrix)
             for count in range(sodium * size + 1):
+                if count and count < layer_counts[layer_key]:
+                    continue
                 x = Fraction(2 * count, oxygen * size)
                 if roles.get("x") == "fixed" and x != Fraction(str(fixed["x"])):
                     continue
@@ -314,7 +363,7 @@ def preview(params, manager, references, config, state):
                 "cells": cells,
             }
         )
-    from phase_agent.policies.initial_coverage import contract, review
+    from phase_agent.policies.initial_coverage import contract
 
     initial_errors, initial = review(params, contract(manager, references, config))
     if initial_errors:

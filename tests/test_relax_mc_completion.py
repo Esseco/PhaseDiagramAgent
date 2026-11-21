@@ -276,3 +276,29 @@ def test_failed_mc_is_not_recorded_as_completed_wave(tmp_path, monkeypatch):
     state = read(Path(prepared["directory"]) / "workflow_state.json")
     assert state["relax_mc_remote"]["completed_mc_waves"] == []
     assert state["relax_mc_remote"]["phase"] == 1
+
+
+def test_continuation_threshold_accepts_only_fully_completed_return():
+    from phase_agent.tools.relax_mc_batch.completion_gate import completion_error
+
+    summary = {
+        "status": "paused",
+        "reason": "continuation_pool_below_minimum",
+        "completed_mc_waves": [0],
+        "task_count": 2,
+        "failed_task_ids": [],
+        "diagnostics": {"unverified_task_ids": []},
+    }
+    tasks = [{"task_id": "a", "status": "completed"}, {"task_id": "b", "status": "completed"}]
+    assert completion_error(summary, tasks) is None
+    for changed in (
+        {**summary, "reason": "phase_diagram_unavailable"},
+        {**summary, "completed_mc_waves": []},
+        {**summary, "failed_task_ids": ["b"]},
+        {**summary, "diagnostics": {"unverified_task_ids": ["b"]}},
+    ):
+        assert completion_error(changed, tasks) == "batch_status_not_completed"
+    assert (
+        completion_error(summary, [tasks[0], {**tasks[1], "status": "pending"}])
+        == "batch_tasks_not_all_completed"
+    )

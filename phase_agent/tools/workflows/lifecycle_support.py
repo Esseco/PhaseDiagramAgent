@@ -71,10 +71,15 @@ def _read_state_for_runner(state, state_path):
     return {}
 
 
-def _save_runner_state(state, state_path):
+def _save_runner_state(state, state_path, *, expected_identity=None):
     if state_path is None:
         return
-    write_json(state_path, state)
+    if expected_identity is None:
+        write_json(state_path, state)
+    else:
+        from phase_agent.tools.step_runner.file_protocol import write_json_if_version
+
+        write_json_if_version(state_path, state, expected_identity)
     from phase_agent.tools.state.execution_receipts import record_business_saved
 
     record_business_saved(state_path, state)

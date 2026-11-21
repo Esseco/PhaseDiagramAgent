@@ -1,0 +1,1114 @@
+{
+  "baseline": [
+    {
+      "case": "audit-revisions-1",
+      "seconds": 2.9000002541579306e-05,
+      "rss_before": 51949568,
+      "rss_peak": 52113408,
+      "rss_end": 52113408,
+      "private_peak": 38174720,
+      "output_bytes": 17332,
+      "counts": {}
+    },
+    {
+      "case": "audit-revisions-10",
+      "seconds": 5.950000195298344e-05,
+      "rss_before": 52142080,
+      "rss_peak": 52547584,
+      "rss_end": 52547584,
+      "private_peak": 38256640,
+      "output_bytes": 170496,
+      "counts": {}
+    },
+    {
+      "case": "audit-revisions-100",
+      "seconds": 0.00040830000943969935,
+      "rss_before": 52887552,
+      "rss_peak": 52887552,
+      "rss_end": 52514816,
+      "private_peak": 39718912,
+      "output_bytes": 1702568,
+      "counts": {}
+    },
+    {
+      "case": "project-unchanged-512",
+      "seconds": 7.819999882485718e-05,
+      "rss_before": 52936704,
+      "rss_peak": 52936704,
+      "rss_end": 52936704,
+      "private_peak": 39346176,
+      "output_bytes": 13,
+      "counts": {}
+    },
+    {
+      "case": "project-local-change-512",
+      "seconds": 0.001367100005154498,
+      "rss_before": 53207040,
+      "rss_peak": 53383168,
+      "rss_end": 53383168,
+      "private_peak": 39436288,
+      "output_bytes": 14,
+      "counts": {}
+    },
+    {
+      "case": "with-advice-512",
+      "seconds": 0.006278400003793649,
+      "rss_before": 53383168,
+      "rss_peak": 53800960,
+      "rss_end": 53800960,
+      "private_peak": 39436288,
+      "output_bytes": 175353,
+      "counts": {}
+    },
+    {
+      "case": "checkpoint-512-0",
+      "seconds": 0.0008799999923212454,
+      "rss_before": 54038528,
+      "rss_peak": 55136256,
+      "rss_end": 55136256,
+      "private_peak": 40669184,
+      "output_bytes": 71,
+      "counts": {
+        "encode": 2,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-512-1",
+      "seconds": 0.00045769999269396067,
+      "rss_before": 55136256,
+      "rss_peak": 55152640,
+      "rss_end": 55152640,
+      "private_peak": 41168896,
+      "output_bytes": 71,
+      "counts": {
+        "encode": 2,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-512-2",
+      "seconds": 0.00038610000046901405,
+      "rss_before": 55152640,
+      "rss_peak": 55152640,
+      "rss_end": 55152640,
+      "private_peak": 41168896,
+      "output_bytes": 71,
+      "counts": {
+        "encode": 2,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-512-3",
+      "seconds": 0.00042100000428035855,
+      "rss_before": 55152640,
+      "rss_peak": 55156736,
+      "rss_end": 55156736,
+      "private_peak": 41168896,
+      "output_bytes": 71,
+      "counts": {
+        "encode": 2,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "project-unchanged-4096",
+      "seconds": 0.0006126000080257654,
+      "rss_before": 58105856,
+      "rss_peak": 58105856,
+      "rss_end": 58105856,
+      "private_peak": 43270144,
+      "output_bytes": 13,
+      "counts": {}
+    },
+    {
+      "case": "project-local-change-4096",
+      "seconds": 0.01043940000818111,
+      "rss_before": 59969536,
+      "rss_peak": 61095936,
+      "rss_end": 61095936,
+      "private_peak": 45670400,
+      "output_bytes": 14,
+      "counts": {}
+    },
+    {
+      "case": "with-advice-4096",
+      "seconds": 0.04084549999970477,
+      "rss_before": 61095936,
+      "rss_peak": 63692800,
+      "rss_end": 62009344,
+      "private_peak": 49700864,
+      "output_bytes": 1382673,
+      "counts": {}
+    },
+    {
+      "case": "checkpoint-4096-0",
+      "seconds": 0.015481700000236742,
+      "rss_before": 62070784,
+      "rss_peak": 62849024,
+      "rss_end": 62849024,
+      "private_peak": 48066560,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 17,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "checkpoint-4096-1",
+      "seconds": 0.007291900008567609,
+      "rss_before": 62849024,
+      "rss_peak": 62861312,
+      "rss_end": 62861312,
+      "private_peak": 48013312,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 17,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "checkpoint-4096-2",
+      "seconds": 0.00736499999766238,
+      "rss_before": 62861312,
+      "rss_peak": 62861312,
+      "rss_end": 62861312,
+      "private_peak": 48013312,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 17,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "checkpoint-4096-3",
+      "seconds": 0.0077751000062562525,
+      "rss_before": 62861312,
+      "rss_peak": 64143360,
+      "rss_end": 62861312,
+      "private_peak": 49328128,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 17,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "project-unchanged-16384",
+      "seconds": 0.0019118999916827306,
+      "rss_before": 73056256,
+      "rss_peak": 73056256,
+      "rss_end": 73056256,
+      "private_peak": 58519552,
+      "output_bytes": 13,
+      "counts": {}
+    },
+    {
+      "case": "project-local-change-16384",
+      "seconds": 0.04283160000341013,
+      "rss_before": 79851520,
+      "rss_peak": 82862080,
+      "rss_end": 82558976,
+      "private_peak": 68919296,
+      "output_bytes": 14,
+      "counts": {}
+    },
+    {
+      "case": "with-advice-16384",
+      "seconds": 0.1673854999971809,
+      "rss_before": 80658432,
+      "rss_peak": 95526912,
+      "rss_end": 84725760,
+      "private_peak": 81739776,
+      "output_bytes": 5530113,
+      "counts": {}
+    },
+    {
+      "case": "checkpoint-16384-0",
+      "seconds": 0.030663700003060512,
+      "rss_before": 81580032,
+      "rss_peak": 86720512,
+      "rss_end": 81657856,
+      "private_peak": 72826880,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 65,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "checkpoint-16384-1",
+      "seconds": 0.022676599997794256,
+      "rss_before": 81657856,
+      "rss_peak": 81686528,
+      "rss_end": 81661952,
+      "private_peak": 67768320,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 65,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "checkpoint-16384-2",
+      "seconds": 0.023022399996989407,
+      "rss_before": 81661952,
+      "rss_peak": 86724608,
+      "rss_end": 81661952,
+      "private_peak": 72826880,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 65,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "checkpoint-16384-3",
+      "seconds": 0.022784399989177473,
+      "rss_before": 81661952,
+      "rss_peak": 86728704,
+      "rss_end": 81666048,
+      "private_peak": 72826880,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 65,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "report-0",
+      "seconds": 0.862215200002538,
+      "rss_before": 81666048,
+      "rss_peak": 129843200,
+      "rss_end": 129843200,
+      "private_peak": 103510016,
+      "output_bytes": 117,
+      "counts": {}
+    },
+    {
+      "case": "report-1",
+      "seconds": 0.0025809999933699146,
+      "rss_before": 129843200,
+      "rss_peak": 129851392,
+      "rss_end": 129851392,
+      "private_peak": 103784448,
+      "output_bytes": 117,
+      "counts": {}
+    },
+    {
+      "case": "report-2",
+      "seconds": 0.0022184999979799613,
+      "rss_before": 129851392,
+      "rss_peak": 129851392,
+      "rss_end": 129851392,
+      "private_peak": 103784448,
+      "output_bytes": 117,
+      "counts": {}
+    },
+    {
+      "case": "report-artifacts",
+      "files": 4
+    }
+  ],
+  "after": [
+    {
+      "case": "audit-revisions-1",
+      "seconds": 2.9799994081258774e-05,
+      "rss_before": 52158464,
+      "rss_peak": 52269056,
+      "rss_end": 52269056,
+      "private_peak": 38416384,
+      "output_bytes": 17332,
+      "counts": {}
+    },
+    {
+      "case": "audit-revisions-10",
+      "seconds": 5.560000136028975e-05,
+      "rss_before": 52297728,
+      "rss_peak": 52797440,
+      "rss_end": 52797440,
+      "private_peak": 38436864,
+      "output_bytes": 170496,
+      "counts": {}
+    },
+    {
+      "case": "audit-revisions-100",
+      "seconds": 0.0003812000068137422,
+      "rss_before": 53133312,
+      "rss_peak": 53133312,
+      "rss_end": 52707328,
+      "private_peak": 40001536,
+      "output_bytes": 1702568,
+      "counts": {}
+    },
+    {
+      "case": "project-unchanged-512",
+      "seconds": 7.160000677686185e-05,
+      "rss_before": 53039104,
+      "rss_peak": 53039104,
+      "rss_end": 53039104,
+      "private_peak": 39489536,
+      "output_bytes": 13,
+      "counts": {}
+    },
+    {
+      "case": "project-local-change-512",
+      "seconds": 0.0013259999977890402,
+      "rss_before": 53293056,
+      "rss_peak": 53460992,
+      "rss_end": 53460992,
+      "private_peak": 39489536,
+      "output_bytes": 14,
+      "counts": {}
+    },
+    {
+      "case": "with-advice-512",
+      "seconds": 0.0036774999898625538,
+      "rss_before": 53460992,
+      "rss_peak": 53657600,
+      "rss_end": 53657600,
+      "private_peak": 39489536,
+      "output_bytes": 175353,
+      "counts": {}
+    },
+    {
+      "case": "checkpoint-512-0",
+      "seconds": 0.0008680000028107315,
+      "rss_before": 53841920,
+      "rss_peak": 54931456,
+      "rss_end": 54931456,
+      "private_peak": 39628800,
+      "output_bytes": 71,
+      "counts": {
+        "encode": 2,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-512-1",
+      "seconds": 0.0004276999970898032,
+      "rss_before": 54931456,
+      "rss_peak": 54951936,
+      "rss_end": 54951936,
+      "private_peak": 40124416,
+      "output_bytes": 71,
+      "counts": {
+        "encode": 2,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-512-2",
+      "seconds": 0.00039990000368561596,
+      "rss_before": 54951936,
+      "rss_peak": 54951936,
+      "rss_end": 54951936,
+      "private_peak": 40124416,
+      "output_bytes": 71,
+      "counts": {
+        "encode": 2,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-512-3",
+      "seconds": 0.0003730999887920916,
+      "rss_before": 54951936,
+      "rss_peak": 54951936,
+      "rss_end": 54951936,
+      "private_peak": 40124416,
+      "output_bytes": 71,
+      "counts": {
+        "encode": 2,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "project-unchanged-4096",
+      "seconds": 0.0005421999958343804,
+      "rss_before": 58114048,
+      "rss_peak": 58114048,
+      "rss_end": 58114048,
+      "private_peak": 43274240,
+      "output_bytes": 13,
+      "counts": {}
+    },
+    {
+      "case": "project-local-change-4096",
+      "seconds": 0.01050309999845922,
+      "rss_before": 60121088,
+      "rss_peak": 61284352,
+      "rss_end": 61259776,
+      "private_peak": 46780416,
+      "output_bytes": 14,
+      "counts": {}
+    },
+    {
+      "case": "with-advice-4096",
+      "seconds": 0.019615900004282594,
+      "rss_before": 61259776,
+      "rss_peak": 61333504,
+      "rss_end": 61308928,
+      "private_peak": 46780416,
+      "output_bytes": 1382673,
+      "counts": {}
+    },
+    {
+      "case": "checkpoint-4096-0",
+      "seconds": 0.00885250000283122,
+      "rss_before": 61317120,
+      "rss_peak": 62132224,
+      "rss_end": 62132224,
+      "private_peak": 47046656,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 17,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "checkpoint-4096-1",
+      "seconds": 0.005885299993678927,
+      "rss_before": 62132224,
+      "rss_peak": 62132224,
+      "rss_end": 62132224,
+      "private_peak": 47521792,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 17,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-4096-2",
+      "seconds": 0.0058693000028142706,
+      "rss_before": 62132224,
+      "rss_peak": 62132224,
+      "rss_end": 62132224,
+      "private_peak": 47521792,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 17,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-4096-3",
+      "seconds": 0.005856000003404915,
+      "rss_before": 62132224,
+      "rss_peak": 62132224,
+      "rss_end": 62132224,
+      "private_peak": 47521792,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 17,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "project-unchanged-16384",
+      "seconds": 0.002353400006541051,
+      "rss_before": 73715712,
+      "rss_peak": 73715712,
+      "rss_end": 73715712,
+      "private_peak": 59076608,
+      "output_bytes": 13,
+      "counts": {}
+    },
+    {
+      "case": "project-local-change-16384",
+      "seconds": 0.044108100002631545,
+      "rss_before": 79392768,
+      "rss_peak": 82071552,
+      "rss_end": 81215488,
+      "private_peak": 67407872,
+      "output_bytes": 14,
+      "counts": {}
+    },
+    {
+      "case": "with-advice-16384",
+      "seconds": 0.08177859999705106,
+      "rss_before": 80166912,
+      "rss_peak": 92921856,
+      "rss_end": 80650240,
+      "private_peak": 78991360,
+      "output_bytes": 5530113,
+      "counts": {}
+    },
+    {
+      "case": "checkpoint-16384-0",
+      "seconds": 0.025283800001489,
+      "rss_before": 80650240,
+      "rss_peak": 86114304,
+      "rss_end": 81051648,
+      "private_peak": 71385088,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 65,
+        "hash": 1,
+        "compressor": 1
+      }
+    },
+    {
+      "case": "checkpoint-16384-1",
+      "seconds": 0.01730239999596961,
+      "rss_before": 81051648,
+      "rss_peak": 86114304,
+      "rss_end": 81051648,
+      "private_peak": 71385088,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 65,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-16384-2",
+      "seconds": 0.01608630000555422,
+      "rss_before": 81051648,
+      "rss_peak": 86114304,
+      "rss_end": 81051648,
+      "private_peak": 71385088,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 65,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "checkpoint-16384-3",
+      "seconds": 0.01736440000240691,
+      "rss_before": 81051648,
+      "rss_peak": 86114304,
+      "rss_end": 81051648,
+      "private_peak": 71385088,
+      "output_bytes": 72,
+      "counts": {
+        "encode": 65,
+        "hash": 1,
+        "compressor": 0
+      }
+    },
+    {
+      "case": "report-0",
+      "seconds": 0.8597614000027534,
+      "rss_before": 81055744,
+      "rss_peak": 129396736,
+      "rss_end": 129396736,
+      "private_peak": 103018496,
+      "output_bytes": 117,
+      "counts": {}
+    },
+    {
+      "case": "report-1",
+      "seconds": 0.0028193999896757305,
+      "rss_before": 129396736,
+      "rss_peak": 129404928,
+      "rss_end": 129404928,
+      "private_peak": 103395328,
+      "output_bytes": 117,
+      "counts": {}
+    },
+    {
+      "case": "report-2",
+      "seconds": 0.0023259000008692965,
+      "rss_before": 129404928,
+      "rss_peak": 129404928,
+      "rss_end": 129404928,
+      "private_peak": 103395328,
+      "output_bytes": 117,
+      "counts": {}
+    },
+    {
+      "case": "report-artifacts",
+      "files": 4
+    }
+  ],
+  "history": [
+    {
+      "case": "history-0",
+      "seconds": 0.00028300000121816993,
+      "rss_before": 53727232,
+      "rss_peak": 53837824,
+      "rss_end": 53837824,
+      "private_peak": 39194624,
+      "output_bytes": 74,
+      "counts": {},
+      "wire_bytes": 1203,
+      "raw_json_bytes": 73398,
+      "blob_bytes": 0,
+      "stored_blobs": 0
+    },
+    {
+      "case": "history-10",
+      "seconds": 0.0004636999947251752,
+      "rss_before": 53903360,
+      "rss_peak": 53903360,
+      "rss_end": 53903360,
+      "private_peak": 39284736,
+      "output_bytes": 75,
+      "counts": {},
+      "wire_bytes": 2179,
+      "raw_json_bytes": 162056,
+      "blob_bytes": 0,
+      "stored_blobs": 0
+    },
+    {
+      "case": "history-100",
+      "seconds": 0.0020714999991469085,
+      "rss_before": 54538240,
+      "rss_peak": 54542336,
+      "rss_end": 54542336,
+      "private_peak": 39804928,
+      "output_bytes": 78,
+      "counts": {},
+      "wire_bytes": 1315,
+      "raw_json_bytes": 960176,
+      "blob_bytes": 2823,
+      "stored_blobs": 1
+    },
+    {
+      "case": "checkpoint-count-1",
+      "wire_bytes": 308,
+      "stored_checkpoints": 1,
+      "stored_blobs": 1,
+      "blob_bytes": 17472,
+      "database_bytes": 32768
+    },
+    {
+      "case": "checkpoint-count-5",
+      "wire_bytes": 308,
+      "stored_checkpoints": 5,
+      "stored_blobs": 1,
+      "blob_bytes": 17472,
+      "database_bytes": 32768
+    },
+    {
+      "case": "checkpoint-count-20",
+      "wire_bytes": 308,
+      "stored_checkpoints": 20,
+      "stored_blobs": 1,
+      "blob_bytes": 17472,
+      "database_bytes": 40960
+    }
+  ],
+  "audit": [
+    {
+      "revisions": 1,
+      "events": 8,
+      "audit_file_bytes": 7154,
+      "frozen_action_bytes": 4316,
+      "current_advice": 1,
+      "simulation_plans": 2,
+      "execution_approved": false,
+      "scientific_state_bytes": 2
+    },
+    {
+      "revisions": 5,
+      "events": 44,
+      "audit_file_bytes": 25772,
+      "frozen_action_bytes": 16450,
+      "current_advice": 1,
+      "simulation_plans": 10,
+      "execution_approved": false,
+      "scientific_state_bytes": 2
+    },
+    {
+      "revisions": 10,
+      "events": 89,
+      "audit_file_bytes": 49021,
+      "frozen_action_bytes": 31633,
+      "current_advice": 1,
+      "simulation_plans": 20,
+      "execution_approved": false,
+      "scientific_state_bytes": 2
+    }
+  ],
+  "timeline": {
+    "retention": [
+      {
+        "case": "retention-0",
+        "seconds": 0.01958599999488797,
+        "rss_before": 198262784,
+        "rss_peak": 201252864,
+        "rss_end": 201252864,
+        "private_peak": 171790336,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-1",
+        "seconds": 0.09087949999957345,
+        "rss_before": 201252864,
+        "rss_peak": 202518528,
+        "rss_end": 202498048,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-2",
+        "seconds": 0.07607739999366459,
+        "rss_before": 202498048,
+        "rss_peak": 202702848,
+        "rss_end": 202678272,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-3",
+        "seconds": 0.08091499999864027,
+        "rss_before": 202678272,
+        "rss_peak": 202702848,
+        "rss_end": 202678272,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-4",
+        "seconds": 0.09207879999303259,
+        "rss_before": 202678272,
+        "rss_peak": 202702848,
+        "rss_end": 202678272,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-5",
+        "seconds": 0.09008270000049379,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-6",
+        "seconds": 0.0833143000054406,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-7",
+        "seconds": 0.0921167000051355,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-8",
+        "seconds": 0.08878039999399334,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-9",
+        "seconds": 0.08768929999496322,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-10",
+        "seconds": 0.08870980000938289,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-11",
+        "seconds": 0.08757460000924766,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-12",
+        "seconds": 0.08355619999929331,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-13",
+        "seconds": 0.09033320000162348,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-14",
+        "seconds": 0.08389500000339467,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-15",
+        "seconds": 0.09096079999289941,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-16",
+        "seconds": 0.09110239999426994,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-17",
+        "seconds": 0.08554160001222044,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-18",
+        "seconds": 0.08769179999944754,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      },
+      {
+        "case": "retention-19",
+        "seconds": 0.08397379999223631,
+        "rss_before": 202682368,
+        "rss_peak": 202706944,
+        "rss_end": 202682368,
+        "private_peak": 173109248,
+        "output_bytes": 252176,
+        "counts": {}
+      }
+    ],
+    "timeline": [
+      {
+        "case": "read",
+        "seconds": 0.004335799996624701,
+        "rss_before": 202743808,
+        "rss_peak": 202743808,
+        "rss_end": 202743808,
+        "private_peak": 173056000,
+        "output_bytes": 2,
+        "counts": {}
+      },
+      {
+        "case": "consult-strategy-simulation-validation",
+        "seconds": 0.5889310000056867,
+        "rss_before": 202743808,
+        "rss_peak": 203726848,
+        "rss_end": 203702272,
+        "private_peak": 174166016,
+        "output_bytes": 168515,
+        "counts": {}
+      },
+      {
+        "case": "persist",
+        "seconds": 0.09149279999837745,
+        "rss_before": 203702272,
+        "rss_peak": 203771904,
+        "rss_end": 203747328,
+        "private_peak": 174166016,
+        "output_bytes": 81,
+        "counts": {}
+      },
+      {
+        "case": "report",
+        "seconds": 0.0775288000004366,
+        "rss_before": 203747328,
+        "rss_peak": 203890688,
+        "rss_end": 203890688,
+        "private_peak": 174166016,
+        "output_bytes": 119,
+        "counts": {}
+      },
+      {
+        "case": "return",
+        "seconds": 1.68999977177009e-05,
+        "rss_before": 203890688,
+        "rss_peak": 203890688,
+        "rss_end": 203890688,
+        "private_peak": 174112768,
+        "output_bytes": 61708,
+        "counts": {}
+      }
+    ],
+    "model_stages": [
+      {
+        "mode": "team_consultation",
+        "role": "strategic",
+        "seconds": 0.002629399998113513,
+        "input_bytes": 62523
+      },
+      {
+        "mode": "expert_assessment",
+        "role": "exploration",
+        "seconds": 0.002791599996271543,
+        "input_bytes": 56825
+      },
+      {
+        "mode": "expert_assessment",
+        "role": "reliability",
+        "seconds": 0.0028228000010130927,
+        "input_bytes": 66343
+      },
+      {
+        "mode": "autonomous_search",
+        "role": "strategic",
+        "seconds": 0.004915700003039092,
+        "input_bytes": 123830
+      },
+      {
+        "mode": "simulation_plan",
+        "role": "simulation",
+        "seconds": 0.0027639000036288053,
+        "input_bytes": 50507
+      }
+    ],
+    "status": "awaiting_approval",
+    "scientific_tool_executed": false
+  },
+  "combined_repair_before": {
+    "calls": [
+      {
+        "mode": "autonomous_search",
+        "errors": []
+      },
+      {
+        "mode": "proposal_contract_repair",
+        "errors": [
+          "action.budget: Input should be greater than or equal to 0"
+        ]
+      },
+      {
+        "mode": "branch_review_repair",
+        "errors": [
+          "branch_pool_review.evidence_refs: unknown source ['invented']"
+        ]
+      }
+    ],
+    "final_tool": "generate_branches"
+  },
+  "combined_repair_after": {
+    "calls": [
+      {
+        "mode": "autonomous_search",
+        "errors": []
+      },
+      {
+        "mode": "proposal_contract_repair",
+        "errors": [
+          "action.budget: Input should be greater than or equal to 0",
+          "branch_pool_review.evidence_refs: unknown source ['invented']"
+        ]
+      }
+    ],
+    "final_tool": "generate_branches",
+    "chain": [
+      {
+        "call_id": 1,
+        "parent_call_id": null,
+        "reason": "autonomous_search",
+        "repair": false,
+        "input_bytes": null,
+        "usage": null,
+        "invoked": true,
+        "status": "returned",
+        "seconds": 0
+      },
+      {
+        "call_id": 2,
+        "parent_call_id": 1,
+        "reason": "proposal_contract_repair",
+        "repair": true,
+        "input_bytes": null,
+        "usage": null,
+        "invoked": true,
+        "status": "returned",
+        "seconds": 0
+      }
+    ]
+  },
+  "primitive_profile": {
+    "rows": 16384,
+    "repeats": 5,
+    "statistic": "median_seconds",
+    "equality": 0.0005467000009957701,
+    "detach": 0.03788689999782946,
+    "encode_64_chunks": 0.0034485000069253147,
+    "hash_stream": 0.0020976999949198216,
+    "compress_stream": 0.005065999997896142,
+    "raw_bytes": 5035165,
+    "compressed_bytes": 73963,
+    "scope": "independent primitives over identical synthetic list; not additive node-exclusive times"
+  }
+}

@@ -13,6 +13,18 @@ def repair_proposal_schema(client, payload, action):
     errors = proposal_schema_errors(action, context)
     if not errors:
         return action
+    # Report simultaneously detectable branch errors in the same correction.
+    # Final branch/scientific validators still run after the model responds.
+    if (
+        isinstance(action, dict)
+        and context.get("branch_pool_review_required")
+        and (action.get("tool") or action.get("action_type")) == "generate_branches"
+        and isinstance(action.get("parameters", {}), dict)
+    ):
+        from phase_agent.agents.exploration.branch_pool_review import review_errors
+        from phase_agent.policies.region_sampling import errors as region_errors
+
+        errors += review_errors(action, context) + region_errors(action.get("parameters") or {})
     request = deepcopy(payload)
     request.update(
         mode="proposal_contract_repair",

@@ -12,7 +12,7 @@ import numpy as np
 from phase_agent.analysis.feedback.dft_comparison_tables import build_comparison_tables
 from phase_agent.analysis.phase.build_composition_hull_entries import build_composition_hull_entries
 from phase_agent.analysis.phase.export_phase_diagram_csv import export_phase_diagram_csv
-from phase_agent.analysis.phase.phase_snapshot_paths import model_output_directory
+from phase_agent.analysis.phase.phase_snapshot_paths import phase_snapshot_directory
 from phase_agent.analysis.phase.publish_current_csv import publish_current_csv
 
 SOURCE_FIELDS = (
@@ -186,15 +186,12 @@ def refresh_combined_phase_diagram(state, directory):
         }
         return
     if directory is not None:
-        root = (
-            model_output_directory(directory, snapshot["model_version"], state=state)
-            / "phase_diagrams"
-            / "combined"
+        history = phase_snapshot_directory(
+            directory, "combined", snapshot["model_version"], state=state
         )
         from phase_agent.evidence.model_epoch import model_epoch
 
         snapshot["epoch"] = model_epoch(state, snapshot["model_version"])
-        history = root / "history"
         history.mkdir(parents=True, exist_ok=True)
         target = history / f"phase_diagram_combined_{snapshot['version']}.csv"
         if not target.is_file():

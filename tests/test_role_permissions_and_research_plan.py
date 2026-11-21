@@ -112,6 +112,27 @@ def test_research_plan_rejects_dependency_cycles():
     assert action_contract_errors(action)
 
 
+class TeamAction:
+    """Fake expert-capable client that proposes the test's frozen action."""
+
+    supports_expert_advice = True
+    supports_simulation = True
+
+    def __init__(self, action):
+        from tests.test_decision_team import FakeTeam
+
+        self.team = FakeTeam()
+        self.simulation = SimulationModel()
+        self.action = action
+
+    def __call__(self, request):
+        if request.get("mode") in {"team_consultation", "expert_assessment"}:
+            return self.team(request)
+        if request.get("mode") in {"simulation_plan", "simulation_diagnosis"}:
+            return self.simulation(request)
+        return deepcopy(self.action)
+
+
 def test_confirmed_auto_operation_reuses_existing_execution_policy():
     session = _session()
     session["confirmed_snapshot"]["config"]["workflow"]["auto_approved_operations"] = [
@@ -124,7 +145,7 @@ def test_confirmed_auto_operation_reuses_existing_execution_policy():
         registry=create_tool_registry(
             {"check_convergence": lambda **kw: calls.append(kw) or {"converged": False}}
         ),
-        agent_client=lambda _: {"tool": "check_convergence", "operation": "check_convergence"},
+        agent_client=TeamAction({"tool": "check_convergence", "operation": "check_convergence"}),
         execution_mode="interactive",
     )
     assert result["status"] == "completed" and len(calls) == 1
@@ -156,7 +177,7 @@ def test_runtime_settings_cannot_grant_automatic_execution():
         {},
         session,
         registry=create_tool_registry({"check_convergence": lambda **kw: calls.append(kw) or {}}),
-        agent_client=lambda _: {"tool": "check_convergence", "operation": "check_convergence"},
+        agent_client=TeamAction({"tool": "check_convergence", "operation": "check_convergence"}),
         context={"effective_config": runtime},
         execution_mode="interactive",
     )
@@ -230,14 +251,14 @@ def test_future_plan_steps_do_not_execute_under_current_approval():
                 "generate_branches": lambda **kw: calls.append("generate") or {},
             }
         ),
-        agent_client=lambda _: action,
+        agent_client=TeamAction(action),
         execution_mode="autonomous",
     )
     assert result["status"] == "completed" and calls == ["check"]
 
 
 def test_native_direction_uses_only_confirmed_policy(tmp_path):
-    from tests.test_codex_native_team import make_control, team
+    from tests.test_codex_native_team import advice, make_control, team
 
     control, context = make_control(tmp_path)
     context["allowed_tools"] = ["prepare_local_batch_files"]
@@ -251,7 +272,10 @@ def test_native_direction_uses_only_confirmed_policy(tmp_path):
         }
     }
     native = team(control)
-    started = native.start(question="prepare a permitted input", consult=[])
+    started = native.start(question="prepare a permitted input", consult=["exploration"])
+    opinion = advice(started, "exploration")
+    opinion.update(options=[], recommendation="explore")
+    native.advise(started["team_id"], 1, opinion)
     draft = native.draft(
         started["team_id"],
         1,
@@ -353,11 +377,11 @@ def test_approved_retry_reuses_bounded_existing_task_recovery():
         {"tasks": [original]},
         session,
         registry=create_tool_registry(create_workflow_handlers()),
-        agent_client=lambda _: action,
+        agent_client=TeamAction(action),
         execution_mode="interactive",
         context={"effective_config": config},
     )
-    assert result["status"] == "prepared"
+    assert result["status"] == "prepared", result.get("execution")
     assert result["state"]["tasks"][0] == original
     retry = result["state"]["tasks"][1]
     assert retry["retry_of"] == "T" and retry["retry_index"] == 1
@@ -380,3 +404,15 @@ def test_retry_scope_or_parameter_expansion_requires_human(parameters):
         action,
         {"workflow": {"auto_approved_operations": ["restart_failed_task"], "auto_retry_limit": 1}},
     )
+
+
+def test_advice_accepts_verified_deferred_candidate_ids_only():
+    snapshot, opinion = consultation("reliability", "select_dft_candidates", recommendation="dft")
+    opinion["options"][0]["target_ids"] = ["deferred-candidate"]
+    opinion["risk_structure_ids"] = ["deferred-candidate"]
+    with pytest.raises(ValueError, match="unavailable"):
+        validate_advice(opinion, role="reliability", snapshot=snapshot)
+    assert validate_advice(opinion, role="reliability", snapshot=snapshot, additional_identifiers={"deferred-candidate"})["role"] == "reliability"
+    opinion["risk_structure_ids"] = ["invented"]
+    with pytest.raises(ValueError, match="unavailable"):
+        validate_advice(opinion, role="reliability", snapshot=snapshot, additional_identifiers={"deferred-candidate"})

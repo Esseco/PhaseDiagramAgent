@@ -12,17 +12,35 @@ from phase_agent.tools.remote.write_training_submission import training_environm
 from phase_agent.runtime.turn_process import timed_call
 
 
-def prepare_remote_finetune(state, config, *, replacement_directory=None):
+def prepare_remote_finetune(
+    state,
+    config,
+    *,
+    replacement_directory=None,
+    training_action=None,
+    transition_policy=None,
+    transition_approval_reason=None,
+):
     current = timed_call("finetune_state_copy", deepcopy, state, category="training_inputs")
-    from phase_agent.policies.workflow_policy import active_tasks
+    from phase_agent.tools.workflows.manual_training_coexistence import blocking_tasks
 
-    if active_tasks(current):
+    if blocking_tasks(current, training_action):
         return {
             "status": "tasks_awaiting_results",
             "state": current,
             "reason": "model_training_waits_for_inflight_tasks",
         }
     settings = deepcopy(config.get("mlip_finetune") or {})
+    from phase_agent.policies.training_transition import (
+        resolve_training_transition,
+        same_training_transition,
+    )
+
+    transition = resolve_training_transition(
+        config,
+        requested=transition_policy,
+        approval_reason=transition_approval_reason,
+    )
     if not settings.get("committee"):
         settings["committee"] = [{"seed": 2026 + i, "bootstrap_seed": 3026 + i} for i in range(4)]
     root = config.get("upload_batches_directory")
@@ -30,7 +48,13 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     from phase_agent.analysis.convergence.training_provenance import model_with_training_provenance
 
     base = model_with_training_provenance(current, base)
-    model_path = base.get("model_path")
+    # The active model identifies the search epoch; every training run starts
+    # from the original foundation model recorded in the confirmed config.
+    initial_mlip = (current.get("confirmed_config") or {}).get("mlip") or {}
+    foundation_path = (settings.get("training") or {}).get("foundation_model")
+    model_path = initial_mlip.get("model_path") or foundation_path
+    if not model_path and not current.get("active_model"):
+        model_path = (config.get("mlip") or {}).get("model_path")
     if not root or not model_path or not settings.get("committee"):
         return {
             "status": "not_configured",
@@ -48,6 +72,24 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     records = timed_call(
         "finetune_dataset", cumulative_training_records, current, category="training_inputs"
     )
+    holdout_policy = current.get("training_preflight_policy")
+    holdout_records, holdout_plan = [], None
+    if holdout_policy:
+        from phase_agent.science.training.training_preflight_selection import (
+            selected_records, split_independent_holdout,
+        )
+
+        records = selected_records(current, holdout_policy)
+        records, holdout_records, holdout_plan = split_independent_holdout(
+            records, base, settings, holdout_policy
+        )
+        from phase_agent.science.training.training_preflight_selection import (
+            group_equivalent_training_records,
+        )
+
+        records, cv_grouping = group_equivalent_training_records(records, settings)
+        settings["group_keys"] = ["independent_group_id"]
+        holdout_plan["cv_grouping"] = cv_grouping
     from phase_agent.science.training.prepare_main_model import grouped_folds
 
     try:
@@ -64,12 +106,15 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
             "state": current,
             "reason": f"无法可靠进行分组5折：{error}；未生成输入、未训练。",
         }
+    digest_payload = ["training-inputs-v5", records, settings, base, model_path, environment]
+    if holdout_plan is not None:
+        digest_payload.extend(["independent-holdout-v1", holdout_policy, holdout_plan])
+    # Keep the historical digest stable when the legacy manual path is used;
+    # an explicit transition is part of the immutable handoff identity.
+    if transition is not None:
+        digest_payload.extend(["post-training-transition-v1", transition])
     digest = hashlib.sha256(
-        json.dumps(
-            ["training-inputs-v4", records, settings, base, environment],
-            sort_keys=True,
-            default=str,
-        ).encode()
+        json.dumps(digest_payload, sort_keys=True, default=str).encode()
     ).hexdigest()[:16]
     version = (
         base.get("version")
@@ -79,6 +124,14 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     )
     # The digest names one immutable approved dataset/settings combination.
     existing = (current.get("remote_finetune_jobs") or {}).get(digest)
+    if existing and not same_training_transition(
+        existing.get("post_training_transition"), transition
+    ):
+        return {
+            "status": "confirmation_required",
+            "state": current,
+            "reason": "已有训练交接的模型切换策略不同；未修改不可变训练记录。",
+        }
     from phase_agent.tools.remote.model_upload_directory import model_upload_directory
 
     epoch_root = model_upload_directory(root, current, version)
@@ -196,6 +249,19 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         config=settings,
         category="training_inputs",
     )
+    if holdout_plan is not None:
+        from ase.io import write
+        from phase_agent.science.training.prepare_mace_finetune import _to_atoms
+
+        test_path = inputs / "_shared_data" / "test.xyz"
+        write(test_path, [_to_atoms(row, settings.get("labels", {})) for row in holdout_records], format="extxyz")
+        report["split_counts"]["test"] = len(holdout_records)
+        report["split_groups"]["test"] = holdout_plan["groups"]
+        report["independent_holdout"] = {
+            **holdout_plan, "status": "reserved_not_evaluated",
+            "count": len(holdout_records), "relative_path": "_shared_data/test.xyz",
+            "policy": deepcopy(holdout_policy),
+        }
     from phase_agent.analysis.convergence.independent_evidence import training_snapshot
 
     report["training_snapshot"] = training_snapshot(records, base)
@@ -206,6 +272,7 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
     }
     report["remote_environment"] = {"name": environment, "source": environment_source}
     report["original_model_version"] = version
+    report["post_training_transition"] = deepcopy(transition)
     from phase_agent.evidence.model_epoch import model_epoch
 
     report["epoch"] = model_epoch(current, version)
@@ -254,6 +321,10 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
             "state": current,
             "reason": f"训练输入尚未就绪：{error}；未训练或提交。",
         }
+    if holdout_plan is not None:
+        report["main_model"]["independent_holdout_reserved"] = True
+        report["main_model"]["independent_test"] = False
+        report["main_model"]["note"] = "委员会和交叉验证仅使用训练部分；独立测试集已保留，尚未评估。"
     models = [
         row["model_id"] for row in [*report["committees"], *report["main_model"]["fold_jobs"]]
     ]
@@ -320,6 +391,8 @@ def prepare_remote_finetune(state, config, *, replacement_directory=None):
         "submitted": False,
         "activated": False,
     }
+    if transition is not None:
+        current["remote_finetune_jobs"][digest]["post_training_transition"] = transition
     current["remote_finetune_jobs"][digest]["handoff"] = handoff
     from phase_agent.tools.remote.submission_layout import write_submission_index
 

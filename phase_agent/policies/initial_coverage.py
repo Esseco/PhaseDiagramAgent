@@ -1,4 +1,4 @@
-"""Initial coverage is a complete phase/composition grid on chosen supercells."""
+"""Expose legal initial phase/composition cells as metadata, not a sampling target."""
 
 from fractions import Fraction
 import json
@@ -7,11 +7,20 @@ from pymatgen.core import Element
 
 from phase_agent.science.structures import boundary_utils as utils
 
+SAMPLING_SCALE_INSTRUCTION = (
+    "采样规模须充分：空池首轮和较广补充需求应优先评估数百候选的方案，"
+    "按相、Na区间、扩胞多样性及每branch初态成本说明数量依据。"
+    "不把每区域十几个、全轮几十个作为保守默认；仅请求几十个时，须说明有限合法空间、"
+    "已有覆盖、明确局部需求或资源约束等具体理由。"
+    "后续补充同样按缺口广度与收益决定规模，不机械沿用小批数量。"
+    "数百是规模评估方向，不是固定配额或最低数量；每轮上限1000，不凑数、不穷举。"
+)
+
 INSTRUCTION = (
-    "首轮没有父branch，只允许coverage。先从确认边界选择一组扩胞，再覆盖这些扩胞下全部合法相和整数Na组分；"
-    "中间组分的竞争相必须同时覆盖，端点按boundary.P过滤。不能用不同相的局部Na区间代替首轮覆盖。"
-    "Na数量=x*氧数量/2，P3候选位点数不改变组分定义。数量由所选扩胞和整数占据决定；"
-    "资源不足应在审批前缩小扩胞选择，执行被截断不能宣称覆盖完成或准备下游输入。"
+    "首轮优先覆盖用户选定的相、扩胞和Na范围；按需求采样，每轮最多生成1000个branch。"
+    "合法组合仅用于范围与覆盖统计，不要求穷举或把数量作为目标。"
+    "Na=0豁免层占位，其他含量须满足各Na层占位约束；未采到的区域如实报告。"
+    + SAMPLING_SCALE_INSTRUCTION
 )
 
 
@@ -63,11 +72,17 @@ def contract(manager, references, config):
                 continue
             if limits.get("max_atoms") is not None and len(reference) * size > limits["max_atoms"]:
                 continue
+            from phase_agent.science.structures.rank_na_orderings_by_electrostatics import (
+                count_supercell_na_layers,
+            )
+
+            layer_count = count_supercell_na_layers(reference, matrix)
             xs = [Fraction(2 * n, oxygen * size) for n in range(sodium * size + 1)]
             xs = [
                 x
                 for x in xs
                 if 0 <= x <= 1
+                and (x == 0 or x * oxygen * size / 2 >= layer_count)
                 and phase in utils.allowed_phases_at_x(boundary["P"], x)
                 and (roles.get("x") != "fixed" or x == Fraction(str(fixed["x"])))
             ]
@@ -109,30 +124,10 @@ def review(params, facts):
             for x in f["allowed_x"]:
                 if row.get("na_min", 0) <= float(Fraction(x)) <= row.get("na_max", 1):
                     actual.add(cell_key(f["P"], f["H"], x))
-    expected = {
-        cell_key(f["P"], f["H"], x)
-        for f in frameworks
-        if json.dumps(f["H"], separators=(",", ":")) in selected
-        for x in f["allowed_x"]
-    }
-    missing = sorted(expected - actual)
     problems = []
     if not selected:
         problems.append("initial_coverage_requires_selected_supercells")
-    if missing:
-        problems.append(
-            f"initial_coverage_missing_cells:{len(missing)}; examples={missing[:4]}; cover all legal phases/x on chosen supercells"
-        )
-    from phase_agent.policies.region_sampling import CONTROLS
-
-    limit = min(
-        params.get("max_new_branches", CONTROLS["review_after_new_branches"]),
-        CONTROLS["review_after_new_branches"],
-    )
-    if len(expected) > limit:
-        problems.append(
-            f"initial_coverage_exceeds_branch_guard:{len(expected)}>{limit}; choose fewer supercells"
-        )
+    expected = actual
     return problems, {
         "required": True,
         "expected_cells": len(expected),

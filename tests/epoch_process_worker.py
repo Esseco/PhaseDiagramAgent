@@ -38,6 +38,8 @@ def main():
         assert response, "Parent fake model disconnected"
         return json.loads(response)
 
+    model.supports_expert_advice = True
+    model.supports_simulation = True
     kwargs.update(manager=manager, agent_client=model)
     handler = RunWorkflowChatHandler(kwargs)
     if request.get("returned_science"):

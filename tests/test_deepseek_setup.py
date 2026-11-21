@@ -18,7 +18,7 @@ class DeepSeekSetupTest(unittest.TestCase):
 
     def test_valid_key_is_tested_then_saved_and_activated(self):
         activated = []
-        client = lambda _payload: {"_llm_usage": {"calls": 1}}
+        client = lambda _payload: {"connected": True, "_llm_usage": {"calls": 1}}
         with patch("phase_agent.models.create_deepseek_client.create_deepseek_client", return_value=client) as factory,\
                 patch("phase_agent.runtime.deepseek_credentials.save_deepseek_api_key") as save:
             result = _test_and_save_api_key(
@@ -41,6 +41,18 @@ class DeepSeekSetupTest(unittest.TestCase):
                 )
         save.assert_not_called()
         self.assertEqual(activated, [])
+
+    def test_unconfirmed_connection_is_not_saved_or_activated(self):
+        for connected in (False, None):
+            activated = []
+            response = {"connected": connected, "_llm_usage": {"calls": 1}}
+            with self.subTest(connected=connected), \
+                    patch("phase_agent.models.create_deepseek_client.create_deepseek_client", return_value=lambda _payload: response), \
+                    patch("phase_agent.runtime.deepseek_credentials.save_deepseek_api_key") as save:
+                with self.assertRaisesRegex(RuntimeError, "密钥未保存"):
+                    _test_and_save_api_key("sk-test-secret-value", settings={}, activate_client=activated.append)
+                save.assert_not_called()
+                self.assertEqual(activated, [])
 
     def test_local_setup_http_page_and_post(self):
         configured = []

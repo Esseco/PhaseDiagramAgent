@@ -12,6 +12,11 @@ def attach_dft_preview(action, state, config):
     preview, error = preview_dft_inputs(clean, state, config)
     if error:
         return None, error
+    from phase_agent.tools.workflows.dft_selection_plot import require_dft_selection_plot
+    try:
+        require_dft_selection_plot(state, clean["parameters"].get("decisions") or [])
+    except (ValueError, OSError, TypeError, KeyError, ImportError) as error:
+        return None, "dft_selection_plot_required: " + str(error)
     clean["parameters"]["dft_input_preview"] = preview
     clean["budget"] = preview["relative_cost"]
     return clean, None

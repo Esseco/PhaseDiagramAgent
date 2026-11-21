@@ -16,6 +16,13 @@ from phase_agent.analysis.feedback.dft_comparison_tables import (
     comparison_metrics,
 )
 from phase_agent.analysis.phase.phase_snapshot_paths import model_output_directory
+from phase_agent.analysis.feedback.dft_export_reuse import (
+    report_manifest,
+    report_version,
+    reusable_metrics,
+)
+from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
+from phase_agent.evidence.model_epoch import model_epoch
 
 
 def dft_product_path(root, name):
@@ -30,12 +37,14 @@ def dft_product_path(root, name):
     return Path(root) / category / name
 
 
-def export_dft_products(state, directory):
+def export_dft_products(state, directory, *, check_reuse_only=False):
     """Refresh saved products only; keep old directories and unchanged files intact."""
     if directory is None:
-        return
+        return True if check_reuse_only else None
     from phase_agent.science.dft.spin_acceptance import spin_standard_passed
+    from phase_agent.evidence.dft_extrapolation import failed_dft_task_ids
 
+    failed_ids = failed_dft_task_ids(state)
     groups = {}
     for record in state.get("dft_dataset_records", []):
         groups.setdefault(_scope_key(record["round_scope"]), []).append(record)
@@ -50,21 +59,33 @@ def export_dft_products(state, directory):
         destinations.add(root)
         planned.append((key, identifier, scope, records, tasks, root))
     exports, version_summaries = {}, {}
+    previous = state.get("dft_result_exports") or {}
+    report_cache = analysis_metadata_directory(directory) / "dft_report_versions"
     for key, identifier, scope, records, tasks, root in planned:
+        records = sorted(records, key=lambda row: str(row["task_id"]))
         comparisons = [
             row
             for row in state.get("dft_mlip_comparisons", [])
             if _scope_key(row["round_scope"]) == key
         ]
-        energies, forces = build_comparison_tables(records, comparisons, round_name=root.name)
-        from phase_agent.evidence.model_epoch import model_epoch
-
-        epoch = model_epoch(state, scope.get("model_version") or "unknown-model")
-        for row in energies + forces:
-            row["epoch"] = epoch
-        from phase_agent.analysis.feedback.dft_magnetic_tables import magnetic_rows, MAGNETIC_FIELDS
-
-        metrics = comparison_metrics(energies, forces, scope)
+        eligible_records = [row for row in records if row.get("task_id") not in failed_ids]
+        excluded_ids = sorted(
+            {row["task_id"] for row in records if row.get("task_id") in failed_ids}
+        )
+        version = scope.get("model_version") or "unknown-model"
+        epoch = model_epoch(state, version)
+        version_root = model_output_directory(directory, version, state=state)
+        training = sorted(
+            [
+                row
+                for row in state.get("dft_training_records", [])
+                if _scope_key(row["round_scope"]) == key
+                and row.get("checks_passed", True) is True
+                and row.get("task_id") not in failed_ids
+                and spin_standard_passed(row)
+            ],
+            key=lambda row: str(row.get("data_id")),
+        )
         pending = [
             row["task_id"]
             for row in tasks
@@ -72,25 +93,67 @@ def export_dft_products(state, directory):
             and row.get("recovery_wait_waived") is not True
         ]
         expected = len({row["task_id"] for row in tasks} | {row["task_id"] for row in records})
+        paths = [
+            dft_product_path(root, name)
+            for name in (
+                "training.json",
+                "dft_records.json",
+                "mlip_dft_metrics.json",
+                "energy_comparison.csv",
+                "force_comparison.csv",
+                "magnetic_moments.csv",
+                "metrics.csv",
+            )
+        ]
+        manifest = report_cache / f"{identifier}.json"
+        try:
+            source_version = report_version(
+                str(root),
+                str(version_root),
+                scope,
+                epoch,
+                records,
+                comparisons,
+                training,
+                excluded_ids,
+                expected,
+                sorted(pending),
+            )
+        except (TypeError, ValueError):
+            source_version = None
+        entry = previous.get(identifier)
+        saved_metrics = reusable_metrics(root, paths, entry, source_version, manifest, paths[2])
+        if isinstance(saved_metrics, dict):
+            try:
+                metric_rows = _metric_rows(saved_metrics, root.name)
+            except (ValueError, TypeError, KeyError):
+                pass
+            else:
+                for row in metric_rows:
+                    row["epoch"] = epoch
+                version_summaries.setdefault(version_root, []).extend(metric_rows)
+                exports[identifier] = entry
+                continue
+        if check_reuse_only:
+            return False
+        energies, forces = build_comparison_tables(
+            eligible_records, comparisons, round_name=root.name
+        )
+        for row in energies + forces:
+            row["epoch"] = epoch
+        from phase_agent.analysis.feedback.dft_magnetic_tables import magnetic_rows, MAGNETIC_FIELDS
+
+        metrics = comparison_metrics(energies, forces, scope)
         metrics.update(
             recovered_tasks=len(records),
             expected_tasks=expected,
             pending_tasks=len(pending),
             pending_task_ids=sorted(pending),
+            excluded_extrapolation_failed_task_ids=excluded_ids,
         )
         metric_rows = _metric_rows(metrics, root.name)
         for row in metric_rows:
             row["epoch"] = epoch
-        training = sorted(
-            [
-                row
-                for row in state.get("dft_training_records", [])
-                if _scope_key(row["round_scope"]) == key
-                and row.get("checks_passed", True) is True
-                and spin_standard_passed(row)
-            ],
-            key=lambda row: str(row.get("data_id")),
-        )
         magnetism = magnetic_rows(records)
         for row in magnetism:
             row.update(
@@ -98,7 +161,7 @@ def export_dft_products(state, directory):
             )
         for name, payload in {
             "training.json": training,
-            "dft_records.json": sorted(records, key=lambda row: str(row["task_id"])),
+            "dft_records.json": records,
             "mlip_dft_metrics.json": metrics,
         }.items():
             _publish_bytes(
@@ -117,18 +180,16 @@ def export_dft_products(state, directory):
         from phase_agent.analysis.feedback.dft_magnetic_plots import export_magnetic_plots
 
         magnetic_plots = export_magnetic_plots(magnetism, root / "diagnostics" / "magnetic_plots")
-        version_root = model_output_directory(
-            directory, scope.get("model_version") or "unknown-model", state=state
-        )
         from phase_agent.analysis.feedback.dft_parity_plots import export_parity_plots
 
-        version = scope.get("model_version") or "unknown-model"
-        plots = export_parity_plots(
-            energies,
-            forces,
-            root / "comparisons" / "plots",
-            f"{model_epoch(state, version) or 'Epoch unrecorded'} ({version})",
-        )
+        label = f"{epoch or 'Epoch unrecorded'} ({version})"
+        if excluded_ids:
+            from phase_agent.analysis.feedback.dft_parity_plots import archive_filtered_parity
+
+            archive_filtered_parity(
+                directory, root / "comparisons" / "plots", energies, forces, label
+            )
+        plots = export_parity_plots(energies, forces, root / "comparisons" / "plots", label)
         version_summaries.setdefault(version_root, []).extend(metric_rows)
         exports[identifier] = {
             "directory": str(root),
@@ -145,6 +206,17 @@ def export_dft_products(state, directory):
             "metrics_csv_path": str(dft_product_path(root, "metrics.csv")),
             "round_metrics_csv_path": str(version_root / "round_metrics.csv"),
         }
+        receipt = report_manifest(root, paths, exports[identifier], source_version)
+        if receipt is not None:
+            try:
+                _publish_bytes(manifest, receipt)
+            except OSError:
+                pass  # Reuse is optional; the verified report has already been published.
+    if check_reuse_only:
+        return set(exports) == set(previous) and all(
+            item.get("round_metrics_csv_path") and Path(item["round_metrics_csv_path"]).is_file()
+            for item in exports.values()
+        )
     for root, rows in version_summaries.items():
         _publish_csv(
             root / "round_metrics.csv",
@@ -155,36 +227,145 @@ def export_dft_products(state, directory):
             ),
         )
     state["dft_result_exports"] = exports
+    if Path(directory).name == "analysis_outputs":
+        _write_round_parity_index(state, directory, exports)
     from phase_agent.evidence.summarize_model_rounds import (
         summarize_model_rounds,
         ROUND_SUMMARY_FIELDS,
     )
 
     state["model_round_summary"] = summarize_model_rounds(state)
-    summary_path = Path(directory) / "round_summary.csv"
+    summary_path = analysis_metadata_directory(directory) / "round_summary.csv"
     _publish_csv(summary_path, ROUND_SUMMARY_FIELDS, state["model_round_summary"])
     state["round_summary_csv_path"] = str(summary_path)
-    publish_output_catalog(state, directory)
+    if Path(directory).name == "analysis_outputs":
+        from phase_agent.analysis.feedback.round_error_trend import publish_round_error_trend
+
+        publish_round_error_trend(state, directory)
+    publish_output_catalog(state, directory, action="dft")
 
 
-def publish_output_catalog(state, directory):
+def _write_round_parity_index(state, directory, exports):
+    """Describe only actually verified, same-frame predictions for each DFT round."""
+    from os.path import relpath
+    from phase_agent.evidence.model_epoch import model_epoch
+
+    root = Path(directory)
+    active = state.get("active_model_version")
+    lines = [
+        "# 本轮 MLIP 与 DFT 同帧对比",
+        "",
+        "使用每轮选出并实际回收的 DFT 结构及对应轮次的冻结 MLIP 预测。",
+        "DFT 弛豫任务使用已核验最终帧；未完成配对的结构不进入图。",
+        "这不是 K 折误差图，也不自动代表独立测试。",
+        "",
+        f"当前模型：`{active or '未登记'}`",
+        "",
+    ]
+    for item in sorted(exports.values(), key=lambda row: str(row.get("directory"))):
+        scope = item.get("round_scope") or {}
+        model = scope.get("model_version")
+        epoch = model_epoch(state, model) or "轮次未登记"
+        plot = item.get("parity_plots") or {}
+        path = Path(item["directory"])
+        prefix = Path(relpath(path, root)).as_posix()
+        target = None
+        if epoch != "轮次未登记":
+            group = scope.get("search_group_index")
+            group_name = (
+                f"Search-group-{int(group):04d}" if group is not None else "Search-group-unassigned"
+            )
+            target = root / epoch / "Round_Error" / group_name / path.name
+        if target is not None and plot.get("status") != "completed" and target.is_dir():
+            history = root / "history" / epoch / "round_error_unavailable"
+            history.mkdir(parents=True, exist_ok=True)
+            target.rename(history / uuid.uuid4().hex)
+        if target is not None and plot.get("status") == "completed":
+            for name in (
+                "energy_parity.png",
+                "force_parity.png",
+            ):
+                source = path / "comparisons" / "plots" / name
+                if source.is_file():
+                    _publish_bytes(target / name, source.read_bytes())
+            _publish_bytes(
+                target / "README.md",
+                (
+                    f"# 本轮 MLIP 与 DFT 同帧比较\n\n模型：{model}\n\n数据来源：{path}\n\nDFT 弛豫使用最终帧。\n"
+                ).encode("utf8"),
+            )
+            prefix = Path(relpath(target, root)).as_posix()
+        lines.append(f"## {epoch} · {path.name}")
+        lines.append(
+            f"模型：`{model or '未登记'}`；已配对 {item.get('matched_structures', 0)} / 已回收 {item.get('records', 0)}；待回收 {item.get('pending_tasks', 0)}。"
+        )
+        if plot.get("status") == "completed":
+            plot_prefix = prefix if epoch != "轮次未登记" else prefix + "/comparisons/plots"
+            lines.append(
+                f"[能量图](<{plot_prefix}/energy_parity.png>) · [受力图](<{plot_prefix}/force_parity.png>)"
+            )
+        else:
+            lines.append("未生成：" + str(plot.get("reason") or "缺少已核验同帧预测"))
+        lines.append("")
+    if not exports:
+        lines.append("尚无登记的 DFT 结果；需要先回收已完成结果和同帧模型预测。")
+    _publish_bytes(root / "round_dft_parity.md", ("\n".join(lines) + "\n").encode("utf8"))
+
+
+def publish_output_catalog(state, directory, *, action="refresh", epoch=None):
     """Refresh complete analysis bundles and publish navigation after a verified update."""
     if directory is None:
         return
     from phase_agent.analysis.feedback.analysis_publication import publish_analysis_products
 
     publish_analysis_products(state, directory)
+    if Path(directory).name == "analysis_outputs":
+        from phase_agent.analysis.feedback.training_parity import publish_training_parity
+
+        publish_training_parity(state, directory)
+    try:
+        from phase_agent.analysis.feedback.out_data import export_out_data
+
+        state["out_data_export"] = export_out_data(state, directory, action=action, epoch=epoch)
+    except Exception as error:
+        # Derived convenience exports must never invalidate verified scientific publications.
+        state["out_data_export"] = {
+            "status": "not_ready",
+            "directory": str(Path(directory).resolve() / "out_data"),
+            "reason": f"{type(error).__name__}: {error}",
+        }
     from phase_agent.analysis.feedback.output_catalog import output_catalog, catalog_markdown
 
-    path = Path(directory) / "output_index.md"
+    from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
+
+    path = analysis_metadata_directory(directory) / "output_index.md"
     from phase_agent.analysis.feedback.workspace_guide import publish_epoch_guides
 
     publish_epoch_guides(directory, state)
+    organization_path = analysis_metadata_directory(directory) / "analysis_organization.json"
+    if organization_path.is_file():
+        from phase_agent.analysis.feedback.analysis_output_organization import write_latest_guide
+
+        try:
+            saved = json.loads(organization_path.read_text(encoding="utf8"))
+            write_latest_guide(directory, state, saved.get("dft_selections") or {})
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
     _publish_bytes(
-        path, catalog_markdown(output_catalog(state), Path(directory), state=state).encode("utf-8")
+        path,
+        catalog_markdown(
+            output_catalog(state), Path(directory), state=state, index_directory=path.parent
+        ).encode("utf-8"),
     )
     state.pop("output_index_csv_path", None)
     state["output_index_path"] = str(path)
+    from phase_agent.analysis.feedback.folder_navigation import publish_folder_navigation
+
+    if Path(directory).name == "analysis_outputs":
+        from phase_agent.analysis.feedback.physical_layout import organize_physical_layout
+
+        organize_physical_layout(directory)
+    publish_folder_navigation(directory)
 
 
 def _scope_key(scope):
@@ -259,7 +440,18 @@ def _product_directory(directory, state, scope, tasks, identifier):
             if index and operation and re.fullmatch(r"[A-Za-z0-9_.-]+", str(operation))
             else f"DFT-round-unassigned-{identifier}"
         )
-    return version_root / group_name / round_name
+    from phase_agent.analysis.feedback.output_paths import dft_round_directory
+
+    saved = (state.get("dft_result_exports") or {}).get(identifier) or {}
+    registered = saved.get("directory")
+    legacy = version_root / group_name / round_name
+    current = version_root / "dft" / group_name / round_name
+    if registered and Path(registered) in {legacy, current}:
+        other = current if Path(registered) == legacy else legacy
+        if other.exists() and other.resolve() != Path(registered).resolve():
+            raise ValueError("duplicate DFT round destinations require explicit review")
+        return Path(registered)
+    return dft_round_directory(version_root, group_name, round_name)
 
 
 def _metric_rows(metrics, round_name):

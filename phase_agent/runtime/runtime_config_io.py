@@ -45,7 +45,14 @@ def runtime_base_directory(config_file, settings):
 
 def _load_json_object(path, label):
     try:
-        value = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        if Path(path).name == "state.json":
+            from phase_agent.tools.step_runner.file_protocol import read_json
+
+            if not Path(path).is_file():
+                raise FileNotFoundError(path)
+            value = read_json(path)
+        else:
+            value = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     except FileNotFoundError as error:
         raise ValueError(f"{label}不存在：{path}") from error
     except json.JSONDecodeError as error:

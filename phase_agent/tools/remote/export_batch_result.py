@@ -39,6 +39,16 @@ def export_batch_result(task_directory, results_directory, *, create_archive=Tru
                 or file_checksum(source) != item.get('structure_checksum')):
             raise ValueError('invalid_extrapolation_failure_frame')
         _copy(source, destination / source.name)
+    for item in outputs.get("relaxation_observations") or []:
+        raw = item.get("structure_path")
+        if not raw:
+            continue  # Historical observations may not have saved frames.
+        source = Path(str(raw)).resolve()
+        if (source.parent != task_dir or not source.name.startswith("mc_relaxation_frame_")
+            or source.suffix.lower() != ".vasp" or not source.is_file()
+            or file_checksum(source) != item.get("structure_checksum")):
+            raise ValueError("invalid_mc_relaxation_frame")
+        _copy(source, destination / source.name)
     # Small occupancy deltas are required for cross-round/model de-duplication.
     # Do not transfer the per-worker SQLite database or structure history.
     occupation_delta = task_dir / "mc_occupations.bin"

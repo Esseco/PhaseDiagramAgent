@@ -182,13 +182,40 @@ def apply_quality_review(
         raise ValueError("排除前必须配置备份目录")
     record_ids = {record_id for r in selected for record_id in r["record_ids"]}
     model = state.get("active_model_version")
+    snapshot = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    reviewed_geometry = {}
+    reviewed_sources = {}
+    if (
+        decision == "remove"
+        and snapshot.get("model_version") == model
+        and str(snapshot.get("energy_basis_id", "")).startswith("mlip:latest-per-structure:")
+    ):
+        reviewed_geometry = {
+            rid: row["geometry_key"] for row in selected for rid in row["record_ids"]
+        }
+        reviewed_sources = {
+            row["record_id"]: row["source_version"]
+            for row in snapshot["entries"]
+            if row["record_id"] in reviewed_geometry
+            and row.get("source_version") in (snapshot.get("source_model_versions") or [])
+        }
+    from phase_agent.analysis.convergence.independent_evidence import geometry_key
+
     records = [
         r
         for r in state.get("phase_records") or []
         if r.get("record_id") in record_ids
         and r.get("status", "completed") == "completed"
         and r.get("energy_method") == "mlip"
-        and (r.get("model_version") or r.get("source_version")) == model
+        and (
+            (r.get("model_version") or r.get("source_version")) == model
+            or (
+                r["record_id"] in reviewed_sources
+                and (r.get("model_version") or r.get("source_version"))
+                == reviewed_sources[r["record_id"]]
+                and geometry_key(r) == reviewed_geometry[r["record_id"]]
+            )
+        )
     ]
     if {r.get("record_id") for r in records} != record_ids:
         raise ValueError("所选结构无法精确绑定当前模型的有效MLIP记录")
@@ -204,6 +231,9 @@ def apply_quality_review(
         directory=directory,
         entry={
             "model_version": model,
+            "source_model_by_record": {
+                r["record_id"]: r.get("model_version") or r.get("source_version") for r in records
+            },
             "hull_version": report["hull_version"],
             "screening_policy": deepcopy(report["screening_policy"]),
             "policy_revision": report.get("policy_control", {}).get("revision", 0),

@@ -52,6 +52,7 @@ WATCHED_MODULES = (
     "phase_agent.evidence.summarize_agent_state",
     "phase_agent.runtime.result_recovery_status",
     "phase_agent.runtime.partial_recovery",
+    "phase_agent.evidence.dft_failure_policy",
     "phase_agent.runtime.scientific_progress",
     "phase_agent.runtime.local_agent_control",
     "phase_agent.runtime.local_http_server",

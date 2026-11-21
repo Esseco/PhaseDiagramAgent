@@ -10,6 +10,25 @@ import math
 import random
 
 
+def _copy_state(value):
+    """Detach a JSON-shaped tree quickly; any other type uses copy.deepcopy."""
+
+    def detach(item):
+        kind = type(item)
+        if item is None or kind in (str, int, float, bool):
+            return item
+        if kind is list:
+            return [detach(row) for row in item]
+        if kind is dict:
+            return {key: detach(row) for key, row in item.items()}
+        raise TypeError
+
+    try:
+        return detach(value)
+    except (TypeError, RecursionError):
+        return deepcopy(value)
+
+
 def schedule_tiered_mc(
     candidates,
     state,
@@ -21,8 +40,9 @@ def schedule_tiered_mc(
     hull_reference_version,
     phase_diagram_version=None,
     scope_by_model=False,
+    excluded_history_task_keys=(),
 ):
-    current = deepcopy(state or {"segments": [], "processed_task_keys": []})
+    current = _copy_state(state or {"segments": [], "processed_task_keys": []})
     current.setdefault("segments", [])
     current.setdefault("processed_task_keys", [])
     tiers = list(policy.get("tiers") or [])
@@ -30,20 +50,20 @@ def schedule_tiered_mc(
         raise ValueError("mc_policy.tiers cannot be empty")
     _validate_tiers(tiers)
     max_segments = int(policy.get("max_segments_per_branch", 3))
-    raw_cost = policy.get("max_cumulative_cost_per_branch")
-    max_cost = float(raw_cost) if raw_cost is not None else float("inf")
-    cost_reference = max_cost
     from phase_agent.tools.budget.check_budget import budget_is_hard
 
     hard_budget = budget_is_hard({"enforcement": policy.get("budget_enforcement", "advisory")})
     if not hard_budget:
-        max_cost = float("inf")
         total_budget = float("inf")
     rng = random.Random(seed)
     scoped = [
         row
         for row in current["segments"]
-        if not scope_by_model or row.get("model_version") == model_version
+        if (not scope_by_model or row.get("model_version") == model_version)
+        and (
+            row.get("task_key") not in excluded_history_task_keys
+            or row.get("status") in {"pending", "running"}
+        )
     ]
     active = [row for row in scoped if row.get("status") in {"pending", "running"}]
     if active:
@@ -129,18 +149,6 @@ def schedule_tiered_mc(
             ]
         if len(previous) >= max_segments:
             continue
-        spent = sum(
-            float(
-                row.get("actual_gpu_core_hours")
-                if row.get("actual_gpu_core_hours") is not None
-                else row.get("actual_cost")
-                if row.get("actual_cost") is not None
-                else row.get("accounted_cost", row.get("estimated_cost", 0)) or 0
-            )
-            for row in previous
-        )
-        if spent >= max_cost:
-            continue
         if hb:
             tier_index = len(previous)
             reason = (
@@ -175,8 +183,6 @@ def schedule_tiered_mc(
                 **(policy["continuation_resource_tiers"][resource_tier] if previous else base),
             }
         requested = int(tier["max_mc_steps"])
-        if spent + requested > max_cost:
-            continue
         if reserved + requested > total_budget:
             continue
         segment_index = len(previous)
@@ -202,9 +208,7 @@ def schedule_tiered_mc(
             "tier_index": tier_index,
             "selection_source": "relax_hull_tiered_mc",
             "segment_reason": reason,
-            "budget_warnings": ["branch_cumulative_cost_reference_exceeded"]
-            if not hard_budget and spent >= cost_reference
-            else [],
+            "budget_warnings": [],
             "restart_mode": "new_segment_from_structure",
             "model_version": model_version,
             "hull_reference_version": hull_reference_version,
@@ -269,6 +273,7 @@ def schedule_tiered_mc(
                 hull_reference_version=hull_reference_version,
                 phase_diagram_version=phase_diagram_version,
                 scope_by_model=scope_by_model,
+                excluded_history_task_keys=excluded_history_task_keys,
             )
             extra = fill["actions"][: minimum - len(actions)]
             actions.extend(extra)
@@ -532,6 +537,8 @@ def _mc_candidate_exclusion_reason(candidate):
         return "no_mobile_ion_sites"
     if x > 1:
         return "branch_composition_out_of_range"
+    if candidate.get("mc_no_vacancies") is True:
+        return "no_vacant_ion_sites"
     return None
 
 

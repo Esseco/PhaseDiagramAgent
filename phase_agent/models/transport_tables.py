@@ -62,71 +62,102 @@ def table_rows(rows):
             ],
         }
         return table if _size(table) < _size(rows) else rows
-    # Python equates True/1/1.0; wire evidence must retain their JSON types.
-    common = {
-        key: rows[0][key]
-        for key in columns
-        if all(
-            json.dumps(r[key], sort_keys=True, default=str)
-            == json.dumps(rows[0][key], sort_keys=True, default=str)
-            for r in rows
-        )
-    }
-    columns = [key for key in columns if key not in common]
-    table = {
-        "format": "column_table_v1",
-        "count": len(rows),
-        "common": common,
-        "columns": columns,
-        "rows": [[row[key] for key in columns] for row in rows],
-    }
-    best = table if _size(table) < _size(rows) else rows
-    indexed = deepcopy(table)
-    dictionaries = {}
-    for index, column in enumerate(columns):
+    # Encode each cell once, retaining canonical keys for only one column.
+    # Size accounting uses the same character unit as _size, not token estimates.
+    count = len(rows)
+    common, dictionaries, indices_by_column = {}, {}, {}
+    variable = []
+    cell_size = 0
+    for column in columns:
         values, indices, lookup = [], [], {}
-        for row in indexed["rows"]:
-            value = row[index]
-            key = json.dumps(value, sort_keys=True, default=str)
+        unique_size = column_size = 0
+        for row in rows:
+            value = row[column]
+            key = json.dumps(
+                value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+            )
+            column_size += len(key)
             if key not in lookup:
                 lookup[key] = len(values)
                 values.append(value)
+                unique_size += len(key)
             indices.append(lookup[key])
-        if _size(values) + _size(indices) + len(column) + 4 < _size(
-            [row[index] for row in indexed["rows"]]
-        ):
+        cell_size += column_size
+        if len(values) == 1:
+            common[column] = values[0]
+            continue
+        variable.append(column)
+        original_column_size = 2 + count - 1 + column_size
+        dictionary_size = 2 + len(values) - 1 + unique_size
+        index_size = 2 + count - 1 + sum(len(str(index)) for index in indices)
+        if dictionary_size + index_size + len(column) + 4 < original_column_size:
             dictionaries[column] = values
-            for row, value_index in zip(indexed["rows"], indices, strict=True):
-                row[index] = value_index
+            indices_by_column[column] = indices
+    # Release the last column's encoded lookup before any candidate-size encoding.
+    del values, indices, lookup, key
+    # JSON object syntax and repeated keys, without serializing all input rows again.
+    key_size = sum(len(json.dumps(key, ensure_ascii=False)) + 1 for key in columns)
+    original_size = 2 + count - 1 + count * (2 + len(columns) - 1 + key_size) + cell_size
+    table = {
+        "format": "column_table_v1",
+        "count": count,
+        "common": common,
+        "columns": variable,
+        "rows": [[row[key] for key in variable] for row in rows],
+    }
+    table_size = _size(table)
+    best, best_size = (table, table_size) if table_size < original_size else (rows, original_size)
+    candidate = table
     if dictionaries:
-        indexed.update(format="dictionary_column_table_v1", dictionaries=dictionaries)
-        if _size(indexed) < _size(best):
-            best = indexed
-    # Preserve full file paths, sharing their common prefix rather than repeating it.
-    prefixed = deepcopy(indexed if dictionaries else table)
-    prefixes = {}
-    for index, column in enumerate(columns):
+        candidate = {
+            **table,
+            "format": "dictionary_column_table_v1",
+            "dictionaries": dictionaries,
+            "rows": [
+                [
+                    indices_by_column[key][index] if key in dictionaries else row[key]
+                    for key in variable
+                ]
+                for index, row in enumerate(rows)
+            ],
+        }
+        size = _size(candidate)
+        if size < best_size:
+            best, best_size = candidate, size
+    prefixes, suffixes = {}, {}
+    for index, column in enumerate(variable):
         if not column.endswith("_path"):
             continue
-        if column in dictionaries:
-            values = prefixed["dictionaries"][column]
-        else:
-            values = [row[index] for row in prefixed["rows"]]
+        values = (
+            dictionaries[column]
+            if column in dictionaries
+            else [row[index] for row in candidate["rows"]]
+        )
         if not values or not all(isinstance(value, str) for value in values):
             continue
         prefix = commonprefix(values)
-        if len(prefix) < 32:
-            continue
-        prefixes[column] = prefix
-        suffixes = [value[len(prefix) :] for value in values]
-        if column in dictionaries:
-            prefixed["dictionaries"][column] = suffixes
-        else:
-            for row, suffix in zip(prefixed["rows"], suffixes, strict=True):
-                row[index] = suffix
+        if len(prefix) >= 32:
+            prefixes[column] = prefix
+            suffixes[column] = [value[len(prefix) :] for value in values]
     if prefixes:
-        prefixed.update(format="prefix_column_table_v1", prefixes=prefixes)
-        if _size(prefixed) < _size(best):
+        # Only row-cell arrays change; nested evidence is never copied for size trials.
+        prefixed = {
+            **candidate,
+            "format": "prefix_column_table_v1",
+            "prefixes": prefixes,
+            "rows": [list(row) for row in candidate["rows"]],
+        }
+        if dictionaries:
+            prefixed["dictionaries"] = dict(dictionaries)
+        for index, column in enumerate(variable):
+            if column not in prefixes:
+                continue
+            if column in dictionaries:
+                prefixed["dictionaries"][column] = suffixes[column]
+            else:
+                for row, suffix in zip(prefixed["rows"], suffixes[column], strict=True):
+                    row[index] = suffix
+        if _size(prefixed) < best_size:
             best = prefixed
     return best
 

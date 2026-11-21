@@ -10,7 +10,9 @@ def test_high_hd_is_always_selected_using_original_operation():
     plan = build_model_refresh_plan(rows, old_version='old', new_version='new')
     chosen = next(r for r in plan['candidates'] if r['structure_id'] == '0')
     assert chosen['selection_reason'] == 'high_hd' and chosen['operation'] == 'predict'
-    assert len(plan['candidates']) == 3
+    assert plan['policy']['audit_fraction'] == 1.0
+    assert len(plan['candidates']) == 20
+    assert sum(row['selection_reason'] == 'far_audit' for row in plan['candidates']) == 19
 
 
 def test_hd_reference_uses_existing_preview_and_keeps_formal_snapshot(monkeypatch):

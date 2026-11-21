@@ -284,3 +284,86 @@ def test_approved_recovery_enters_planner_in_the_same_turn(tmp_path, monkeypatch
     assert calls == []
     assert scientific_workflow({**state, **update}, runtime)["result"] is expected
     assert len(calls) == 1 and calls[0][1] is None
+
+
+def test_abandoned_refresh_allows_bound_direct_dft_decision():
+    from phase_agent.policies.recovery_transition import post_recovery_tools
+
+    state = {
+        "post_recovery_next_step_pending": True,
+        "active_model_version": "model",
+        "model_refresh": {"status": "abandoned_extrapolation", "new_model_version": "model"},
+        "extrapolation_recovery_cycle": {
+            "status": "awaiting_reviewed_dft_labels", "invalid_model_version": "model"
+        },
+    }
+    assert post_recovery_tools(state) == {"prepare_local_batch_files", "select_dft_candidates"}
+    state["extrapolation_recovery_cycle"]["invalid_model_version"] = "other"
+    assert post_recovery_tools(state) == {"prepare_local_batch_files"}
+    state["model_refresh"]["status"] = "waiting_results"
+    state["extrapolation_recovery_cycle"]["invalid_model_version"] = "model"
+    assert post_recovery_tools(state) == {"prepare_local_batch_files"}
+
+
+def test_legacy_recovery_archives_complete_frozen_plan(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from phase_agent.graphs.dialogue.nodes import read_project
+    from phase_agent.tools.step_runner.file_protocol import read_json, write_json
+
+    path = tmp_path / "state.json"
+    plan = {"agent_proposal": {"raw_action": {"tool": "select_dft_candidates", "parameters": {"scope": ["S1"]}}}, "identity": "frozen"}
+    write_json(path, {"pending_execution_policies": {"P1": plan}, "recovery_acknowledgement": {"done": True}})
+    monkeypatch.setattr("phase_agent.runtime.read_only_queries.read_only_reply", lambda *a, **k: None)
+    monkeypatch.setattr("phase_agent.policies.recovery_transition.legacy_post_recovery_plan_ids", lambda _: ["P1"])
+    def stop_after_archiving(_message):
+        raise RuntimeError("inspect archived plan")
+    monkeypatch.setattr("phase_agent.graphs.dialogue.commands._classify_history_decision", stop_after_archiving)
+    handler = SimpleNamespace(state_path=path, conversation_id=None, config_delegate=None, history_decision=None)
+    runtime = SimpleNamespace(context=SimpleNamespace(handler=handler, conversation_id="c", messages=[{"role": "user", "content": "继续"}]))
+    with pytest.raises(RuntimeError, match="inspect archived plan"):
+        read_project({}, runtime)
+    saved = read_json(path)
+    assert saved["pending_execution_policies"] == {}
+    assert saved["superseded_pending_plans"][0]["plan"] == plan
+    assert saved["post_recovery_next_step_pending"] is True
+
+
+def test_legacy_recovery_does_not_overwrite_concurrent_update(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+    from phase_agent.graphs.dialogue.nodes import read_project
+    from phase_agent.tools.step_runner.file_protocol import write_json
+
+    path = tmp_path / "state.json"
+    plan = {"agent_proposal": {"raw_action": {"tool": "select_dft_candidates"}}}
+    write_json(path, {"pending_execution_policies": {"P1": plan}, "recovery_acknowledgement": {"done": True}})
+    monkeypatch.setattr("phase_agent.runtime.read_only_queries.read_only_reply", lambda *a, **k: None)
+    def concurrent_update(_facts):
+        code = "import sys; from phase_agent.tools.step_runner.file_protocol import read_json,write_json; p=sys.argv[1]; s=read_json(p); s['other_process']=True; write_json(p,s)"
+        subprocess.run([sys.executable, "-c", code, str(path)], check=True)
+        return ["P1"]
+    monkeypatch.setattr("phase_agent.policies.recovery_transition.legacy_post_recovery_plan_ids", concurrent_update)
+    handler = SimpleNamespace(state_path=path, conversation_id=None, config_delegate=None)
+    runtime = SimpleNamespace(context=SimpleNamespace(handler=handler, conversation_id="c", messages=[{"role": "user", "content": "继续"}]))
+    with pytest.raises(ValueError, match="stale_state_file_version"):
+        read_project({}, runtime)
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["other_process"] is True
+    assert saved["pending_execution_policies"]["P1"] == plan
+    assert not saved.get("superseded_pending_plans")
+
+
+def test_verified_recovery_threshold_opens_training_not_additional_dft(monkeypatch):
+    from phase_agent.policies.recovery_transition import post_recovery_tools
+    from phase_agent.evidence import extrapolation_recovery
+
+    state = {"post_recovery_next_step_pending": True, "active_model_version": "m",
+             "model_refresh": {"status": "abandoned_extrapolation", "new_model_version": "m"},
+             "extrapolation_recovery_cycle": {"status": "awaiting_reviewed_dft_labels",
+                 "invalid_model_version": "m", "policy_version": "epoch_refresh_v1"}}
+    monkeypatch.setattr(extrapolation_recovery, "recovery_label_facts", lambda state: {"status": "complete"})
+    assert post_recovery_tools(state) == {"prepare_local_batch_files", "update_mlip"}
+    monkeypatch.setattr(extrapolation_recovery, "recovery_label_facts", lambda state: {"status": "waiting"})
+    assert post_recovery_tools(state) == {"prepare_local_batch_files", "select_dft_candidates"}

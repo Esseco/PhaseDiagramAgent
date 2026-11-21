@@ -101,6 +101,7 @@ def test_empty_project_reaches_first_saved_approval_without_old_round_evidence(t
                     {
                         "region_id": "cold-r1",
                         "priority": 1,
+                        "sample_count": 1,
                         "strategy": "coverage",
                         "phase": "O3",
                         "min_det_H": 1,

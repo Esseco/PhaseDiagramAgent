@@ -6,6 +6,7 @@ def default_slurm_cluster_config() -> dict:
     return {
         "mlip_gpu": {
             "stages": ["relax_and_feature", "deep_search"],
+            "partition_pool": ["v100m3", "v100g32"],
             "slurm_options": {
                 "nodes": 1,
                 "ntasks": 2,

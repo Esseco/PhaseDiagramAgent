@@ -26,6 +26,8 @@
 
 ## 人工编号剔除
 
+Codex MCP 的 `phase_remove_quality_records` 接受当前凸包版本和明确授权的审查目标。每个目标绑定审查 ID、几何和全部记录 ID。人工可排除混合凸包上精确匹配的旧模型记录；自动排除仍使用当前模型范围。审计保留原模型身份、原文件和恢复备份。此入口仅处理相图和台账，不创建计算任务。
+
 ```python
 from phase_agent.analysis.phase.phase_quality_review import apply_numbered_exclusions
 

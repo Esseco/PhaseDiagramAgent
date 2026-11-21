@@ -8,7 +8,6 @@ def check_structure_cost_limits(
     for name, value in (
         ("max_atoms", atom_count),
         ("max_det_H", det_H),
-        ("max_proxy_cost_per_task", proxy_cost),
     ):
         limit = limits.get(name)
         if limit is not None and value is None:

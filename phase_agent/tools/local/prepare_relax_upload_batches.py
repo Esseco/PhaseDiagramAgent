@@ -18,10 +18,26 @@ from phase_agent.configuration.defaults.default_slurm_cluster_config import (
 def prepare_relax_upload_batches(*, action, context):
     config = context["effective_config"]
     manager = context["manager"]
-    state = deepcopy(context.get("event_state") or {})
+    original = context.get("event_state") or {}
+    exact = (action.get("parameters") or {}).get("selection_scope") == "candidate_ids"
+    if exact:
+        # Only these collections are mutated by budget reservation and packaging.
+        # Copy them together to preserve shared task references and rollback on failure.
+        state = dict(original)
+        state.update(deepcopy({k: original[k] for k in
+                               ("tasks", "pending_tasks", "slurm_batches", "budget_reservations")
+                               if k in original}))
+    else:
+        state = deepcopy(original)
     if (state.get("dedup_gate") or {}).get("status") != "ready":
         return {"status": "not_configured", "reason": "structure_dedup_not_ready", "state": state}
     model = config.get("mlip") or {}
+    if (action.get("parameters") or {}).get("selection_scope") == "candidate_ids":
+        active = state.get("active_model") or {}
+        if active.get("version") != state.get("active_model_version"):
+            return {"status": "rejected", "reason": "active_model_identity_mismatch", "state": state}
+        config = deepcopy(config)
+        model = config["mlip"] = {**model, **active}
     version = model.get("version") or model.get("name")
     from phase_agent.science.mlip.slurm_executor import remote_model_references
 
@@ -44,11 +60,21 @@ def prepare_relax_upload_batches(*, action, context):
         from phase_agent.tools.local.rebuild_relax_inputs import rebuild_relax_inputs
 
         state = rebuild_relax_inputs(state, root, parameters.get("cleanup_plan"))
-    requested = list(
-        dict.fromkeys(
-            (action.get("target_ids") or [])
-            if parameters.get("selection_scope") == "target_ids"
-            else manager.data.get("branches", {})
+    exact = parameters.get("selection_scope") == "candidate_ids"
+    if exact:
+        try:
+            planned = _exact_candidate_frames(action, state, manager, config, version)
+        except (ValueError, OSError, KeyError) as error:
+            return {"status": "rejected", "reason": str(error), "state": state}
+    requested = (
+        []
+        if exact
+        else list(
+            dict.fromkeys(
+                (action.get("target_ids") or [])
+                if parameters.get("selection_scope") == "target_ids"
+                else manager.data.get("branches", {})
+            )
         )
     )
     unknown = [bid for bid in requested if bid not in manager.data.get("branches", {})]
@@ -61,7 +87,8 @@ def prepare_relax_upload_batches(*, action, context):
         }
     count = min(3, int((config.get("bohb") or {}).get("relax_structures_per_branch", 3)))
     valid_ids = set((state.get("dedup_gate") or {}).get("valid_structure_ids") or [])
-    planned = []
+    if not exact:
+        planned = []
     for bid in requested:
         branch = manager.data["branches"][bid]
         ids = [
@@ -91,7 +118,7 @@ def prepare_relax_upload_batches(*, action, context):
             cost = estimate_stage_cost(
                 "relax_and_feature", atom_count=int(atoms), budgets=config["budgets"]
             )["value"]
-            planned.append((bid, sid, cost))
+            planned.append((bid, sid, cost, None))
     if not planned:
         return {
             "status": "not_configured",
@@ -107,13 +134,17 @@ def prepare_relax_upload_batches(*, action, context):
     migrated_ids = _verified_migrated_relax_ids(state, model, version)
     created = []
     approved_keys = set()
-    for bid, sid, cost in planned:
-        key = f"relax-screen:{version}:{settings_id}:{sid}"
+    for bid, sid, cost, frame in planned:
+        key = (
+            f"relax-frame:{version}:{context['config_version']}:{settings_id}:{sid}:{frame['sha256']}"
+            if frame
+            else f"relax-screen:{version}:{settings_id}:{sid}"
+        )
         approved_keys.add(key)
         existing = next(
             (row for row in state.get("tasks") or [] if row.get("task_key") == key), None
         )
-        if existing is None and sid in migrated_ids:
+        if not exact and existing is None and sid in migrated_ids:
             continue
         if existing:
             if existing.get("status") == "completed" or _task_files_complete(existing):
@@ -175,6 +206,13 @@ def prepare_relax_upload_batches(*, action, context):
             "parameters": deepcopy(settings),
             "screening_basis": "electrostatic_top10_random3_layer_occupied",
         }
+        if frame:
+            task.update(
+                structure_path=frame["path"],
+                input_structure_sha256=frame["sha256"],
+                candidate_id=frame["candidate_id"],
+                screening_basis="exact_candidate_frame",
+            )
         task["generation_cycle"] = len(state.get("generation_history") or [])
         task["parent_decision_id"] = context.get("approval_record_id")
         state.setdefault("tasks", []).append(task)
@@ -196,11 +234,21 @@ def prepare_relax_upload_batches(*, action, context):
     )
     batches = []
     while True:
-        prepared = runner.prepare(state)
+        prepared = runner.prepare(state, _owned=exact)
         state = prepared["state"]
         if prepared["status"] == "no_tasks":
             break
         batches.append(prepared["batch"])
+    if exact and batches:
+        from phase_agent.tools.remote.prepare_phase_analysis import prepare_phase_analysis
+
+        prepared_ids = {task["task_id"] for task in created}
+        batch_ids = {tid for batch in batches for tid in batch.get("task_ids") or []}
+        if prepared_ids != batch_ids:
+            raise ValueError("exact_relax_prepared_task_scope_mismatch")
+        prepare_phase_analysis(
+            state, batches, manager, context.get("phase_references"), default_slurm_cluster_config()
+        )
     from phase_agent.tools.remote.write_relax_upload_plan import write_relax_upload_plan
 
     pending_relax = any(
@@ -235,6 +283,50 @@ def prepare_relax_upload_batches(*, action, context):
         ],
         "submitted": False,
     }
+
+
+def _exact_candidate_frames(action, state, manager, config, version):
+    """Resolve approved candidate frames without branch resampling or path substitution."""
+    params = action.get("parameters") or {}
+    ids = action.get("target_ids") or []
+    hashes = params.get("candidate_frame_sha256") or {}
+    if not ids or len(ids) != len(set(ids)) or set(ids) != set(hashes):
+        raise ValueError("candidate_frame_identity_invalid")
+    if state.get("active_model_version") != version or params.get("model_version") != version:
+        raise ValueError("candidate_frame_model_changed")
+    candidates = {}
+    for row in state.get("qbc_candidates") or []:
+        if row.get("candidate_id") in candidates:
+            raise ValueError("candidate_frame_id_ambiguous")
+        candidates[row.get("candidate_id")] = row
+    result = []
+    for cid in ids:
+        row = candidates.get(cid) or {}
+        sid = row.get("structure_id")
+        record = manager.data.get("structures", {}).get(sid)
+        if not record:
+            raise ValueError("candidate_structure_unregistered:" + str(cid))
+        bid = record.get("branch_id")
+        if bid not in manager.data.get("branches", {}):
+            raise ValueError("candidate_branch_unregistered:" + str(cid))
+        path = Path(row.get("structure_path") or "")
+        digest = hashes[cid]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or row.get("structure_sha256") != digest
+            or not path.is_file()
+            or hashlib.sha256(path.read_bytes()).hexdigest() != digest
+        ):
+            raise ValueError("candidate_frame_checksum_mismatch:" + str(cid))
+        atoms = row.get("atom_count") or sum((record.get("composition") or {}).values())
+        if not atoms or int(atoms) != atoms:
+            raise ValueError("candidate_atom_count_missing:" + str(cid))
+        cost = estimate_stage_cost(
+            "relax_and_feature", atom_count=int(atoms), budgets=config["budgets"]
+        )["value"]
+        result.append((bid, sid, cost, {"candidate_id": cid, "path": str(path), "sha256": digest}))
+    return result
 
 
 def _task_files_complete(task):

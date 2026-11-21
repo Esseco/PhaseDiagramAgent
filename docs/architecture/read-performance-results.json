@@ -1,0 +1,4005 @@
+{
+  "baseline": [
+    {
+      "mib_target": 64,
+      "limit_mib": 3072,
+      "returncode": 0,
+      "failure": null,
+      "results": [
+        {
+          "event": "end",
+          "operation": "start",
+          "seconds": 39.116911499993876,
+          "cpu_seconds": 38.140625,
+          "response_bytes": 63230092,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 6.599992047995329e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.00040970000554807484
+            },
+            "source_io": {
+              "calls": 420,
+              "seconds": 0.300142399923061,
+              "opens": 20,
+              "bytes": 451661338
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.2905689000035636
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.06979359999240842
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0003521000035107136
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "indexed_json_decode": {
+              "calls": 16,
+              "seconds": 2.7023329999647103
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "index_full_validation": {
+              "calls": 2,
+              "seconds": 0.4479423000011593
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 5.7775086000037845
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 4.470436000003247
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 4.470464300000458
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.219047499995213
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.2207988000009209
+            },
+            "json_encode:team-a59957fd386b418c9428e91f8c400bb0.json": {
+              "calls": 1,
+              "seconds": 0.00011470000026747584
+            },
+            "json_encode:codex_team.json": {
+              "calls": 1,
+              "seconds": 1.8600010662339628e-05
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.0931497999990825
+            },
+            "role_projection": {
+              "calls": 2,
+              "seconds": 1.823260900011519
+            },
+            "table_compression": {
+              "calls": 2,
+              "seconds": 16.642357099990477
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 34.6140674000053
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 34.61542339999869
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.48452470000484
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 150827008,
+          "private_end": 1671327744,
+          "kernel_process_peak_rss": 454901760,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 49446912,
+          "private": 36810752,
+          "sampled_peak_rss": 454901760,
+          "sampled_peak_private": 2104025088
+        },
+        {
+          "event": "end",
+          "operation": "read-1",
+          "seconds": 19.523065299988957,
+          "cpu_seconds": 19.21875,
+          "response_bytes": 31615663,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.5000127758830786e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012473999959183857
+            },
+            "source_io": {
+              "calls": 302,
+              "seconds": 0.24872490001143888,
+              "opens": 11,
+              "bytes": 321197615
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4588513999915449
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.2294473000074504
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0011771999998018146
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.0026323000056436285
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 1.3357954999810318
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 4.344722900001216
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 4.344738700005109
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.22700630000326782
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.2270579999894835
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.22945850000542123
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.1424677000031807
+            },
+            "role_projection": {
+              "calls": 1,
+              "seconds": 0.8166596999944886
+            },
+            "table_compression": {
+              "calls": 1,
+              "seconds": 8.287077499990119
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 17.33767940000689
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 17.33977410000807
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.1831951000058325
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 158937088,
+          "private_end": 1680379904,
+          "kernel_process_peak_rss": 454901760,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 150835200,
+          "private": 1671340032,
+          "sampled_peak_rss": 354340864,
+          "sampled_peak_private": 1946951680
+        },
+        {
+          "event": "end",
+          "operation": "read-2",
+          "seconds": 19.837003699998604,
+          "cpu_seconds": 19.609375,
+          "response_bytes": 31615663,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.299996701069176e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.00154310000652913
+            },
+            "source_io": {
+              "calls": 302,
+              "seconds": 0.24456269989605062,
+              "opens": 11,
+              "bytes": 321197615
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.45013870000548195
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.2287125000002561
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0012491000088630244
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.0027405999862821773
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 1.312738399981754
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 4.399441699992167
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 4.399473700003
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.21886079999967478
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.21898599999258295
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.22147449999465607
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.228245100006461
+            },
+            "role_projection": {
+              "calls": 1,
+              "seconds": 0.8132627000013599
+            },
+            "table_compression": {
+              "calls": 1,
+              "seconds": 8.41943419999734
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 17.590293100001873
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 17.59254970001348
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.244365899998229
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 163540992,
+          "private_end": 1683595264,
+          "kernel_process_peak_rss": 454901760,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 156848128,
+          "private": 1678270464,
+          "sampled_peak_rss": 353665024,
+          "sampled_peak_private": 1946595328
+        },
+        {
+          "event": "end",
+          "operation": "read-3",
+          "seconds": 20.0204808999988,
+          "cpu_seconds": 19.828125,
+          "response_bytes": 31615663,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 4.7000066842883825e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0013104999961797148
+            },
+            "source_io": {
+              "calls": 302,
+              "seconds": 0.25038599999970756,
+              "opens": 11,
+              "bytes": 321197615
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4516589999984717
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.22196910000639036
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.001174899996840395
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.0026150999910896644
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 1.3655752999911783
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 4.431367699988186
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 4.43139450000308
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.2304160000057891
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.23054509999928996
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.2297367999999551
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.327309400003287
+            },
+            "role_projection": {
+              "calls": 1,
+              "seconds": 0.847855799991521
+            },
+            "table_compression": {
+              "calls": 1,
+              "seconds": 8.453011999998125
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 17.80307619999803
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 17.805244500006665
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.2151499000028707
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 167776256,
+          "private_end": 1688215552,
+          "kernel_process_peak_rss": 454901760,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 161452032,
+          "private": 1681494016,
+          "sampled_peak_rss": 355667968,
+          "sampled_peak_private": 1947865088
+        },
+        {
+          "event": "end",
+          "operation": "advise",
+          "seconds": 20.611308300009114,
+          "cpu_seconds": 20.375,
+          "response_bytes": 31615955,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.49999822396785e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012483999889809638
+            },
+            "source_io": {
+              "calls": 302,
+              "seconds": 0.25725890004832763,
+              "opens": 11,
+              "bytes": 321197615
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4614653000171529
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.2304396999970777
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0012427999899955466
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.0026893000031122938
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 1.3392543999943882
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 4.441193999999086
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 4.441219500004081
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.23105329999816604
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.2311780999880284
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.23110239999368787
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.28466180000396
+            },
+            "json_encode:team-a59957fd386b418c9428e91f8c400bb0.json": {
+              "calls": 1,
+              "seconds": 0.0002199000009568408
+            },
+            "role_projection": {
+              "calls": 1,
+              "seconds": 0.8684006999974372
+            },
+            "table_compression": {
+              "calls": 1,
+              "seconds": 8.420062999997754
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 18.41913910000585
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 18.421194099995773
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.15615369999432
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 173473792,
+          "private_end": 1693306880,
+          "kernel_process_peak_rss": 454901760,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 166727680,
+          "private": 1687162880,
+          "sampled_peak_rss": 365424640,
+          "sampled_peak_private": 1946701824
+        },
+        {
+          "event": "end",
+          "operation": "advise_compact",
+          "seconds": 9.188982799998485,
+          "cpu_seconds": 9.171875,
+          "response_bytes": 383,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.099995178170502e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012740999954985455
+            },
+            "source_io": {
+              "calls": 302,
+              "seconds": 0.25190729995665606,
+              "opens": 11,
+              "bytes": 321197615
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4529627000010805
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.2255736000079196
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0011799999920185655
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.0027359000087017193
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 1.343814799998654
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 4.475734399995417
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 4.475759400011157
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.22470989999419544
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.2248453999927733
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.22743869999249
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.3293674000015017
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 9.13960940000834
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 9.141703100001905
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 6.370000483002514e-05
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 172175360,
+          "private_end": 1692323840,
+          "kernel_process_peak_rss": 454901760,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 170336256,
+          "private": 1690152960,
+          "sampled_peak_rss": 350408704,
+          "sampled_peak_private": 1946054656
+        },
+        {
+          "event": "end",
+          "operation": "mcp_read",
+          "seconds": 20.467781600003946,
+          "cpu_seconds": 20.3125,
+          "response_bytes": 33677371,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 3.999986802227795e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0011182000016560778
+            },
+            "source_io": {
+              "calls": 302,
+              "seconds": 0.24007619985786732,
+              "opens": 11,
+              "bytes": 321197615
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.41915630000585224
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.19249549999949522
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.001131800003349781
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.0026045999984489754
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 1.3328920000058133
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 4.473834999997052
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 4.47386070000357
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.22397919998911675
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.22410610000952147
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.2267093999980716
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.2865903999918373
+            },
+            "role_projection": {
+              "calls": 1,
+              "seconds": 0.8749115999962669
+            },
+            "table_compression": {
+              "calls": 1,
+              "seconds": 8.564343999998528
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 17.901829099995666
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 17.903627000006963
+            },
+            "mcp_content_encoding": {
+              "calls": 1,
+              "seconds": 2.187007700005779
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 0.3393989000032889
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-qd93617l\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 176783360,
+          "private_end": 1697779712,
+          "kernel_process_peak_rss": 454901760,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 172437504,
+          "private": 1692561408,
+          "sampled_peak_rss": 373317632,
+          "sampled_peak_private": 1945653248
+        }
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "mib_target": 128,
+      "limit_mib": 3072,
+      "returncode": 1,
+      "failure": "owned benchmark worker timed out",
+      "results": [
+        {
+          "event": "end",
+          "operation": "start",
+          "seconds": 79.20915349999268,
+          "cpu_seconds": 78.515625,
+          "response_bytes": 126429640,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 7.399998139590025e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.001066299999365583
+            },
+            "source_io": {
+              "calls": 782,
+              "seconds": 0.6874729998235125,
+              "opens": 20,
+              "bytes": 903558616
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.8920045999984723
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4356645999941975
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0012200000055599958
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "indexed_json_decode": {
+              "calls": 16,
+              "seconds": 5.425797600008082
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 69798342
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 413105
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "index_full_validation": {
+              "calls": 2,
+              "seconds": 0.9186514000030002
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 11.777062299996032
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 9.170200000007753
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 9.170227500013425
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.45702430000528693
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.45638899999903515
+            },
+            "json_encode:team-1ac2a0cfd4614321920aaa340fe4c3ae.json": {
+              "calls": 1,
+              "seconds": 0.00012310000602155924
+            },
+            "json_encode:codex_team.json": {
+              "calls": 1,
+              "seconds": 6.229999416973442e-05
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.688250299994252
+            },
+            "role_projection": {
+              "calls": 2,
+              "seconds": 3.879080500002601
+            },
+            "table_compression": {
+              "calls": 2,
+              "seconds": 33.921650600008434
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 70.04244220000692
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 70.04414920001
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 9.13522730000841
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-74p5qyec\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-74p5qyec\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 149504000,
+          "private_end": 1669779456,
+          "kernel_process_peak_rss": 801931264,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 48455680,
+          "private": 36593664,
+          "sampled_peak_rss": 795770880,
+          "sampled_peak_private": 2545192960
+        },
+        {
+          "event": "end",
+          "operation": "read-1",
+          "seconds": 40.891761699997005,
+          "cpu_seconds": 40.453125,
+          "response_bytes": 63215437,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 4.799978341907263e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012731000024359673
+            },
+            "source_io": {
+              "calls": 574,
+              "seconds": 0.5112316000158899,
+              "opens": 11,
+              "bytes": 642561246
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.9215184000058798
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4612059000064619
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0012303000112297013
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.002917699996032752
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 2.7026332000095863
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 69798342
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 413105
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 9.138413299995591
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 9.138436799999909
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.4607864999998128
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.4609121999965282
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.4603655999962939
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.711581700001261
+            },
+            "role_projection": {
+              "calls": 1,
+              "seconds": 1.903221600005054
+            },
+            "table_compression": {
+              "calls": 1,
+              "seconds": 17.06079899999895
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 36.307233300001826
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 36.30928800000402
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.582385800007614
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-74p5qyec\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-74p5qyec\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 157298688,
+          "private_end": 1677119488,
+          "kernel_process_peak_rss": 801931264,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 149512192,
+          "private": 1669791744,
+          "sampled_peak_rss": 587538432,
+          "sampled_peak_private": 2237075456
+        },
+        {
+          "event": "end",
+          "operation": "read-2",
+          "seconds": 40.352249200004735,
+          "cpu_seconds": 39.828125,
+          "response_bytes": 63215437,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.399982910603285e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.001273000001674518
+            },
+            "source_io": {
+              "calls": 574,
+              "seconds": 0.47063660000276286,
+              "opens": 11,
+              "bytes": 642561246
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.891065299991169
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4545629999920493
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0012214000016683713
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.0026519999955780804
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 2.6835008000198286
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 69798342
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 413105
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 8.968257300002733
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 8.968279199994868
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.4396733000030508
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.43979509999917354
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.4365494000085164
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.616750200002571
+            },
+            "role_projection": {
+              "calls": 1,
+              "seconds": 1.952855499999714
+            },
+            "table_compression": {
+              "calls": 1,
+              "seconds": 16.887362399997073
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 35.85693879998871
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 35.859047000005376
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.493090100004338
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-74p5qyec\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-74p5qyec\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 161185792,
+          "private_end": 1682042880,
+          "kernel_process_peak_rss": 801931264,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 156250112,
+          "private": 1676066816,
+          "sampled_peak_rss": 600150016,
+          "sampled_peak_private": 2236710912
+        },
+        {
+          "event": "end",
+          "operation": "read-3",
+          "seconds": 39.692926700008684,
+          "cpu_seconds": 38.953125,
+          "response_bytes": 63215437,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 4.899993655271828e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0013871999981347471
+            },
+            "source_io": {
+              "calls": 574,
+              "seconds": 0.484439600026235,
+              "opens": 11,
+              "bytes": 642561246
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.9018297000002349
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4641068999917479
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0012278999929549173
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 0.0026978000096278265
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 2.6375384000129998
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 69798342
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 413105
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 8.898283599992283
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 8.898309700001846
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.44054870000400115
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.44067769999674056
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.43777019999106415
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.519134300004225
+            },
+            "role_projection": {
+              "calls": 1,
+              "seconds": 1.8855374999984633
+            },
+            "table_compression": {
+              "calls": 1,
+              "seconds": 16.48803819999739
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 35.2458415000001
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 35.248021900013555
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.444822899997234
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-74p5qyec\\state.json"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-74p5qyec\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 166416384,
+          "private_end": 1687162880,
+          "kernel_process_peak_rss": 801931264,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 161189888,
+          "private": 1682046976,
+          "sampled_peak_rss": 619151360,
+          "sampled_peak_private": 2235408384
+        }
+      ],
+      "stderr_tail": ""
+    }
+  ],
+  "after": [
+    {
+      "mib_target": 64,
+      "limit_mib": 3072,
+      "returncode": 0,
+      "failure": null,
+      "results": [
+        {
+          "event": "end",
+          "operation": "start",
+          "seconds": 41.03712290000112,
+          "cpu_seconds": 39.84375,
+          "response_bytes": 63230092,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 4.999994416721165e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0003640999930212274
+            },
+            "source_io": {
+              "calls": 302,
+              "seconds": 0.19755159986380022,
+              "opens": 11,
+              "bytes": 321197615
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.2994180999958189
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.06714719999581575
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.00036860001273453236
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 1.2726364999834914
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 4.27964670000074
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 2.9303788999968674
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 2.930397099989932
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.21739539998816326
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.2175256999908015
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.23229929999797605
+            },
+            "json_encode:team-3caeeeef1b344b6d94c4c38ea18dbeea.json": {
+              "calls": 1,
+              "seconds": 0.00012150000839028507
+            },
+            "json_encode:codex_team.json": {
+              "calls": 1,
+              "seconds": 2.3999993572942913e-05
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.1216409000044223
+            },
+            "role_projection": {
+              "calls": 2,
+              "seconds": 1.720392199989874
+            },
+            "table_compression": {
+              "calls": 2,
+              "seconds": 15.903997599991271
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 36.6740540000028
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 36.67493979999563
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.353116799989948
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "index_hit": 1,
+              "field_read": 8,
+              "codex_context_miss": 1,
+              "index_full_validation": 1,
+              "derived_cache_miss": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "index_hit": 0,
+              "field_read": 35096777,
+              "codex_context_miss": 0,
+              "index_full_validation": 95366946,
+              "derived_cache_miss": 0
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "field_read",
+                "field": "pending_execution_policies"
+              },
+              {
+                "kind": "codex_context_miss",
+                "changed_sources": [
+                  "empty"
+                ]
+              },
+              {
+                "kind": "field_read",
+                "field": "confirmed_config"
+              },
+              {
+                "kind": "field_read",
+                "field": "confirmed_config_version"
+              },
+              {
+                "kind": "field_read",
+                "field": "active_model_version"
+              },
+              {
+                "kind": "field_read",
+                "field": "tasks"
+              },
+              {
+                "kind": "field_read",
+                "field": "action_records"
+              },
+              {
+                "kind": "field_read",
+                "field": "qbc_candidates"
+              },
+              {
+                "kind": "field_read",
+                "field": "current_status"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_miss",
+                "cache": "role"
+              },
+              {
+                "kind": "derived_cache_miss",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 213413888,
+          "private_end": 1733529600,
+          "kernel_process_peak_rss": 529424384,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 47149056,
+          "private": 35733504,
+          "sampled_peak_rss": 529408000,
+          "sampled_peak_private": 2178494464
+        },
+        {
+          "event": "end",
+          "operation": "read-1",
+          "seconds": 8.571959099994274,
+          "cpu_seconds": 8.328125,
+          "response_bytes": 31615663,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.80001506023109e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0013762000016868114
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.14363030008098576,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4343916999932844
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.21469330000400078
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.0864141000056406
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 6.329479699998046
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 6.331617100004223
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.2402536000008695
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 66541829
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 215949312,
+          "private_end": 1737412608,
+          "kernel_process_peak_rss": 529424384,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 213413888,
+          "private": 1733529600,
+          "sampled_peak_rss": 460279808,
+          "sampled_peak_private": 2013220864
+        },
+        {
+          "event": "end",
+          "operation": "read-2",
+          "seconds": 8.825995100007276,
+          "cpu_seconds": 8.71875,
+          "response_bytes": 31615663,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 6.399990525096655e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012586999946506694
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.14805189990147483,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4463459000107832
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.22137230000225827
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.2371908000059193
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 6.55874190000759
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 6.561081199994078
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.2648154000053182
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 66541829
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 218337280,
+          "private_end": 1739784192,
+          "kernel_process_peak_rss": 529424384,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 214904832,
+          "private": 1736364032,
+          "sampled_peak_rss": 460222464,
+          "sampled_peak_private": 2013052928
+        },
+        {
+          "event": "end",
+          "operation": "read-3",
+          "seconds": 8.86821040000359,
+          "cpu_seconds": 8.6875,
+          "response_bytes": 31615663,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.299996701069176e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012671000004047528
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.14904960010608193,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4546701000072062
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.2256548000004841
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.214748900005361
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 6.595114299998386
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 6.5972457000025315
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.2708671000000322
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 66541829
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 220590080,
+          "private_end": 1742340096,
+          "kernel_process_peak_rss": 529424384,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 217292800,
+          "private": 1738735616,
+          "sampled_peak_rss": 460218368,
+          "sampled_peak_private": 2013028352
+        },
+        {
+          "event": "end",
+          "operation": "advise",
+          "seconds": 9.4821135999955,
+          "cpu_seconds": 9.265625,
+          "response_bytes": 31615955,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.700014298781753e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012691000010818243
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.14258870006597135,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.44250190000457224
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.22297379998781253
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.1921639000065625
+            },
+            "json_encode:team-3caeeeef1b344b6d94c4c38ea18dbeea.json": {
+              "calls": 1,
+              "seconds": 0.00022069999249652028
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 7.176160600007279
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 7.178255999999237
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.2474924999987707
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 66541829
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 223727616,
+          "private_end": 1745424384,
+          "kernel_process_peak_rss": 529424384,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 219541504,
+          "private": 1741291520,
+          "sampled_peak_rss": 461168640,
+          "sampled_peak_private": 2013532160
+        },
+        {
+          "event": "end",
+          "operation": "advise_compact",
+          "seconds": 5.796597499997006,
+          "cpu_seconds": 5.703125,
+          "response_bytes": 383,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.299996701069176e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012315999920247123
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.14097959993523546,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4408694000012474
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.22343389999878127
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.1645952999970177
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 5.749413400000776
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 5.751343600000837
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.920000406447798e-05
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 1
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 34934100
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 227516416,
+          "private_end": 1747951616,
+          "kernel_process_peak_rss": 529424384,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 222683136,
+          "private": 1744375808,
+          "sampled_peak_rss": 421027840,
+          "sampled_peak_private": 2013278208
+        },
+        {
+          "event": "end",
+          "operation": "mcp_read",
+          "seconds": 9.132388000012725,
+          "cpu_seconds": 8.921875,
+          "response_bytes": 33677371,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 4.2000028770416975e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.001132400007918477
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.13934649992734194,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4433400999841979
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.22001730000192765
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.271782900003018
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 6.613408299992443
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 6.615224099994521
+            },
+            "mcp_content_encoding": {
+              "calls": 1,
+              "seconds": 2.1540547000040533
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 0.3252202000003308
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 66541829
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-g2lfwbop\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 228835328,
+          "private_end": 1749450752,
+          "kernel_process_peak_rss": 529424384,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 225320960,
+          "private": 1745747968,
+          "sampled_peak_rss": 461303808,
+          "sampled_peak_private": 2013417472
+        }
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "mib_target": 128,
+      "limit_mib": 3072,
+      "returncode": 0,
+      "failure": null,
+      "results": [
+        {
+          "event": "end",
+          "operation": "start",
+          "seconds": 86.65455900000234,
+          "cpu_seconds": 84.578125,
+          "response_bytes": 126429640,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 7.399998139590025e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.001318200011155568
+            },
+            "source_io": {
+              "calls": 574,
+              "seconds": 0.5081062000681413,
+              "opens": 11,
+              "bytes": 642561246
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.9216275999933714
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4609587000013562
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0013075000024400651
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 2.6694076000130735
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 69798342
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 413105
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 8.683688400007668
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 6.171012099992367
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 6.171038200001931
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.46276519999082666
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.46291079999355134
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.46072069999354426
+            },
+            "json_encode:team-30f8a979ba804baab3f629542fee2e64.json": {
+              "calls": 1,
+              "seconds": 0.0001250000059371814
+            },
+            "json_encode:codex_team.json": {
+              "calls": 1,
+              "seconds": 6.179999036248773e-05
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.553211400008877
+            },
+            "role_projection": {
+              "calls": 2,
+              "seconds": 3.853088200019556
+            },
+            "table_compression": {
+              "calls": 2,
+              "seconds": 33.845909599986044
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 77.5997556999937
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 77.60186549999344
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 9.018698500003666
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "index_hit": 1,
+              "field_read": 8,
+              "codex_context_miss": 1,
+              "index_full_validation": 1,
+              "derived_cache_miss": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876,
+              "index_hit": 0,
+              "field_read": 70215432,
+              "codex_context_miss": 0,
+              "index_full_validation": 190781938,
+              "derived_cache_miss": 0
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "field_read",
+                "field": "pending_execution_policies"
+              },
+              {
+                "kind": "codex_context_miss",
+                "changed_sources": [
+                  "empty"
+                ]
+              },
+              {
+                "kind": "field_read",
+                "field": "confirmed_config"
+              },
+              {
+                "kind": "field_read",
+                "field": "confirmed_config_version"
+              },
+              {
+                "kind": "field_read",
+                "field": "active_model_version"
+              },
+              {
+                "kind": "field_read",
+                "field": "tasks"
+              },
+              {
+                "kind": "field_read",
+                "field": "action_records"
+              },
+              {
+                "kind": "field_read",
+                "field": "qbc_candidates"
+              },
+              {
+                "kind": "field_read",
+                "field": "current_status"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_miss",
+                "cache": "role"
+              },
+              {
+                "kind": "derived_cache_miss",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 279928832,
+          "private_end": 1800736768,
+          "kernel_process_peak_rss": 941670400,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 48148480,
+          "private": 36196352,
+          "sampled_peak_rss": 936165376,
+          "sampled_peak_private": 2686132224
+        },
+        {
+          "event": "end",
+          "operation": "read-1",
+          "seconds": 17.380526099994313,
+          "cpu_seconds": 17.0,
+          "response_bytes": 63215437,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.799985956400633e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0011041999969165772
+            },
+            "source_io": {
+              "calls": 366,
+              "seconds": 0.2906350999401184,
+              "opens": 2,
+              "bytes": 381563876
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.8819686999922851
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.44128949999867473
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.365242200001376
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 12.993381799999042
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 13.004055600002175
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.376371899998048
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 133053082
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 283721728,
+          "private_end": 1805918208,
+          "kernel_process_peak_rss": 941670400,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 279937024,
+          "private": 1800736768,
+          "sampled_peak_rss": 786882560,
+          "sampled_peak_private": 2372833280
+        },
+        {
+          "event": "end",
+          "operation": "read-2",
+          "seconds": 17.25977380000404,
+          "cpu_seconds": 16.609375,
+          "response_bytes": 63215437,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 4.5000051613897085e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0010850999969989061
+            },
+            "source_io": {
+              "calls": 366,
+              "seconds": 0.2879335000034189,
+              "opens": 2,
+              "bytes": 381563876
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.8866907000046922
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4436301999958232
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.355363199996646
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 12.904299300003913
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 12.906181999991531
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.353507899999386
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 133053082
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 286470144,
+          "private_end": 1808003072,
+          "kernel_process_peak_rss": 941670400,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 281624576,
+          "private": 1803816960,
+          "sampled_peak_rss": 786526208,
+          "sampled_peak_private": 2372251648
+        },
+        {
+          "event": "end",
+          "operation": "read-3",
+          "seconds": 17.323260600009235,
+          "cpu_seconds": 16.890625,
+          "response_bytes": 63215437,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.199995939619839e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0013251999916974455
+            },
+            "source_io": {
+              "calls": 366,
+              "seconds": 0.30207240012532566,
+              "opens": 2,
+              "bytes": 381563876
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.8871071000030497
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4436937999998918
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.23720790000516
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 12.830075999998371
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 12.83219809998991
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.490964700002223
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 133053082
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 291151872,
+          "private_end": 1812512768,
+          "kernel_process_peak_rss": 941670400,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 284372992,
+          "private": 1805905920,
+          "sampled_peak_rss": 786812928,
+          "sampled_peak_private": 2371649536
+        },
+        {
+          "event": "end",
+          "operation": "advise",
+          "seconds": 19.018231399997603,
+          "cpu_seconds": 18.421875,
+          "response_bytes": 63215729,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.599998985417187e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0013202999980421737
+            },
+            "source_io": {
+              "calls": 366,
+              "seconds": 0.30055059998994693,
+              "opens": 2,
+              "bytes": 381563876
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.8993247999896994
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4586666000104742
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.533890499995323
+            },
+            "json_encode:team-30f8a979ba804baab3f629542fee2e64.json": {
+              "calls": 1,
+              "seconds": 0.00020840000070165843
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 14.448263599988422
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 14.450391599995783
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.455336500002886
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 133053082
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 291213312,
+          "private_end": 1812684800,
+          "kernel_process_peak_rss": 941670400,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 288006144,
+          "private": 1809358848,
+          "sampled_peak_rss": 789061632,
+          "sampled_peak_private": 2371899392
+        },
+        {
+          "event": "end",
+          "operation": "advise_compact",
+          "seconds": 11.785503300008713,
+          "cpu_seconds": 11.421875,
+          "response_bytes": 383,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 6.299989763647318e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0013105999969411641
+            },
+            "source_io": {
+              "calls": 366,
+              "seconds": 0.30588830025226343,
+              "opens": 2,
+              "bytes": 381563876
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.9155726000026334
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4619252999982564
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.485259599998244
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 11.688172399997711
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 11.690193200003705
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 6.78999931551516e-05
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 1
+            },
+            "bytes": {
+              "strong_file_validation": 381563876,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 69845579
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 293335040,
+          "private_end": 1814753280,
+          "kernel_process_peak_rss": 941670400,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 290164736,
+          "private": 1811636224,
+          "sampled_peak_rss": 711929856,
+          "sampled_peak_private": 2371555328
+        },
+        {
+          "event": "end",
+          "operation": "mcp_read",
+          "seconds": 18.254220199989504,
+          "cpu_seconds": 17.84375,
+          "response_bytes": 67334194,
+          "input_bytes": 190781938,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.999987479299307e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0014229999942472205
+            },
+            "source_io": {
+              "calls": 366,
+              "seconds": 0.3021042999753263,
+              "opens": 2,
+              "bytes": 381563876
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.9071242000063648
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.4641850999905728
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 6.504360400009318
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 13.21166169999924
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 13.213914499996463
+            },
+            "mcp_content_encoding": {
+              "calls": 1,
+              "seconds": 4.344589500004076
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 0.6185121999878902
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 381563876,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 133053082
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\native-prof-i3fp2kj5\\native-case-2hxiep_e\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 296271872,
+          "private_end": 1817698304,
+          "kernel_process_peak_rss": 941670400,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 293601280,
+          "private": 1815027712,
+          "sampled_peak_rss": 787357696,
+          "sampled_peak_private": 2372190208
+        }
+      ],
+      "stderr_tail": ""
+    }
+  ],
+  "baseline_source_sha256": {
+    "phase_agent.agents.strategic.codex_team.py": "8322dfed5d76b841ec8cdbe0cb1d73f5b610c6745fc9a80c6ba51ca9a6b74758",
+    "phase_agent.evidence.decision_evidence.py": "29f35f436755e7c66b944c87e0c4d5851a9948a5b66de2ba4fac084ffb869a9e",
+    "phase_agent.evidence.snapshot.py": "88bc942d3f1f916be7241ca2af71fe08ed7ffbf4c6d252191cd624f2408a65e5",
+    "phase_agent.models.transport_tables.py": "8d6ceba8f44e1b1e4b5f0941aebbcdedbd52496cc60096af3ef63267088fcd91",
+    "phase_agent.persistence.memory.decision_context.py": "57615723489e6f948c662d419675fd20b6eec9b3b155fdc408d7229147d34dfd",
+    "phase_agent.persistence.memory.knowledge_record.py": "a5e85ae6ecad8464ab50c5dfd2902b1619d161aeee60f80e72e651a505198548",
+    "phase_agent.persistence.memory.retrieve_relevant_knowledge.py": "6da99938e6c60fa7fbfaf6c9bfb312466dd58fd6633428144878645e2999f80b",
+    "phase_agent.persistence.memory.review_queue.py": "6cf226b34caf41a53cf7cfc0af3bbc2e33f544932734d9b680d2be47360f9885",
+    "phase_agent.persistence.memory.verify_evidence_refs.py": "45985c4e4d7ee5a9eff7872141127e364713447399ce827dfbf2d62f79157863",
+    "phase_agent.persistence.state.field_index.py": "08bfea22c99ad7aa943afe802aaed6b61256ec8d46b6b67aac9b21c5b11c16c4",
+    "phase_agent.persistence.state.state_view.py": "f34943d7c6c5c5ff7a5bd337a57304fc6f3a2630b3b8e2dbc3b256dce9bc1b81",
+    "phase_agent.runtime.codex.context.py": "37eafcc22a1e7cd9ffd5a1e64a9a392c2a543ac1cc6ed28709f8b11ce6b19bcd",
+    "phase_agent.runtime.context_overview.py": "77260438c08f2a31dcd6ea508f645e916b3693ce7813237a2e1552cae6a67808",
+    "phase_agent.runtime.local_agent_control.py": "0074519674ff16c8efec311e37ddc0a7217fa17e11e7173a429bae13c8eb6a04"
+  },
+  "limits": {
+    "process_commit_mib": 3072,
+    "worker_timeout_seconds": 240
+  },
+  "notes": [
+    "Performance-path baseline is an owned snapshot of disk source, not Git HEAD. Shared memory-correctness interfaces were aligned on both sides after the separate correctness fix.",
+    "The 190MB baseline exceeded the total worker deadline after completed start/read samples; those completed requests are retained.",
+    "An initial 1.5GiB setup failed at dependency import. Earlier cache placement and 64MiB capacity were rejected after measurement.",
+    "Final semantic compatibility guards are verified separately; final-source 95MB smoke appended below."
+  ],
+  "final_source_smoke": [
+    {
+      "mib_target": 64,
+      "limit_mib": 3072,
+      "returncode": 0,
+      "failure": null,
+      "results": [
+        {
+          "event": "end",
+          "operation": "start",
+          "seconds": 45.12576059999992,
+          "cpu_seconds": 44.390625,
+          "response_bytes": 63230084,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.099995178170502e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.00035349999961908907
+            },
+            "source_io": {
+              "calls": 302,
+              "seconds": 0.197869100025855,
+              "opens": 11,
+              "bytes": 321197615
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.2814776000013808
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.06747089998680167
+            },
+            "team_open_index": {
+              "calls": 1,
+              "seconds": 0.0003690000012284145
+            },
+            "field:pending_execution_policies": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 2
+            },
+            "indexed_json_decode": {
+              "calls": 8,
+              "seconds": 1.3097922999877483
+            },
+            "field:confirmed_config": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 26
+            },
+            "field:confirmed_config_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:active_model_version": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 4
+            },
+            "field:tasks": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 34886865
+            },
+            "field:action_records": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 205927
+            },
+            "field:qbc_candidates": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 3932
+            },
+            "field:current_status": {
+              "calls": 0,
+              "seconds": 0.0,
+              "declared_bytes": 17
+            },
+            "team_control_context": {
+              "calls": 1,
+              "seconds": 4.426200600006268
+            },
+            "decision_evidence": {
+              "calls": 1,
+              "seconds": 2.9018961999972817
+            },
+            "team_decision_evidence": {
+              "calls": 1,
+              "seconds": 2.901923800003715
+            },
+            "index_full_validation": {
+              "calls": 1,
+              "seconds": 0.22071280000091065
+            },
+            "team_verify_index": {
+              "calls": 1,
+              "seconds": 0.2208531999931438
+            },
+            "team_source_after": {
+              "calls": 1,
+              "seconds": 0.21403889999783132
+            },
+            "json_encode:team-f94ac51f2a154958addd01b9848dfcab.json": {
+              "calls": 1,
+              "seconds": 0.00012630000128410757
+            },
+            "json_encode:codex_team.json": {
+              "calls": 1,
+              "seconds": 9.349999891128391e-05
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.2617857000004733
+            },
+            "role_projection": {
+              "calls": 2,
+              "seconds": 1.8439422999945236
+            },
+            "table_compression": {
+              "calls": 2,
+              "seconds": 16.91892779999762
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 40.542310999997426
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 40.54332130000694
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 4.566168499994092
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "index_hit": 1,
+              "field_read": 8,
+              "codex_context_miss": 1,
+              "index_full_validation": 1,
+              "derived_cache_miss": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "index_hit": 0,
+              "field_read": 35096777,
+              "codex_context_miss": 0,
+              "index_full_validation": 95366946,
+              "derived_cache_miss": 0
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "field_read",
+                "field": "pending_execution_policies"
+              },
+              {
+                "kind": "codex_context_miss",
+                "changed_sources": [
+                  "empty"
+                ]
+              },
+              {
+                "kind": "field_read",
+                "field": "confirmed_config"
+              },
+              {
+                "kind": "field_read",
+                "field": "confirmed_config_version"
+              },
+              {
+                "kind": "field_read",
+                "field": "active_model_version"
+              },
+              {
+                "kind": "field_read",
+                "field": "tasks"
+              },
+              {
+                "kind": "field_read",
+                "field": "action_records"
+              },
+              {
+                "kind": "field_read",
+                "field": "qbc_candidates"
+              },
+              {
+                "kind": "field_read",
+                "field": "current_status"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "derived_cache_miss",
+                "cache": "role"
+              },
+              {
+                "kind": "derived_cache_miss",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 212250624,
+          "private_end": 1732530176,
+          "kernel_process_peak_rss": 529469440,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 48943104,
+          "private": 38080512,
+          "sampled_peak_rss": 529403904,
+          "sampled_peak_private": 2178576384
+        },
+        {
+          "event": "end",
+          "operation": "read-1",
+          "seconds": 9.021373499999754,
+          "cpu_seconds": 9.03125,
+          "response_bytes": 31615658,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 4.999994416721165e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.001034899993101135
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.15289040011703037,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4633968999987701
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.23251069999241736
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.2980021000112174
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 6.718451599997934
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 6.720231900006183
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.301054199997452
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 66541825
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 215064576,
+          "private_end": 1735958528,
+          "kernel_process_peak_rss": 529469440,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 212254720,
+          "private": 1732530176,
+          "sampled_peak_rss": 460697600,
+          "sampled_peak_private": 2013609984
+        },
+        {
+          "event": "end",
+          "operation": "advise",
+          "seconds": 9.6818792999984,
+          "cpu_seconds": 9.609375,
+          "response_bytes": 31615950,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.700014298781753e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0013091000000713393
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.14826139991055243,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4577804999862565
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.22929299999668729
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.2914074000000255
+            },
+            "json_encode:team-f94ac51f2a154958addd01b9848dfcab.json": {
+              "calls": 1,
+              "seconds": 0.00021029998606536537
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 7.3372786000109045
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 7.339323799998965
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 2.2840205999964382
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 66541825
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 217616384,
+          "private_end": 1738665984,
+          "kernel_process_peak_rss": 529469440,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 214020096,
+          "private": 1734909952,
+          "sampled_peak_rss": 460984320,
+          "sampled_peak_private": 2013585408
+        },
+        {
+          "event": "end",
+          "operation": "advise_compact",
+          "seconds": 5.948905700002797,
+          "cpu_seconds": 5.921875,
+          "response_bytes": 383,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 5.099995178170502e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0012843000004068017
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.14879249999648891,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.456855300013558
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.2272674999985611
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.287768899986986
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 5.897752100005164
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 5.899763699999312
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 7.529999129474163e-05
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 1
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 34934099
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 220368896,
+          "private_end": 1741115392,
+          "kernel_process_peak_rss": 529469440,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 216571904,
+          "private": 1737617408,
+          "sampled_peak_rss": 419115008,
+          "sampled_peak_private": 2012176384
+        },
+        {
+          "event": "end",
+          "operation": "mcp_read",
+          "seconds": 9.199582200002624,
+          "cpu_seconds": 9.140625,
+          "response_bytes": 33677366,
+          "input_bytes": 95366946,
+          "stages": {
+            "handler_lock_wait": {
+              "calls": 2,
+              "seconds": 4.799992893822491e-06
+            },
+            "file_lock_wait": {
+              "calls": 1,
+              "seconds": 0.0011289999965811148
+            },
+            "source_io": {
+              "calls": 184,
+              "seconds": 0.151928300052532,
+              "opens": 2,
+              "bytes": 190733892
+            },
+            "strong_version": {
+              "calls": 2,
+              "seconds": 0.4630116000043927
+            },
+            "team_source_before": {
+              "calls": 1,
+              "seconds": 0.23033079999731854
+            },
+            "snapshot": {
+              "calls": 1,
+              "seconds": 3.2958608999906573
+            },
+            "file_lock_hold": {
+              "calls": 1,
+              "seconds": 6.6887201000063214
+            },
+            "handler_lock_hold": {
+              "calls": 1,
+              "seconds": 6.69054129999131
+            },
+            "mcp_content_encoding": {
+              "calls": 1,
+              "seconds": 2.173262299998896
+            },
+            "final_serialization": {
+              "calls": 1,
+              "seconds": 0.2968659000034677
+            }
+          },
+          "read_metrics": {
+            "counts": {
+              "strong_file_validation": 2,
+              "codex_context_hit": 1,
+              "derived_cache_hit": 2
+            },
+            "bytes": {
+              "strong_file_validation": 190733892,
+              "codex_context_hit": 0,
+              "derived_cache_hit": 66541825
+            },
+            "details": [
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "context"
+              },
+              {
+                "kind": "strong_file_validation",
+                "path": "E:\\Py-Code\\final-read-x5cx43u2\\native-case-6o782v78\\state.json"
+              },
+              {
+                "kind": "derived_cache_hit",
+                "cache": "role"
+              }
+            ]
+          },
+          "model_calls": 0,
+          "client_wait_seconds": null,
+          "rss_end": 224354304,
+          "private_end": 1745977344,
+          "kernel_process_peak_rss": 529469440,
+          "cpu_affinity": [
+            0
+          ],
+          "rss": 220622848,
+          "private": 1741410304,
+          "sampled_peak_rss": 461242368,
+          "sampled_peak_private": 2013683712
+        }
+      ],
+      "stderr_tail": ""
+    }
+  ],
+  "source_stable_during_final_smoke": true,
+  "smoke_source_sha256": {
+    "phase_agent\\persistence\\memory\\knowledge_record.py": "cb7a1bf63be7a49f0aa7b6b3494cf558954644b51c1b8b4f34a9d5ef9eeab97f",
+    "phase_agent\\persistence\\memory\\verify_evidence_refs.py": "985adff56c4b906745b80410b2b207f8e85c10d826049a25a1b186ae48972e44",
+    "phase_agent\\persistence\\memory\\review_queue.py": "8d2dbb5cdc8d4078c79ff7d859b25f9a59f14adafc6592dc2b02ec6d10567c74",
+    "phase_agent\\persistence\\memory\\retrieve_relevant_knowledge.py": "c48988ad98fce63d6310cb6a77460ddc3cac765a87971110560e1e8a48f69907",
+    "phase_agent\\persistence\\memory\\decision_context.py": "9b2fa8ef6aab4381f0c72ff4ba1da64df971c20667fcacbefb4c3d5607083ef4",
+    "phase_agent\\persistence\\state\\field_index.py": "4e5a6d5f7d3cb4fc906450c7d14919e068be68c87853889925d22188fee871e0",
+    "phase_agent\\persistence\\state\\state_view.py": "02e571f4426b69adcf25fcab42da2a35d041fa7861644c1d232b9099d154123c",
+    "phase_agent\\runtime\\context_overview.py": "ba462a648577392b454d6627b342308d8e0f1e5bc8249570ce886e31b777d8e0",
+    "phase_agent\\runtime\\codex\\context.py": "458f33568db3bffc826fbdb2fc4b1165e975f8ad4a74220d92912a461d4be954",
+    "phase_agent\\runtime\\local_agent_control.py": "ee78ef26a16ede28c5bb99fda3f0cc862e877a37be15b06608124bcca69fe96c",
+    "phase_agent\\evidence\\decision_evidence.py": "29f35f436755e7c66b944c87e0c4d5851a9948a5b66de2ba4fac084ffb869a9e",
+    "phase_agent\\evidence\\snapshot.py": "88bc942d3f1f916be7241ca2af71fe08ed7ffbf4c6d252191cd624f2408a65e5",
+    "phase_agent\\models\\transport_tables.py": "8d6ceba8f44e1b1e4b5f0941aebbcdedbd52496cc60096af3ef63267088fcd91",
+    "phase_agent\\agents\\strategic\\codex_team.py": "68d3d68c30d577fc377981218e0839bb2987d9b5afacf7bfec5575afe9471a4b",
+    "phase_agent\\persistence\\state\\read_versions.py": "ee925b7c0386af145517ac851373ddf591b1ab4e2ff2721b7b2c001909a1134e",
+    "phase_agent\\runtime\\turn_process.py": "0938f05049c170a09b513f7d1e90ef4ca0a6c78134c857764ab65727424bb315",
+    "phase_agent\\persistence\\ledger\\phase_data_manager.py": "e7353366b8727f3214ea798352cd33fae62f62b0b0d1cd8f3118427eb63c7086",
+    "phase_agent\\tools\\step_runner\\file_protocol.py": "2dee5359f6fdad5ec3f4779e60a86defad0c7f30072b27e2a5df2d5b5cefac96",
+    "phase_agent\\evidence\\build_decision_context.py": "93a30e03dec97a42970aac5917c32f71ec4e58641c9ae6664527420306258ecc"
+  },
+  "final_disk_source_sha256": {
+    "phase_agent\\persistence\\memory\\knowledge_record.py": "cb7a1bf63be7a49f0aa7b6b3494cf558954644b51c1b8b4f34a9d5ef9eeab97f",
+    "phase_agent\\persistence\\memory\\verify_evidence_refs.py": "704b728dc32ed065b2be0ab0c5abb4b2b84622ad876458a3c637e178f2c8c697",
+    "phase_agent\\persistence\\memory\\review_queue.py": "8d2dbb5cdc8d4078c79ff7d859b25f9a59f14adafc6592dc2b02ec6d10567c74",
+    "phase_agent\\persistence\\memory\\retrieve_relevant_knowledge.py": "c48988ad98fce63d6310cb6a77460ddc3cac765a87971110560e1e8a48f69907",
+    "phase_agent\\persistence\\memory\\decision_context.py": "9b2fa8ef6aab4381f0c72ff4ba1da64df971c20667fcacbefb4c3d5607083ef4",
+    "phase_agent\\persistence\\state\\field_index.py": "4e5a6d5f7d3cb4fc906450c7d14919e068be68c87853889925d22188fee871e0",
+    "phase_agent\\persistence\\state\\state_view.py": "02e571f4426b69adcf25fcab42da2a35d041fa7861644c1d232b9099d154123c",
+    "phase_agent\\runtime\\context_overview.py": "ba462a648577392b454d6627b342308d8e0f1e5bc8249570ce886e31b777d8e0",
+    "phase_agent\\runtime\\codex\\context.py": "458f33568db3bffc826fbdb2fc4b1165e975f8ad4a74220d92912a461d4be954",
+    "phase_agent\\runtime\\local_agent_control.py": "ee78ef26a16ede28c5bb99fda3f0cc862e877a37be15b06608124bcca69fe96c",
+    "phase_agent\\evidence\\decision_evidence.py": "29f35f436755e7c66b944c87e0c4d5851a9948a5b66de2ba4fac084ffb869a9e",
+    "phase_agent\\evidence\\snapshot.py": "88bc942d3f1f916be7241ca2af71fe08ed7ffbf4c6d252191cd624f2408a65e5",
+    "phase_agent\\models\\transport_tables.py": "8d6ceba8f44e1b1e4b5f0941aebbcdedbd52496cc60096af3ef63267088fcd91",
+    "phase_agent\\agents\\strategic\\codex_team.py": "68d3d68c30d577fc377981218e0839bb2987d9b5afacf7bfec5575afe9471a4b",
+    "phase_agent\\persistence\\state\\read_versions.py": "ee925b7c0386af145517ac851373ddf591b1ab4e2ff2721b7b2c001909a1134e",
+    "phase_agent\\runtime\\turn_process.py": "0938f05049c170a09b513f7d1e90ef4ca0a6c78134c857764ab65727424bb315",
+    "phase_agent\\persistence\\ledger\\phase_data_manager.py": "e7353366b8727f3214ea798352cd33fae62f62b0b0d1cd8f3118427eb63c7086",
+    "phase_agent\\tools\\step_runner\\file_protocol.py": "2dee5359f6fdad5ec3f4779e60a86defad0c7f30072b27e2a5df2d5b5cefac96",
+    "phase_agent\\evidence\\build_decision_context.py": "93a30e03dec97a42970aac5917c32f71ec4e58641c9ae6664527420306258ecc"
+  },
+  "post_smoke_changed_sources": [
+    "phase_agent\\persistence\\memory\\verify_evidence_refs.py"
+  ],
+  "post_smoke_note": "Only explicit stale/invalid_report evidence rejection changed after the stable-source smoke. The empty-memory performance fixture does not execute that branch; final correctness regressions ran afterward.",
+  "verification": {
+    "targeted_pytest_passed": 227,
+    "ruff_check": "passed",
+    "scientific_jobs": 0,
+    "real_projects_modified": 0,
+    "service_restarts": 0
+  }
+}

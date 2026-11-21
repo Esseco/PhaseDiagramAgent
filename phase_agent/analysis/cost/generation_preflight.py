@@ -93,7 +93,7 @@ def generation_framework_costs(manager, phase_references, config, state):
 
 
 def attach_generation_preflight(action, state, context, config):
-    from phase_agent.policies.region_sampling import is_region, preview
+    from phase_agent.policies.region_sampling import is_region, preview, sampling_limit
 
     if is_region(action):
         action["parameters"]["region_preview"] = preview(
@@ -117,7 +117,7 @@ def attach_generation_preflight(action, state, context, config):
             remaining = budgets.get("total_relative_cost")
             if isinstance(remaining, (int, float)):
                 action["parameters"]["generation_cost_preview"] = {
-                    "selected_branch_upper": legal,
+                    "selected_branch_upper": sampling_limit(action["parameters"]),
                     "relax_mc_cost_upper": float(remaining),
                 }
                 attach_module_scope(action, state, config)
@@ -133,16 +133,6 @@ def attach_generation_preflight(action, state, context, config):
         manager, (context or {}).get("phase_references") or {}, config, state
     )
     preview = preview_generation_cost(action, frameworks, state, config)
-    from phase_agent.tools.budget.check_budget import budget_is_hard
-
-    from phase_agent.policies.adaptive_branch_count import budget_limits_for_action
-
-    if preview["status"] == "over_budget" and budget_is_hard(
-        budget_limits_for_action(action, config.get("budgets"))
-    ):
-        raise ValueError(
-            f"扩胞前Relax+MC粗估 {preview['relax_mc_cost_upper']:.3g} 超过剩余预算 {preview['remaining_budget']:.3g}；请缩小胞/数量或修订预算，未生成结构"
-        )
     from phase_agent.policies.adaptive_branch_count import is_adaptive_generation
 
     if is_adaptive_generation(action):
@@ -201,18 +191,7 @@ def preview_generation_cost(action, frameworks, state, config):
         envelopes.extend([(per_branch, seconds)] * allocation["quota"])
     selected = sorted(envelopes, key=lambda row: row[0], reverse=True)[: params["batch_size"]]
     cost = sum(row[0] for row in selected)
-    limits = config.get("budgets") or {}
-    used = float((state.get("budget_usage") or {}).get("total_relative_cost", 0))
-    remaining = (
-        max(
-            0.0,
-            float(limits["total_relative_cost"])
-            - used
-            - float(state.get("reserved_relative_cost", 0)),
-        )
-        if limits.get("total_relative_cost") is not None
-        else None
-    )
+    remaining = None
     if not isfinite(cost):
         raise ValueError("扩胞成本预估无效")
     return {

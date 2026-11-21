@@ -178,8 +178,13 @@ def test_frozen_hull_with_discarded_results_cannot_be_reused(monkeypatch):
     state = {
         "tasks": [bad, good],
         "branch_hull_batches": {
-            "frozen": {"model_version": "new", "records": [{"structure_path": "bad.vasp"}]}
+            "frozen": {
+                "version": "frozen",
+                "model_version": "new",
+                "records": [{"structure_path": "bad.vasp"}],
+            }
         },
+        "phase_diagrams": {"mlip": {"status": "completed", "model_version": "new", "version": "current"}},
     }
     manager = SimpleNamespace(
         data={
@@ -278,10 +283,15 @@ def test_hull_rejects_mlip_quality_failure_even_when_status_says_completed():
 
 
 def test_relax_worker_defaults_to_500_lbfgs_without_loading_a_model(tmp_path, monkeypatch):
+    from ase import Atoms
+    from ase.io import write
     from pymatgen.core import Lattice, Structure
     from phase_agent.science.mlip.mace_worker import run_mace_worker
 
     seen = {}
+    initial = tmp_path / "initial.vasp"
+    write(initial, Atoms("CoO2", positions=[[0, 0, 0], [1, 1, 1], [2, 2, 2]], cell=[5, 5, 5], pbc=True))
+    monkeypatch.setattr("phase_agent.science.mlip.mace_worker._extrapolation_monitor_factory", lambda: lambda atoms: object())
 
     def relax(structure, model, *, output_path, steps, **kwargs):
         seen["steps"] = steps
@@ -297,7 +307,7 @@ def test_relax_worker_defaults_to_500_lbfgs_without_loading_a_model(tmp_path, mo
         {
             "operation": "relax",
             "model_path": "fake.model",
-            "structure_path": "unused.vasp",
+            "structure_path": str(initial),
             "output_directory": str(tmp_path),
             "parameters": {"optimizer": "LBFGS"},
         }
@@ -306,8 +316,14 @@ def test_relax_worker_defaults_to_500_lbfgs_without_loading_a_model(tmp_path, mo
 
 
 def test_unconverged_refresh_does_not_spend_more_committee_predictions(tmp_path, monkeypatch):
+    from ase import Atoms
+    from ase.io import write
     from pymatgen.core import Lattice, Structure
     from phase_agent.science.mlip.mace_worker import run_mace_worker
+
+    initial = tmp_path / "initial.vasp"
+    write(initial, Atoms("CoO2", positions=[[0, 0, 0], [1, 1, 1], [2, 2, 2]], cell=[5, 5, 5], pbc=True))
+    monkeypatch.setattr("phase_agent.science.mlip.mace_worker._extrapolation_monitor_factory", lambda: lambda atoms: object())
 
     def relax(structure, model, *, output_path, **kwargs):
         Structure(
@@ -324,7 +340,7 @@ def test_unconverged_refresh_does_not_spend_more_committee_predictions(tmp_path,
         {
             "operation": "relax",
             "model_path": "fake",
-            "structure_path": "unused",
+            "structure_path": str(initial),
             "output_directory": str(tmp_path),
             "parameters": {"model_refresh_operation": "relax"},
         }

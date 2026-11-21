@@ -3,6 +3,7 @@
 from copy import deepcopy
 import hashlib
 from pathlib import Path
+from time import perf_counter
 
 from phase_agent.policies.region_sampling import CONTROLS, preview
 from phase_agent.policies.adaptive_branch_count import configured_selection_guards
@@ -13,15 +14,22 @@ from phase_agent.tools.workflows.region_review import write_result
 
 def run_region_generation(*, action, context):
     config = context["effective_config"]
-    state = deepcopy(context.get("event_state") or {})
+    state = dict(context.get("event_state") or {})
+    if "generation_history" in state:
+        state["generation_history"] = list(state["generation_history"])
+    if "branch_region_review" in state:
+        state["branch_region_review"] = deepcopy(state["branch_region_review"])
     params = action["parameters"]
     manager, refs = context["manager"], context["phase_references"]
+    timings = {}
+    started_stage = perf_counter()
     try:
         fresh = preview(params, manager, refs, config, state)
         if params.get("sampling_controls") != CONTROLS or params.get("region_preview") != fresh:
             raise ValueError("区域方案所依据的账本、模型、配置或保护规则已变化，需重新审阅")
     except (ValueError, KeyError) as error:
         return {"status": "rejected", "state": state, "reason": str(error)}
+    timings["preview_and_binding"] = perf_counter() - started_stage
     if params.get("replace_initial_pool"):
         from phase_agent.tools.workflows.replace_initial_pool import replace_initial_pool
 
@@ -38,6 +46,7 @@ def run_region_generation(*, action, context):
         verify_parent_matches_branch,
     )
 
+    started_stage = perf_counter()
     try:
         for source in (fresh.get("near_hull_parent_evidence") or {}).get("parents") or []:
             verify_parent_matches_branch(
@@ -45,6 +54,8 @@ def run_region_generation(*, action, context):
             )
     except (OSError, ValueError, KeyError) as error:
         return {"status": "rejected", "state": state, "reason": str(error)}
+    timings["parent_validation"] = perf_counter() - started_stage
+    started_stage = perf_counter()
     candidates, report = sample_regions(
         manager,
         refs,
@@ -52,14 +63,13 @@ def run_region_generation(*, action, context):
         system_config=config.get("system_config"),
         strategy_options=config.get("generation_options"),
     )
-    initial = report.get("initial_coverage") or {}
-    if initial.get("required") and not initial.get("complete"):
-        _finish_review(state, action, "paused_for_review")
+    timings["sampling"] = perf_counter() - started_stage
+    if not candidates:
         return {
             "status": "paused_for_review",
             "state": state,
             "registered": [],
-            "reason": "initial_coverage_incomplete; no downstream inputs prepared",
+            "reason": "sampling_produced_no_candidates",
             "summary": {"sampling_report": report},
         }
     before = set(manager.data["branches"])
@@ -88,6 +98,11 @@ def run_region_generation(*, action, context):
         system_config=config.get("system_config"),
         prepared_candidates=candidates,
         sampling_report=report,
+        timings=timings,
+        max_det_H=params.get("max_det_H"),
+    )
+    result["summary"].setdefault(
+        "timings_seconds", {key: round(value, 4) for key, value in timings.items()}
     )
     history = {
         "task_key": action["task_key"],
@@ -104,13 +119,12 @@ def run_region_generation(*, action, context):
         "structure_directory": str(directory),
     }
     state.setdefault("generation_history", []).append(history)
-    incomplete_initialization = initial.get("required") and bool(
-        result["summary"].get("initialization_failed_branches")
-    )
+    incomplete_initialization = bool(result["summary"].get("initialization_failed_branches"))
+    needs_review = incomplete_initialization or report.get("status") == "paused_for_review"
     _finish_review(
         state,
         action,
-        "paused_for_review" if incomplete_initialization else report.get("status", "completed"),
+        "paused_for_review" if needs_review else report.get("status", "completed"),
     )
     state["coverage"] = result["coverage"]
     artifacts = write_result(history, manager, result["registered"], state, action)
@@ -125,7 +139,7 @@ def run_region_generation(*, action, context):
             ),
         }
     return {
-        "status": "paused_for_review" if incomplete_initialization else "completed",
+        "status": "paused_for_review" if needs_review else "completed",
         "state": state,
         "registered": result["registered"],
         "coverage": result["coverage"],

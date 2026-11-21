@@ -7,7 +7,45 @@ from pathlib import Path
 
 import numpy as np
 
-PLOT_VERSION = 5
+PLOT_VERSION = 6
+
+
+def archive_filtered_parity(root, directory, energies, forces, model_label):
+    """Preserve the old visible plot before replacing a filtered dataset."""
+    import shutil
+    import uuid
+
+    root, directory = Path(root).resolve(), Path(directory).resolve()
+    if root.name != "analysis_outputs" or not directory.is_relative_to(root):
+        return
+    content = [
+        [{key: value for key, value in row.items() if not key.endswith("_path")} for row in rows]
+        for rows in (energies, forces)
+    ]
+    fingerprint = hashlib.sha256(
+        json.dumps([PLOT_VERSION, model_label, *content], sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
+    manifest = directory / "parity_metrics.json"
+    try:
+        if json.loads(manifest.read_text(encoding="utf8")).get("fingerprint") == fingerprint:
+            return
+    except (OSError, ValueError):
+        pass
+    names = ["parity_metrics.json"] + [
+        f"{kind}_parity.{extension}"
+        for kind in ("energy", "force")
+        for extension in ("png", "pdf", "svg")
+    ]
+    existing = [directory / name for name in names if (directory / name).is_file()]
+    if not existing:
+        return
+    archive = root / "history" / "filtered_parity" / uuid.uuid4().hex
+    archive.mkdir(parents=True)
+    for path in existing:
+        shutil.copy2(path, archive / path.name)
+    (archive / "source.txt").write_text(str(directory.relative_to(root)), encoding="utf8")
+    for path in existing:
+        path.unlink()
 
 
 def export_parity_plots(energies, forces, directory, model_label):
@@ -153,7 +191,7 @@ def _export_parity_plots(energies, forces, directory, model_label):
                 fontsize=10,
             )
             fig.text(0.20, 0.82, f"n = {m['points']:,}", size=10)
-            for extension in ("png", "pdf", "svg"):
+            for extension in ("png",):
                 path = directory / f"{name}_parity.{extension}"
                 buffer = io.BytesIO()
                 fig.savefig(buffer, format=extension, dpi=600)

@@ -205,6 +205,7 @@ def test_real_chat_entry_revises_conflict_and_waits_for_approval(tmp_path, monke
     session = confirm_config_snapshot(create_config_draft(config), user_confirmed=True)
     state["confirmed_config_version"] = session["confirmed_snapshot"]["config_version"]
     state["confirmed_config"] = session["confirmed_snapshot"]["config"]
+    manager.save(tmp_path / "ledger.json")
     path.write_text(json.dumps(state), encoding="utf-8")
     other = next(b for b in manager.data["branches"] if b not in action["target_ids"])
     calls = []

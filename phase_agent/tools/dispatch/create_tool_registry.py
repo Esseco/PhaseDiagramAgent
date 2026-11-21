@@ -6,6 +6,9 @@ def create_tool_registry(handlers=None) -> dict:
     from phase_agent.agents.permissions import advisory_roles
 
     handlers = handlers or {}
+    if "prepare_nepkit_initial_dataset" not in handlers:
+        from phase_agent.actions.nepkit_initialization import prepare_nepkit_initial_dataset
+        handlers["prepare_nepkit_initial_dataset"] = prepare_nepkit_initial_dataset
     specs = {
         "generate_branches": "generation",
         "select_candidates": "selection",
@@ -20,6 +23,7 @@ def create_tool_registry(handlers=None) -> dict:
         "adjust_strategy": "policy",
         "prepare_dedup_batch": "execution_layer",
         "prepare_local_batch_files": "phase_agent.tools.local",
+        "prepare_nepkit_initial_dataset": "phase_agent.tools.local",
     }
     child_reservations = {
         "select_dft_candidates",
@@ -52,3 +56,5 @@ def create_tool_registry(handlers=None) -> dict:
         }
         for name, owner in specs.items()
     }
+
+

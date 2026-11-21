@@ -22,7 +22,7 @@ class AutonomousPlatformTest(unittest.TestCase):
         result = run_tool_step(None, session, registry=registry, execute=True, invocation_id="x")
         self.assertEqual(result["status"], "rejected")
         self.assertIn("configuration_not_confirmed", result["validation"]["errors"])
-        with tempfile.TemporaryDirectory(dir=".") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = f"{directory}/draft.json"; save_config_session(session, path); loaded = load_config_session(path)
         self.assertEqual(loaded["draft_revision"], session["draft_revision"])
 

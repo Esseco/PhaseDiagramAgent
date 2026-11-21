@@ -48,3 +48,35 @@ def test_model_mc_steps_cost_and_coverage_are_distinct(monkeypatch):
 def test_missing_mc_preview_facts_fail_before_approval():
     with pytest.raises(ValueError, match="台账"):
         prepare_mc_preview({"tool": "allocate_mc_bohb"}, {}, {}, {})
+
+
+def test_preview_does_not_add_unreviewed_protected_branches(monkeypatch):
+    seen = []
+
+    def estimate(candidates, *args, **kwargs):
+        seen.extend(row["branch_id"] for row in candidates)
+        return {
+            "requested_steps": 10,
+            "estimated_relative_cost": 1,
+            "full_plan_steps": 10,
+            "full_plan_branch_count": 1,
+            "selected_branch_count": 1,
+            "phase_diagram_version": "h",
+            "allocation_checksum": "x",
+            "missing_branch_ids": [],
+            "compression_requires_user_choice": False,
+        }
+
+    monkeypatch.setattr(
+        "phase_agent.tools.workflows.prepare_mc_preview.estimate_branch_mc_budget", estimate
+    )
+    action = {
+        "tool": "allocate_mc_bohb",
+        "target_ids": ["reviewed"],
+        "parameters": {"mc_budget": 10},
+    }
+    state = {"current_branch_hull_version": "v", "branch_hull_batches": {"v": {"version": "v"}}}
+    manager = SimpleNamespace(data={"branches": {"reviewed": {}, "unreviewed": {}}})
+    result = prepare_mc_preview(action, state, {"manager": manager}, {})
+    assert result["target_ids"] == ["reviewed"]
+    assert seen == ["reviewed"]

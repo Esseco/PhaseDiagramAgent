@@ -193,6 +193,7 @@ def test_outer_script_is_slurm_job(tmp_path):
     text = Path(handoff["submit_script"]).read_text()
     assert handoff["command"] == "sbatch submit_all.sh"
     assert "#SBATCH --job-name=phase-dispatch" in text
+    assert "#SBATCH --time=02:00:00" in text
     assert "SLURM_SUBMIT_DIR" in text
     assert "python3 dispatch_tasks.py" in text
     assert "PHASE_SUBMIT_PY" not in text

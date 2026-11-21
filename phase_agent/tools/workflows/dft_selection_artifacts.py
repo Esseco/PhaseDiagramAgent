@@ -1,6 +1,8 @@
 """One JSON containing a DFT selection plan and its prepared task inventory."""
 
 from collections import Counter
+from hashlib import sha256
+import json
 from pathlib import Path
 
 from phase_agent.tools.workflows.generation_artifacts import artifact_path, determinant
@@ -36,7 +38,7 @@ def proposal_artifacts(proposal, state):
         if original.get("actual") is not None:
             if original is saved:
                 write(path, readable_view(original), sort_keys=False)
-            return review_artifacts(path, kind="dft", record=original, state=state)
+            return _selection_review_artifacts(path, original, state)
     # Enrich display metadata from the owned ledger, never create scientific objects.
     root = path.parents[2].resolve()
     config = state.get("confirmed_config") or {}
@@ -60,11 +62,39 @@ def proposal_artifacts(proposal, state):
     ledger = read(ledger_path) if ledger_path.is_file() else {}
     payload = selection_record(proposal, state, ledger=ledger)
     write(path, readable_view(payload), sort_keys=False)
-    return review_artifacts(path, kind="dft", record=payload, state=state)
+    return _selection_review_artifacts(path, payload, state)
+
+
+def _selection_review_artifacts(path, record, state):
+    artifacts = review_artifacts(path, kind="dft", record=record, state=state)
+    from phase_agent.tools.workflows.dft_selection_plot import plot_dft_selection
+
+    from phase_agent.evidence.model_diagram_scope import selection_diagram
+    identity = {'hull': selection_diagram(state).get('version'),
+                'model': record.get('model_version'), 'decisions': record.get('decisions'),
+                'frames': [(c.get('candidate_id'), c.get('structure_sha256')) for c in state.get('qbc_candidates') or []]}
+    key = sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    from phase_agent.evidence.model_epoch import model_epoch
+
+    root = state.get("analysis_output_directory")
+    epoch = model_epoch(state, state.get("active_model_version"))
+    if not root or not epoch:
+        raise ValueError("dft_selection_analysis_directory_or_epoch_missing")
+    image = Path(root) / epoch / "phase_diagram" / "_internal" / "mlip" / "plots" / (path.stem + "_plot_" + key + ".png")
+    try:
+        result = plot_dft_selection(state, record, image)
+        artifacts.update({'selection_plot': result['figure'], 'selection_plot_metadata': result['metadata'],
+                          'selection_plot_unplotted_count': result['unplotted_count']})
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        raise ValueError("dft_selection_plot_required: " + str(error)) from error
+    if result['unplotted_count']:
+        raise ValueError("dft_selection_plot_unplotted:" + str(result['unplotted_count']))
+    return artifacts
 
 
 def selection_record(proposal, state, *, ledger=None):
     """Project saved choices only; no file reads, scientific decisions or mutations."""
+    from phase_agent.evidence.model_diagram_scope import selection_diagram
     action = proposal.get("raw_action") or {}
     params = action.get("parameters") or proposal.get("action_parameters") or {}
     ledger = ledger or {}
@@ -91,7 +121,7 @@ def selection_record(proposal, state, *, ledger=None):
                     )
                     and sampling.get("model_version") == state.get("active_model_version")
                     and sampling.get("hull_version")
-                    == (state.get("phase_diagrams", {}).get("mlip") or {}).get("version")
+                    == selection_diagram(state).get("version")
                 ):
                     candidates[key] = {**saved, "dft_sampling_evidence": sampling}
     preview = params.get("dft_selection_preview") or params.get("dft_input_preview") or {}
@@ -150,6 +180,7 @@ def selection_record(proposal, state, *, ledger=None):
         "status": "awaiting_approval",
         "task_key": action.get("task_key"),
         "model_version": state.get("active_model_version"),
+        "hull_version": selection_diagram(state).get("version"),
         "config_version": state.get("confirmed_config_version"),
         "purpose": proposal.get("expected_purpose") or action.get("expected_purpose"),
         "reason": action.get("reason"),
@@ -234,4 +265,12 @@ def preparation_artifacts(action, state, tasks, validation, prepared=None, manag
         },
     )
     write(path, readable_view(payload), sort_keys=False)
-    return review_artifacts(path, kind="dft", record=payload, state=state)
+    artifacts = review_artifacts(path, kind="dft", record=payload, state=state)
+    if tasks:
+        from phase_agent.analysis.feedback.analysis_output_organization import publish_prepared_selection
+
+        try:
+            artifacts["analysis_publication"] = publish_prepared_selection(state, payload, path)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            artifacts["analysis_publication"] = {"status": "unavailable", "reason": str(error)}
+    return artifacts

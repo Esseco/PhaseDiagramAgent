@@ -1,0 +1,221 @@
+[
+  {
+    "project": "O3-NaCo-3phase",
+    "rows": [
+      {
+        "epoch": "epoch0",
+        "model_version": "mace-mh-1",
+        "status": "completed",
+        "selected_records": 32,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.016141522575828,
+        "force_mae_eV_per_A": 0.10368391578413025,
+        "structures": 22,
+        "force_components": 5577,
+        "excluded_unpaired": 10,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch1",
+        "status": "unavailable",
+        "reason": "没有已登记的新选 DFT 数据"
+      }
+    ]
+  },
+  {
+    "project": "O3-1ele-NaCoO2",
+    "rows": [
+      {
+        "epoch": "epoch0",
+        "model_version": "mace-mh-1",
+        "status": "completed",
+        "selected_records": 35,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.019794816070406788,
+        "force_mae_eV_per_A": 0.07186241246199877,
+        "structures": 30,
+        "force_components": 5142,
+        "excluded_unpaired": 5,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch1",
+        "status": "unavailable",
+        "reason": "没有已登记的新选 DFT 数据"
+      }
+    ]
+  },
+  {
+    "project": "O3-2ele-NaFeMn",
+    "rows": [
+      {
+        "epoch": "epoch0",
+        "model_version": "mace-mh-1",
+        "status": "completed",
+        "selected_records": 31,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.009677708414394259,
+        "force_mae_eV_per_A": 0.11975787790896246,
+        "structures": 27,
+        "force_components": 4713,
+        "excluded_unpaired": 4,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch1",
+        "model_version": "remote-34cc25764bd5c42a-f05c82041330",
+        "status": "completed",
+        "selected_records": 13,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.04151893027601588,
+        "force_mae_eV_per_A": 0.22787230976027903,
+        "structures": 12,
+        "force_components": 2097,
+        "excluded_unpaired": 1,
+        "is_active_model": true
+      }
+    ]
+  },
+  {
+    "project": "O3-NiCo",
+    "rows": [
+      {
+        "epoch": "epoch0",
+        "model_version": "mace-mh-1",
+        "status": "completed",
+        "selected_records": 40,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.0750368940732403,
+        "force_mae_eV_per_A": 0.14167072892001256,
+        "structures": 27,
+        "force_components": 7662,
+        "excluded_unpaired": 13,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch1",
+        "model_version": "remote-3fbdcd97521b62a4-bebeac5b8ce6",
+        "status": "completed",
+        "selected_records": 296,
+        "selection_unverified": 10,
+        "energy_mae_eV_per_atom": 0.0644421172825427,
+        "force_mae_eV_per_A": 0.510774207668273,
+        "structures": 71,
+        "force_components": 10362,
+        "excluded_unpaired": 225,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch2",
+        "status": "unavailable",
+        "reason": "没有已登记的新选 DFT 数据"
+      }
+    ]
+  },
+  {
+    "project": "NaNiO2-phase",
+    "rows": [
+      {
+        "epoch": "epoch0",
+        "model_version": "mace-mh-1",
+        "status": "completed",
+        "selected_records": 25,
+        "selection_unverified": 1,
+        "energy_mae_eV_per_atom": 0.13149804094251755,
+        "force_mae_eV_per_A": 0.09672649292245322,
+        "structures": 21,
+        "force_components": 4596,
+        "excluded_unpaired": 4,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch1",
+        "model_version": "remote-439f3fff95de8bb4-56c0d6508023",
+        "status": "completed",
+        "selected_records": 23,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.05867110088395759,
+        "force_mae_eV_per_A": 0.47681610506651106,
+        "structures": 17,
+        "force_components": 4335,
+        "excluded_unpaired": 6,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch2",
+        "model_version": "remote-340f895066d07019-7143ace36643",
+        "status": "completed",
+        "selected_records": 100,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.004863900963164197,
+        "force_mae_eV_per_A": 0.06278495109983738,
+        "structures": 60,
+        "force_components": 16005,
+        "excluded_unpaired": 40,
+        "is_active_model": false
+      }
+    ]
+  },
+  {
+    "project": "O3-1ele-NaCrO2",
+    "rows": [
+      {
+        "epoch": "epoch0",
+        "model_version": "mace-mh-1",
+        "status": "completed",
+        "selected_records": 15,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.022405016808585355,
+        "force_mae_eV_per_A": 0.08975690317704496,
+        "structures": 12,
+        "force_components": 2985,
+        "excluded_unpaired": 3,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch1",
+        "model_version": "remote-7022fe224f6e42b9-ea17d08ad0d2",
+        "status": "completed",
+        "selected_records": 15,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.1489135062524329,
+        "force_mae_eV_per_A": 0.4771191965263801,
+        "structures": 12,
+        "force_components": 2982,
+        "excluded_unpaired": 3,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch2",
+        "model_version": "remote-d6bd71f3a37f8bc2-18d0354c36e1",
+        "status": "completed",
+        "selected_records": 22,
+        "selection_unverified": 6,
+        "energy_mae_eV_per_atom": 0.006600405018755456,
+        "force_mae_eV_per_A": 0.1016926665873102,
+        "structures": 15,
+        "force_components": 3573,
+        "excluded_unpaired": 7,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch3",
+        "model_version": "remote-f9e375aa91ee7890-93c4b6c8e0e8",
+        "status": "completed",
+        "selected_records": 25,
+        "selection_unverified": 0,
+        "energy_mae_eV_per_atom": 0.02893022412067398,
+        "force_mae_eV_per_A": 0.1487899011564514,
+        "structures": 17,
+        "force_components": 4938,
+        "excluded_unpaired": 8,
+        "is_active_model": false
+      },
+      {
+        "epoch": "epoch4",
+        "status": "unavailable",
+        "reason": "没有已登记的新选 DFT 数据"
+      }
+    ]
+  }
+]

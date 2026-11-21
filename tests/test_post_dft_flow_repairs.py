@@ -169,7 +169,7 @@ def test_input_only_update_bypasses_enablement_not_training_safety(monkeypatch):
     action = {"tool": "update_mlip", "parameters": {"prepare_inputs_only": True}}
     monkeypatch.setattr(
         "phase_agent.tools.workflows.prepare_remote_finetune.prepare_remote_finetune",
-        lambda state, config: {"status": "awaiting_remote_training", "state": state},
+        lambda state, config, **kwargs: {"status": "awaiting_remote_training", "state": state},
     )
 
     def forbidden(**kwargs):

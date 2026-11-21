@@ -30,6 +30,22 @@ def prepare_mc_upload_batches(*, action, context):
         and row.get("status") == "pending"
         and not row.get("slurm_batch_id")
     ]
+    expected = (action.get("parameters") or {}).get("expected_task_ids")
+    if expected is not None:
+        actual = [row.get("task_id") for row in pending]
+        if (
+            not isinstance(expected, list)
+            or not expected
+            or any(not isinstance(value, str) or not value for value in expected)
+            or len(set(expected)) != len(expected)
+            or len(set(actual)) != len(actual)
+            or set(actual) != set(expected)
+        ):
+            return {
+                "status": "not_configured",
+                "reason": "mc_input_scope_changed",
+                "state": context.get("event_state") or {},
+            }
     if not pending:
         from phase_agent.tools.remote.submission_handoff import finalize_prepared_handoffs
 
@@ -78,9 +94,15 @@ def prepare_mc_upload_batches(*, action, context):
             context["manager"], context.get("phase_references") or {}, config
         ),
     )
+    from phase_agent.tools.remote.prepare_options import supported_prepare_options
+
+    prepare = runner.prepare
+    options = supported_prepare_options(
+        prepare, _owned=True, _defer_index=True, _defer_archive=True
+    )
     batches = []
     while True:
-        prepared = runner.prepare(state)
+        prepared = prepare(state, **options)
         state = prepared["state"]
         if prepared["status"] == "no_tasks":
             break

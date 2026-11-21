@@ -128,6 +128,11 @@ def create_mlip_task_preparer(manager, phase_references, config):
                     "model_file_evidence": model_evidence,
                     "model_storage": "remote",
                     "model_version": model.get("version") or model.get("name"),
+                    **(
+                        {"input_structure_sha256": current.get("input_structure_sha256")}
+                        if (current.get("parameters") or {}).get("energy_basis_repair")
+                        else {}
+                    ),
                     "output_directory": current.get("calculation_directory"),
                     "parameters": {
                         **base_parameters,
@@ -142,6 +147,15 @@ def create_mlip_task_preparer(manager, phase_references, config):
                             else {}
                         ),
                         **deepcopy(current.get("parameters") or {}),
+                        **(
+                            {"feature_difference_threshold": 3.0}
+                            if (
+                                current.get("relax_mc_bundle_id")
+                                or current["stage"] == "deep_search"
+                            )
+                            and not (current.get("parameters") or {}).get("model_refresh_operation")
+                            else {}
+                        ),
                     },
                     "segment_budget": int(segment_budget) if segment_budget is not None else None,
                     **(
@@ -223,8 +237,28 @@ def execute_mlip_task(task):
         ]
     elif not Path(job["model_path"]).is_absolute():
         job["model_path"] = str(root / job["model_path"])
+    expected_model_sha = task.get("model_sha256")
+    if expected_model_sha:
+        import hashlib
+        import re
+
+        if (
+            not isinstance(expected_model_sha, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_model_sha)
+            or job.get("model_paths")
+            or not job.get("model_path")
+        ):
+            raise ValueError("mlip_model_sha256_binding_invalid")
+        digest = hashlib.sha256()
+        with Path(job["model_path"]).open("rb") as model_file:
+            for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_model_sha:
+            raise ValueError("mlip_model_sha256_mismatch")
     result = run_mace_worker(job)
     outputs = deepcopy(result)
+    if expected_model_sha:
+        outputs["verified_model_sha256"] = expected_model_sha
     outputs.setdefault("mlip_name", "MACE")
     outputs.setdefault("mlip_version", job.get("model_version"))
     response = {

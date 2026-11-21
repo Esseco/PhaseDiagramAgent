@@ -61,7 +61,8 @@ def can_resume_message(config_path, message_identity):
 
         base = lifecycle_base_thread("project-scientific-lifecycle-v2", state_path)
         thread = current_lifecycle_thread(connection, base)
-        snapshot = graph.get_state({"configurable": {"thread_id": thread}}, subgraphs=True)
+        with graph.checkpointer.serde.routing_only():
+            snapshot = graph.get_state({"configurable": {"thread_id": thread}}, subgraphs=True)
         # The receipt identity proves this gateway message already started.
         # A safe checkpoint may still carry the previous request ID after an
         # interrupted read-only node; the durable runner rebinds it before

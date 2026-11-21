@@ -31,6 +31,7 @@ STOP_STATUSES = set(DIALOGUE_STATUSES) | {
     "proposal_context_changed",
     "approval_reconciliation_required",
     "execution_reconciliation_required",
+    "handoff_preparation_failed",
 }
 
 

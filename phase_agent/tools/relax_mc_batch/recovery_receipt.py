@@ -17,9 +17,7 @@ def selected_recovery(record):
         return None
     receipt = read(pointer)
     root = Path(directory).with_name(Path(directory).name + "_recovery").resolve()
-    archive = Path(receipt["archive"]).resolve()
-    if not archive.is_relative_to(root) or not archive.is_file():
-        raise ValueError("recovery_receipt_archive_outside_batch")
+    archive = _resolve_recovery_archive(receipt, root)
     if checksum(archive) != receipt.get("archive_checksum"):
         raise ValueError("recovery_receipt_checksum_mismatch")
     return archive
@@ -85,12 +83,10 @@ def register_recovery(record, state, archive):
         raise ValueError("cancelled_relax_mc_bundle_requires_manual_result_review")
     if state.get("active_model_version") != record.get("model_version"):
         raise ValueError("recovery_active_model_mismatch")
-    archive = Path(archive).resolve()
     root = (
         Path(record["directory"]).with_name(Path(record["directory"]).name + "_recovery").resolve()
     )
-    if not archive.is_relative_to(root):
-        raise ValueError("recovery_receipt_archive_outside_batch")
+    archive = _resolve_recovery_archive({"archive": str(archive)}, root)
     original = (
         Path(record["directory"]).with_name(Path(record["directory"]).name + "_output")
         / "results.zip"
@@ -105,3 +101,38 @@ def register_recovery(record, state, archive):
     validate_recovery_scope(archive, record, state, receipt=receipt)
     write(pointer, receipt)
     return receipt
+
+
+def _resolve_recovery_archive(receipt, root):
+    """Resolve a receipt path after a project delivery-directory migration.
+
+    The archive must remain inside the recovery root and match the receipt
+    checksum. A legacy absolute path is accepted only when exactly one file
+    under the current root has that checksum.
+    """
+    archive = Path(receipt.get("archive", "")).resolve()
+    if archive.is_relative_to(root) and archive.is_file():
+        return archive
+    expected = receipt.get("archive_checksum")
+    if not expected:
+        raise ValueError("recovery_receipt_archive_outside_batch")
+    roots = [root]
+    # Projects migrated their delivery tree under submissions/<epoch>/delivery.
+    # Keep the legacy root for integrity checks, then search only the matching
+    # batch name in the sibling delivery tree.
+    legacy_parent = root.parent
+    if legacy_parent.name == "relax_mc":
+        delivery_parent = legacy_parent.parent / "delivery" / "relax_mc"
+        migrated = delivery_parent / root.name
+        if migrated.is_dir():
+            roots.append(migrated)
+    matches = [
+        path
+        for candidate_root in roots
+        for path in candidate_root.rglob("*.zip")
+        if path.is_file() and checksum(path) == expected
+    ]
+    if not matches:
+        raise ValueError("recovery_receipt_archive_outside_batch")
+    # Multiple identical copies are safe; choose a deterministic current copy.
+    return sorted(matches, key=lambda path: str(path).lower())[0].resolve()

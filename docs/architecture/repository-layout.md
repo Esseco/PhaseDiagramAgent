@@ -54,6 +54,12 @@ Agent 负责分析、策略或执行规划；具体科学计算在 science，带
 
 源码外置备份在同级 _Process_PhaseDiagram_source_backups，不加入 PYTHONPATH。已被取代的三角色验收、旧开发计划和一次性维护/诊断记录从当前仓库删除，原文保存在本轮源码 ZIP；当前指南不再链接这些历史文件。
 
+## 生成文件契约
+
+科研数据只写入各项目工作区，repo 不接收运行结果或计算包。`analysis_outputs/` 可见根目录使用已登记的 `epochN/`、`latest/`、`out_data/` 和 `history/`；本轮相图、已核验选点图及证据放在对应 epoch，跨轮索引和汇总放在 `workflow_state/analysis/`；`latest/` 保留当前 MLIP 相图和当前模型 DFT 误差。模型轮次未知的新证据使用 `workflow_state/analysis/Unassigned/`，不得猜测 epoch。发布与整理通过项目 Agent 入口，已登记历史文件引用必须保持有效，无法安全迁移时报告原因。
+
+测试统一使用 `tests/conftest.py` 管理的每次临时目录；不要在 repo 当前目录或固定磁盘路径新建测试副本。`TEMP_PLAN.md` 仅用于按规则记录当前复杂工作，已有未完成计划不得覆盖。repo 的 `local/`、`settings/`、`.langgraph_api/` 及未提交源码不属于缓存清理范围。
+
 ## 安全整理范围
 
 整理不迁移或清除 local、settings、.langgraph_api、真实项目 structures/parameters/workflow_state/submissions、结果或模型。运行服务由用户手动管理；源码更新不自动重启服务或提交科研任务。
@@ -67,3 +73,6 @@ Agent 负责分析、策略或执行规划；具体科学计算在 science，带
 - NiCo、Ni、Cr、Co、FeMn 五项目只读检查均 ready、issues 为空；没有启动真实服务、模型 API 或 HPC 计算。
 
 外置源码/历史文档备份：E:/jupyter notebook/1-AL_for_PhaseDiagram/_Process_PhaseDiagram_source_backups/layout-cleanup-20261101-212647.zip。测试临时目录由现有 TemporaryDirectory 清理；维护脚本和临时计划在交付前移除。
+
+
+物理输出整理：各轮 DFT 批次归入 `epochN/dft/`，采样及恢复材料归入 `epochN/diagnostics/`；不可变版本、内部快照、旧格式文件、失败轮归档和原 Previous_Latest 内容集中到 `history/`。所有文件保留并校验搬移前后哈希。用户批准的隐藏目录兼容入口维持旧路径，未经校验的链接仍拒绝。整理和正常发布共用 `analysis/feedback/physical_layout.py` 的固定规则，不修改 state、冻结方案或检查点。

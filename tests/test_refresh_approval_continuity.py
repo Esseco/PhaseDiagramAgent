@@ -13,6 +13,11 @@ def setup(tmp_path):
     return state, session, context, registry
 
 
+def occupy_only_task_slot(session, context):
+    for config in (context["effective_config"], session["confirmed_snapshot"]["config"]):
+        config["budgets"]["stage_limits"]["relax_and_feature"]["max_tasks"] = 1
+
+
 def test_advisory_budget_keeps_approved_inputs_and_does_not_duplicate(tmp_path):
     state, session, context, registry = refresh_setup(tmp_path)
     state["budget_reservations"] = {
@@ -34,6 +39,7 @@ def test_advisory_budget_keeps_approved_inputs_and_does_not_duplicate(tmp_path):
 
 def test_budget_block_preserves_approval_and_resumes_once(tmp_path):
     state, session, context, registry = setup(tmp_path)
+    occupy_only_task_slot(session, context)
     limit = context["effective_config"]["budgets"]["total_relative_cost"]
     state["budget_reservations"] = {
         "other": {"stage": "relax_and_feature", "status": "reserved", "reserved_cost": limit}
@@ -70,6 +76,7 @@ def test_frozen_geometry_is_used_after_new_ledger_geometry(tmp_path):
 
 def test_changed_model_does_not_reuse_blocked_approval(tmp_path):
     state, session, context, registry = setup(tmp_path)
+    occupy_only_task_slot(session, context)
     state["budget_reservations"] = {
         "other": {
             "stage": "relax_and_feature",
@@ -93,6 +100,7 @@ def test_delivered_native_approval_survives_restart_before_execution(tmp_path):
     import json
 
     state, session, context, registry = setup(tmp_path)
+    occupy_only_task_slot(session, context)
     state_path = tmp_path / "state.json"
     context["state_path"] = str(state_path)
     state["confirmed_config_version"] = "c"

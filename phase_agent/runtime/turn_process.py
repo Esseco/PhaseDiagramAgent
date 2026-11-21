@@ -67,6 +67,12 @@ def read_presentation_state(path):
     return read_json(path, {}) or {}
 
 
+def has_reusable_initial_state(path):
+    record = _current.get()
+    cached = record.get("_initial_state") if record is not None else None
+    return bool(cached and str(Path(path).resolve()) == cached.get("path"))
+
+
 def reuse_initial_state(path):
     """Transfer ownership of the initial parsed state once, after a freshness check."""
     record = _current.get()
@@ -75,10 +81,16 @@ def reuse_initial_state(path):
         return False, None
     record.pop("_initial_state", None)
     try:
-        stat = Path(path).stat()
-        if (stat.st_size, stat.st_mtime_ns, stat.st_ino) == cached["signature"]:
-            return True, cached["value"]
-    except OSError:
+        from phase_agent.persistence.state.read_versions import read_identity
+
+        if cached.get("identity") is not None:
+            if read_identity(path, strong=True) == cached["identity"]:
+                return True, cached["value"]
+        else:
+            stat = Path(path).stat()
+            if (stat.st_size, stat.st_mtime_ns, stat.st_ino) == cached["signature"]:
+                return True, cached["value"]
+    except (OSError, ValueError):
         pass
     return False, None
 
@@ -213,7 +225,10 @@ def record_turn(runtime_config, message, thread_id):
             state_path = root / settings.get("state_path", "workflow_state/state.json")
 
             if state_path.is_file() and state_path.resolve().is_relative_to(root):
+                from phase_agent.persistence.state.read_versions import read_identity
+
                 before_stat = state_path.stat()
+                before_identity = read_identity(state_path, strong=True)
                 state = timed_call(
                     "读取项目状态摘要",
                     lambda: json.loads(state_path.read_text(encoding="utf-8")),
@@ -221,14 +236,19 @@ def record_turn(runtime_config, message, thread_id):
                 )
 
                 after_stat = state_path.stat()
+                after_identity = read_identity(state_path, strong=True)
 
                 def signature(st):
                     return st.st_size, st.st_mtime_ns, st.st_ino
 
-                if signature(before_stat) == signature(after_stat):
+                if (
+                    signature(before_stat) == signature(after_stat)
+                    and before_identity == after_identity
+                ):
                     record["_initial_state"] = {
                         "path": str(state_path.resolve()),
                         "signature": signature(after_stat),
+                        "identity": after_identity,
                         "value": state,
                     }
 
@@ -302,6 +322,7 @@ def record_turn(runtime_config, message, thread_id):
 
         record["token_usage"] = usage_summary(record)
         record.pop("_model_request_cache", None)
+        record.pop("_decision_model_round", None)
         record.pop("_initial_state", None)
         record.pop("_presentation_state", None)
         record["duration_seconds"] = round(monotonic() - started, 3)
@@ -452,3 +473,30 @@ def render_process_panel(runtime_config):
         )
         + "</html>"
     )
+
+
+_read_metrics = ContextVar("phase_read_metrics", default=None)
+
+
+@contextmanager
+def capture_read_metrics():
+    """Opt-in request-local counters; no source data, global cache or disk writes."""
+    metrics = {"counts": {}, "bytes": {}, "details": []}
+    token = _read_metrics.set(metrics)
+    try:
+        yield metrics
+    finally:
+        _read_metrics.reset(token)
+
+
+def record_read_metric(kind, *, bytes_read=0, **detail):
+    record = _current.get()
+    metrics = _read_metrics.get()
+    if metrics is None and record is not None:
+        metrics = record.setdefault("read_metrics", {"counts": {}, "bytes": {}, "details": []})
+    if metrics is None:
+        return
+    metrics["counts"][kind] = metrics["counts"].get(kind, 0) + 1
+    metrics["bytes"][kind] = metrics["bytes"].get(kind, 0) + bytes_read
+    if detail and len(metrics["details"]) < 128:
+        metrics["details"].append({"kind": kind, **detail})

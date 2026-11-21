@@ -9,6 +9,7 @@ H = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 def region(identity, strategy):
     return {
         "region_id": identity,
+        "sample_count": 1,
         "priority": 1,
         "strategy": strategy,
         "phase": "O3",
@@ -22,11 +23,14 @@ def region(identity, strategy):
 
 
 def parameters():
-    return {
+    result = {
         "sampling_mode": "region_adaptive",
         "regions": [region("coverage", "coverage"), region("composition", "composition")],
         "max_new_branches": 100,
     }
+    result["regions"][0]["sample_count"] = 70
+    result["regions"][1]["sample_count"] = 30
+    return result
 
 
 def test_strategy_shares_validate_used_strategies_and_sum():
@@ -116,7 +120,10 @@ def test_small_review_still_samples_ten_percent_strategies():
     names = ["coverage", "composition", "competing_phase", "periodic_extension"]
     p = {
         "sampling_mode": "region_adaptive",
-        "regions": [region(name, name) for name in names],
+        "regions": [
+            {**region(name, name), "sample_count": count}
+            for name, count in zip(names, (3, 3, 2, 2))
+        ],
         "strategy_shares": {
             "coverage": 0.7,
             "composition": 0.1,

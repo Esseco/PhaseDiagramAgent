@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import random
+from time import perf_counter
 from fractions import Fraction
 from typing import Any
 
@@ -24,6 +25,7 @@ def initialize_branch_structures(
     initial_states_per_branch: int,
     seed: int,
     preserve_reference_tm: bool = False,
+    timings: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """固定 P、H、x、T，为每个 branch 生成至多指定数量的不同 V。"""
     if (
@@ -106,6 +108,7 @@ def initialize_branch_structures(
         occupied = target_x * oxygen_count / 2
         if occupied.denominator != 1 or not 0 <= occupied <= len(na_indices):
             raise ValueError(f"x={original['x']} 无法在 {len(na_indices)} 个 Na 位点上实现")
+        started_ranking = perf_counter()
         try:
             ranked = rank_na_orderings_by_electrostatics(full, original["x"], limit=10)
         except Exception as error:
@@ -113,6 +116,13 @@ def initialize_branch_structures(
                 f"branch {original.get('branch_id', original.get('candidate_id', branch_index))} "
                 f"静电能初态生成失败：{error}"
             ) from error
+        finally:
+            if timings is not None:
+                timings["initial_electrostatic_ranking"] = (
+                    timings.get("initial_electrostatic_ranking", 0.0)
+                    + perf_counter()
+                    - started_ranking
+                )
         count = min(initial_states_per_branch, 3, len(ranked))
         selected_ranks = random.Random(branch_seed).sample(range(len(ranked)), count)
         for state_index, valid_rank in enumerate(selected_ranks):
@@ -157,14 +167,14 @@ def _na_occupancy_indices(full, ordered, na_indices):
     positions = [
         site.frac_coords for site in ordered if site.is_ordered and site.specie.symbol == "Na"
     ]
-    chosen = []
-    for position, index in enumerate(na_indices):
-        reference = full[index].frac_coords
-        if any(
-            np.allclose((coords - reference) - np.rint(coords - reference), 0, atol=1e-5)
-            for coords in positions
-        ):
-            chosen.append(position)
+    if positions and len(na_indices):
+        references = np.asarray([full[index].frac_coords for index in na_indices])
+        delta = np.asarray(positions)[None, :, :] - references[:, None, :]
+        periodic = delta - np.rint(delta)
+        matched = np.all(np.isclose(periodic, 0, atol=1e-5), axis=2).any(axis=1)
+        chosen = np.flatnonzero(matched).tolist()
+    else:
+        chosen = []
     if len(chosen) != len(positions):
         raise RuntimeError("静电能构型的 Na 位点无法映射回母结构")
     return tuple(chosen)

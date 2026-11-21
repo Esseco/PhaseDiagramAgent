@@ -184,6 +184,7 @@ class CodexControlClient:
                 "proposal_hash": proposal_hash,
                 "comment": comment,
                 "conversation_id": conversation_id,
+                **({"operator": "codex"} if self.operator == "codex" else {}),
             },
         )
 

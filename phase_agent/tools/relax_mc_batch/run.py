@@ -13,6 +13,7 @@ from phase_agent.tools.relax_mc_batch.files import (
     rebase,
     script,
     gpu_profile,
+    balanced_batch_size,
     python_environment,
 )
 from phase_agent.tools.relax_mc_batch.analysis import feedback, next_mc, candidate_pool
@@ -155,12 +156,55 @@ def checkpoint(root, state, manager):
     )
 
 
+def _balanced_batch_sizes(state, profiles, sizes):
+    """Keep existing maximum sizes while permitting an even number of shards."""
+    from phase_agent.tools.remote.batch_runner import _upload_eligible
+
+    result = dict(sizes)
+    tasks = state.get("tasks") or []
+    for stage in ("relax_and_feature", "deep_search"):
+        count = sum(t.get("stage") == stage and _upload_eligible(state, t) for t in tasks)
+        if count < 2:
+            continue
+        pool = gpu_profile(profiles, stage).get("partition_pool") or []
+        if len(pool) != 2:
+            continue
+        maximum = int(result.get(stage, 100 if stage == "relax_and_feature" else 20))
+        if maximum > 0:
+            result[stage] = balanced_batch_size(count, maximum)
+    return result
+
+
+def _wave_gpu_profile(profiles, stage, existing_batches):
+    profile = deepcopy(gpu_profile(profiles, stage))
+    pool = profile.pop("partition_pool", None)
+    if pool is None:
+        return profile
+    if (
+        not isinstance(pool, list)
+        or len(pool) != 2
+        or any(not isinstance(p, str) or not p.strip() for p in pool)
+        or pool[0] == pool[1]
+    ):
+        raise ValueError("gpu_partition_pool_requires_two_distinct_partitions")
+    counts = {p: 0 for p in pool}
+    for batch in existing_batches:
+        if batch.get("stage") == stage and not batch.get("relax_mc_wave_done"):
+            partition = batch.get("gpu_partition")
+            if partition in counts:
+                counts[partition] += len(batch.get("task_ids") or [])
+    profile["slurm_options"]["partition"] = min(pool, key=counts.get)
+    return profile
+
+
 def prepare_wave(root, state, manager, manifest):
     config = manifest["config"]
     runner = ManualUploadBatchRunner(
         Path(root) / "jobs",
         worker_command=config["supercomputer"]["worker"]["command"],
-        stage_batch_sizes=config["supercomputer"]["batch_sizes"],
+        stage_batch_sizes=_balanced_batch_sizes(
+            state, manifest["stage_profiles"], config["supercomputer"]["batch_sizes"]
+        ),
         stage_profiles=manifest["stage_profiles"],
         task_preparer=create_mlip_task_preparer(manager, manifest["phase_references"], config),
     )
@@ -171,24 +215,24 @@ def prepare_wave(root, state, manager, manifest):
             break
         batch = state["slurm_batches"][-1]
         batch_dir = Path(batch["upload_directory"])
+        stage = next(t["stage"] for t in state["tasks"] if t["task_id"] == batch["task_ids"][0])
+        profile = _wave_gpu_profile(manifest["stage_profiles"], stage, state["slurm_batches"][:-1])
         command = (
             python_environment(root)
             + f"cd -- {shlex.quote(str(batch_dir))}\npython3 run_mlip_batch.py"
         )
         Path(batch["script_path"]).write_text(
             script(
-                gpu_profile(
-                    manifest["stage_profiles"],
-                    next(
-                        t["stage"] for t in state["tasks"] if t["task_id"] == batch["task_ids"][0]
-                    ),
-                ),
+                profile,
                 command,
                 name=manifest["bundle_id"] + "-" + batch["batch_id"],
             ),
             encoding="utf-8",
             newline="\n",
         )
+        if gpu_profile(manifest["stage_profiles"], stage).get("partition_pool") is not None:
+            batch["gpu_partition"] = profile["slurm_options"]["partition"]
+            batch["stage"] = stage
         checkpoint(root, state, manager)
     preflight_models(
         Path(root),
@@ -361,7 +405,44 @@ def publish(root, state, manifest, status, reason=None):
     # Keep full remote checkpoints in place for resumption; publish only the
     # importer contract and scientifically referenced artifacts.
     from phase_agent.tools.relax_mc_batch.return_payload import compact_state, result_files
+    from phase_agent.science.qbc.remote_dft_sampling import run_remote_dft_sampling
     import json
+
+    mlip_diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    if status in {"completed", "partial"} and mlip_diagram.get("status") == "completed":
+        sampling_out = run_remote_dft_sampling(
+            root, state, manifest, seed=int(manifest.get("seed", 0))
+        )
+        dft_params = (manifest.get("config") or {}).get("dft") or {}
+        if manifest.get("prepare_dft_on_remote") and sampling_out.get("selected"):
+            from phase_agent.tools.remote.remote_dft_materializer import (
+                materialize_remote_dft_batch,
+                prepare_remote_dft_manifest_bundle,
+            )
+
+            dft_tasks = [
+                {
+                    "task_id": f"DFT-{idx:04d}",
+                    "task_key": f"{manifest.get('bundle_id')}:{row['structure_sha256']}:DFT_SINGLE_POINT",
+                    "stage": "dft_single_point",
+                    "structure_path": str(root / row["structure_path"]),
+                    "input_structure_sha256": row["structure_sha256"],
+                    "parameters": dft_params.get("parameters") or {},
+                    "model_version": manifest.get("model_version"),
+                }
+                for idx, row in enumerate(sampling_out["selected"])
+            ]
+            prep = prepare_remote_dft_manifest_bundle(dft_tasks, root / "dft_prep")
+            mat = materialize_remote_dft_batch(prep["manifest_path"], root / "dft_jobs")
+            write(root / "remote_dft_materialization.json", mat)
+        try:
+            from phase_agent.analysis.phase.phase_quality_reports import get_phase_quality_report
+
+            if state.get("phase_records"):
+                quality_report = get_phase_quality_report(state, write=False)
+                write(root / "remote_phase_quality_report.json", quality_report)
+        except (ImportError, ValueError, KeyError, TypeError, OSError):
+            pass
 
     candidates = candidate_pool(state)
     files = [
@@ -482,7 +563,6 @@ def run_batch(
                                 if plan["status"]
                                 in {
                                     "phase_diagram_unavailable",
-                                    "continuation_pool_below_minimum",
                                     "tasks_in_progress",
                                 }
                                 else "completed"

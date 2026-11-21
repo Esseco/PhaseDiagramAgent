@@ -7,7 +7,8 @@ import json
 def conversation_context(state, messages=()):
     model = state.get("active_model") or {}
     jobs = state.get("remote_finetune_jobs") or {}
-    pending = state.get("pending_execution_policies") or {}
+    from phase_agent.runtime.pending_plan_state import visible_pending
+    pending = visible_pending(state)
     artifacts = []
     for job in list(jobs.values())[-2:]:
         artifacts.append(

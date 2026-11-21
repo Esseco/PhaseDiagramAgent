@@ -32,6 +32,25 @@ DEFAULT_PROJECT_SETTINGS = {
     "runtime_adapters": {},
 }
 
+CLEAN_PROJECT_SETTINGS = {
+    **DEFAULT_PROJECT_SETTINGS,
+    "project_layout": "clean_v2",
+    "config_session_path": ".phase/config_session.json",
+    "editable_config_draft_path": "inputs/search_config.json",
+    "state_path": ".phase/state.json",
+    "ledger_path": ".phase/ledger.json",
+    "new_runs_directory": "runs",
+    "phase_diagram_directory": "outputs",
+    "approval_directory": ".phase/approvals",
+    "local_action_directory": ".phase/approved_batches",
+    "output_preferences": {
+        "formats": ["png", "csv", "json", "npz"],
+        "exclude_formats": ["pdf"],
+        "concise_summary": True,
+        "save_sampling_features": True,
+    },
+}
+
 
 def write_project_entry(root):
     root = Path(root)

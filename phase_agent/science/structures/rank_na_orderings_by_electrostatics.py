@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from fractions import Fraction
 
-from pymatgen.transformations.standard_transformations import OrderDisorderedStructureTransformation
-
 from phase_agent.science.structures.generate_branch_structure import (
     _assign_charge_balanced_average_tm_valence,
 )
@@ -55,6 +53,10 @@ def rank_na_orderings_by_electrostatics(full, x, *, limit=10, oxidation_states=N
 
 
 def _rank(disordered, full, x, limit, oxidation_states, layer_groups, na_sites):
+    from pymatgen.transformations.standard_transformations import (
+        OrderDisorderedStructureTransformation,
+    )
+
     trial = disordered.copy()
     if oxidation_states is not None:
         trial.add_oxidation_state_by_element(oxidation_states)
@@ -121,6 +123,28 @@ def _na_layer_groups(full, na_sites, z_tolerance=0.02):
     if not groups:
         raise ValueError("母结构中没有 Na 候选位点")
     return [tuple(position for _, position in group) for group in groups]
+
+
+def count_supercell_na_layers(reference, matrix):
+    """Count Na layers from coordinates and H without constructing a supercell Structure."""
+    na_indices = [
+        i for i, site in enumerate(reference) if site.is_ordered and site.specie.symbol == "Na"
+    ]
+    if not na_indices:
+        return 0
+    if [row[2] for row in matrix] == [0, 0, 1]:
+        return len(_na_layer_groups(reference, na_indices))
+    from types import SimpleNamespace
+    import numpy as np
+    from pymatgen.util.coord import lattice_points_in_supercell
+
+    coords = [reference[i].frac_coords for i in na_indices]
+    matrix = np.asarray(matrix, dtype=int)
+    translations = lattice_points_in_supercell(matrix)
+    positions = np.asarray(coords) @ np.linalg.inv(matrix)
+    z_values = (positions[:, None, 2] + translations[None, :, 2]).ravel()
+    sites = [SimpleNamespace(frac_coords=(0.0, 0.0, float(z))) for z in z_values]
+    return len(_na_layer_groups(sites, range(len(sites))))
 
 
 def _has_na_in_each_layer(ordered, layer_groups, full, na_sites):

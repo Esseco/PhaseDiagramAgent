@@ -9,7 +9,9 @@ from pathlib import Path
 
 
 def _sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    from phase_agent.persistence.artifact_cache import file_sha256
+
+    return file_sha256(path)
 
 
 def validate_parent_first_result(input_dir, result_dir):

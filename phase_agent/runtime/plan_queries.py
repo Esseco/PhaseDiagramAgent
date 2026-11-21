@@ -25,7 +25,8 @@ def is_plan_query(message):
 
 @read_only_view
 def pending_plan_reply(state):
-    pending = state.get("pending_execution_policies") or {}
+    from phase_agent.runtime.pending_plan_state import visible_pending
+    pending = visible_pending(state)
     regeneration = [
         ("微调输入重生成", state.get("pending_finetune_regeneration")),
         ("MC输入重生成", state.get("pending_mc_regeneration")),
@@ -36,6 +37,13 @@ def pending_plan_reply(state):
     reviews = additional_reviews(state)
     total = len(pending) + len(regeneration) + len(reviews)
     if not total:
+        from phase_agent.runtime.pending_plan_state import stale_pending_plan_ids
+
+        if stale_pending_plan_ids(state):
+            return (
+                "已保存方案：\n"
+                "暂不可批准：当前模型或生效设置与方案依据不同；需更新具体方案。未执行任务。"
+            )
         return "当前没有待确认方案。可说“继续”获取下一步建议。"
     if total > 1:
         entries = [

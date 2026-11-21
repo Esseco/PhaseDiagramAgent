@@ -127,6 +127,12 @@ def run_workflow_turn(
             "config_session_path",
         }
     }
+    # The config session can be confirmed by another project entry point while
+    # this handler remains alive. Use the current saved session for each turn.
+    from phase_agent.runtime.project_context import current_config_session
+
+    if "config_session" in kwargs or getattr(handler, "config_session_path", None):
+        kwargs["config_session"] = current_config_session(handler)
     kwargs["user_message"] = user_message
     if getattr(handler, "unified_dialogue", False):
         kwargs["unified_dialogue"] = True
@@ -272,6 +278,9 @@ def run_workflow_turn(
         )
         user_contextualized_agent._codex_structured = getattr(
             base_agent_client, "_codex_structured", False
+        )
+        user_contextualized_agent._frozen_refresh_draft = getattr(
+            base_agent_client, "_frozen_refresh_draft", False
         )
     try:
         return workflow(

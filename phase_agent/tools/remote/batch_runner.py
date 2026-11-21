@@ -3,6 +3,7 @@
 from copy import deepcopy
 import hashlib
 import json
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -77,27 +78,55 @@ class RemoteBatchRunner:
         selected = self._select(current, scoped)
         if not selected:
             return {"status": "no_tasks", "state": current, "batch": None}
-        batch_id = f"remote-{len(current.get('slurm_batches') or []) + 1:06d}"
+        batch_index = len(current.get("slurm_batches") or []) + 1
         from phase_agent.tools.remote.build_upload_batch_directory import (
             build_upload_batch_directory,
         )
 
         model_version = selected[0].get("model_version") or current.get("active_model_version")
-        directory, layout = build_upload_batch_directory(
-            self.root,
-            current,
-            batch_id=batch_id,
-            stage=selected[0].get("stage"),
-            model_version=model_version,
-            operation_id=selected[0].get("upload_operation_id"),
-            segment_index=selected[0].get("segment_index"),
-            search_group_index=selected[0].get("search_group_index"),
-            parent_relax_round=selected[0].get("parent_relax_round"),
-            model_refresh_round=selected[0].get("model_refresh_round"),
-            refresh_operation=(selected[0].get("parameters") or {}).get("model_refresh_operation"),
-        )
-        directory.parent.mkdir(parents=True, exist_ok=True)
-        directory.mkdir(exist_ok=False)
+        epoch_model = selected[0].get("upload_epoch_model_version") or model_version
+        if epoch_model != model_version and (
+            not selected[0].get("perturbation_batch_id")
+            or epoch_model != current.get("active_model_version")
+            or any(
+                t.get("upload_epoch_model_version") != epoch_model
+                or not t.get("perturbation_batch_id")
+                for t in selected
+            )
+        ):
+            raise ValueError("upload_epoch_model_binding_invalid")
+        # Preserved, unregistered staging still owns its path. Allocate a new
+        # batch identity instead of overwriting or deleting those files.
+        registered_ids = {row.get("batch_id") for row in current.get("slurm_batches") or []}
+        for _ in range(10000):
+            batch_id = f"remote-{batch_index:06d}"
+            if batch_id in registered_ids:
+                batch_index += 1
+                continue
+            directory, layout = build_upload_batch_directory(
+                self.root,
+                current,
+                batch_id=batch_id,
+                stage=selected[0].get("stage"),
+                model_version=epoch_model,
+                operation_id=selected[0].get("upload_operation_id"),
+                segment_index=selected[0].get("segment_index"),
+                search_group_index=selected[0].get("search_group_index"),
+                parent_relax_round=selected[0].get("parent_relax_round"),
+                model_refresh_round=selected[0].get("model_refresh_round"),
+                refresh_operation=(selected[0].get("parameters") or {}).get(
+                    "model_refresh_operation"
+                ),
+            )
+            directory.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                directory.mkdir(exist_ok=False)
+            except FileExistsError:
+                batch_index += 1
+                continue
+            break
+        else:
+            raise ValueError("upload_batch_directory_exhausted")
         manifest = []
         for index, source in enumerate(selected):
             task = deepcopy(source)
@@ -135,6 +164,10 @@ class RemoteBatchRunner:
                     raise FileNotFoundError(f"Relax input structure missing: {original}")
                 staged = task_dir / "initial.vasp"
                 shutil.copy2(original, staged)
+                if task.get("screening_basis") == "exact_candidate_frame":
+                    expected = task.get("input_structure_sha256")
+                    if not expected or hashlib.sha256(staged.read_bytes()).hexdigest() != expected:
+                        raise ValueError("candidate_staged_frame_checksum_mismatch")
                 worker_job["structure_path"] = staged.name
                 worker_job["phase_references"] = {}
                 full_na = (worker_job.get("parameters") or {}).get("full_na_structure")
@@ -210,6 +243,7 @@ class RemoteBatchRunner:
             "batch_id": batch_id,
             "config_version": manifest[0]["config_version"],
             "model_version": manifest[0]["model_version"],
+            **({"upload_epoch_model_version": epoch_model} if epoch_model != model_version else {}),
             "task_ids": [r["task_id"] for r in manifest],
             "manifest_checksum": checksum,
             "protocol_version": PROTOCOL_VERSION,
@@ -247,6 +281,7 @@ class RemoteBatchRunner:
             t.get("task_id")
             for t in state.get("tasks") or []
             if t.get("task_id")
+            and not t.get("recovery_cancelled")
             and (t.get("task_id") not in processed or t.get("stage") in DFT_STAGES)
         }
         directories = _task_directories_by_id(state, task_ids=eligible_ids)
@@ -271,10 +306,18 @@ class RemoteBatchRunner:
             registered_result_directories(state),
             locations=registered_return_locations(state),
         )
+        if report["transfer_errors"]:
+            from phase_agent.runtime.repair_legacy_return import reconcile_verified_legacy_returns
+
+            report["transfer_errors"] = reconcile_verified_legacy_returns(
+                state, report["transfer_errors"]
+            )
         from phase_agent.tools.remote.legacy_recovery import reassessment_result_paths
 
         reassessed_results = reassessment_result_paths(state)
         for task in state.get("tasks") or []:
+            if task.get("recovery_cancelled"):
+                continue
             # WebUI control records are not remote scientific jobs. Legacy
             # tasks with file/batch pointers remain eligible even without stage.
             if not task.get("stage") and not any(
@@ -358,10 +401,9 @@ class RemoteBatchRunner:
                                 "training_file_missing_or_checksum_mismatch",
                             )
                             continue
-                if (
-                    task.get("stage") in {"relax_and_feature", "deep_search"}
-                    and (payload.get("status") == "completed" or
-                         (payload.get("outputs") or {}).get("extrapolation_failures"))
+                if task.get("stage") in {"relax_and_feature", "deep_search"} and (
+                    payload.get("status") == "completed"
+                    or (payload.get("outputs") or {}).get("extrapolation_failures")
                 ):
                     from phase_agent.tools.remote.resolve_local_relax_structure import (
                         resolve_local_relax_structure,
@@ -401,7 +443,47 @@ class RemoteBatchRunner:
                             **outputs,
                             "structure_path": str(local_structure.resolve()),
                         }
+                sidecar = result.with_name("phase_identification.json")
+                if sidecar.is_file() and task.get("stage") in {"relax_and_feature", "deep_search"}:
+                    from phase_agent.tools.remote.phase_result_evidence import (
+                        verified_phase_evidence,
+                    )
+
+                    evidence = verified_phase_evidence(sidecar, result, task, payload)
+                    if evidence is not None:
+                        payload.setdefault("outputs", {})["phase_identification"] = evidence
+                    else:
+                        _add_collection_detail(
+                            task_report, task_id, "phase_evidence_invalid_local_recheck"
+                        )
                 compact = _compact_result_for_state(payload, result)
+                if previously_processed and snapshot:
+                    # Legacy DFT result payloads may omit round provenance that is
+                    # present in the immutable task snapshot. Only restore absent
+                    # fields when the saved task and verified snapshot agree.
+                    for key in ("upload_operation_id", "search_group_index", "parent_relax_round"):
+                        if key not in compact and task.get(key) is not None:
+                            explicit = snapshot.get(key) == task[key]
+                            parent_first = (
+                                key == "upload_operation_id"
+                                and snapshot.get(key) is None
+                                and str(task[key]).startswith("parent-first-")
+                                and snapshot.get("batch_id") == task[key] == task.get("batch_id")
+                            )
+                            imported_retry = (
+                                key == "upload_operation_id"
+                                and snapshot.get(key) is None
+                                and any(
+                                    task.get("task_id") in (row.get("task_ids") or [])
+                                    and task[key] == "diagnostic-retry-" + digest[:16]
+                                    and snapshot.get("task_checksum") == task.get("task_checksum")
+                                    for digest, row in (
+                                        state.get("diagnostic_retry_imports") or {}
+                                    ).items()
+                                )
+                            )
+                            if explicit or parent_first or imported_retry:
+                                compact[key] = task[key]
                 if previously_processed:
                     from phase_agent.tools.state.dft_result_refresh import (
                         validated_magnetic_refresh,
@@ -450,11 +532,17 @@ class RemoteBatchRunner:
             if candidate != anchor:
                 continue
             chosen.append(task)
-            limit = (
-                1
-                if task.get("stage") in DFT_STAGES
-                else self.batch_sizes.get(task.get("stage"), 100)
-            )
+            if task.get("stage") in DFT_STAGES:
+                limit = 1
+            elif (
+                task.get("stage") == "relax_and_feature"
+                and (task.get("parameters") or {}).get("model_refresh_operation") == "predict"
+            ):
+                limit = int(self.batch_sizes.get("mlip_single_point", 500))
+                if limit <= 0:
+                    raise ValueError("mlip_single_point batch size must be positive")
+            else:
+                limit = self.batch_sizes.get(task.get("stage"), 100)
             if len(chosen) >= limit:
                 break
         return chosen
@@ -522,6 +610,41 @@ def _compatibility(task):
     )
 
 
+def _imported_relax_parent_round(state, task, history_tasks):
+    """Resolve an imported Relax–MC parent using its recorded frame and scope."""
+    bundle_id = task.get("relax_mc_bundle_id")
+    batch = (state.get("relax_mc_batches") or {}).get(bundle_id) or {}
+    transition = batch.get("threshold_transition") or {}
+    wave = transition.get("mc_first_wave") or {}
+    if (
+        not bundle_id
+        or transition.get("status") != "relax_phase_imported"
+        or task.get("task_id") not in (wave.get("task_ids") or [])
+        or task.get("model_version") != batch.get("model_version")
+        or task.get("config_version") != batch.get("config_version")
+    ):
+        raise ValueError("imported_relax_parent_scope_invalid")
+    parents = [
+        row
+        for row in history_tasks
+        if row.get("stage") == "relax_and_feature"
+        and row.get("status") == "completed"
+        and row.get("relax_mc_bundle_id") == bundle_id
+        and row.get("structure_id") == task.get("structure_id")
+        and row.get("branch_id") == task.get("branch_id")
+        and row.get("model_version") == task.get("model_version")
+        and row.get("result_path") == task.get("structure_path")
+        and task.get("structure_path")
+    ]
+    if len(parents) != 1:
+        raise ValueError("imported_relax_parent_not_unique")
+    path = str(parents[0]["result_path"]).replace("\\", "/")
+    match = re.search(r"(?:^|/)G(\d+)_Relax-(\d+)(?:/|$)", path)
+    if not match:
+        raise ValueError("imported_relax_parent_round_unverified")
+    return int(match.group(2))
+
+
 def _assign_upload_operations(state, tasks):
     """Keep every approved allocation in a separate, persistent results scope."""
     records = list(state.get("mc_second_round_allocations") or [])
@@ -587,6 +710,10 @@ def _assign_upload_operations(state, tasks):
                 int(relax_batches[row["slurm_batch_id"]].get("operation_index") or 1)
                 for row in exact or matches
             }
+            bundle = (state.get("relax_mc_batches") or {}).get(task.get("relax_mc_bundle_id")) or {}
+            if (bundle.get("threshold_transition") or {}).get("status") == "relax_phase_imported":
+                # Bundle-local IDs may collide with unrelated historic Slurm IDs.
+                parents = {_imported_relax_parent_round(state, task, history_tasks)}
             if len(parents) > 1:
                 raise ValueError(f"MC任务 {task.get('task_id')} 的父 Relax 不唯一")
             if not parents and relax_batches:
@@ -766,6 +893,9 @@ def _expected_result_identity(task, snapshot):
         "task_checksum",
         "protocol_version",
         "input_file_version",
+        "upload_operation_id",
+        "search_group_index",
+        "parent_relax_round",
     ):
         saved, local = task.get(key), expected.get(key)
         if saved is not None and local is not None and saved != local:

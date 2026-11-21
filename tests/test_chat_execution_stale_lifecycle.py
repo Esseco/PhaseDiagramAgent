@@ -80,3 +80,65 @@ def test_stale_lifecycle_error_becomes_read_only_reconciliation(tmp_path, messag
     assert result["recovery_report"]["unsettled"][0]["reason"] == "stale_lifecycle_checkpoint"
     assert len(calls) == 1
     assert state_path.read_bytes() == before
+
+
+def test_workflow_turn_uses_current_saved_config_session(tmp_path):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    session_path = tmp_path / "session.json"
+    current = {"status": "confirmed", "confirmed_snapshot": {"config_version": "new"}}
+    session_path.write_text(json.dumps(current), encoding="utf-8")
+    calls = []
+
+    def workflow(**kwargs):
+        calls.append(kwargs)
+        return {"status": "observed"}
+
+    handler = SimpleNamespace(
+        state_path=state_path,
+        config_session_path=session_path,
+        workflow=workflow,
+        workflow_kwargs={"config_session": {"confirmed_snapshot": {"config_version": "old"}}},
+        unified_dialogue=False,
+    )
+    run_workflow_turn(handler, "request", None, "继续")
+    assert calls[0]["config_session"] == current
+    assert (
+        handler.workflow_kwargs["config_session"]["confirmed_snapshot"]["config_version"] == "old"
+    )
+
+
+def test_workflow_turn_preserves_frozen_refresh_marker(tmp_path):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    calls = []
+
+    class Client:
+        _codex_structured = True
+        _frozen_refresh_draft = True
+        _frozen_generation_draft = True
+        _frozen_mc_action = {"tool": "allocate_mc_bohb"}
+        _frozen_exact_relax_action = {"tool": "prepare_local_batch_files"}
+
+        def __call__(self, payload):
+            return payload
+
+    def workflow(**kwargs):
+        calls.append(kwargs)
+        return {"status": "observed"}
+
+    handler = SimpleNamespace(
+        state_path=state_path,
+        workflow=workflow,
+        workflow_kwargs={"agent_client": Client()},
+        unified_dialogue=True,
+        decision_backend=None,
+    )
+    run_workflow_turn(handler, "request", None, "continue")
+    assert calls[0]["agent_client"]._frozen_refresh_draft is True
+    assert calls[0]["agent_client"]._frozen_generation_draft is True
+    assert calls[0]["agent_client"]._frozen_mc_action == {"tool": "allocate_mc_bohb"}
+    assert calls[0]["agent_client"]._frozen_exact_relax_action == {
+        "tool": "prepare_local_batch_files"
+    }
+    assert calls[0]["agent_client"]._codex_structured is True

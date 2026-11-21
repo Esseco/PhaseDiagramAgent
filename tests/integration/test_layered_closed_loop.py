@@ -38,7 +38,7 @@ class LayeredClosedLoopTest(unittest.TestCase):
         self.assertEqual(settled["state"]["budget_usage"]["total_relative_cost"], .03)
         convergence = check_global_convergence({"tasks": [], "model_update_epochs": [{"model_version": "m1", "hull_change": .002, "ground_state_unchanged": True}, {"model_version": "m2", "hull_change": .001, "ground_state_unchanged": True}], "final_frame_dft_errors": [{"error_ev_per_atom": .002}], "budget_remaining": 1}, rules={"hull_change_tolerance": .003, "stable_model_update_epochs": 2, "final_energy_mae_tolerance": .003, "minimum_recent_dft_checks": 1})
         self.assertEqual(convergence["status"], "numerical_criteria_satisfied")
-        with tempfile.TemporaryDirectory(dir=".") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = f"{directory}/phase.json"; manager.save(path); loaded = load_legacy_ledger(path)
         self.assertEqual(set(loaded.data["branches"]), {branch})
 

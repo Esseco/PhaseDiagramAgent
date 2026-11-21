@@ -22,6 +22,10 @@ def build_agent_proposal(
 ) -> dict[str, Any]:
     """Create the stable proposal envelope shown and stored by the policy."""
     action = normalize_action(action)
+    from phase_agent.tools.dispatch.scientific_operations import new_operation_errors
+
+    if errors := new_operation_errors(action):
+        raise ValueError("; ".join(errors))
     analysis = action.get("analysis") or action.get("current_state_analysis")
     if analysis is None:
         analysis = {

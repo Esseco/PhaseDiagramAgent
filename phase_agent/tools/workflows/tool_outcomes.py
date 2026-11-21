@@ -66,7 +66,7 @@ def _apply_execution_result(current, action, execution, *, record_id, formal, _o
     if execution.get("status") != "completed" or not isinstance(execution.get("result"), dict):
         if formal and execution.get("status") == "failed":
             # An exception does not prove that the handler produced no files.
-            current = deepcopy(current)
+            current = current if _owned else deepcopy(current)
             key = action.get("task_key")
             current.setdefault("effective_decisions", {}).setdefault(key, {}).update(
                 {

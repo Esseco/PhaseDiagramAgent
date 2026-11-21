@@ -113,4 +113,10 @@ def validate_result_binding(result, prior):
     for key in ("task_key", "structure_id", "stage", "config_version", "model_version"):
         if prior.get(key) is not None and key in result and prior[key] != result[key]:
             raise InvalidScientificResult("result_binding_mismatch:" + key)
+    if prior.get("energy_repair_source_model_version"):
+        for key in ("energy_basis_repair_id", "energy_repair_source_task_id",
+                    "energy_repair_source_record_id", "energy_repair_source_model_version",
+                    "input_structure_sha256", "model_sha256", "parent_decision_id"):
+            if key in result and result[key] != prior.get(key):
+                raise InvalidScientificResult("result_binding_mismatch:" + key)
     validate_scientific_result({**prior, **result})

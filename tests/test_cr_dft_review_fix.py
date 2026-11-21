@@ -22,11 +22,11 @@ def test_storage_root_and_empty_response_use_original_pending(tmp_path):
         "expected_purpose": "原选点用途",
         "raw_action": action,
     }
-    state = {
-        "confirmed_config": {"storage": {"workspace_root": str(tmp_path)}},
-        "active_model_version": "m1",
-        "pending_execution_policies": {"p": {"agent_proposal": proposal}},
-    }
+    from tests.test_dft_selection_artifacts import fixture
+
+    state, _ = fixture(tmp_path)
+    state["confirmed_config"] = {"storage": {"workspace_root": str(tmp_path)}}
+    state["pending_execution_policies"] = {"p": {"agent_proposal": proposal}}
     before = deepcopy(state)
     proposal_artifacts(proposal, state)
     text = approval_reply({}, state)
@@ -51,7 +51,14 @@ def test_metadata_reads_owned_ledger_without_creating_tasks(tmp_path):
             }
         )
     )
-    state = {"confirmed_config": {"storage": {"workspace_root": str(tmp_path)}}, "tasks": []}
+    from tests.test_dft_selection_artifacts import fixture
+
+    state, _ = fixture(tmp_path)
+    state["confirmed_config"] = {"storage": {"workspace_root": str(tmp_path)}}
+    state["qbc_candidates"][0]["candidate_id"] = "s"
+    state["qbc_candidates"][0]["branch_id"] = "b"
+    state["qbc_candidates"][0].pop("x_Na_per_O2")
+    state["tasks"] = []
     proposal = {
         "raw_action": {
             "tool": "select_dft_candidates",

@@ -5,13 +5,13 @@ import hashlib
 import json
 
 
-def collect_memory_candidates(state):
-    updated = dict(state)
-    pool = deepcopy(state.get("memory_candidates") or [])
+def collect_memory_candidates(state, *, _owned=False):
+    updated = state if _owned else dict(state)
+    pool = state.get("memory_candidates") or []
+    if not _owned:
+        pool = deepcopy(pool)
     updated["memory_candidates"] = pool
     known = {row.get("candidate_id") for row in pool}
-    model = updated.get("active_model_version")
-    config = updated.get("confirmed_config_version")
     from phase_agent.evidence.training_result_evidence import training_result_evidence
     from phase_agent.evidence.round_budget_evidence import budget_decision_outcomes
 
@@ -49,7 +49,13 @@ def collect_memory_candidates(state):
             continue
         summary = {
             "record_id": row["record_id"],
-            "decision": deepcopy(action),
+            "decision": {
+                key: deepcopy(action.get(key))
+                for key in ("tool", "operation", "stage", "reason", "estimated_cost")
+                if key in action
+            },
+            "action_parameters_ref": "decision_outcome:" + row["record_id"],
+            "parameter_names": sorted((action.get("parameters") or {}).keys()),
             "config_version": row.get("config_version"),
             "model_version": next(iter({task.get("model_version") for task in linked}))
             if len({task.get("model_version") for task in linked}) == 1
@@ -140,18 +146,31 @@ def collect_memory_candidates(state):
             "kind": kind,
             "reference": str(reference),
             "facts": facts,
-            "config_version": source.get("config_version", config),
-            "model_version": source.get("model_version", model),
+            "config_version": source.get("config_version"),
+            "model_version": source.get("model_version"),
         }
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, default=str).encode()
         ).hexdigest()[:16]
         candidate_id = "MCAND-" + digest
         if candidate_id not in known:
+            previous = [
+                row
+                for row in pool
+                if row.get("kind") == kind
+                and row.get("reference") == str(reference)
+                and row.get("status") == "candidate"
+            ]
+            for old in previous:
+                old["status"] = "superseded"
+                old["superseded_by"] = candidate_id
             pool.append(
                 {
                     "candidate_id": candidate_id,
                     "status": "candidate",
+                    "source_id": f"{kind}:{reference}",
+                    "revision": max((row.get("revision", 1) for row in previous), default=0) + 1,
+                    "supersedes": [row["candidate_id"] for row in previous],
                     "evidence_refs": [f"{kind}:{reference}"],
                     **payload,
                 }

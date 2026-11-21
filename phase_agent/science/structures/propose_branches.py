@@ -59,6 +59,8 @@ def propose_branches(
         for value in quotas.values()
     ):
         raise ValueError("配额必须是非负整数")
+    if sum(quotas.values()) > 1000:
+        raise ValueError("每轮 branch 生成数量不能超过 1000")
     disabled = {name for name, quota in quotas.items() if quota and name not in enabled}
     if disabled:
         raise ValueError(f"策略已禁用但配额非零：{sorted(disabled)}")
@@ -168,7 +170,7 @@ def propose_branches(
             and (roles.get("x") != "fixed" or normalize_fraction(candidate["x"]) == x_fixed)
         )
     for candidate in candidates:
-        before = set(manager.data["branches"])
+        before = set(manager.data["branches"]) if register else set()
         candidate["branch_id"] = (
             manager.add_branch(
                 P=candidate["P"],

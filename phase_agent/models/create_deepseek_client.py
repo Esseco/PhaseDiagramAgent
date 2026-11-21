@@ -127,7 +127,7 @@ def create_deepseek_client(
     cache_namespace = ("legacy_client", uuid4().hex)
 
     def uncached_call(payload: dict) -> dict:
-        from time import monotonic
+        from time import monotonic, perf_counter
 
         expert_assessment = bool(payload.get("agent_role")) and payload.get("mode") in {
             "expert_assessment",
@@ -140,6 +140,11 @@ def create_deepseek_client(
             min(float(total_timeout), 12.0) if bounded_control else float(total_timeout)
         )
         deadline = monotonic() + max(0.001, effective_timeout)
+        from phase_agent.runtime.api_deadline import current_model_round
+
+        shared = current_model_round()
+        if shared is not None:
+            deadline = min(deadline, shared["deadline"])
         planning = (
             not expert_assessment
             and (payload.get("evidence_reader") or {}).get("phase") == "select_topics"
@@ -233,7 +238,13 @@ def create_deepseek_client(
         if bounded_control:
             max_tokens_this_try = 384
             thinking_this_try = "disabled"
-        effort_this_try = reasoning_effort
+        # Specialist opinions and failure diagnosis keep thinking enabled but use a
+        # lower effort; the Strategic proposal keeps the configured effort.
+        effort_this_try = (
+            "low"
+            if payload.get("mode") in {"expert_assessment", "simulation_diagnosis"}
+            else reasoning_effort
+        )
         if isinstance(payload.get("analysis_plan"), dict):
             from phase_agent.evidence.analysis_context import AnalysisPlan
 
@@ -261,6 +272,20 @@ def create_deepseek_client(
 
         for attempt in range(2 if thinking_this_try == "enabled" else 1):
             check_cancelled()
+            if attempt:
+                from phase_agent.runtime.api_deadline import consume_model_repair
+
+                try:
+                    consume_model_repair("provider_output_truncation")
+                except (RuntimeError, TimeoutError) as error:
+                    error.llm_usage = {
+                        "calls": attempt,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cost": None,
+                        "model": model,
+                    }
+                    raise
             body = {
                 "model": model,
                 "messages": messages if continuation is None else messages + [continuation],
@@ -295,6 +320,7 @@ def create_deepseek_client(
                     for m in body["messages"]
                 ),
                 phase="evidence_topics" if planning else "analysis",
+                input_bytes=len(request.data or b""),
                 max_output_tokens=max_tokens_this_try,
                 reasoning_enabled=thinking_this_try == "enabled",
                 reasoning_effort=effort_this_try if thinking_this_try == "enabled" else None,
@@ -304,6 +330,7 @@ def create_deepseek_client(
                 if attempt
                 else None,
             )
+            request_started = perf_counter()
             try:
                 from phase_agent.runtime.api_deadline import (
                     read_response,
@@ -376,6 +403,9 @@ def create_deepseek_client(
                 else:
                     message = "无法连接 DeepSeek API，请检查本机网络和 API 地址。"
                 raise DeepSeekResponseError("network_error", message) from None
+            finally:
+                if usage_entry is not None:
+                    usage_entry["seconds"] = perf_counter() - request_started
 
             try:
                 result = json.loads(raw_response.decode("utf-8"))
@@ -496,6 +526,12 @@ def create_deepseek_client(
         raise error
 
     def call(payload):
+        from phase_agent.runtime.api_deadline import model_round, traced_model_call
+
+        with model_round(call):
+            return traced_model_call(bounded_call, payload)
+
+    def bounded_call(payload):
         from phase_agent.runtime.token_usage import cached_request
         from phase_agent.runtime.turn_process import timed_call
 
@@ -514,7 +550,10 @@ def create_deepseek_client(
             category="model",
         )
 
+    call.decision_timeout_seconds = float(total_timeout)
+    call.decision_repair_limit = 2
     call.supports_expert_advice = True
+    call.supports_concurrent_experts = True
     call.supports_simulation = True
     call.supports_strategic_review = True
     call.expert_client = call

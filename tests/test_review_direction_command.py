@@ -45,3 +45,41 @@ def test_rejection_and_ambiguous_approval(tmp_path):
     assert rejected["state"]["remote_finetune_jobs"]["j"]["training_handoff"]["stage"] == "direction_rejected"
     state["pending_execution_policies"] = {"other": {}}
     assert "多个审批对象" in review_direction_command("同意", state, path)["reason"]
+
+
+def test_direction_review_keeps_checkpoint_and_rejects_concurrent_state(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    import pytest
+    from types import SimpleNamespace
+    from phase_agent.persistence.state.read_versions import read_identity
+    from phase_agent.runtime.review_requests import additional_reviews, review_additional
+    from phase_agent.tools.step_runner.file_protocol import read_json, write_json
+    import phase_agent.tools.local.review_direction_command as module
+
+    state, path, _ = setup(tmp_path)
+    write_json(path, state)
+    row = additional_reviews(state)[0]
+    handler = SimpleNamespace(state_path=path)
+    original = module.review_direction_command
+
+    def concurrent(*args, **kwargs):
+        result = original(*args, **kwargs)
+        script = ("import sys; from phase_agent.tools.step_runner.file_protocol import read_json, write_json; "
+                  "p=sys.argv[1]; s=read_json(p); s['other_process_update']=True; write_json(p,s)")
+        subprocess.run([sys.executable, "-c", script, str(path)], check=True)
+        return result
+
+    monkeypatch.setattr(module, "review_direction_command", concurrent)
+    with pytest.raises(ValueError, match="stale_state_file_version"):
+        review_additional(handler, state, row, "approve", "", expected_identity=read_identity(path, strong=True))
+    fresh = read_json(path)
+    assert fresh["other_process_update"] is True
+    assert fresh["remote_finetune_jobs"]["j"]["training_handoff"]["stage"] == "awaiting_direction_approval"
+    proposal = fresh["remote_finetune_jobs"]["j"]["training_handoff"]["direction_proposal"]
+    assert direction_checkpoint(path, proposal)["status"] == "approved"
+    monkeypatch.setattr(module, "review_direction_command", original)
+    row = additional_reviews(fresh)[0]
+    result = review_additional(handler, fresh, row, "approve", "", expected_identity=read_identity(path, strong=True))
+    assert result["status"] == "direction_reviewed"
+    assert read_json(path)["other_process_update"] is True

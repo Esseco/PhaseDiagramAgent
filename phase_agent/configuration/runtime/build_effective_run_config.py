@@ -62,6 +62,24 @@ def build_effective_run_config(config_session: dict, runtime_config: dict | None
     for key in ("budgets", "dft", "convergence", "agent", "frozen_parameters"):
         if key in confirmed:
             effective[key] = deepcopy(confirmed[key])
+    # Legacy cost ceilings remain in the confirmed snapshot for audit; the
+    # project-wide policy removes only compute-cost ceilings at runtime.
+    budgets = effective.get("budgets")
+    if isinstance(budgets, dict):
+        budgets["total_relative_cost"] = None
+        for limits in (budgets.get("stage_limits") or {}).values():
+            if isinstance(limits, dict):
+                limits["max_cost"] = None
+        if isinstance(budgets.get("structure_limits"), dict):
+            budgets["structure_limits"]["max_proxy_cost_per_task"] = None
+    if isinstance(effective.get("mc_policy"), dict):
+        effective["mc_policy"]["max_cumulative_cost_per_branch"] = None
+    if isinstance(effective.get("round_strategy"), dict):
+        effective["round_strategy"]["maximum_dft_budget"] = None
+    if isinstance(effective.get("dft"), dict) and isinstance(effective["dft"].get("selection"), dict):
+        effective["dft"]["selection"]["single_point_cost_per_round"] = None
+    if isinstance(effective.get("qbc"), dict):
+        effective["qbc"]["budget_limits"] = deepcopy(budgets or {})
     if "bohb" in effective:
         effective["bohb"]["budget_limits"] = deepcopy(effective.get("budgets") or {})
     calculation = confirmed.get("calculation") or {}

@@ -16,7 +16,9 @@ def test_native_simulation_must_finish_before_human_direction(tmp_path):
     control, context = make_control(tmp_path)
     context["allowed_tools"] = ["prepare_local_batch_files"]
     t = team(control)
-    started = t.start(question="prepare reviewed inputs", consult=[])
+    started = t.start(question="prepare reviewed inputs", consult=['exploration', 'reliability'])
+    from tests.test_codex_native_team import register_opinions
+    register_opinions(t, started, ['exploration', 'reliability'])
     draft = t.draft(
         started["team_id"],
         1,
@@ -38,7 +40,9 @@ def test_native_stale_plan_cannot_be_registered(tmp_path):
     control, context = make_control(tmp_path)
     context["allowed_tools"] = ["prepare_local_batch_files"]
     t = team(control)
-    view = t.start(question="prepare", consult=[])
+    view = t.start(question="prepare", consult=['exploration', 'reliability'])
+    from tests.test_codex_native_team import register_opinions
+    register_opinions(t, view, ['exploration', 'reliability'])
     draft = t.draft(view["team_id"], 1, {"tool": "prepare_local_batch_files"}, rationale="prepare")
     plan = SimulationModel()(draft["requests"]["simulation"])
     plan["action_hash"] = "stale"
@@ -98,7 +102,7 @@ def test_real_dispatch_supplies_simulation_execution_role():
                 )
             }
         ),
-        agent_client=lambda _: {"tool": "check_convergence"},
+        agent_client=SimulationModel(),
         execution_mode="autonomous",
     )
     assert result["status"] == "completed"
@@ -138,11 +142,17 @@ def test_ordering_export_and_import_are_minimal_and_checksummed(tmp_path, monkey
     from Process_AL_MC import run_ordering_search
 
     session, context, action, registry = fixture(tmp_path)
+    class OrderingClient(SimulationModel):
+        def __call__(self, request):
+            if request.get("mode") == "autonomous_search":
+                return deepcopy(action)
+            return super().__call__(request)
+    ordering_client = OrderingClient()
     options = dict(
         session=session,
         registry=registry,
         context=context,
-        agent_client=lambda _: action,
+        agent_client=ordering_client,
         execution_mode="interactive",
         invocation_id="ordering",
     )

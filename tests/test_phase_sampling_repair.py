@@ -78,6 +78,12 @@ def test_empty_parent_strategy_is_reported_without_changing_quota(
         == "parent_branches_required"
     )
     assert result["summary"]["phase_coverage"]["missing"] == ["O1", "O3"]
+    sampled = module.run_branch_generation(
+        manager, {}, structure_directory=tmp_path, quotas={"coverage": 300},
+        batch_size=300, initial_states_per_branch=3, seed=1, prepared_candidates=[],
+        sampling_report={"unfilled_requested_candidates": 32},
+    )
+    assert sampled["summary"]["unfilled_quota"] == 32
 
 
 @pytest.mark.parametrize("use_summary", [False, True])

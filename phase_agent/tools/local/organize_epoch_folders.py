@@ -70,7 +70,11 @@ def _english_interaction_stem(stem):
 
 def folder_plan(root, state):
     root = Path(root).resolve()
-    rounds = (state.get("upload_layout") or {}).get("model_rounds") or {}
+    layout = state.get("upload_layout") or {}
+    registered = layout.get("model_rounds") or {}
+    scientific = layout.get("scientific_epochs") or {}
+    rounds = {version: (scientific[version] + 1 if version in scientific else number)
+              for version, number in registered.items()}
     moves = []
 
     def add(old, new):

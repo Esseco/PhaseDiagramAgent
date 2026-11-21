@@ -205,15 +205,22 @@ def build_epoch_manifest(
     }
 
 
-def write_epoch_manifests(submission_root, model_rounds, registered_directories):
+def write_epoch_manifests(submission_root, model_rounds, registered_directories, *, scientific_epochs=None):
     root = Path(submission_root).resolve()
     registered = {Path(path).resolve() for path in registered_directories}
     written = []
+    groups = {}
     for version, number in (model_rounds or {}).items():
-        epoch = root / f"epoch{int(number) - 1}"
+        label = (scientific_epochs or {}).get(version, int(number) - 1)
+        groups.setdefault(int(label), []).append((int(number), version))
+    for number, versions in groups.items():
+        epoch = root / f"epoch{number}"
         if not epoch.is_dir():
             continue
-        manifest = build_epoch_manifest(root, epoch, registered, model_version=version)
+        ordered = [version for _, version in sorted(versions)]
+        manifest = build_epoch_manifest(root, epoch, registered, model_version=ordered[-1])
+        if len(ordered) > 1:
+            manifest["model_versions"] = ordered
         path = epoch / "layout_manifest.json"
         path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",

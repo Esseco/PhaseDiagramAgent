@@ -282,6 +282,9 @@ def create_local_http_server(
                                 expected_proposal_hash=body.get("proposal_hash"),
                                 comment=body.get("comment", ""),
                                 conversation_id=conversation,
+                                **(
+                                    {"operator": "codex"} if body.get("operator") == "codex" else {}
+                                ),
                             )
                         elif route == "/phase/recovery/transaction/resume":
                             return local_control.resume_recovery_transaction(body["revision"])

@@ -1,13 +1,19 @@
 """Per-turn provider-reported usage; missing usage is never treated as zero."""
 
+from threading import Lock
 from phase_agent.runtime.turn_process import _current
+
+_usage_lock = Lock()
 
 
 def begin_api_call(model, mode, attempt, input_chars, **metadata):
     record = _current.get()
     if record is None:
         return None
+    from phase_agent.runtime.api_deadline import _model_call
+
     entry = {
+        "logical_call_id": _model_call.get(),
         "model": model,
         "mode": mode,
         "attempt": attempt + 1,
@@ -21,6 +27,7 @@ def begin_api_call(model, mode, attempt, input_chars, **metadata):
             if k
             in {
                 "phase",
+                "input_bytes",
                 "max_output_tokens",
                 "reasoning_enabled",
                 "reasoning_effort",
@@ -28,7 +35,8 @@ def begin_api_call(model, mode, attempt, input_chars, **metadata):
             }
         }
     )
-    record.setdefault("model_requests", []).append(entry)
+    with _usage_lock:
+        record.setdefault("model_requests", []).append(entry)
     return entry
 
 
@@ -77,7 +85,6 @@ def cached_request(payload, callback, *, namespace=None):
     if record is None:
         return callback(payload)
     # Cache outside persisted diagnostics: no payloads or credentials are saved.
-    cache = record.setdefault("_model_request_cache", {})
     digest = hashlib.sha256(
         json.dumps(
             {"namespace": namespace, "payload": payload},
@@ -86,13 +93,17 @@ def cached_request(payload, callback, *, namespace=None):
             default=str,
         ).encode()
     ).hexdigest()
-    if digest in cache:
-        record["reused_model_requests"] = record.get("reused_model_requests", 0) + 1
-        result = deepcopy(cache[digest])
-        result.pop("_llm_usage", None)  # Provider spend has already been recorded once.
-        return result
+    with _usage_lock:
+        cache = record.setdefault("_model_request_cache", {})
+        if digest in cache:
+            record["reused_model_requests"] = record.get("reused_model_requests", 0) + 1
+            result = deepcopy(cache[digest])
+            result.pop("_llm_usage", None)  # Provider spend has already been recorded once.
+            return result
     result = callback(payload)
-    cache[digest] = deepcopy(result)
+    with _usage_lock:
+        cache = record.setdefault("_model_request_cache", {})
+        cache[digest] = deepcopy(result)
     return result
 
 

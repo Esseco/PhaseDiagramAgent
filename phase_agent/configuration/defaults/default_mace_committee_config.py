@@ -78,7 +78,13 @@ def default_mace_committee_config(*, foundation_model=None) -> dict:
         ],
         "main_model_index": 0,
         "qbc_member_count": 4,
-        "activation": {"requires_separate_approval": True, "pause_on_refresh_anomaly": True},
+        "activation": {
+            "requires_separate_approval": True,
+            "pause_on_refresh_anomaly": True,
+            # Legacy-safe default.  A reviewed training action may explicitly
+            # opt into automatic activation followed by a separate refresh gate.
+            "post_training_transition": "manual_activation",
+        },
         "validation": {
             "max_energy_mae": None,
             "max_force_rmse": None,

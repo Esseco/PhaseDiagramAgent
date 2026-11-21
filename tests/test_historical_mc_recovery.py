@@ -140,9 +140,11 @@ def test_configuration_drift_imports_and_replay_does_not_settle_again(tmp_path, 
     )
     quality = import_module("phase_agent.analysis.phase.phase_quality_reports")
     monkeypatch.setattr(quality, "candidate_quality_evidence", lambda state, rows: rows)
+    from phase_agent.configuration.defaults.default_budget_rules import default_budget_rules
+
     ctx = {
         "event_state": state,
-        "effective_config": {"upload_batches_directory": str(tmp_path), "mlip": {}},
+        "effective_config": {"upload_batches_directory": str(tmp_path), "mlip": {}, "budgets": default_budget_rules()},
         "config_version": "new",
         "manager": Manager(),
     }

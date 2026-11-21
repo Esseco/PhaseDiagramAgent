@@ -47,6 +47,7 @@ def write_proposal(proposal, state):
                 "优先级": row["priority"],
                 "相": row["phase"],
                 "选择方法": row["strategy"],
+                "本轮建议补充候选数": row.get("sample_count", 0),
                 "超胞倍数det_H范围": [row["min_det_H"], row["max_det_H"]],
                 "钠含量Na每O2范围": [row["na_min"], row["na_max"]],
                 "选择理由": row["reason"],
@@ -59,8 +60,15 @@ def write_proposal(proposal, state):
         )
     controls = params.get("sampling_controls") or CONTROLS
     from phase_agent.agents.exploration.branch_pool_review import readable_review
+    from phase_agent.policies.region_sampling import sampling_limit
 
     deferred = not params["regions"]
+    try:
+        requested_limit = sampling_limit(params, controls)
+    except (KeyError, ValueError, TypeError):
+        # Older review artifacts may omit the advisory sample_count. Keep the
+        # artifact readable; execution validation still rejects the incomplete action.
+        requested_limit = 0
     payload = {
         "状态": "待审阅，建议暂不新增branch" if deferred else "待审批，尚未执行新生成",
         "已有branch是否需要补充": readable_review(action.get("branch_pool_review")),
@@ -87,6 +95,7 @@ def write_proposal(proposal, state):
         "停止规则": {
             "区域停止": f"连续{controls['stagnant_batches']}小批没有新覆盖或新的初始TM近邻相关性描述符。",
             "每小批最多尝试": controls["batch_attempts"],
+            "本轮候选工作上限": 0 if deferred else requested_limit,
             "暂停审阅保护阈值": {
                 "尝试次数": controls["max_attempts"],
                 "新增branch数": controls["review_after_new_branches"],
@@ -153,8 +162,7 @@ def write_result(history, manager, registered, state, action):
     payload.update(
         {
             "状态": "已部分生成，初始化失败待审阅"
-            if (report.get("initial_coverage") or {}).get("required")
-            and history["summary"].get("initialization_failed_branches")
+            if history["summary"].get("initialization_failed_branches")
             else (
                 "已生成，保护阈值触发后待审阅"
                 if report.get("status") == "paused_for_review"
@@ -172,7 +180,15 @@ def write_result(history, manager, registered, state, action):
             "新增branch清单": inventory,
         }
     )
-    payload["程序记录（可折叠）"].update(status="completed", actual_new_branch_count=len(new))
+    review_needed = (
+        bool(history["summary"].get("initialization_failed_branches"))
+        or report.get("status") == "paused_for_review"
+    )
+    payload["程序记录（可折叠）"].update(
+        status="completed",
+        generation_review_status="paused_for_review" if review_needed else "completed",
+        actual_new_branch_count=len(new),
+    )
     raw = payload.pop("程序记录（可折叠）")
     rows = []
     for identity in sorted({r["branch_id"] for r in registered}):

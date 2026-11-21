@@ -77,7 +77,7 @@ def test_parallel_phase_dependencies_and_complete_feedback(tmp_path, monkeypatch
             assert len(io.rows) == count
         else:
             assert outcome["status"] == "completed", outcome
-    assert len(calls) == 49
+    assert len(calls) == 46
     assert len(io.rows) == 16  # twelve GPU jobs and four short analysis jobs
     assert read(root / "workflow_state.json")["relax_mc_remote"]["completed_mc_waves"] == [0, 1, 2]
     assert run_batch(root, submit=True, io=io)["submitted"] is False
@@ -143,3 +143,27 @@ def test_terminal_analysis_publishes_named_output(tmp_path):
     with zipfile.ZipFile(output / "diagnostics.zip") as archive:
         assert json.loads(archive.read("run_status.json"))["status"] == "completed"
     assert {p.name for p in output.iterdir()} == {"results.zip", "diagnostics.zip"}
+
+
+def test_missing_cpu_group_receipt_blocks_next_phase(tmp_path, monkeypatch):
+    from phase_agent.tools.relax_mc_batch.files import write
+    from phase_agent.tools.remote.integrity import file_checksum
+
+    root, io, _ = setup(tmp_path, monkeypatch)
+    run_batch(root, submit=True, io=io)
+    state = rebase(read(root / "workflow_state.json"), root)
+    spec = root / "phase_analysis_0" / "phase_wave.json"
+    spec.parent.mkdir(exist_ok=True)
+    spec.write_text('{"tasks":[{"task_id":"missing"}]}', encoding="utf8")
+    state["relax_mc_remote"]["phase_controllers"]["0"]["phase_groups"] = {
+        "spec_relative": "phase_analysis_0/phase_wave.json",
+        "spec_checksum": file_checksum(spec),
+        "group_count": 1,
+        "job_id": "999",
+    }
+    write(root / "workflow_state.json", rebase(state, root, portable=True))
+    count = len(io.rows)
+    result = run_batch(root, submit=True, io=io, phase=0)
+    assert result["status"] == "failed"
+    assert "phase_analysis_group_receipt_missing" in result["reason"]
+    assert len(io.rows) == count

@@ -91,10 +91,12 @@ def test_newly_prepared_relax_action_returns_handoff_not_processing_status():
         "budget": 0, "reason": "prepare existing Relax inputs",
         "expected_purpose": "manual Relax input preparation",
     }
+    from tests.test_role_permissions_and_research_plan import TeamAction
+
     result = run_workflow(
         None, {}, {}, session, state={"dedup_gate": {"status": "ready"}},
         registry=create_tool_registry({"prepare_local_batch_files": prepare}),
-        agent_client=lambda _payload: action,
+        agent_client=TeamAction(action),
         execution_mode="interactive", human_feedback={"decision": "approve", "comment": "approve"},
     )
     assert result["status"] == "awaiting_manual_submission"

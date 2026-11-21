@@ -57,7 +57,7 @@ def generate_dft_workflow_with_atomate(
             from phase_agent.science.dft.incar_policy import layered_oxide_incar
 
             incar = Incar.from_file(incar_path)
-            incar.update(layered_oxide_incar())
+            incar.update(layered_oxide_incar(static=calculation_type == "singlepoint"))
             incar.write_file(incar_path)
     except Exception as error:
         return {

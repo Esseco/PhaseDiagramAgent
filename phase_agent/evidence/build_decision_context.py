@@ -46,6 +46,9 @@ def build_decision_context(state, *, recent_limit=5):
     long_term = memory.get("long_term") or {}
     diagrams = state.get("phase_diagrams") or state.get("phase_diagram_state") or {}
     diagrams = diagrams.get("diagrams", diagrams)
+    from phase_agent.evidence.model_diagram_scope import decision_diagram
+
+    diagrams = {**diagrams, "mlip": decision_diagram(state, diagrams.get("mlip") or {})}
     phase_summary = {}
     for method in ("mlip",):
         snapshot = diagrams.get(method) or {}
@@ -63,16 +66,27 @@ def build_decision_context(state, *, recent_limit=5):
         if entries:
             try:
                 quality_report = get_phase_quality_report(state, method=method, snapshot=snapshot)
-            except (OSError, ValueError, TypeError, KeyError, OverflowError):
-                # quality_summary retains the existing diagnostic_unavailable
-                # contract when a snapshot is incomplete or malformed.
-                quality_report = None
+            except (OSError, ValueError, TypeError, KeyError, OverflowError) as error:
+                # None still means not fetched to legacy callers. Share an explicit failure.
+                quality_report = {"status": "diagnostic_unavailable", "reason": str(error)}
 
         phase_summary[method] = {
             "quality_diagnostics": quality_summary(
                 state, method=method, snapshot=snapshot, report=quality_report
             ),
-            **{k: deepcopy(snapshot.get(k)) for k in ("status", "version", "energy_basis_id")},
+            **{
+                k: deepcopy(snapshot.get(k))
+                for k in (
+                    "status",
+                    "version",
+                    "energy_basis_id",
+                    "energy_policy",
+                    "mixed_model_versions",
+                    "source_model_versions",
+                    "independent_model_comparability",
+                )
+                if k in snapshot
+            },
             "entry_count": len(entries),
             "phase_coverage": summarize_phase_coverage(entries),
             "stable_count": sum(bool(x.get("is_stable")) for x in entries),
@@ -90,6 +104,11 @@ def build_decision_context(state, *, recent_limit=5):
             saved_candidates = candidate_quality_evidence(
                 state, saved_candidates, report=quality_report
             )
+    from phase_agent.evidence.model_diagram_scope import active_model_summary
+
+    independent_summary = active_model_summary(state)
+    if independent_summary:
+        phase_summary["mlip_active_model"] = independent_summary
     rewards = []
     current_basis = (diagrams.get("mlip") or {}).get("energy_basis_id")
     official_rewards = [
@@ -188,19 +207,18 @@ def build_decision_context(state, *, recent_limit=5):
 
     scope = memory_action_scope(state)
     decision_action = scope["action"]
+    from phase_agent.persistence.memory.decision_context import memory_query
+
+    memory_filters, memory_constraints = [], []
     relevant = retrieve_relevant_knowledge(
         state,
         system_id=system_id,
         action=decision_action,
         model_version=state.get("active_model_version"),
         limit=8,
-        query=" ".join(
-            [
-                str(decision_action or ""),
-                str(state.get("current_status") or ""),
-                str(state.get("coverage_gaps") or ""),
-            ]
-        ),
+        query=memory_query(state, decision_action),
+        diagnostics=memory_filters,
+        required_constraints=memory_constraints,
         token_budget=2000,
     )
     from phase_agent.analysis.cost.estimate_task_cost import estimate_task_cost
@@ -245,8 +263,18 @@ def build_decision_context(state, *, recent_limit=5):
 
     from phase_agent.persistence.memory.decision_context import decision_memory_context
 
+    from phase_agent.agents.reliability.extrapolation_round import assess_current_rounds
+    from phase_agent.evidence.extrapolation_recovery import recovery_context
+
+    from phase_agent.evidence.dft_failure_policy import failure_guard_facts
+
     context = {
-        "memory_context": decision_memory_context(state, relevant=relevant),
+        "dft_failure_guard": failure_guard_facts(state),
+        "reliability_extrapolation_rounds": assess_current_rounds(state),
+        "extrapolation_recovery": recovery_context(state),
+        "memory_context": decision_memory_context(
+            state, relevant=relevant, constraints=memory_constraints, diagnostics=memory_filters
+        ),
         "task_wait_cancellation": latest_cancellation_facts(state),
         "mc_entry_conditions": mc_allocation_facts(state),
         "refresh_result_facts": refresh_result_facts(state),
@@ -352,9 +380,9 @@ def build_decision_context(state, *, recent_limit=5):
         "hpc_startup_recovery": startup_recovery_options(state),
         "partial_recovery": partial_recovery_facts(state),
         "partial_recovery_instruction": (
-            "已核验的部分回收无需另行批准分析；在下一步具体待审方案中说明采用成功子集还是补全及依据。"
+            "已核验的部分回收无需另行批准分析；DFT 失败项排除且不主动补算，MC 可考虑补全。"
             "采用成功子集时，后续分析必须标注有效覆盖不足；"
-            "建议补全或用户要求补全时，只能针对 partial_recovery 中的 retryable_task_ids 提出 restart_failed_task，"
+            "MC 建议补全时只针对 partial_recovery 中的 retryable_task_ids 提出 restart_failed_task；DFT 重试须有用户明确要求，"
             "保留原失败记录，不得重跑整批、重建整批输入或把失败项当作完成。"
         ),
         "recent_experience": {
@@ -370,6 +398,7 @@ def build_decision_context(state, *, recent_limit=5):
             "reward_count": len(state.get("rewards") or []),
         },
         "retryable_tasks": retryable_tasks,
+        "dft_recalculation_guidance": "DFT failures may be reviewed by Simulation; request explicit human approval of a frozen restart_failed_task action with repair_profile dft_recalculation, exact target_ids and per-task strategies (original, mixing_parameters, vasp_symmetry_single_gpu, nelm_200, nelm_200_slow_mixing); Simulation analyzes the failed tasks and binds evidence before approval. No automatic retry. Input preparation requires a separate approval.",
         "failure_attempt_facts": {
             key: value for key, value in failure_facts.items() if key != "actionable_failures"
         },
@@ -385,6 +414,13 @@ def build_decision_context(state, *, recent_limit=5):
     from phase_agent.evidence.post_dft_assessment import post_dft_assessment
 
     context["post_dft_assessment"] = post_dft_assessment(state, state.get("confirmed_config") or {})
+    from phase_agent.analysis.convergence.joint_convergence_evidence import (
+        joint_convergence_checklist,
+    )
+
+    context["joint_convergence_checklist"] = joint_convergence_checklist(
+        state, post_dft=context["post_dft_assessment"]
+    )
     from phase_agent.evidence.workflow_blockers import convergence_feedback
 
     context["latest_convergence_check"] = convergence_feedback(state)

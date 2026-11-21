@@ -270,25 +270,71 @@ class PhaseDataManager:
 
         return save_coverage_csv(self.coverage(), path)
 
-    def save(self, path: str | Path) -> Path:
-        output = Path(path)
+    def save(self, path: str | Path, *, _lock_held: bool = False) -> Path:
+        from contextlib import nullcontext
+        from filelock import FileLock
+        from uuid import uuid4
+
+        output = Path(path).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        temporary = output.with_name(f"{output.name}.tmp")
-        temporary.write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(output)
+        lock = nullcontext() if _lock_held else FileLock(str(output) + ".lock", timeout=30)
+        with lock:
+            bound_path = getattr(self, "_ledger_path", None)
+            try:
+                current = _ledger_identity(output)
+            except FileNotFoundError:
+                current = None
+            if bound_path != str(output) and current is not None:
+                raise ValueError("ledger_existing_target_requires_load")
+            if bound_path == str(output):
+                if current != getattr(self, "_ledger_identity", None):
+                    # A long-lived handler may have adopted an externally
+                    # refreshed ``manager.data`` (for example after a child
+                    # process restart) without updating the private identity
+                    # fields.  Accept that state only when it is byte-for-byte
+                    # equivalent in content to the current ledger; otherwise
+                    # preserve the stale-writer guard.
+                    try:
+                        disk_data = json.loads(output.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        disk_data = None
+                    if disk_data is None or _data_digest(disk_data) != _data_digest(self.data):
+                        raise ValueError("ledger_changed_since_load")
+                    self._ledger_identity = current
+                    self._ledger_data_digest = _data_digest(self.data)
+            temporary = output.with_name(f"{output.name}.{uuid4().hex}.tmp")
+            try:
+                with temporary.open("w", encoding="utf-8") as stream:
+                    json.dump(self.data, stream, ensure_ascii=False, indent=2, sort_keys=True)
+                    stream.write("\n")
+                try:
+                    before_replace = _ledger_identity(output)
+                except FileNotFoundError:
+                    before_replace = None
+                if before_replace != current:
+                    raise ValueError("ledger_changed_during_save")
+                temporary.replace(output)
+            finally:
+                temporary.unlink(missing_ok=True)
+            self._ledger_path = str(output)
+            self._ledger_identity = _ledger_identity(output)
+            self._ledger_data_digest = _data_digest(self.data)
         return output
 
     @classmethod
     def load(cls, path: str | Path) -> PhaseDataManager:
+        before = _ledger_identity(path)
         data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if _ledger_identity(path) != before:
+            raise ValueError("ledger_changed_during_load")
         if data.get("schema_version") != cls.SCHEMA_VERSION:
             raise ValueError(f"不支持的 schema_version：{data.get('schema_version')!r}")
         manager = cls(data["boundary"], system_config=data.get("system_config"))
         manager.data = data
         manager._validate_loaded_data()
+        manager._ledger_path = str(Path(path).resolve())
+        manager._ledger_identity = before
+        manager._ledger_data_digest = _data_digest(manager.data)
         return manager
 
     def extract_config_features(self, structure_id: str) -> dict[str, Any]:
@@ -346,3 +392,86 @@ def _finite(value: float | None, name: str) -> float | None:
 def _fill_if_missing(record: dict[str, Any], field: str, value: Any) -> None:
     if record.get(field) is None and value is not None:
         record[field] = json_safe(value)
+
+
+def _ledger_identity(path):
+    source = Path(path)
+    before = source.stat()
+    digest = hashlib.sha256()
+    with source.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    after = source.stat()
+
+    def metadata(stat):
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+    if metadata(before) != metadata(after):
+        raise ValueError("ledger_changed_during_identity")
+    from phase_agent.runtime.turn_process import record_read_metric
+
+    record_read_metric("ledger_file_validation", bytes_read=after.st_size)
+    return (*metadata(after), digest.hexdigest())
+
+
+def _data_digest(data):
+    from time import perf_counter
+    from phase_agent.runtime.turn_process import record_read_metric, record_timing
+
+    started = perf_counter()
+    encoded_bytes = 0
+    digest = hashlib.sha256()
+    def chunks(value):
+        # Encode top-level members with CPython's C encoder.  The canonical JSON
+        # bytes are identical to iterencode, without visiting each scalar in Python.
+        options = {"ensure_ascii": False, "sort_keys": True, "separators": (",", ":")}
+        if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+            yield "{"
+            for index, key in enumerate(sorted(value)):
+                if index:
+                    yield ","
+                yield json.dumps(key, **options)
+                yield ":"
+                yield json.dumps(value[key], **options)
+            yield "}"
+        elif isinstance(value, (list, tuple)):
+            yield "["
+            for index, item in enumerate(value):
+                if index:
+                    yield ","
+                yield json.dumps(item, **options)
+            yield "]"
+        else:
+            yield json.dumps(value, **options)
+
+    for chunk in chunks(data):
+        encoded = chunk.encode("utf-8")
+        encoded_bytes += len(encoded)
+        digest.update(encoded)
+    record_read_metric("ledger_object_digest", bytes_read=encoded_bytes)
+    record_timing("ledger_object_digest", perf_counter() - started, category="processing")
+    return digest.hexdigest()
+
+
+def refresh_if_changed(manager, path):
+    """Refresh an externally replaced ledger only if local data still match its baseline.
+
+    Caller holds the project lifecycle lock. A conflict must be resolved by the caller.
+    """
+    identity = _ledger_identity(path)
+    baseline = getattr(manager, "_ledger_identity", None)
+    if baseline == identity:
+        return False
+    previous_digest = getattr(manager, "_ledger_data_digest", None)
+    if previous_digest is None or _data_digest(manager.data) != previous_digest:
+        raise ValueError("ledger_memory_changed_requires_reconciliation")
+    fresh = PhaseDataManager.load(path)
+    if manager.boundary != fresh.boundary:
+        raise ValueError("ledger_boundary_changed_requires_reconciliation")
+    if _ledger_identity(path) != fresh._ledger_identity:
+        raise ValueError("ledger_changed_during_refresh")
+    manager.data = fresh.data
+    manager._ledger_path = fresh._ledger_path
+    manager._ledger_identity = fresh._ledger_identity
+    manager._ledger_data_digest = fresh._ledger_data_digest
+    return True

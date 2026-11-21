@@ -18,7 +18,7 @@ from phase_agent.persistence.ledger.branch_energy_pool_ledger import (
 )
 
 
-def prepare_branch_relaxation(candidates, state, context):
+def prepare_branch_relaxation(candidates, state, context, *, _owned=False):
     from phase_agent.science.structures.initialize_branch_structures import (
         initialize_branch_structures,
     )
@@ -45,7 +45,10 @@ def prepare_branch_relaxation(candidates, state, context):
         DISCARDED,
     )
 
-    current = reconcile_relaxation_quality(state)
+    current = reconcile_relaxation_quality(state, _owned=_owned)
+    frozen_version = context.get("mc_hull_reference_version")
+    if frozen_version:
+        return _prepare_frozen_pool(candidates, current, context, version, settings)
     pending = []
     unavailable = []
     system_id = (config.get("system_config") or {}).get("system_id")
@@ -215,7 +218,12 @@ def prepare_branch_relaxation(candidates, state, context):
             "reason": "approved_hull_reference_unavailable",
         }
     pool = pool or build_relax_hull(records, model_version=version, system_id=system_id)
-    diagram = (current.get("phase_diagrams") or {}).get("mlip") or {}
+    from phase_agent.analysis.phase.mc_snapshot import mc_model_snapshot
+
+    try:
+        diagram = mc_model_snapshot(current, version)
+    except ValueError:
+        diagram = {}
     if (
         diagram.get("status") != "completed"
         or diagram.get("model_version") != version
@@ -272,6 +280,84 @@ def prepare_branch_relaxation(candidates, state, context):
         "unavailable": unavailable_structures,
         "unavailable_branches": unavailable_branches,
         "partial": bool(unavailable_structures or unavailable_branches),
+    }
+
+
+def _prepare_frozen_pool(candidates, current, context, version, settings):
+    """Use only the approved, already screened pool; never create Relax tasks."""
+    from pathlib import Path
+    from phase_agent.analysis.phase.mc_snapshot import mc_model_snapshot
+    from phase_agent.analysis.convergence.mlip_relaxation import DISCARDED
+    from phase_agent.tools.remote.integrity import file_checksum
+
+    def reject(reason, missing=()):
+        return {
+            "state": current,
+            "status": "screening_incomplete",
+            "candidates": [],
+            "unavailable": [],
+            "unavailable_branches": list(missing),
+            "reason": reason,
+        }
+
+    pool = (current.get("branch_hull_batches") or {}).get(
+        context["mc_hull_reference_version"]
+    ) or {}
+    if (
+        pool.get("version") != context["mc_hull_reference_version"]
+        or pool.get("model_version") != version
+    ):
+        return reject("approved_hull_reference_unavailable")
+    try:
+        diagram = mc_model_snapshot(current, version)
+    except ValueError:
+        return reject("current_mlip_phase_diagram_unavailable")
+    if diagram.get("status") != "completed" or not diagram.get("version"):
+        return reject("current_mlip_phase_diagram_unavailable")
+    if (
+        context.get("mc_phase_diagram_version")
+        and diagram["version"] != context["mc_phase_diagram_version"]
+    ):
+        return reject("approved_phase_diagram_changed")
+    bad_paths = {
+        (t.get("outputs") or {}).get("structure_path")
+        for t in current.get("tasks") or []
+        if t.get("result_disposition") == DISCARDED
+    } - {None}
+    if any(row.get("structure_path") in bad_paths for row in pool.get("records") or []):
+        return reject("approved_hull_contains_unconverged_results")
+    ranked, missing = rank_relaxed_branches(
+        candidates,
+        pool,
+        uncertainty_weight=float(settings.get("uncertainty_weight", 1.0)),
+        phase_diagram=diagram,
+    )
+    if missing:
+        return reject("relax_structure_missing_from_current_phase_diagram", sorted(set(missing)))
+    entries = {
+        (r.get("structure_id"), r.get("structure_path")): r for r in diagram.get("entries") or []
+    }
+    records = {
+        (r.get("structure_id"), r.get("structure_path")): r for r in pool.get("records") or []
+    }
+    for row in ranked:
+        key = (row.get("structure_id"), row.get("structure_path"))
+        path = Path(row.get("structure_path") or "")
+        source = records.get(key) or {}
+        entry = entries.get(key) or {}
+        if not path.is_file() or entry.get("phase") != row.get("P"):
+            return reject("approved_structure_or_phase_unavailable", [row["branch_id"]])
+        expected = source.get("structure_sha256")
+        if expected and file_checksum(path) != expected:
+            return reject("approved_structure_hash_changed", [row["branch_id"]])
+    return {
+        "state": current,
+        "status": "ready" if ranked else "screening_incomplete",
+        "candidates": ranked,
+        "pool": pool,
+        "unavailable": [],
+        "unavailable_branches": [],
+        "partial": False,
     }
 
 

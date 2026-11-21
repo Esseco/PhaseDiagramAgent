@@ -7,6 +7,7 @@ import shutil
 from tempfile import TemporaryDirectory
 
 from filelock import FileLock
+from phase_agent.analysis.feedback.output_paths import epoch_product_directory
 
 SCHEMA_VERSION = 1
 
@@ -53,8 +54,12 @@ def _replace_latest(source, target):
     with TemporaryDirectory(prefix=".latest-", dir=target.parent) as temporary:
         work = Path(temporary).resolve()
         # Both moved directories are explicitly contained in this publication root.
+        boundary = next(
+            (parent for parent in target.absolute().parents if parent.name == "analysis_outputs"),
+            work.parent.parent,
+        )
         if target.resolve().parent != work.parent or not source.resolve().is_relative_to(
-            work.parent.parent
+            boundary.resolve()
         ):
             raise ValueError("Analysis latest target outside publication root")
         staged, previous = work / "new", work / "previous"
@@ -90,7 +95,7 @@ def publication_status(root, kind, model, epoch, *, status, reason=None, **detai
             pass
     write_json(Path(root) / "latest" / f"{kind}_status.json", result)
     if epoch:
-        write_json(Path(root) / epoch / kind / "latest_status.json", result)
+        write_json(epoch_product_directory(root, epoch, kind) / "latest_status.json", result)
     return result
 
 
@@ -125,7 +130,7 @@ def publish_bundle(root, *, kind, epoch, model, identity, required, build, curre
                         root, kind, model, epoch, status="not_ready", reason=result["reason"]
                     )
                 else:
-                    write_json(Path(root) / epoch / kind / "latest_status.json", result)
+                    write_json(epoch_product_directory(root, epoch, kind) / "latest_status.json", result)
             except OSError:
                 pass  # Caller retains the failure in workflow state if disk publication also fails.
         raise
@@ -143,10 +148,14 @@ def _publish_bundle(root, *, kind, epoch, model, identity, required, build, curr
         raise ValueError("Explicit epoch and supported product kind required")
     identity = {"schema": SCHEMA_VERSION, "epoch": epoch, "model_version": model, **identity}
     version = digest(identity)[:24]
-    product = root / epoch / kind
+    product = epoch_product_directory(root, epoch, kind)
     versions = product / "versions"
     versions.mkdir(parents=True, exist_ok=True)
-    with FileLock(str(root / ".analysis-publication.lock"), timeout=30):
+    from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
+
+    lock_root = analysis_metadata_directory(root)
+    lock_root.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(lock_root / "publication.lock"), timeout=30):
         if current:
             publication_status(
                 root, kind, model, epoch, status="publishing", requested_version=version

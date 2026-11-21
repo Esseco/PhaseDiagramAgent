@@ -154,3 +154,37 @@ def test_unreadable_current_receipts_remain_a_hard_boundary(tmp_path, monkeypatc
 
     monkeypatch.setattr(receipts, "recovery_report", unreadable)
     assert not clean(path, state=state)
+
+
+@pytest.mark.parametrize("missing", [None, "saved", "return", "identity", "cost"])
+def test_only_saved_completed_generation_allows_old_zero_cost_hold(tmp_path, missing):
+    from phase_agent.tools.state.execution_receipts import (
+        begin_execution, record_business_saved, record_execution_return,
+    )
+    from phase_agent.policies.file_approval import proposal_hash
+
+    state = case()
+    key = "old-generation"
+    action = {"tool": "generate_branches", "task_key": key}
+    state["budget_reservations"][key] = {
+        "stage": "generate_branches", "status": "reserved", "reserved_cost": 0,
+        "config_version": "config",
+    }
+    if missing == "cost":
+        state["budget_reservations"][key]["reserved_cost"] = 1
+    state["invocations"] = {"old": {
+        "action": action, "execution_result": {"status": "completed"}, "status": "completed",
+    }}
+    path = tmp_path / "state.json"
+    write_json(path, state)
+    identity = {"invocation_id": "old", "config_version": "other" if missing == "identity" else "config",
+                "action_hash": proposal_hash(action), "tool": "generate_branches"}
+    begin_execution(path, identity, action=action)
+    if missing != "return":
+        record_execution_return(path, identity, "completed")
+    if missing not in {"return", "saved"}:
+        record_business_saved(path, state)
+    before = path.read_bytes()
+    assert clean(path, state=state) is (missing is None)
+    assert path.read_bytes() == before
+    assert state["budget_reservations"][key]["status"] == "reserved"

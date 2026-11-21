@@ -220,3 +220,35 @@ def test_decision_context_exposes_joint_evidence():
     quality = context["current_phase_diagram"]["mlip"]["quality_diagnostics"]
     assert quality["decision_role"] == "supporting_evidence_alongside_ehull_and_qbc"
     assert conversation_facts(state, {})["phase_diagram_quality"]["status"] == "review_required"
+
+
+def test_strong_read_scope_reuses_quality_only_for_same_snapshot_and_files(tmp_path, monkeypatch):
+    from phase_agent.analysis.phase import phase_quality_reports as module
+    from phase_agent.runtime.codex.context import codex_read_scope
+    state = sample()
+    source = tmp_path / "frame.vasp"
+    source.write_text("a", encoding="utf-8")
+    state["phase_diagrams"]["mlip"]["entries"][1]["structure_path"] = str(source)
+    counts = []
+    monkeypatch.setattr(module, "diagnose_phase_diagram", lambda *a, **k: {"status": "ok", "structures": []})
+    original = module._digest
+    def digest(value):
+        if isinstance(value, dict) and "tasks" in value and "snapshot" in value:
+            counts.append(1)
+        return original(value)
+    monkeypatch.setattr(module, "_digest", digest)
+    with codex_read_scope(state, identity=("strong",)), module.quality_report_read_scope():
+        first = module.get_phase_quality_report(state)
+        second = module.get_phase_quality_report(state)
+        assert first == second and len(counts) == 1
+        second["status"] = "modified"
+        assert module.get_phase_quality_report(state)["status"] == first["status"]
+        source.write_text("changed", encoding="utf-8")
+        module.get_phase_quality_report(state)
+        assert len(counts) == 2
+        state["phase_diagrams"]["mlip"]["version"] = "different"
+        module.get_phase_quality_report(state)
+        assert len(counts) == 3
+    with codex_read_scope(state, identity=("new",)), module.quality_report_read_scope():
+        module.get_phase_quality_report(state)
+        assert len(counts) == 4

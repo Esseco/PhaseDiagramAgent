@@ -42,16 +42,92 @@ def _read_business_state(state_path):
 
 def _settle_completed_input_delivery(state_path):
     """Canonicalize proven local delivery before examining old lifecycle frames."""
+    if state_path:
+        from phase_agent.persistence.state.field_index import IndexUnavailable, open_indexed_state
+        from phase_agent.runtime.turn_process import has_reusable_initial_state
+        from phase_agent.tools.workflows.training_input_settlement import training_input_eligible
+
+        if not has_reusable_initial_state(state_path):
+            indexed = open_indexed_state(state_path)
+            if indexed is not None:
+                try:
+                    needs_settlement = any(
+                        training_input_eligible(
+                            indexed,
+                            record.get("final_action") or {},
+                            record.get("execution_result") or {},
+                        )
+                        for record in indexed.get("action_records") or []
+                    )
+                    indexed.verify(strong=True)
+                    if not needs_settlement:
+                        return None
+                except IndexUnavailable:
+                    pass  # Fall back to the authoritative full-state reader.
+    from phase_agent.persistence.state.read_versions import read_identity
+
+    expected_identity = read_identity(state_path, strong=True) if state_path else None
     state = _read_business_state(state_path)
     if state is None:
         return None
     from phase_agent.tools.workflows.training_input_settlement import settle_saved_training_inputs
-    from phase_agent.tools.step_runner.file_protocol import write_json
+    from phase_agent.tools.step_runner.file_protocol import write_json_if_version
 
     settled = settle_saved_training_inputs(state)
     if settled is not state:
-        write_json(state_path, settled)
+        write_json_if_version(state_path, settled, expected_identity)
     return settled
+
+
+def _finished_generation_hold(state_path, state, key, reservation):
+    """A saved, completed local generation is not an in-flight task.
+
+    Keep its reservation and all accounting intact.  A return alone is not
+    enough: both the claimed action and the saved business record must match.
+    """
+    if (
+        reservation.get("stage") != "generate_branches"
+        or reservation.get("status") != "reserved"
+        or reservation.get("reconciliation_required")
+        or reservation.get("reserved_cost", reservation.get("relative_cost")) != 0
+    ):
+        return False
+    from phase_agent.tools.state.execution_receipts import execution_events
+    from phase_agent.policies.file_approval import proposal_hash
+
+    matches = []
+    for invocation, record in (state.get("invocations") or {}).items():
+        if not isinstance(record, dict):
+            continue
+        action = record.get("final_action") or record.get("action") or {}
+        execution = record.get("execution") or record.get("execution_result") or {}
+        if (
+            action.get("tool") == "generate_branches"
+            and action.get("task_key") == key
+            and execution.get("status") == "completed"
+        ):
+            matches.append((invocation, action))
+    if len(matches) != 1:
+        return False
+    invocation, action = matches[0]
+    events = execution_events(state_path, invocation)
+    by_name = {row["event"]: row["payload"] for row in events}
+    claimed = by_name.get("claimed") or {}
+    returned = by_name.get("tool_returned") or {}
+    saved = by_name.get("business_saved") or {}
+    identity = claimed.get("identity") or {}
+    return bool(
+        identity.get("invocation_id") == invocation
+        and identity.get("tool") == "generate_branches"
+        and identity.get("config_version") == reservation.get("config_version")
+        and identity.get("action_hash") == proposal_hash(action)
+        and identity.get("action_hash") == proposal_hash(claimed.get("action") or {})
+        and (claimed.get("action") or {}).get("task_key") == key
+        and returned.get("identity") == identity
+        and returned.get("outcome") == "completed"
+        and saved.get("identity") == identity
+        and saved.get("state_file_sha256")
+    )
 
 
 def _business_state_is_clean_for_stale_checkpoint(state_path, *, pending_plan_id=None, state=None):
@@ -70,9 +146,22 @@ def _business_state_is_clean_for_stale_checkpoint(state_path, *, pending_plan_id
         state = _read_business_state(state_path)
     if state is None:
         return False
+    # The stored report is a snapshot and can remain stale after an audited
+    # reconciliation. Do not infer clearance from a missing or unexplained report.
     recovery = state.get("execution_recovery_report") or {}
     if recovery.get("status") != "clear" or recovery.get("unsettled"):
-        return False
+        old_issues = recovery.get("unsettled") or []
+        audited = state.get("execution_reconciliations") or {}
+        def audited_issue(item):
+            invocation = (item.get("identity") or {}).get("invocation_id")
+            record = audited.get(invocation) or {}
+            return bool(invocation and record.get("resolution") in {
+                "verified_no_effect", "verified_registered_effects", "verified_abandoned_staging"
+            } and (record.get("identity") or {}).get("invocation_id") == invocation
+                and record.get("evidence") and record.get("reviewed_at"))
+
+        if not old_issues or not all(audited_issue(item) for item in old_issues):
+            return False
     from phase_agent.tools.state.execution_receipts import recovery_report
 
     import sqlite3
@@ -129,12 +218,23 @@ def _business_state_is_clean_for_stale_checkpoint(state_path, *, pending_plan_id
     active_reservations = {"reserved", "submitted", "running", "unknown"}
     current_config = state.get("confirmed_config_version")
     from phase_agent.tools.workflows.model_refresh_scope import is_refresh_planning_hold
+    from phase_agent.tools.state.scheduler_terminal_evidence import terminal_reservation_is_proven
 
     for key, reservation in (state.get("budget_reservations") or {}).items():
         if not isinstance(reservation, dict):
             return False
         if is_refresh_planning_hold(state, key, reservation):
             continue  # Keep the allowance; fresh analysis decides its next use.
+        if terminal_reservation_is_proven(state, key, reservation):
+            continue  # Terminal execution is separate from unresolved cost accounting.
+        from phase_agent.tools.state.scheduler_terminal_evidence import user_waived_dft_reservation
+        if user_waived_dft_reservation(state, key, reservation):
+            continue  # User stopped waiting; keep the existing unsettled cost reservation.
+        try:
+            if _finished_generation_hold(state_path, state, key, reservation):
+                continue
+        except (OSError, ValueError, TypeError, sqlite3.Error):
+            return False
         if (
             reservation.get("reconciliation_required")
             or reservation.get("status") in active_reservations
@@ -173,8 +273,28 @@ def _rebind_pending_subgraphs(graph, snapshot, request_id):
         _rebind_pending_subgraphs(graph, child, request_id)
         values = getattr(child, "values", {}) or {}
         node = values.get("current_node")
+        if node == "initialize_confirmed_run" and tuple(child.next) == ("collect_and_reconcile",):
+            # The observation subgraph inherits the parent's last node before
+            # its first node has run.  That label is not a child graph node.
+            node = "__start__"
         if node:
             graph.update_state(child.config, {"request_id": request_id}, as_node=node)
+
+
+def _validate_verified_resume(snapshot, invocation_id, evidence, row):
+    import hashlib
+
+    if (
+        not isinstance(evidence, dict)
+        or snapshot.config["configurable"].get("checkpoint_id") != evidence.get("checkpoint_id")
+        or (snapshot.values or {}).get("request_id") != invocation_id
+        or evidence.get("request_id") != invocation_id
+        or tuple(snapshot.next) != (evidence.get("resume_next", "react"),)
+        or evidence.get("resume_next", "react") not in {"react", "analyze"}
+        or not row
+        or hashlib.sha256(row[0]).hexdigest() != evidence.get("checkpoint_sha256")
+    ):
+        raise ValueError("verified_resume_checkpoint_changed")
 
 
 def _pending_approval_for_request(state_path, invocation_id, human_feedback, *, state=None):
@@ -194,6 +314,16 @@ def _pending_approval_for_request(state_path, invocation_id, human_feedback, *, 
     if not state_path:
         return None
     if state is None:
+        from phase_agent.persistence.state.field_index import IndexUnavailable, open_indexed_state
+
+        indexed = open_indexed_state(state_path)
+        if indexed is not None:
+            try:
+                pending = indexed.get("pending_execution_policies") or {}
+                indexed.verify(remember=True)
+                return invocation_id if isinstance(pending, dict) and invocation_id in pending else None
+            except IndexUnavailable:
+                pass  # The authoritative reader also supports unindexed and older state.
         state = _read_business_state(state_path)
     if state is None:
         return None
@@ -211,6 +341,7 @@ def run_search_workflow_graph(
     project_thread=None,
     business_state_path=None,
     human_feedback=None,
+    resume_verified_checkpoint=None,
     **stages,
 ):
     if workflow_graph is None:
@@ -249,7 +380,19 @@ def run_search_workflow_graph(
                 graph.checkpointer = saver
                 thread = current_lifecycle_thread(saver.conn, base_thread)
                 config["configurable"]["thread_id"] = thread
-                snapshot = graph.get_state(config, subgraphs=True)
+                # This pass only selects the request, route and resume boundary.
+                # Actual execution loads and verifies the persisted business frame.
+                with saver.serde.routing_only():
+                    snapshot = graph.get_state(config, subgraphs=True)
+                if resume_verified_checkpoint is not None:
+                    row = saver.conn.execute(
+                        "SELECT checkpoint FROM checkpoints WHERE thread_id=? AND checkpoint_ns='' "
+                        "ORDER BY checkpoint_id DESC LIMIT 1",
+                        (thread,),
+                    ).fetchone()
+                    _validate_verified_resume(
+                        snapshot, invocation_id, resume_verified_checkpoint, row
+                    )
                 if thread != base_thread:
                     if not snapshot.values:
                         raise ValueError(
@@ -266,15 +409,18 @@ def run_search_workflow_graph(
                     and snapshot.values.get("completed_response") is not None
                     and (not project_thread or snapshot.values.get("request_id") == invocation_id)
                 ):
-                    return snapshot.values["completed_response"]
+                    return graph.get_state(config).values["completed_response"]
                 if (
                     snapshot.next
                     and not pending_approval
                     and any(task.interrupts for task in snapshot.tasks)
                     and snapshot.values.get("request_id") == invocation_id
                 ):
-                    return snapshot.values["completed_response"]
-                context = WorkflowRuntime(stages={**stages, "durable": True}, expose_response=False)
+                    return graph.get_state(config).values["completed_response"]
+                context = WorkflowRuntime(
+                    stages={**stages, "durable": True, "seal_checkpoint_lists": True},
+                    expose_response=False,
+                )
 
                 # A native wait completed its prior request. All subsequent
                 # input resumes this same selected lifecycle, even with active tasks.
@@ -408,8 +554,20 @@ def run_search_workflow_graph(
                         "completed_response": None,
                         "business_frame": {},
                     }
+                # graph.invoke reads the checkpoint again. Retaining the prior
+                # materialized snapshot and business-state copy here can double
+                # peak memory for large approval continuations.
+                # The wait node clears the previous turn's business frame and reply.
+                # Share verified, read-only history only while loading that exact checkpoint.
+                wait_checkpoint_id = (
+                    snapshot.config["configurable"].get("checkpoint_id")
+                    if new_request_at_wait
+                    else None
+                )
+                business_state = approval_state = snapshot = None
                 try:
-                    graph.invoke(value, config, context=context)
+                    with saver.serde.share_wait_history(wait_checkpoint_id):
+                        graph.invoke(value, config, context=context)
                 except Exception:
                     # A safe read-only node may fail again. Keep the same new
                     # request retryable without changing any scientific facts.

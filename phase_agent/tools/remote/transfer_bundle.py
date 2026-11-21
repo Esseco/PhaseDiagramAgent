@@ -4,11 +4,10 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
-import shutil
 import tempfile
 import threading
 import zipfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import time
 
 MANIFEST = "transfer_manifest.json"
@@ -23,6 +22,7 @@ RESULT_NAMES = {
     "mc_occupations.bin",
     "result.json",
     "task.finished.json",
+    "phase_identification.json",
     "final.vasp",
     "CONTCAR",
     "checkpoint.json",
@@ -436,22 +436,31 @@ def import_bundle(
                 target.resolve().relative_to(root)
                 candidate = staged.joinpath(*relative.parts)
                 with _return_path_error("解包与校验", row["path"], candidate):
-                    candidate.parent.mkdir(parents=True, exist_ok=True)
-                    with (
-                        archive.open(row["path"]) as source,
-                        candidate.open("wb") as output,
-                    ):
-                        shutil.copyfileobj(source, output, 1024 * 1024)
-                    if (
-                        candidate.stat().st_size != row["size"]
-                        or checksum(candidate) != row["sha256"]
-                    ):
-                        raise ValueError(f"Result checksum mismatch: {relative}")
-                    if target.exists() and (
-                        not target.is_file() or checksum(target) != row["sha256"]
+                    present = target.exists()
+                    if present and (
+                        not target.is_file()
+                        or target.stat().st_size != row["size"]
+                        or checksum(target) != row["sha256"]
                     ):
                         raise ValueError(f"Existing result differs: {target}")
-                targets.append((candidate, target))
+                    if not present:
+                        candidate.parent.mkdir(parents=True, exist_ok=True)
+                    digest, size = hashlib.sha256(), 0
+                    with (
+                        archive.open(row["path"]) as source,
+                        (nullcontext() if present else candidate.open("wb")) as output,
+                    ):
+                        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                            size += len(chunk)
+                            if size > row["size"]:
+                                break
+                            digest.update(chunk)
+                            if output is not None:
+                                output.write(chunk)
+                    if size != row["size"] or digest.hexdigest() != row["sha256"]:
+                        raise ValueError(f"Result checksum mismatch: {relative}")
+                if not present:
+                    targets.append((candidate, target))
             for candidate, target in sorted(
                 targets, key=lambda pair: pair[1].name.endswith("finished.json")
             ):
@@ -525,6 +534,14 @@ def registered_return_locations(state):
     from phase_agent.tools.remote.legacy_recovery import _original_source_folder
 
     locations = {}
+    original_folders = {}
+
+    def original_folder(handoff):
+        key = str(handoff["folder"])
+        if key not in original_folders:
+            original_folders[key] = _original_source_folder(state, handoff)
+        return original_folders[key]
+
     rows = list(state.get("slurm_batches") or [])
     for job in (state.get("remote_finetune_jobs") or {}).values():
         if job.get("activated") or job.get("status") in {"abandoned", "cancelled", "superseded"}:
@@ -545,7 +562,7 @@ def registered_return_locations(state):
             raise ValueError("batch_output_directory_mismatch")
         target = {
             "directory": handoff["import_directory"],
-            "batch": _original_source_folder(state, handoff)[:-6],
+            "batch": original_folder(handoff)[:-6],
             "input_archive": handoff["upload_archive"],
         }
         if str(output) in locations and locations[str(output)] != target:
@@ -557,7 +574,7 @@ def registered_return_locations(state):
         folder = Path(handoff["folder"])
         locations[handoff["return_directory"]] = {
             "directory": handoff["import_directory"],
-            "batch": _original_source_folder(state, handoff)[:-6],
+            "batch": original_folder(handoff)[:-6],
             "input_archive": handoff["upload_archive"],
             "allowed_prefixes": handoff["allowed_prefixes"],
             "runtime_roots": handoff["runtime_roots"],
@@ -620,14 +637,15 @@ def _archive_receipt(root, archive):
     return root / ".transfer_receipts" / (name + ".sha256")
 
 
-def has_registered_return(state):
+def has_registered_return(state, *, ignore_known_diagnostics=False):
     state = _pending_return_state(state)
     for batch in (state.get("relax_mc_batches") or {}).values():
         archive = Path(batch.get("expected_results_archive") or "")
         if archive.is_file() and batch.get("import_checksum") != checksum(archive):
             return True
     directories = registered_result_directories(state)
-    directories.update(registered_return_locations(state))
+    locations = registered_return_locations(state)
+    directories.update(locations)
     directories.update(
         str(Path(job["directory"]))
         for job in (state.get("remote_finetune_jobs") or {}).values()
@@ -642,8 +660,15 @@ def has_registered_return(state):
         and not job.get("activated")
         and job.get("status") not in {"abandoned", "cancelled", "superseded"}
     )
-    if any(dispatch_failure(source) for source in registered_return_locations(state)):
-        return True
+    known_failures = {}
+    if ignore_known_diagnostics:
+        for row in (state.get("result_collection") or {}).get("historical_transfer_errors") or []:
+            if isinstance(row, dict) and row.get("archive") and row.get("reason"):
+                known_failures[str(Path(row["archive"]))] = row["reason"]
+    for source in locations:
+        reason = dispatch_failure(source)
+        if reason and known_failures.get(str(Path(source) / "diagnostics.zip")) != reason:
+            return True
     return any(
         not _archive_receipt(root, archive).is_file()
         or _archive_receipt(root, archive).read_text(encoding="utf-8") != checksum(archive)

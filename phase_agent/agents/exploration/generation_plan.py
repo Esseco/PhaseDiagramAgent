@@ -52,6 +52,8 @@ def validate_generation_plan(params):
         raise ValueError("quotas必须是合法策略到非负JSON整数的映射")
     if type(params.get("total_quota")) is not int or params["total_quota"] <= 0:
         raise ValueError("total_quota必须是正JSON整数")
+    if params["total_quota"] > 1000:
+        raise ValueError("每轮 branch 生成数量不能超过 1000")
     totals = Counter()
     for index, row in enumerate(plan):
         try:

@@ -5,7 +5,6 @@ import math
 from phase_agent.science.qbc.build_candidate_metrics import build_qbc_candidate_metrics
 from phase_agent.agents.reliability.selection.dft_round_policy import (
     dft_task_limit,
-    round_dft_tasks,
 )
 from phase_agent.tools.workflows.validate_dft_agent_decisions import validate_dft_agent_decisions
 
@@ -19,7 +18,12 @@ def stale_dft_preview(proposal):
         or (proposal.get("raw_action") or {}).get("parameters")
         or {}
     )
-    preview = params.get("dft_input_preview") or {}
+    preview = params.get("dft_input_preview")
+    if not preview and params.get("prepare_inputs_after_approval") is True:
+        # Scientific approval stores the validated selection separately from
+        # the input batch, which can only be created after approval.
+        preview = params.get("dft_selection_preview")
+    preview = preview or {}
     return preview.get("schema_version") != 2 or not preview.get("selected_structures")
 
 
@@ -44,16 +48,17 @@ def preview_dft_inputs(action, state, config):
         max_tasks = dft_task_limit(config)
     except ValueError as error:
         return None, f"DFT 数量配置无效：{error}"
-    prior = round_dft_tasks(state, config)
-    if len(selected) + len(prior) > max_tasks:
+    if len(selected) > max_tasks:
         return None, (
-            f"本轮 DFT 任务超过上限（单点与优化合计最多 {max_tasks} 个，"
-            f"已登记 {len(prior)} 个，本次 {len(selected)} 个），请按需要减少选点后重新预览。"
+            f"本次 DFT 选点超过上限（单点与优化合计最多 {max_tasks} 个，"
+            f"本次 {len(selected)} 个），请按需要减少选点后重新预览。"
         )
     qbc = deepcopy(config.get("qbc") or {})
     qbc["selection_policy"] = deepcopy((config.get("dft") or {}).get("selection") or {})
     qbc["budget_limits"] = deepcopy(config.get("budgets") or {})
-    candidates = state.get("qbc_candidates") or []
+    from phase_agent.tools.workflows.create_dft_selection_handler import _state_candidates
+
+    candidates = _state_candidates(state, None, {})
     candidate_map = {row.get("candidate_id"): row for row in candidates}
     selected_rows = [candidate_map.get(row.get("candidate_id")) or {} for row in selected]
     available_phases = {row.get("phase") for row in candidates if row.get("phase")}
@@ -74,6 +79,7 @@ def preview_dft_inputs(action, state, config):
             config=qbc,
             config_version=state.get("confirmed_config_version"),
             remaining_budget=float("inf"),
+            require_all_ground_states=True,
         )
     except (KeyError, TypeError, ValueError) as error:
         return None, f"DFT 成本或筛选配置不完整：{error}"
@@ -103,7 +109,18 @@ def preview_dft_inputs(action, state, config):
         )
     from phase_agent.tools.workflows.dft_coverage_review import coverage_errors
 
-    missing_review = coverage_errors(action, candidates)
+    from phase_agent.tools.workflows.validate_dft_agent_decisions import (
+        _is_direct_recovery_selection,
+    )
+
+    from phase_agent.evidence.unknown_gs_dft import is_authorized_unknown_gs_scope
+    selected_ids = {row["candidate_id"] for row in selected}
+    unknown_gs_scope = is_authorized_unknown_gs_scope(state, decisions)
+    missing_review = (
+        []
+        if _is_direct_recovery_selection(state, selected_ids) or unknown_gs_scope
+        else coverage_errors(action, candidates)
+    )
     if missing_review:
         return None, "DFT 的 D/H 独立疑点未完整审阅；增加或替换代表，或明确暂缓理由：" + "; ".join(
             missing_review
@@ -113,6 +130,7 @@ def preview_dft_inputs(action, state, config):
         return None, "DFT 成本尚未确定，不能以零成本批准。"
     return {
         "schema_version": 2,
+        "ground_state_policy": "all_eligible_gs_v1",
         "task_count": len(accepted),
         "registered_retry_input_ids": retry_inputs,
         "total_input_task_count": len(accepted) + len(retry_inputs),

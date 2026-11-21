@@ -14,9 +14,14 @@ from phase_agent.configuration.schema.state_schema_migrations import migrate_per
 
 
 def update_state_snapshot(state: dict, *, config_version=None, _owned=False) -> dict:
-    current = collect_memory_candidates(
-        call_with_optimizations(migrate_persisted_state, state, _optimizations={"_owned": _owned})
+    current = call_with_optimizations(
+        collect_memory_candidates,
+        call_with_optimizations(migrate_persisted_state, state, _optimizations={"_owned": _owned}),
+        _optimizations={"_owned": True},
     )
+    from phase_agent.persistence.memory.verify_evidence_refs import revalidate_memory
+
+    revalidate_memory(current)
     fingerprint = _state_fingerprint(current)
     existing = current.get("current_state_snapshot") or {}
     if existing.get("source_fingerprint") == fingerprint:
@@ -53,6 +58,22 @@ def agent_state_summary(state: dict, *, manager=None, _approval_only=False) -> d
     from phase_agent.agents.exploration.branch_pool_review import pool_context
 
     # Refresh scoped directives even when the cached snapshot predates this code.
+    # The proposal view needs registered identities, not full task payloads, to
+    # distinguish preparing a fixed DFT list from selecting new scientific inputs.
+    summary.setdefault("decision_context", {})["registered_dft_inputs"] = {
+        "confirmed_config_version": state.get("confirmed_config_version"),
+        "active_model_version": state.get("active_model_version"),
+        "tasks": [
+            {
+                key: task[key]
+                for key in ("task_id", "stage", "status", "slurm_batch_id", "model_version")
+                if key in task
+            }
+            for task in state.get("tasks") or []
+            if task.get("stage") in {"dft_relax", "dft_single_point"}
+            and task.get("status") == "pending"
+        ],
+    }
     summary.setdefault("decision_context", {}).update(
         training_validation_planning=validation_planning_context(state),
         post_refresh_search=post_refresh_search_context(state),
@@ -62,7 +83,15 @@ def agent_state_summary(state: dict, *, manager=None, _approval_only=False) -> d
         ),
     )
     from phase_agent.evidence.decision_evidence_catalog import decision_evidence_catalog
+    from phase_agent.evidence.model_diagram_scope import active_model_summary
 
+    independent_summary = active_model_summary(state)
+    if independent_summary:
+        summary["decision_context"].setdefault("current_phase_diagram", {})[
+            "mlip_active_model"
+        ] = independent_summary
+    else:
+        summary["decision_context"].get("current_phase_diagram", {}).pop("mlip_active_model", None)
     summary["decision_context"]["evidence_catalog"] = decision_evidence_catalog(
         summary["decision_context"]
     )
@@ -100,7 +129,7 @@ def _history_snapshot(snapshot):
 def _state_fingerprint(state):
     excluded = {"current_state_snapshot", "state_snapshots", "state_snapshot_index"}
     payload = {key: value for key, value in state.items() if key not in excluded}
-    memory = deepcopy(payload.get("decision_memory") or {})
+    memory = dict(payload.get("decision_memory") or {})
     memory.pop("short_term", None)
     if "decision_memory" in payload:
         payload["decision_memory"] = memory

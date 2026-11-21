@@ -144,7 +144,7 @@ logs/             服务日志
 history_backups/  历史备份
 ```
 
-优先查看项目的 `analysis_outputs/output_index.md` 和 `round_summary.csv`。事实、交接和动作收益进入记忆候选；长期经验经过审阅，不自动把一次建议晋升为长期规则。详见 [工作区布局](docs/guides/workspace.md#doc-workspace_layout) 与 [决策记忆](docs/guides/memory.md#doc-decision_memory)。
+优先查看项目的 `workflow_state/analysis/output_index.md` 和 `workflow_state/analysis/round_summary.csv`。事实、交接和动作收益进入记忆候选；长期经验经过审阅，不自动把一次建议晋升为长期规则。详见 [工作区布局](docs/guides/workspace.md#doc-workspace_layout) 与 [决策记忆](docs/guides/memory.md#doc-decision_memory)。
 
 ## 开发导航
 

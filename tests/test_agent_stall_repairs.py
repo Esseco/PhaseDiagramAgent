@@ -141,6 +141,26 @@ def test_another_config_change_invalidates_refresh_approval(tmp_path, legacy_unb
 
 def test_config_change_after_hull_refresh_does_not_reopen_supplement(tmp_path):
     state, session, ctx, registry = recovered_state(tmp_path)
+    task = state["tasks"][0]
+    source_sha = task["input_structure_sha256"]
+    task["converged"] = True
+    task["outputs"].update(
+        optimizer_converged=True,
+        single_point_completed=False,
+        refresh_force_followup={
+            "input_structure_sha256": source_sha,
+            "force_max_ev_per_angstrom": 0.11,
+            "threshold_ev_per_angstrom": 0.1,
+            "relaxed": True,
+            "initial_prediction": {
+                "single_point_completed": True,
+                "forces_unit": "eV/angstrom",
+                "forces": [[0.11, 0, 0]] * 4,
+                "structure_checksum": source_sha,
+                "mlip_version": "new",
+            },
+        },
+    )
     before = deepcopy(state)
     session["confirmed_snapshot"]["config_version"] = "new-config"
     ctx["config_version"] = "new-config"

@@ -165,3 +165,27 @@ def test_rejected_old_dft_refresh_does_not_count_as_missing_current_result(tmp_p
     historical = answer["report"]["metadata_refresh_report"]
     assert historical["invalid_count"] == 1
     assert historical["details_preview"][0]["reason"] == "dft_refresh_upload_operation_id_mismatch"
+
+
+def test_parent_first_metadata_refresh_uses_bound_batch_identity(tmp_path):
+    from tests.test_dft_spin_acceptance import make_result
+    from phase_agent.tools.remote.batch_runner import RemoteBatchRunner
+    from phase_agent.tools.remote.integrity import file_checksum
+    incoming=make_result(); batch='parent-first-'+('a'*16); incoming['batch_id']=batch
+    taskdir=tmp_path/'00000-D1'; taskdir.mkdir()
+    (taskdir/'task.json').write_text(json.dumps({'task_id':'D1','task_key':'K1','model_version':'m1','batch_id':batch}))
+    path=taskdir/'result.json'; path.write_text(json.dumps(incoming))
+    (taskdir/'task.finished.json').write_text(json.dumps({'task_id':'D1','task_key':'K1','model_version':'m1','batch_id':batch,'status':'completed','result_checksum':file_checksum(path)}))
+    prior=deepcopy(incoming); prior.update(batch_id=batch,upload_operation_id=batch,input_path=str(taskdir/'task.json'),result_path=str(path))
+    answer=RemoteBatchRunner(tmp_path/'unused',worker_command=[]).collect_results_with_report({'tasks':[prior],'processed_task_ids':['D1']})
+    assert answer['report']['metadata_refresh_report']['invalid_count']==0
+
+
+def test_perturbation_relax_results_are_recorded_but_not_plotted():
+    manager, result = manager_and_result()
+    result.update(stage='relax_and_feature', perturbation_batch_id='batch', converged=True)
+    result['outputs'].update(optimizer_converged=True, relax_stopped_normally=True)
+    outcome = apply_scientific_feedback({}, [result], manager=manager)
+    assert len(outcome['recorded']) == 1
+    assert outcome['state']['phase_records'] == []
+    assert outcome['state']['feedback_processed_task_ids'] == [result['task_id']]

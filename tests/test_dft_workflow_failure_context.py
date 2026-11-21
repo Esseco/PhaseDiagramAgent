@@ -16,6 +16,7 @@ def test_generated_wrapper_preserves_original_workflow_error(tmp_path, monkeypat
     def generator(directory, structure, **kwargs):
         directory.mkdir()
         (directory / "workflow.py").write_text("pass")
+        (directory / "workflow.json").write_text("{}", encoding="utf-8")
 
     prepare_pycode_relax(
         {"stage": "dft_single_point", "structure_path": str(source), "work_directory": str(folder)},
@@ -99,6 +100,7 @@ def test_generated_task_carries_authoritative_runner(tmp_path, entry):
     def generator(directory, structure, **kwargs):
         directory.mkdir()
         (directory / "workflow.py").write_text(entry + "\n")
+        (directory / "workflow.json").write_text("{}", encoding="utf-8")
 
     prepare_pycode_relax(
         {"stage": "dft_single_point", "structure_path": str(source), "work_directory": str(target)},

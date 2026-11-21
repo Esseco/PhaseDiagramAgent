@@ -1,12 +1,25 @@
 """Keep the next proposal within the recovered stage's approval boundary."""
 
 
-def post_recovery_tools(state):
+def _post_recovery_base_tools(state):
     if not (state.get("post_recovery_next_step_pending") or state.get("_recovery_just_approved")):
         return None
     from phase_agent.tools.workflows.model_refresh_state import current_model_refresh
 
+    cycle = state.get("extrapolation_recovery_cycle") or {}
     refresh = current_model_refresh(state)
+    if (
+        cycle.get("status") == "awaiting_reviewed_dft_labels"
+        and refresh.get("status") == "abandoned_extrapolation"
+        and cycle.get("invalid_model_version") == state.get("active_model_version")
+        and refresh.get("new_model_version") == state.get("active_model_version")
+    ):
+        if cycle.get("policy_version") == "epoch_refresh_v1":
+            from phase_agent.evidence.extrapolation_recovery import recovery_label_facts
+
+            if recovery_label_facts(state).get("status") == "complete":
+                return {"prepare_local_batch_files", "update_mlip"}
+        return {"prepare_local_batch_files", "select_dft_candidates"}
     if refresh and refresh.get("status") != "completed":
         # A completed model switch establishes a newer stage than old DFT/MC
         # recovery markers. Its own gate still controls exact targets/approval.
@@ -52,6 +65,78 @@ def post_recovery_tools(state):
             tools.add("restart_failed_task")
         return tools
     return {"select_dft_candidates", "generate_branches"}
+
+
+def post_recovery_tools(state):
+    """Expose exact candidate-frame relaxation in a recovered selection stage."""
+    base = _post_recovery_base_tools(state)
+    if base is None:
+        return None
+    from phase_agent.evidence.unknown_gs_dft import is_authorized_unknown_gs_tasks
+
+    unknown = state.get("unknown_gs_dft_authorization") or {}
+    unknown_ids = set((unknown.get("candidate_frame_sha256") or {}))
+    if "select_dft_candidates" in base and unknown_ids:
+        tasks = [
+            t
+            for t in state.get("tasks") or []
+            if (t.get("object_id") or t.get("structure_id")) in unknown_ids
+            and t.get("stage") == "dft_single_point"
+            and t.get("status") == "pending"
+        ]
+        if is_authorized_unknown_gs_tasks(state, tasks):
+            return base | {"prepare_local_batch_files"}
+    auth = state.get("exact_candidate_relax_authorization") or {}
+    if (
+        base is None
+        or "select_dft_candidates" not in base
+        or auth.get("status") != "approved_for_preparation"
+        or auth.get("model_version") != state.get("active_model_version")
+        or auth.get("config_version") != state.get("confirmed_config_version")
+        or not auth.get("candidate_frame_sha256")
+    ):
+        return base
+    return base | {"prepare_local_batch_files"}
+
+
+def exact_recovery_scope_errors(action, state):
+    """Do not widen the pre-existing recovery gate to other preparation modes."""
+    base = _post_recovery_base_tools(state)
+    if (
+        base is None
+        or "prepare_local_batch_files" in base
+        or action.get("tool") != "prepare_local_batch_files"
+    ):
+        return []
+    params = action.get("parameters") or {}
+    if (
+        "select_dft_candidates" in base
+        and action.get("operation") == "prepare_dft_inputs"
+        and params == {"mode": "dft_inputs"}
+    ):
+        from phase_agent.evidence.unknown_gs_dft import is_authorized_unknown_gs_tasks
+
+        targets = action.get("target_ids") or []
+        tasks = [t for t in state.get("tasks") or [] if t.get("task_id") in set(targets)]
+        if len(tasks) == len(targets) and is_authorized_unknown_gs_tasks(state, tasks):
+            return []
+    if (
+        "select_dft_candidates" in base
+        and params.get("mode") == "relax_inputs"
+        and params.get("selection_scope") == "candidate_ids"
+        and action.get("operation") == "prepare_mlip_relax"
+        and (state.get("exact_candidate_relax_authorization") or {}).get("status")
+        == "approved_for_preparation"
+        and (state.get("exact_candidate_relax_authorization") or {}).get("model_version")
+        == state.get("active_model_version")
+        and (state.get("exact_candidate_relax_authorization") or {}).get("config_version")
+        == state.get("confirmed_config_version")
+        and params.get("candidate_frame_sha256")
+        == (state.get("exact_candidate_relax_authorization") or {}).get("candidate_frame_sha256")
+        and set(action.get("target_ids") or []) == set(params.get("candidate_frame_sha256") or {})
+    ):
+        return []
+    return ["post_recovery_only_exact_candidate_relax_allowed"]
 
 
 def legacy_post_recovery_plan_ids(state):

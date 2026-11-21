@@ -13,7 +13,6 @@ from phase_agent.tools.dispatch.create_tool_registry import create_tool_registry
 from phase_agent.tools.workflows.create_workflow_handlers import (
     create_workflow_handlers,
 )
-from phase_agent.tools.workflows.compact_action_history import compact_state_history
 from phase_agent.tools.workflows.lifecycle_support import (
     _read_state_for_runner,
     _save_runner_state,
@@ -77,11 +76,7 @@ def _initialize_workflow(
     }
     automatic_results = []
     collection_report = None
-    loaded_state = call_with_optimizations(
-        compact_state_history,
-        _read_state_for_runner(state, state_path or effective_config.get("state_path")),
-        _optimizations={"_owned": True},
-    )
+    loaded_state = _read_state_for_runner(state, state_path or effective_config.get("state_path"))
     from phase_agent.persistence.result_recovery_commit import refresh_manager_after_recovery
 
     refresh_manager_after_recovery(manager, loaded_state, effective_config.get("ledger_path"))
@@ -168,6 +163,8 @@ def _initialize_workflow(
                 )
                 reserved = float(loaded_state.get("reserved_relative_cost", 0) or 0)
                 loaded_state["budget_remaining"] = max(0.0, float(total_limit) - used - reserved)
+            else:
+                loaded_state["budget_remaining"] = None
             _save_runner_state(loaded_state, state_path or effective_config.get("state_path"))
             return {
                 "status": "config_migrated",
@@ -219,5 +216,10 @@ def _initialize_workflow(
     }
 
     from phase_agent.tools.workflows.saved_dft_input_frame import prepare_saved_dft_input_frame
+    from phase_agent.tools.workflows.saved_refresh_frame import prepare_saved_refresh_frame
 
-    return prepare_saved_dft_input_frame(prepared)
+    from phase_agent.tools.workflows.saved_exact_relax_frame import prepare_saved_exact_relax_frame
+
+    return prepare_saved_exact_relax_frame(
+        prepare_saved_dft_input_frame(prepare_saved_refresh_frame(prepared))
+    )

@@ -233,6 +233,7 @@ flowchart TD
 - `pause_search`
 - `prepare_dedup_batch`
 - `prepare_local_batch_files`
+- `prepare_nepkit_initial_dataset`
 - `reevaluate_candidates`
 - `restart_failed_task`
 - `run_calculation_stage`

@@ -11,6 +11,17 @@ from phase_agent.tools.remote.legacy_recovery_runner import safe, terminal
 from phase_agent.tools.remote.predict_dft_final_frame import supplement_results
 
 
+def _static_evidence(calculation):
+    from monty.os.path import zpath
+
+    # Atomate reads the XML. It requires the other two files to be present and nonempty.
+    xml = Path(zpath(calculation / "vasprun.xml"))
+    outputs = [xml, *(Path(zpath(calculation / name)) for name in ("CONTCAR", "OUTCAR"))]
+    if any(not output.is_file() or output.stat().st_size == 0 for output in outputs):
+        return None
+    return file_checksum(xml)
+
+
 def reassessment_transform(work, options, *, validator=None, predictor=None):
     """Keep original task outputs immutable; reuse the existing prediction adapter."""
     from Process_Vasp.workflows.atomate_runner import _same_structure, _validate
@@ -21,9 +32,7 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
 
     def transform(destination, source, task, original):
         tid = task["expected"]["task_id"]
-        print(f"[{tid}] checking existing DFT result", flush=True)
         if tid not in bindings:
-            print(f"[{tid}] skipped: no verified converged final frame", flush=True)
             return {"status": "skipped", "reason": "not_selected_for_reassessment"}
         bound = bindings[tid]
         original_bytes = (destination / "result.json").read_bytes()
@@ -68,24 +77,32 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
         if model.get("model_sha256") and model_sha != model["model_sha256"]:
             raise ValueError("reassessment_original_model_fingerprint_mismatch")
         calculation = safe(worker, entry["directory"])
-        # Read and validate complete existing XML/OUTCAR/CONTCAR. Never run_workflow.
-        final = validate(calculation, "static")
-        initial = (
-            Structure.from_str(initial_path.read_text(encoding="utf-8"), fmt="poscar")
-            if initial_path.suffix.lower() == ".vasp"
-            else Structure.from_file(initial_path)
-        )
-        saved = Structure.from_dict(outputs["structure"])
-        if not _same_structure(initial, final) or not _same_structure(saved, final):
-            raise ValueError("reassessment_static_geometry_really_changed")
-        cache_key = hashlib.sha256((original_sha + model_sha).encode()).hexdigest()
+        xml_sha = _static_evidence(calculation)
+        cache_key = hashlib.sha256(
+            f"static_geometry_v2:{original_sha}:{model_sha}:{xml_sha or ''}".encode()
+        ).hexdigest()
         cache = Path(work) / "reassessment_cache" / tid
         cache.mkdir(parents=True, exist_ok=True)
         cached_path = cache / "result.json"
-        cached = (
-            json.loads(cached_path.read_text(encoding="utf-8")) if cached_path.is_file() else {}
-        )
-        if (cached.get("recovery_provenance") or {}).get("cache_key") != cache_key:
+        try:
+            cached = terminal(cache, task["expected"]) or {}
+        except (OSError, ValueError, KeyError, TypeError):
+            cached = {}
+        same_cache = (cached.get("recovery_provenance") or {}).get("cache_key") == cache_key
+        if not same_cache or xml_sha is None:
+            # Without a source fingerprint the validator remains authoritative.
+            final = validate(calculation, "static")
+            initial = (
+                Structure.from_str(initial_path.read_text(encoding="utf-8"), fmt="poscar")
+                if initial_path.suffix.lower() == ".vasp"
+                else Structure.from_file(initial_path)
+            )
+            saved = Structure.from_dict(outputs["structure"])
+            if not _same_structure(initial, final) or not _same_structure(saved, final):
+                raise ValueError("reassessment_static_geometry_really_changed")
+            if _static_evidence(calculation) != xml_sha:
+                raise ValueError("reassessment_static_output_changed_during_validation")
+        if not same_cache:
             derived = deepcopy(original)
             derived.update(status="completed", converged=True)
             derived.pop("error", None)
@@ -103,10 +120,6 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
             receipt = json.loads((destination / "task.finished.json").read_text(encoding="utf-8"))
             receipt.update(status="completed", result_checksum=file_checksum(cached_path))
             _write(cache / "task.finished.json", receipt)
-        print(
-            f"[{tid}] geometry verified; supplementing original-model same-frame prediction",
-            flush=True,
-        )
         reports = supplement_results(cache, model, predictor=predictor)
         if len(reports) != 1:
             raise ValueError("reassessment_prediction_scope_invalid")
@@ -124,7 +137,6 @@ def reassessment_transform(work, options, *, validator=None, predictor=None):
             raise ValueError("reassessment_receipt_invalid")
         report = reports[0]
         status = "prediction_failed" if report["status"] == "failed" else "completed"
-        print(f"[{tid}] {status} ({report['status']})", flush=True)
         return {
             "status": status,
             "prediction": report["status"],

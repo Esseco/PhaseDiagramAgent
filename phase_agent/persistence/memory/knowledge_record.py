@@ -63,4 +63,30 @@ def knowledge_record(value):
             :16
         ],
     )
+    row.setdefault("knowledge_family_id", row["knowledge_id"])
+    row["revision_id"] = knowledge_revision(row)
     return row
+
+
+def knowledge_revision(row):
+    """Content revision is separate from stable historical knowledge references."""
+    fields = (
+        "scope",
+        "category",
+        "statement",
+        "source_project",
+        "project_id",
+        "system_id",
+        "applicability",
+        "model_version",
+        "model_dependent",
+        "config_version",
+        "maturity",
+        "evidence_refs",
+        "evidence_fingerprint",
+    )
+    payload = {key: row.get(key) for key in fields}
+    return (
+        "KR-"
+        + hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:24]
+    )

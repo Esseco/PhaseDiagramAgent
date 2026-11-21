@@ -20,8 +20,9 @@ from phase_agent.runtime.project_registry import edit_project_registry
 
 
 from phase_agent.configuration.runtime.project_template import (
-    PROJECT_CONFIG_NAME,
+    CLEAN_PROJECT_SETTINGS,
     DEFAULT_PROJECT_SETTINGS,
+    PROJECT_CONFIG_NAME,
 )
 
 
@@ -186,8 +187,8 @@ def create_project(
         )
     root.mkdir(parents=True, exist_ok=True)
     target = root / PROJECT_CONFIG_NAME
-    session_path = root / DEFAULT_PROJECT_SETTINGS["config_session_path"]
-    draft_path = root / DEFAULT_PROJECT_SETTINGS["editable_config_draft_path"]
+    session_path = root / CLEAN_PROJECT_SETTINGS["config_session_path"]
+    draft_path = root / CLEAN_PROJECT_SETTINGS["editable_config_draft_path"]
     if any(
         path.exists()
         for path in (

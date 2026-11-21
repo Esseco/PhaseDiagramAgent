@@ -64,7 +64,7 @@ def conversation_facts(facts, project):
         "partial_recovery": partial_recovery_facts(facts),
         "partial_recovery_instruction": (
             "部分回收是后续方案的数据范围与限制，不是再次批准分析的前置步骤。"
-            "基于成功子集评估并提出下一步具体建议，明确覆盖不足；若建议补全，只为失败任务提出重试。"
+            "DFT 失败项排除、不主动补算，使用有效结果并说明覆盖不足；MC 可针对失败项提出补全。"
             "将采用子集或补全的理由、范围纳入同一待审方案，保留原失败记录，不得重跑或重建整批。"
         ),
         "post_recovery_next_step_pending": bool(facts.get("post_recovery_next_step_pending")),
@@ -175,6 +175,8 @@ def read_topics(facts, topics, *, manager=None):
             (facts.get("confirmed_config") or {}).get("convergence") or {}
         )
     if "plans" in topics:
+        from phase_agent.runtime.pending_plan_state import visible_pending
+
         result["pending_plans"] = [
             {
                 "plan_id": key,
@@ -188,7 +190,7 @@ def read_topics(facts, topics, *, manager=None):
                 },
                 "authority": "只读方案事实，不是批准；审批仍绑定实际plan_id/版本/哈希。",
             }
-            for key, row in (facts.get("pending_execution_policies") or {}).items()
+            for key, row in visible_pending(facts).items()
         ]
     return result
 

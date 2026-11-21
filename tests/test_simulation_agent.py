@@ -8,16 +8,25 @@ from tests.test_event_loop import _session
 
 class SimulationModel:
     supports_simulation = True
+    supports_expert_advice = True
 
     def __init__(self):
         self.calls = []
         self.bad = False
 
     def __call__(self, request):
+        if request.get("mode") in {"team_consultation", "expert_assessment"}:
+            from tests.test_decision_team import FakeTeam
+
+            helper = FakeTeam()
+            value = helper(request)
+            self.calls.append(deepcopy(request))
+            return value
         self.calls.append(deepcopy(request))
         if request.get("mode") == "simulation_plan":
             return {
                 "action_hash": request["action_hash"],
+                "context_binding": request.get("context_binding"),
                 "rationale": "Inspect recorded convergence evidence.",
                 "steps": [
                     {"kind": "preflight", "description": "Check frozen configuration"},
@@ -205,7 +214,8 @@ def test_malformed_paid_plan_still_records_usage():
         execution_mode="interactive",
     )
     assert result["status"] == "rejected"
-    assert result["state"]["budget_usage"]["llm"]["calls"] == 1
+    # Three real fake consultation calls plus the malformed paid plan.
+    assert result["state"]["budget_usage"]["llm"]["calls"] == 4
 
 
 def test_planner_network_failure_is_closed_without_dispatch():

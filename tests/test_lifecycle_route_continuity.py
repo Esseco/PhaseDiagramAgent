@@ -168,6 +168,14 @@ def test_studio_retry_finds_fresh_read_checkpoint_and_latest_reply(tmp_path, mon
         )
     base = options["project_thread"] + (":control:r1" if control else "")
     poison(options, thread=base)
+    initial = options["initialize"]
+
+    def initialize():
+        frame = initial()
+        frame.setdefault("loaded_state", {})["history"] = "x" * 100000
+        return frame
+
+    options["initialize"] = initialize
     config_path = tmp_path / "agent_runtime.json"
     write_json(config_path, {"state_path": str(options["business_state_path"])})
     monkeypatch.setenv("PHASE_AGENT_RUNTIME_CONFIG", str(config_path))
@@ -182,7 +190,17 @@ def test_studio_retry_finds_fresh_read_checkpoint_and_latest_reply(tmp_path, mon
         graph.invoke(request, config)
     assert can_resume_message(config_path, "studio:m")
     before = options["checkpoint_path"].read_bytes()
-    assert can_resume_message(config_path, "studio:m")
+    statements = []
+    saver_init = CompactSqliteSaver.__init__
+
+    def track_saver(saver, conn):
+        saver_init(saver, conn)
+        conn.set_trace_callback(statements.append)
+
+    with monkeypatch.context() as query:
+        query.setattr(CompactSqliteSaver, "__init__", track_saver)
+        assert can_resume_message(config_path, "studio:m")
+    assert not any("SELECT kind,data FROM checkpoint_payloads" in sql for sql in statements)
     assert options["checkpoint_path"].read_bytes() == before
     failure[0] = False
     result = graph.invoke(request, config)

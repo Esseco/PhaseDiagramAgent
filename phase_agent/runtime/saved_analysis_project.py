@@ -16,10 +16,11 @@ from phase_agent.runtime.runtime_config_io import (
 class SavedAnalysisView:
     state_path: Path
     lock: object = field(default_factory=threading.RLock)
+    analysis_output_directory: Path | None = None
 
 
 class SavedAnalysisProject:
-    """A restricted control binding: no model clients, migrations, ledger writes or workflow."""
+    """A restricted analysis control: no model clients, scientific state changes or workflow."""
 
     def __init__(self, runtime_config):
         config_path = Path(runtime_config).resolve()
@@ -31,6 +32,14 @@ class SavedAnalysisProject:
         state = _load_json_object(state_path, "saved analysis state")
         registered = state.get("analysis_output_directory")
         configured = _resolve_path(settings["phase_diagram_directory"], base)
-        if not registered or Path(registered).resolve() != configured:
-            raise ValueError("Registered analysis output does not match project runtime config")
-        self.control = LocalAgentControl(SavedAnalysisView(state_path))
+        if registered:
+            if Path(registered).resolve() != configured:
+                raise ValueError("Registered analysis output does not match project runtime config")
+        elif not (
+            state_path == (base / "workflow_state" / "state.json").resolve()
+            and configured == (base / "analysis_outputs").resolve()
+        ):
+            raise ValueError("Unregistered analysis output requires standard project-local paths")
+        # Legacy projects can use the validated runtime directory for this
+        # read-only analysis session. Never persist it as scientific state.
+        self.control = LocalAgentControl(SavedAnalysisView(state_path, analysis_output_directory=configured))

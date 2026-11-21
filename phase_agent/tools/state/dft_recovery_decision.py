@@ -79,9 +79,9 @@ def classify_dft_recovery_reply(message, state, *, allow_short_replies=True):
     )
 
 
-def update_dft_recovery_question(state, decision=None):
+def update_dft_recovery_question(state, decision=None, *, _owned=False):
     """Record an exact human choice; do not cancel jobs or settle unknown costs."""
-    current = deepcopy(state)
+    current = state if _owned and decision is None else deepcopy(state)
     question = current.get("pending_dft_recovery_question")
     if decision is not None:
         if (

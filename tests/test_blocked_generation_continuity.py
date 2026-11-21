@@ -171,6 +171,24 @@ def test_branch_revision_reaches_existing_online_generation_contract(tmp_path, m
         }
         return action
 
+    class BranchRevisionClient:
+        supports_expert_advice = True
+        supports_simulation = True
+
+        def __init__(self):
+            from tests.test_decision_team import FakeTeam
+            from tests.test_simulation_agent import SimulationModel
+
+            self.team = FakeTeam()
+            self.simulation = SimulationModel()
+
+        def __call__(self, payload):
+            if payload.get("mode") in {"team_consultation", "expert_assessment"}:
+                return self.team(payload)
+            if payload.get("mode") in {"simulation_plan", "simulation_diagnosis"}:
+                return self.simulation(payload)
+            return client(payload)
+
     manager = Manager()
     manager.data["branches"]["old_branch"] = {
         "P": "O3",
@@ -196,7 +214,7 @@ def test_branch_revision_reaches_existing_online_generation_contract(tmp_path, m
             name: {"handler": forbidden}
             for name in ("generate_branches", "allocate_mc_bohb", "pause_search")
         },
-        agent_client=client,
+        agent_client=BranchRevisionClient(),
         invocation_id="old-plan",
         execution_mode="interactive",
         human_feedback={"decision": "comment", "comment": "生成branch方案"},

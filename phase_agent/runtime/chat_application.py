@@ -179,7 +179,14 @@ class RunWorkflowChatHandler:
                 self.recent_dialogue = dialogue
 
     def review_pending(
-        self, plan_id, decision, *, expected_state_version, expected_proposal_hash, comment=""
+        self,
+        plan_id,
+        decision,
+        *,
+        expected_state_version,
+        expected_proposal_hash,
+        comment="",
+        operator="agent",
     ):
         from phase_agent.runtime.chat_review import review_pending
 
@@ -192,6 +199,7 @@ class RunWorkflowChatHandler:
             comment=comment,
             request_error=OpenWebUIRequestError,
             is_sensitive=_is_sensitive_proposal,
+            operator=operator,
         )
 
     def _run(

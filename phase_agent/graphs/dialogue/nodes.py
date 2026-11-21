@@ -26,7 +26,12 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
     from phase_agent.runtime.turn_process import presentation_signature, remember_presentation_state
 
     signature = presentation_signature(handler.state_path)
+    from phase_agent.persistence.state.read_versions import read_identity
+
+    initial_identity = read_identity(handler.state_path, strong=True)
     facts = read_json(handler.state_path, missing)
+    if read_identity(handler.state_path, strong=True) != initial_identity:
+        raise ValueError("state_changed_during_read; reload current state")
     if facts is missing:
         from pathlib import Path
 
@@ -80,10 +85,6 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
                         "operation": "done",
                     }
                 dft_question_reply = explicit_dft_reply
-    from phase_agent.tools.workflows.compact_action_history import compact_state_history_once
-
-    if compact_state_history_once(facts):
-        write_json(handler.state_path, facts)
     from phase_agent.policies.recovery_transition import legacy_post_recovery_plan_ids
 
     if handler.config_delegate is None:
@@ -98,16 +99,19 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
             facts["pending_execution_policies"] = {
                 key: row for key, row in pending.items() if key not in stale_plan_ids
             }
+            from phase_agent.runtime.pending_plan_state import archived_plan
+
             facts.setdefault("superseded_pending_plans", []).extend(
-                {
-                    "plan_id": plan_id,
-                    "tool": "legacy_post_recovery_plan",
-                    "reason": "legacy_post_recovery_plan_requires_current_decision_boundary",
-                }
+                archived_plan(
+                    plan_id, pending[plan_id], tool="legacy_post_recovery_plan",
+                    reason="legacy_post_recovery_plan_requires_current_decision_boundary",
+                )
                 for plan_id in stale_plan_ids
             )
             facts["post_recovery_next_step_pending"] = True
-            write_json(handler.state_path, facts)
+            from phase_agent.tools.step_runner.file_protocol import write_json_if_version
+
+            write_json_if_version(handler.state_path, facts, initial_identity)
     # An explicit independent run must switch projects before any old-result
     # recovery or semantic model call can inspect the previous state.
     from phase_agent.graphs.dialogue.commands import _classify_history_decision
@@ -311,16 +315,15 @@ def read_project(state, runtime: Runtime[TurnRuntime]):
             # cannot become the next action by saved-plan routing.
             facts["post_recovery_next_step_pending"] = True
             if pending:
+                from phase_agent.runtime.pending_plan_state import archived_plan
+
                 superseded = []
                 for plan_id, row in pending.items():
                     action = (row.get("agent_proposal") or {}).get("raw_action") or {}
-                    superseded.append(
-                        {
-                            "plan_id": plan_id,
-                            "tool": action.get("tool"),
-                            "reason": "result_recovery_completed_before_approval",
-                        }
-                    )
+                    superseded.append(archived_plan(
+                        plan_id, row, tool=action.get("tool"),
+                        reason="result_recovery_completed_before_approval",
+                    ))
                     for record in facts.get("action_records") or []:
                         if record.get("record_id") == plan_id and record.get("status") in {
                             None,
@@ -463,17 +466,16 @@ def route_request(state, runtime: Runtime[TurnRuntime]):
             if (action.get("tool") or action.get("action_type")) not in allowed_tools:
                 stale_ids.append(plan_id)
         if stale_ids:
+            from phase_agent.runtime.pending_plan_state import archived_plan
+
             superseded = []
             for plan_id in stale_ids:
                 row = pending.pop(plan_id, {})
                 action = (row.get("agent_proposal") or {}).get("raw_action") or {}
-                superseded.append(
-                    {
-                        "plan_id": plan_id,
-                        "tool": action.get("tool") or action.get("action_type"),
-                        "reason": "post_recovery_next_step_requires_stage_decision",
-                    }
-                )
+                superseded.append(archived_plan(
+                    plan_id, row, tool=action.get("tool") or action.get("action_type"),
+                    reason="post_recovery_next_step_requires_stage_decision",
+                ))
                 for record in state["facts"].get("action_records") or []:
                     if record.get("record_id") == plan_id and record.get("status") in {
                         None,
@@ -787,12 +789,16 @@ def scientific_workflow(state, runtime: Runtime[TurnRuntime]):
 def present(state, runtime: Runtime[TurnRuntime]):
     from phase_agent.graphs.dialogue.support import bind_presented_proposal
     from phase_agent.tools.step_runner.file_protocol import read_json
+    from phase_agent.runtime.turn_process import presentation_signature, remember_presentation_state
     from phase_agent.runtime.workflow_reply_presentation import format_workflow_reply
 
     handler = runtime.context.handler
     handler.last_turn_outcome = state["result"].get("status")
     if state["result"].get("status") in {"awaiting_approval", "training_handoff"}:
-        bind_presented_proposal(handler, read_json(handler.state_path, {}) or {})
+        signature = presentation_signature(handler.state_path)
+        latest_facts = read_json(handler.state_path, {}) or {}
+        bind_presented_proposal(handler, latest_facts)
+        remember_presentation_state(handler.state_path, latest_facts, signature)
     result = {**state["result"], "verified_recovery": state.get("verified_recovery") or {}}
     return {"reply": format_workflow_reply(result, handler.state_path)}
 

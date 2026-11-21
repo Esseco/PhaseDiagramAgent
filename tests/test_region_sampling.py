@@ -28,6 +28,7 @@ def params():
         "regions": [
             {
                 "region_id": "r1",
+                "sample_count": 16,
                 "priority": 1,
                 "strategy": "coverage",
                 "phase": "O3",
@@ -111,10 +112,10 @@ def test_stop_on_novelty_stagnation_and_preserve_real_ledger():
         descriptor=lambda r: (r["P"], tuple(r["T"])),
     )
     assert len(chosen) == 1  # no minimum100, no fill600
-    assert count == 4
+    assert count == 1
     assert report["status"] == "completed"
     assert manager.data == before
-    assert report["regions"][0]["duplicates"] == 3
+    assert report["regions"][0]["duplicates"] == 0
 
 
 def test_redundant_descriptors_do_not_drive_more_generation():
@@ -130,7 +131,7 @@ def test_redundant_descriptors_do_not_drive_more_generation():
         manager, {}, params(), producer=producer, descriptor=lambda r: "same"
     )
     assert len(chosen) == 1
-    assert report["regions"][0]["redundant_descriptor"] == 3
+    assert report["regions"][0]["redundant_descriptor"] == 0
 
 
 def test_guard_is_pause_and_regions_get_first_pass(monkeypatch):
@@ -146,14 +147,15 @@ def test_guard_is_pause_and_regions_get_first_pass(monkeypatch):
         Manager(), {}, p, producer=producer, descriptor=lambda r: tuple(r["T"])
     )
     assert calls[:2] == ["r1", "r2"]
-    assert len(chosen) == CONTROLS["review_after_new_branches"]
-    assert report["status"] == "paused_for_review"
-    assert "guard" in report["stop_reason"]
+    assert len(chosen) == 32
+    assert report["status"] == "completed"
+    assert report["attempts"] == sum(row["sample_count"] for row in p["regions"])
 
 
 def test_project_branch_cap_stops_uniform_region_round():
     p = params()
     p["max_new_branches"] = 5
+    p["regions"][0]["sample_count"] = 5
     calls = []
 
     def producer(*args, **kwargs):
@@ -165,8 +167,8 @@ def test_project_branch_cap_stops_uniform_region_round():
         Manager(), {}, p, producer=producer, descriptor=lambda r: tuple(r["T"])
     )
     assert len(chosen) == 5
-    assert report["status"] == "paused_for_review"
-    assert "guard" in report["stop_reason"]
+    assert report["status"] == "completed"
+    assert report["attempts"] == 5
 
 
 def test_empty_regions_explicit_defer():
@@ -293,7 +295,10 @@ def test_service_failure_cannot_bootstrap_legacy_quota(monkeypatch):
     assert "503" in result["fallback_reason"]
 
 
-def test_approved_region_route_counts_registered_only_and_stops(tmp_path, monkeypatch):
+@pytest.mark.parametrize("report_status, failures", [("completed", 1), ("paused_for_review", 0)])
+def test_approved_region_route_counts_registered_only_and_stops(
+    tmp_path, monkeypatch, report_status, failures
+):
     import phase_agent.tools.workflows.run_region_generation as workflow
     import phase_agent.tools.workflows.scientific_module_scope as downstream
 
@@ -306,7 +311,7 @@ def test_approved_region_route_counts_registered_only_and_stops(tmp_path, monkey
         "sample_regions",
         lambda *args, **kw: (
             [candidate("Fe"), candidate("Mn")],
-            {"status": "completed"},
+            {"status": report_status},
         ),
     )
     monkeypatch.setattr(
@@ -327,7 +332,7 @@ def test_approved_region_route_counts_registered_only_and_stops(tmp_path, monkey
             "coverage": [],
             "summary": {
                 "sampling_report": kw["sampling_report"],
-                "initialization_failed_branches": 1,
+                "initialization_failed_branches": failures,
             },
         }
 
@@ -345,7 +350,7 @@ def test_approved_region_route_counts_registered_only_and_stops(tmp_path, monkey
             "effective_config": {"structure_directory": str(tmp_path / "structures")},
         },
     )
-    assert result["status"] == "completed"
+    assert result["status"] == "paused_for_review"
     assert result["state"]["generation_history"][-1]["new_branch_ids"] == ["0"]
     import json
     from pathlib import Path

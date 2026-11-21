@@ -1,6 +1,6 @@
 # 项目文件管理
 
-源码只在 Process_PhaseDiagram/phase_agent；五个科学项目保留在 E:/0-PhaseDiagram。新项目使用同一模板，不复制应用代码。现有入口 `python run_project.py` 不变。
+生产应用源码位于 Process_PhaseDiagram/phase_agent；科学项目与源码独立，保留在各自工作区。新项目使用同一模板，不复制应用代码。现有入口 `python run_project.py` 不变。
 
 ```text
 项目/
@@ -32,26 +32,24 @@
 │   │       └── storage_archives/ 完整归档包
 │   └── epoch1/
 ├── analysis_outputs/
-│   ├── output_index.md          已有产物索引
-│   ├── round_summary.csv        跨轮汇总
-│   ├── gpu_usage.csv            跨轮 GPU 用量
-│   ├── latest/                 当前模型最新完整产物副本（先看 *_status.json）
-│   │   ├── phase_diagram/      main.png、hd_cross.png、CSV、JSON、报告、manifest
-│   │   └── dft_error/          能量/受力误差图、比较表、metrics、数据清单、manifest
+│   ├── latest/                  当前模型结果与状态
+│   │   ├── README.md
+│   │   ├── phase_diagram/       MLIP 总相图、D/H 相图及信息
+│   │   └── dft_error/           当前模型同帧 DFT 误差及信息（若可用）
 │   ├── epoch0/
-│   │   ├── phase_diagram/      versions/<指纹>/ 不可变完整版本，以及 latest/
-│   │   ├── dft_error/          同一模型累计 DFT 配对的 versions/<指纹>/ 与 latest/
-│   │   ├── phase_diagrams/     MLIP 底层 history；旧 dft/combined 历史保留可读
-│   │   ├── Search-group-*/DFT-round-*/
-│   │   │   ├── comparisons/    比较表、指标和 plots
-│   │   │   ├── training/       训练结构与标签
-│   │   │   └── diagnostics/    磁矩和检查
-│   │   └── recovery/           本轮历史恢复分析（若存在）
-│   └── epoch1/
+│   │   ├── README.md
+│   │   └── phase_diagram/       本轮唯一相图目录，按实际事件顺序编号
+│   │       ├── 0_update_phasediagram/
+│   │       ├── 1_relaxmc-1/     若发生；包含对应图和说明
+│   │       └── 2_dft-selection-1/  若发生；包含选点图和说明
+│   ├── epoch1/                  同样按 phase_diagram、dft、dft_error、diagnostics 分类
+│   ├── out_data/                当前跨轮表格与附属信息
+│   └── history/                 完整历史、内部快照、旧格式及失败轮归档
+├── workflow_state/analysis/     内部索引、跨轮汇总、未分配证据和整理记录
 └── history_backups/             人工维护快照
 ```
 
-只创建实际需要的目录；尚未产生科学结果的 Mn/Ni 项目有导航文件，没有伪造的结果或任务。
+编号历史从采用新版发布入口的当前已核验相图开始；更早的旧图与引用继续保留在原路径，不依据文件时间推测顺序。DIRECT 可在相图不可用时作为首个步骤。`latest` 中如有仍被登记状态引用的历史证据，Agent 会保留并在整理报告中标出，直到可通过正式入口安全迁移。只创建实际需要的目录；实际 epoch 数按模型登记决定。正式 MLIP 主图包含全部有效点，D/H 对照单独绘制；已选 DFT 时生成独立选点图。每次已核验的当前模型凸包发布还会在同一 epoch bundle 和 `latest/phase_diagram/` 中生成 `voltage_curve.png`、`voltage_curve.csv` 与 `voltage_curve_status.json`。电压按相邻稳定 hull 段的能量斜率计算，并使用已确认配置中的 `energy_conventions.voltage_references.Na` 作为 Na 化学势参考；缺少显式参考时保留带原因的 not_ready CSV 和图，不猜测参考能量。历史凸包或帧不足时标记不可用，不以其他数据代替。
 
 ## 日常使用
 

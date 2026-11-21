@@ -1,9 +1,12 @@
 """Read-only, fixed-reference hull sensitivity; influence is not prediction error."""
 
 from collections import defaultdict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from hashlib import sha256
 import json
 from math import isfinite
+from pathlib import Path
 from statistics import median
 
 DEFAULT_POLICY = {
@@ -16,6 +19,46 @@ DEFAULT_POLICY = {
     "joint_max_order": 5,
 }
 RULE_VERSION = "phase-quality-HD-near-hull-v8"
+_GEOMETRY_READ_CACHE = ContextVar("phase_quality_geometry_read_cache", default=None)
+
+
+@contextmanager
+def geometry_read_scope():
+    """Share identical geometry observations only during one version-bound read."""
+    token = _GEOMETRY_READ_CACHE.set({})
+    try:
+        yield
+    finally:
+        _GEOMETRY_READ_CACHE.reset(token)
+
+
+def _geometry_cache_key(point, state, identity):
+    rows = point["rows"]
+    row = rows[0]
+    task_ids = {r.get("source_task_id") for r in rows} - {None}
+    digests = {r.get("structure_sha256") for r in rows} - {None}
+    matched = None
+    for task in reversed(state.get("tasks") or []):
+        output = task.get("outputs") or {}
+        digest = (output.get("phase_identification") or {}).get("structure_sha256") or output.get("structure_checksum")
+        if task.get("model_version") == state.get("active_model_version") and (task.get("task_id") in task_ids or digest in digests):
+            matched = {"task_id": task.get("task_id"), "phase": task.get("phase"),
+                       "path": task.get("structure_path") or (task.get("inputs") or {}).get("structure_path"),
+                       "digest": digest}
+            break
+    paths = [row.get("structure_path"), (matched or {}).get("path")]
+    files = []
+    for raw in paths:
+        if not raw:
+            files.append(None)
+            continue
+        try:
+            stat = Path(raw).stat()
+            files.append((str(raw), stat.st_size, stat.st_mtime_ns))
+        except OSError:
+            files.append((str(raw), None, None))
+    data = {"rows": rows, "model": state.get("active_model_version"), "matched": matched, "files": files}
+    return (id(state), str(identity), sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest())
 
 
 def snapshot_evidence_digest(snapshot):
@@ -381,7 +424,17 @@ def _cached_geometry(point, state, cache):
     if cache is None:
         return _geometry_evidence(point, state)
     if point["key"] not in cache:
-        cache[point["key"]] = _geometry_evidence(point, state)
+        from phase_agent.runtime.codex.context import shared_codex_identity
+
+        shared = _GEOMETRY_READ_CACHE.get()
+        identity = shared_codex_identity() if shared is not None else None
+        if identity is None:
+            cache[point["key"]] = _geometry_evidence(point, state)
+        else:
+            key = _geometry_cache_key(point, state, identity)
+            if key not in shared:
+                shared[key] = _geometry_evidence(point, state)
+            cache[point["key"]] = shared[key]
     return cache[point["key"]]
 
 

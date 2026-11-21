@@ -67,6 +67,7 @@ def test_stale_quality_hull_cannot_attach_to_current_candidate_and_metrics_keep_
 
 
 def test_DFT_candidate_reads_new_formal_Ehull_after_executed_removal(tmp_path):
+    from hashlib import sha256
     from pymatgen.core import Structure, Lattice
     from tests.test_phase_quality_review import fixture
     from phase_agent.analysis.phase.update_phase_diagram import update_phase_diagram
@@ -90,6 +91,15 @@ def test_DFT_candidate_reads_new_formal_Ehull_after_executed_removal(tmp_path):
         ],
     ).to(filename=path, fmt="poscar")
     state["phase_records"][2]["structure_path"] = str(path)
+    state["phase_records"][2]["structure_sha256"] = sha256(path.read_bytes()).hexdigest()
+    for index in (0, 1, 3):
+        sodium = (0, 1, 0, 2)[index]
+        species = ["Na"] * sodium + ["Co"] * 2 + ["O"] * 4
+        frame = tmp_path / f"hull-{index}.vasp"
+        coords = [[(i + 1) / (len(species) + 1), 0.2 + 0.05 * index, 0.3] for i in range(len(species))]
+        Structure(Lattice.cubic(8), species, coords).to(filename=frame, fmt="poscar")
+        state["phase_records"][index]["structure_path"] = str(frame)
+        state["phase_records"][index]["structure_sha256"] = sha256(frame.read_bytes()).hexdigest()
     state["tasks"].append(
         {
             "task_id": "mc-r2",
@@ -122,3 +132,25 @@ def test_DFT_candidate_reads_new_formal_Ehull_after_executed_removal(tmp_path):
     assert current["phase_diagram_version"] != original["phase_diagram_version"]
     assert current["predicted_Ehull"] < original["predicted_Ehull"]
     assert current["ehull_unit"] == "eV/atom"
+
+
+def test_latest_hull_old_energy_source_gets_only_exact_bound_quality(tmp_path, monkeypatch):
+    from hashlib import sha256
+    from phase_agent.analysis.convergence import independent_evidence
+    from phase_agent.analysis.phase import phase_dft_sampling
+    frame = tmp_path / "frame.vasp"
+    frame.write_text("frame", encoding="utf8")
+    digest = sha256(frame.read_bytes()).hexdigest()
+    snapshot = {"version": "h", "model_version": "new", "status": "completed",
+                "energy_policy": "latest_valid_per_structure_v1",
+                "entries": [{"structure_sha256": digest, "source_version": "old"}]}
+    state = {"active_model_version": "new", "phase_diagrams": {"mlip": snapshot}}
+    report = {"model_version": "new", "hull_version": "h", "structures": [
+        {"geometry_key": "g", "structure_sha256": [digest]}]}
+    candidate = {"candidate_id": "c", "model_version": "old", "energy_source_version": "old",
+                 "phase_diagram_version": "h", "structure_path": str(frame), "structure_sha256": digest}
+    monkeypatch.setattr(independent_evidence, "geometry_key", lambda _: "g")
+    monkeypatch.setattr(phase_dft_sampling, "fixed_snapshot_sampling_evidence", lambda *_: {"g": {"status": "available"}})
+    assert candidate_quality_evidence(state, [candidate], report=report)[0]["phase_quality_signal"]["status"] == "available"
+    candidate["energy_source_version"] = "wrong"
+    assert candidate_quality_evidence(state, [candidate], report=report)[0]["phase_quality_signal"]["status"] == "unavailable"

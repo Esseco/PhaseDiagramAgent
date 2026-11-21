@@ -288,3 +288,50 @@ def test_ssh_results_directory_avoids_logs_and_duplicate_archives(tmp_path):
         "task/checkpoint.json.gz",
     }
     assert not any("-r" in call for call in calls)
+
+
+def test_retry_stages_only_missing_results_and_keeps_finished_marker_last(tmp_path, monkeypatch):
+    from phase_agent.tools.remote import transfer_bundle
+
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("result.json", "task.finished.json"):
+        (source / name).write_bytes(name.encode())
+    archive = create_bundle(source, source.iterdir(), tmp_path / "batch.results.zip", kind="results")
+    target = tmp_path / "target"
+    original_replace = transfer_bundle.os.replace
+
+    def interrupt(src, dst):
+        if Path(dst).name == "task.finished.json":
+            raise OSError("interrupted publication")
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(transfer_bundle.os, "replace", interrupt)
+    with pytest.raises(ValueError, match="interrupted publication"):
+        import_bundle(archive, target)
+    assert (target / "result.json").read_bytes() == b"result.json"
+    assert not (target / "task.finished.json").exists()
+    monkeypatch.setattr(transfer_bundle.os, "replace", original_replace)
+
+    # A matching local result cannot substitute for validating the ZIP member.
+    corrupt = tmp_path / "bad.results.zip"
+    with zipfile.ZipFile(archive) as old, zipfile.ZipFile(corrupt, "w") as new:
+        for name in old.namelist():
+            new.writestr(name, b"result-xxxx" if name == "result.json" else old.read(name))
+    with pytest.raises(ValueError, match="Result checksum mismatch"):
+        import_bundle(corrupt, target)
+    assert not (target / "task.finished.json").exists()
+
+    written = []
+    original_open = Path.open
+
+    def track(path, mode="r", *args, **kwargs):
+        if "w" in mode and any(part.startswith(".transfer-") for part in path.parts):
+            written.append(path.name)
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", track)
+    assert import_bundle(archive, target) == 2
+    assert written == ["task.finished.json"]
+    assert (target / "task.finished.json").read_bytes() == b"task.finished.json"
+    assert not list(target.glob(".transfer-*"))

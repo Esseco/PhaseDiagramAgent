@@ -24,8 +24,11 @@ def test_statistics_write_failure_is_nonfatal(tmp_path):
         assert run_mlip_batch(manifest) == []
 
 
-def test_revised_dft_replaces_old_preview_and_cost():
+def test_revised_dft_replaces_old_preview_and_cost(tmp_path):
     state = {"qbc_candidates": [{"candidate_id": "s", "atom_count": 40}]}
+    from tests.dft_plot_fixture import add_dft_plot_evidence
+
+    add_dft_plot_evidence(state, tmp_path)
     action = {"tool": "select_dft_candidates", "budget": 999,
         "parameters": {"dft_input_preview": {"relative_cost": 999},
                        "decisions": [{"candidate_id": "s", "action": "DFT_SINGLE_POINT"}]}}

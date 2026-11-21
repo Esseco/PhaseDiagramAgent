@@ -8,7 +8,7 @@ from phase_agent.persistence.models.mark_model_dependent_results_stale import (
 
 
 def activate_validated_model(
-    state: dict, new_model: dict, validation: dict, *, approval_reason=None
+    state: dict, new_model: dict, validation: dict, *, approval_reason=None, copy_state: bool = True
 ) -> dict:
     if validation.get("status") != "completed" or validation.get("passed") is not True:
         return {
@@ -53,7 +53,7 @@ def activate_validated_model(
             "reason": "explicit_activation_approval_reason_required",
         }
     refreshed = mark_model_dependent_results_stale(
-        state, old_model_version=old, new_model_version=new
+        state, old_model_version=old, new_model_version=new, copy_state=copy_state
     )
     updated = refreshed["state"]
     from phase_agent.persistence.models.require_structure_refresh import (

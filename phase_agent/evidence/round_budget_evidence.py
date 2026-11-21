@@ -1,6 +1,7 @@
 """Marginal-budget evidence and explicit decision/task outcome attribution."""
 
 from copy import deepcopy
+from collections import defaultdict
 import math
 
 TERMINAL = {"completed", "failed", "timeout", "cancelled"}
@@ -18,10 +19,32 @@ def numeric_cost(value):
     )
 
 
-def budget_decision_outcomes(state):
+def budget_decision_outcomes(state, *, limit=None):
+    """Attribute exact links; optional limit selects decisions, never their evidence."""
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ValueError("limit must be a positive integer or None")
+    decisions = [
+        row
+        for row in state.get("action_records") or []
+        if isinstance((row.get("final_action") or {}).get("round_budget_review"), dict)
+    ]
+    if limit is not None:
+        decisions = decisions[-limit:]
+    if not decisions:
+        return []
     tasks = state.get("tasks") or []
+    rewards = state.get("rewards") or []
+    by_task, by_parent, rewards_by_task = defaultdict(list), defaultdict(list), defaultdict(list)
+    for position, task in enumerate(tasks):
+        if task.get("task_id"):
+            by_task[task["task_id"]].append(position)
+            if task.get("parent_decision_id"):
+                by_parent[task["parent_decision_id"]].append(position)
+    for position, reward in enumerate(rewards):
+        for task_id in set(reward.get("task_ids") or []):
+            rewards_by_task[task_id].append(position)
     output = []
-    for decision in state.get("action_records") or []:
+    for decision in decisions:
         action = decision.get("final_action") or {}
         review = action.get("round_budget_review")
         if not isinstance(review, dict):
@@ -33,26 +56,21 @@ def budget_decision_outcomes(state):
             if isinstance(result, dict)
             else set()
         )
-        linked = [
-            task
-            for task in tasks
-            if task.get("task_id")
-            and (
-                task.get("task_id") in explicit
-                or (identity and task.get("parent_decision_id") == identity)
-            )
-        ]
+        positions = set(by_parent.get(identity, []) if identity else [])
+        for task_id in explicit:
+            positions.update(by_task.get(task_id, []))
+        # Positions deduplicate overlapping links, preserving duplicate source rows and task order.
+        linked = [tasks[position] for position in sorted(positions)]
         ids = {task["task_id"] for task in linked}
         versions = {task.get("model_version") for task in linked}
         version = next(iter(versions)) if len(versions) == 1 else None
         costs = [numeric_cost(task.get("actual_cost")) for task in linked]
         done = bool(linked) and all(task.get("status") in TERMINAL for task in linked)
         actual_cost = sum(costs) if done and all(cost is not None for cost in costs) else None
-        attributable = [
-            reward
-            for reward in state.get("rewards") or []
-            if ids.intersection(reward.get("task_ids") or [])
-        ]
+        reward_positions = {
+            position for task_id in ids for position in rewards_by_task.get(task_id, [])
+        }
+        attributable = [rewards[position] for position in sorted(reward_positions)]
         output.append(
             {
                 "decision_id": identity,
@@ -112,7 +130,7 @@ def round_budget_evidence(state):
         if (row.get("structure_id") or row.get("candidate_id")) not in labelled
         and not row.get("duplicate_of")
     ]
-    outcomes = budget_decision_outcomes(state)
+    outcomes = budget_decision_outcomes(state, limit=8)
     required = bool(
         reports or state.get("dft_result_exports") or state.get("post_dft_decided_rounds")
     )
@@ -132,7 +150,7 @@ def round_budget_evidence(state):
             "instruction": "Counts alone do not establish representativeness; unknown or old-model QBC must be refreshed.",
         },
         "budget_remaining": deepcopy(state.get("budget_remaining")),
-        "observed_budget_outcomes": deepcopy(outcomes[-8:]),
+        "observed_budget_outcomes": deepcopy(outcomes),
         "budget_experience": budget_experience_context(state),
         "instruction": "Compare supplement_dft from existing candidates versus new_search, using marginal downstream Relax/MC/DFT/training costs, hull/coverage gains and model risk. Historical sunk cost is evidence, not new expenditure. Missing costs/gains remain unknown. Do not compare raw rewards across model or energy-basis versions. Only the chosen path has observed outcomes; alternatives remain hypotheses. Coverage and error are evidence for expected benefit and uncertainty, NEVER hard gates for new_search. New search may win even with large error or incomplete coverage. Compare complete paths through downstream DFT and any retraining; no fixed accuracy threshold or DFT-first rule.",
     }

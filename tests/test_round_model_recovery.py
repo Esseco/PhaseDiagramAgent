@@ -1,3 +1,4 @@
+from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
 """Original-model DFT validation, simple round records and human partial recovery."""
 
 from copy import deepcopy
@@ -208,7 +209,7 @@ def test_round_summary_counts_and_errors_are_model_specific(tmp_path):
     assert first["force_rmse_eV_per_A"] == pytest.approx(0.2)
     assert second["force_rmse_eV_per_A"] == pytest.approx(0.6)
     assert first["matched_dft_tasks"] == 1
-    with (tmp_path / "round_summary.csv").open(encoding="utf-8-sig", newline="") as stream:
+    with (analysis_metadata_directory(tmp_path) / "round_summary.csv").open(encoding="utf-8-sig", newline="") as stream:
         assert len(list(csv.DictReader(stream))) == 2
 
 

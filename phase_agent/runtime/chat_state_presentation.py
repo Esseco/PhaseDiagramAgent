@@ -38,7 +38,7 @@ def _current_dft_review_line(state):
     pending_text = f"，另有 {pending} 个仍待回收" if pending else ""
     return (
         f"当前：当前模型 DFT 本轮已回收 {completed}/{len(rows)} 个，"
-        f"{len(failed)} 个失败{pending_text}；可继续使用已回收结果，或只补全失败项；不会重跑整批。"
+        f"{len(failed)} 个失败{pending_text}；失败数据不参与分析，未自动重试。"
     )
 
 
@@ -163,7 +163,13 @@ def brief_chat_state(state, *, configuring=False):
             failed = sum(facts["status_counts"].get(s, 0) for s in ("failed", "timeout"))
             if failed:
                 return (
-                    f"当前：新模型结构刷新 {failed}/{facts['task_count']} 个失败，需修复后再重试。"
+                    f"当前：新模型结构刷新 {failed}/{facts['task_count']} 个失败，"
+                    f"{facts['discarded_unconverged_count']} 个未收敛已排除；"
+                    + (f"外推失败 {facts['extrapolation_review']['failure_count']} 项。"
+                       if facts['extrapolation_review'].get('failure_count') is not None
+                       else f"疑似外推失败 {facts['extrapolation_review']['suspected_count']} 项。"
+                       if facts['extrapolation_review'].get('suspected_count') is not None
+                       else "外推证据待核验。")
                 )
             if (
                 facts["task_count"]

@@ -23,6 +23,19 @@ def compact_state(state):
 def result_files(root, state, candidates, *, remote_root=None):
     root = Path(root).resolve()
     files = set()
+    from phase_agent.agents.reliability.extrapolation_round import assess_recovered_round
+
+    tasks = state.get("tasks") or []
+    model = state.get("active_model_version")
+    complete = bool(tasks) and all(t.get("status") in {"completed", "failed"} for t in tasks)
+    round_review = (
+        assess_recovered_round(
+            tasks, model_version=model, scope_complete=complete, round_kind="relax_mc"
+        )
+        if model
+        else {}
+    )
+    include_direct_frames = round_review.get("direct_sampling_required") is True
 
     def include(value, base, *, required=False):
         if not isinstance(value, str) or not value:
@@ -91,19 +104,24 @@ def result_files(root, state, candidates, *, remote_root=None):
         if not worker.resolve().is_relative_to(root):
             raise ValueError("return_worker_outside_batch")
         include("task.finished.json", directory, required=completed)
+        include("phase_identification.json", directory)
         raw = json.loads(result.read_text(encoding="utf-8"))
         # Read worker-relative pointers against that result, without modifying
         # signed result bytes. Portable task/candidate pointers are batch-relative.
         raw_outputs = raw.get("outputs") or {}
-        for item in raw_outputs.get('extrapolation_failures') or []:
+        for item in raw_outputs.get("extrapolation_failures") or []:
             from hashlib import sha256
-            name = Path(str(item.get('structure_path') or '').replace('\\', '/')).name
-            if not name.startswith('extrapolation_') or not name.endswith('.vasp'):
-                raise ValueError('invalid_extrapolation_failure_frame')
-            frame = next((folder / name for folder in (directory, worker)
-                          if (folder / name).is_file()), None)
-            if frame is None or sha256(frame.read_bytes()).hexdigest() != item.get('structure_checksum'):
-                raise ValueError('missing_or_invalid_extrapolation_failure_frame')
+
+            name = Path(str(item.get("structure_path") or "").replace("\\", "/")).name
+            if not name.startswith("extrapolation_") or not name.endswith(".vasp"):
+                raise ValueError("invalid_extrapolation_failure_frame")
+            frame = next(
+                (folder / name for folder in (directory, worker) if (folder / name).is_file()), None
+            )
+            if frame is None or sha256(frame.read_bytes()).hexdigest() != item.get(
+                "structure_checksum"
+            ):
+                raise ValueError("missing_or_invalid_extrapolation_failure_frame")
             include(str(frame), root, required=True)
         # Canonical collector paths in task.outputs replace worker-side geometry
         # pointers. Preserve signed raw JSON, but do not copy both geometries.
@@ -136,8 +154,21 @@ def result_files(root, state, candidates, *, remote_root=None):
                         geometry, directory, required=completed or raw.get("status") == "completed"
                     )
         portable = rebase(task, root, portable=True)
+        if include_direct_frames and task.get("stage") == "deep_search":
+            from hashlib import sha256
+
+            for item in (portable.get("outputs") or {}).get("relaxation_observations") or []:
+                frame = include(item.get("structure_path"), root, required=True)
+                if frame is None or sha256(frame.read_bytes()).hexdigest() != item.get(
+                    "structure_checksum"
+                ):
+                    raise ValueError("missing_or_invalid_mc_relaxation_frame")
         referenced(
-            {k: v for k, v in (portable.get("outputs") or {}).items() if k != "pool_summary"},
+            {
+                k: v
+                for k, v in (portable.get("outputs") or {}).items()
+                if k not in {"pool_summary", "relaxation_observations"}
+            },
             root,
             required=completed,
         )
@@ -151,4 +182,16 @@ def result_files(root, state, candidates, *, remote_root=None):
     )
     # Small allocation receipts are needed for the existing GPU usage audit.
     files.update((root / "jobs").rglob("*.runtime.json"))
+    sampling_result = root / "dft_sampling_result.json"
+    if sampling_result.is_file():
+        files.add(sampling_result)
+        sampled = json.loads(sampling_result.read_text(encoding="utf-8"))
+        for item in sampled.get("selected") or []:
+            include(item.get("structure_path"), root, required=True)
+    quality_file = root / "remote_phase_quality_report.json"
+    if quality_file.is_file():
+        files.add(quality_file)
+    mat_file = root / "remote_dft_materialization.json"
+    if mat_file.is_file():
+        files.add(mat_file)
     return sorted(files)

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from phase_agent.tools.step_runner.file_protocol import content_id
 from phase_agent.evidence.model_epoch import model_epoch
+from phase_agent.runtime.pending_plan_state import visible_pending
 
 AUTHORITY_RULE = (
     "current_project 是程序核实的本轮唯一版本与设置来源。active_model 是当前运行模型；"
@@ -178,7 +179,7 @@ def current_project(state, session=None, *, state_path=None):
                 "context_changed": bool(row.get("project_identity"))
                 and row["project_identity"] != project_identity(state),
             }
-            for key, row in (state.get("pending_execution_policies") or {}).items()
+            for key, row in visible_pending(state).items()
         ],
         "consistency_issues": issues,
         "authority": AUTHORITY_RULE,

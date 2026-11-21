@@ -21,10 +21,19 @@ def outside_phase_boundary(row, rule):
     if oxygen <= 0:
         raise ValueError("相图记录缺少有效氧组成")
     x = 2 * Fraction(str(composition.get("Na", 0))) / oxygen
-    return str(row.get("phase") or "").upper() not in allowed_phases_at_x(rule, x)
+    allowed = allowed_phases_at_x(rule, x)
+    from phase_agent.analysis.phase.unidentified_mlip import unidentified_hull_entry
+
+    if unidentified_hull_entry(row):
+        return len(allowed) <= 1
+    return str(row.get("phase") or "").upper() not in allowed
 
 
 def assert_snapshot_boundary(state, snapshot):
+    if any(row.get("phase_identification_status") not in (None, "identified")
+           or str(row.get("phase") or "").strip().lower() in {"", "x", "unknown", "unidentified"}
+           for row in snapshot.get("entries") or []):
+        raise ValueError("相图含未识别相型，须按现行规则重建凸包")
     rule = phase_boundary_rule(state)
     count = sum(outside_phase_boundary(row, rule) for row in snapshot.get("entries") or [])
     if count:

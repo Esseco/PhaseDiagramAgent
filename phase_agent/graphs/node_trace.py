@@ -35,6 +35,9 @@ def _append_node_trace(frame, node, elapsed, *, error=None):
     wait = frame.get("manual_wait") or {}
     record["waiting_by_stage"] = wait.get("waiting_by_stage")
     record["recovered_count"] = frame.get("recovered_count")
+    if node == "scientific_feedback" and frame.get("idle_exact_feedback_reason"):
+        record["feedback_reused"] = frame.get("idle_exact_feedback_reused") is True
+        record["feedback_reuse_reason"] = frame["idle_exact_feedback_reason"]
     with FileLock(str(output) + ".lock", timeout=10):
         with output.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")

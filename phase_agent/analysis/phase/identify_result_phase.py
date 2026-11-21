@@ -11,8 +11,10 @@ from pathlib import Path
 STAGES = {"relax_and_feature", "deep_search", "dft_single_point", "dft_relax"}
 
 
-def identify_result_phase(result, manager, *, phase_references=None, cache=None):
-    current = deepcopy(result)
+def identify_result_phase(
+    result, manager, *, phase_references=None, cache=None, scope_cache=None, _owned=False
+):
+    current = result if _owned else deepcopy(result)
     if current.get("stage") not in STAGES or current.get("status") != "completed":
         return current
     outputs = current.get("outputs") or {}
@@ -41,22 +43,66 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
         evidence = {"status": "unknown", "reason": f"{type(error).__name__}: {error}"}
     else:
         scope = _classification_scope(manager, phase_references, configured_phase=configured_phase)
+        if scope_cache is not None and configured_phase in scope_cache:
+            portable_scope = scope_cache[configured_phase]
+        else:
+            portable_scope = _portable_classification_scope(
+                manager, phase_references, configured_phase=configured_phase
+            )
+            if scope_cache is not None:
+                scope_cache[configured_phase] = portable_scope
         cache_key = f"{scope}:{digest}"
         prior = outputs.get("phase_identification") or {}
         if (
             prior.get("structure_sha256") == digest
-            and prior.get("classification_scope") == scope
-            and prior.get("status") in {"identified", "outside_boundary"}
+            and (
+                (
+                    prior.get("portable_classification_scope")
+                    and portable_scope
+                    and prior.get("portable_classification_scope") == portable_scope
+                )
+                or (
+                    not prior.get("portable_classification_scope")
+                    and prior.get("classification_scope") == scope
+                )
+            )
+            and (
+                prior.get("status") in {"identified", "outside_boundary"}
+                or (
+                    prior.get("status") == "unknown"
+                    and (
+                        outputs.get("_phase_inherited") is True
+                        or prior.get("origin") == "remote_cpu"
+                    )
+                    and (
+                        str(prior.get("reason", "")).startswith("ValueError: unrecognized_phase:")
+                        or (prior.get("origin") == "remote_cpu" and bool(prior.get("reason")))
+                    )
+                )
+            )
         ):
             evidence = deepcopy(prior)
         elif (
             cache is not None
             and cache_key in cache
             and cache[cache_key].get("status") in {"identified", "outside_boundary"}
+            and (
+                not cache[cache_key].get("portable_classification_scope")
+                or (
+                    portable_scope
+                    and cache[cache_key]["portable_classification_scope"] == portable_scope
+                )
+            )
         ):
             evidence = deepcopy(cache[cache_key])
         else:
             try:
+                # A previously matched file may have stale rule code. Load it
+                # before recomputing rather than classifying a null structure.
+                if structure is None:
+                    structure, actual_digest = load_result_structure(outputs)
+                    if actual_digest != digest:
+                        raise ValueError("final_structure_changed_during_classification")
                 from phase_agent.science.structures.identify_branch import (
                     calculate_x,
                     identify_phase,
@@ -144,6 +190,8 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
                 }
             evidence["structure_sha256"] = digest
             evidence["classification_scope"] = scope
+            if portable_scope:
+                evidence["portable_classification_scope"] = portable_scope
             if cache is not None and evidence.get("status") in {
                 "identified",
                 "outside_boundary",
@@ -159,6 +207,7 @@ def identify_result_phase(result, manager, *, phase_references=None, cache=None)
         current["phase_identification_reason"] = evidence["reason"]
     else:
         current.pop("phase_identification_reason", None)
+    outputs = {key: value for key, value in outputs.items() if key != "_phase_inherited"}
     current["outputs"] = {
         **outputs,
         "source_phase": source_phase,
@@ -227,6 +276,45 @@ def _classification_scope(manager, phase_references, *, configured_phase=None):
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[
         :16
     ]
+
+
+def _portable_classification_scope(manager, phase_references, *, configured_phase=None):
+    """Bind transferable evidence to rules and reference content, not host paths."""
+    try:
+        from phase_agent.science.structures.boundary_utils import load_structure
+
+        references = phase_references or (
+            (manager.data.get("system_config") or {}).get("phase_references") or {}
+        )
+        geometry = {}
+        for name, value in sorted(references.items()):
+            structure = load_structure(value)
+            geometry[name] = {
+                "lattice": [[float(x).hex() for x in row] for row in structure.lattice.matrix],
+                "sites": [
+                    [str(site.species), *[float(x).hex() for x in site.frac_coords]]
+                    for site in structure
+                ],
+            }
+        root = Path(__file__).resolve().parents[2] / "science" / "structures"
+        files = ("identify_branch.py", "identify_layered_phase_fast.py", "boundary_utils.py")
+        rules = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
+        rules["identify_result_phase.py"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        payload = {
+            "schema": "phase-rules-v1",
+            "rules": rules,
+            "boundary": getattr(manager, "boundary", None),
+            "mobile": ((manager.data.get("system_config") or {}).get("species") or {}).get("mobile")
+            or ["Na"],
+            "references": geometry,
+            "configured_phase": configured_phase,
+            "legacy_na0": _legacy_na0_default_enabled(manager),
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str, allow_nan=False).encode()
+        ).hexdigest()
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
 
 
 def _configured_phase(structure, manager):

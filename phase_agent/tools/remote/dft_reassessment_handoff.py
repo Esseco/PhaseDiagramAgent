@@ -26,6 +26,7 @@ RUNTIME = (
     "science/structures/load_result_structure.py",
     "science/mlip/run_mace_subprocess.py",
     "science/mlip/mace_worker.py",
+    "science/mlip/refresh_inline.py",
     "science/mlip/model_interface.py",
     "science/mlip/predict_structure.py",
     "science/qbc/summarize_member_energies.py",

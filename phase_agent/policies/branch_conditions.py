@@ -34,7 +34,14 @@ def branch_entry_errors(action, state):
     if training_pending_validation(state) and tool == "update_mlip":
         errors.append("training_already_received_review_required")
     if refresh_active(state) and tool not in {"pause_search", "restart_failed_task"}:
-        if tool != "prepare_local_batch_files" or parameters.get("mode") != "model_refresh_inputs":
+        direct_evidence = (tool == "prepare_local_batch_files"
+                           and action.get("operation") == "sample_direct_extrapolation"
+                           and parameters.get("mode") == "direct_extrapolation")
+        perturbation = (tool == "prepare_local_batch_files"
+                        and (action.get("operation"), parameters.get("mode")) in {
+                            ("prepare_perturbation_recovery", "perturbation_recovery_inputs"),
+                            ("prepare_parent_first_recovery", "parent_first_recovery_inputs")})
+        if not direct_evidence and not perturbation and (tool != "prepare_local_batch_files" or parameters.get("mode") != "model_refresh_inputs"):
             errors.append("new_model_structure_refresh_required")
     mode = parameters.get("mode")
     region_review = state.get("branch_region_review") or {}

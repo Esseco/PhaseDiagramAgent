@@ -18,6 +18,23 @@ from phase_agent.persistence.ledger.coverage_report import coverage
 TERMINAL = {"completed", "failed", "timeout", "cancelled"}
 
 
+def phase_records_checksum(records):
+    """Bind a saved diagram to the same canonical records used to build it."""
+    return hashlib.sha256(
+        json.dumps(
+            sorted(
+                records or [],
+                key=lambda row: (
+                    str(row.get("record_id") or ""),
+                    str(row.get("structure_id") or ""),
+                ),
+            ),
+            sort_keys=True,
+            default=str,
+        ).encode()
+    ).hexdigest()
+
+
 def apply_scientific_feedback(
     state,
     recovered_results,
@@ -62,14 +79,39 @@ def apply_scientific_feedback(
     )
 
     candidates = {}
+    from phase_agent.persistence.ledger.mc_energy_repair import missing_verified_repair_tasks
+
+    repair_replay_ids = {t["task_id"] for t in missing_verified_repair_tasks(current)}
+    # Preserve the first matching task, as the previous linear lookup did.
+    task_positions = {}
+    for position, task in enumerate(current.get("tasks") or []):
+        identifier = task.get("task_id")
+        if isinstance(identifier, str):
+            task_positions.setdefault(identifier, position)
+    processed_ids = {identifier for identifier in processed if isinstance(identifier, str)}
+
+    def was_processed(identifier):
+        return (
+            identifier in processed_ids if isinstance(identifier, str) else identifier in processed
+        )
+
     for incoming in recovered_results or []:
         if not isinstance(incoming, dict):
             rejected.append({"task_id": None, "reason": "result_object_required"})
             continue
         task_id = incoming.get("task_id")
-        prior = next(
-            (row for row in current.get("tasks", []) if row.get("task_id") == task_id), None
-        )
+        if isinstance(task_id, str):
+            position = task_positions.get(task_id)
+        else:
+            position = next(
+                (
+                    i
+                    for i, row in enumerate(current.get("tasks", []))
+                    if row.get("task_id") == task_id
+                ),
+                None,
+            )
+        prior = current["tasks"][position] if position is not None else None
         try:
             validate_result_binding(incoming, prior or {})
         except InvalidScientificResult as error:
@@ -91,20 +133,26 @@ def apply_scientific_feedback(
                 }
             )
             continue
-        if task_id in processed:
-            if incoming.get("stage") not in DFT_STAGES or prior is None:
-                continue
-            checked = validated_magnetic_refresh(prior, incoming)
-            if checked["status"] == "rejected":
-                rejected.append({"task_id": task_id, "reason": checked["reason"]})
-                continue
-            result = checked.get("result", deepcopy(prior))
+        if was_processed(task_id):
+            if task_id in repair_replay_ids and prior is not None:
+                result = deepcopy(prior)
+            else:
+                if incoming.get("stage") not in DFT_STAGES or prior is None:
+                    continue
+                checked = validated_magnetic_refresh(prior, incoming)
+                if checked["status"] == "rejected":
+                    rejected.append({"task_id": task_id, "reason": checked["reason"]})
+                    continue
+                result = checked.get("result", deepcopy(prior))
         else:
             result = {**deepcopy(prior or {}), **deepcopy(incoming)}
         if prior is not None:
-            current["tasks"][current["tasks"].index(prior)] = result
+            current["tasks"][position] = result
         else:
-            current.setdefault("tasks", []).append(result)
+            tasks = current.setdefault("tasks", [])
+            if isinstance(task_id, str):
+                task_positions.setdefault(task_id, len(tasks))
+            tasks.append(result)
         candidates[task_id] = result
     from phase_agent.persistence.ledger.result_validation import (
         validate_scientific_result,
@@ -150,11 +198,12 @@ def apply_scientific_feedback(
         _optimizations={"_owned": True},
     )
     processed = current.setdefault("feedback_processed_task_ids", [])
+    processed_ids = {identifier for identifier in processed if isinstance(identifier, str)}
     for task in current.get("tasks", []):
         if task.get("task_id") in invalid:
             continue
         if task.get("task_id") in candidates or (
-            task.get("task_id") in processed and task.get("stage") in DFT_STAGES
+            was_processed(task.get("task_id")) and task.get("stage") in DFT_STAGES
         ):
             candidates[task.get("task_id")] = task
     for incoming in candidates.values():
@@ -177,18 +226,30 @@ def apply_scientific_feedback(
             sync_dft_assessment,
         )
 
-        is_refresh = task_id in processed
-        if is_refresh and (
-            result.get("stage") not in DFT_STAGES or not assessment_changed(current, result)
+        is_refresh = was_processed(task_id)
+        if (
+            is_refresh
+            and task_id not in repair_replay_ids
+            and (result.get("stage") not in DFT_STAGES or not assessment_changed(current, result))
         ):
             continue
+        if "energy_repair_source_model_version" in result:
+            from phase_agent.persistence.ledger.mc_energy_repair import (
+                cross_model_repair_binding_valid,
+            )
+
+            if not cross_model_repair_binding_valid(current, result):
+                rejected.append(
+                    {"task_id": task_id, "reason": "cross_model_repair_binding_invalid"}
+                )
+                continue
         if result.get("stage") in DFT_STAGES:
             sync_dft_assessment(current, result, manager)
         collected = collect_calculation_results(
             manager, structure_id, result, ledger_path=None, refresh_existing=is_refresh
         )
         if not is_refresh:
-            _record_cost_observation(current, result, manager, structure_id)
+            _record_cost_observation(current, result, manager, structure_id, task=prior)
         from phase_agent.analysis.feedback.dft_result_products import record_dft_products
 
         record_dft_products(
@@ -201,8 +262,13 @@ def apply_scientific_feedback(
             refreshed.append(task_id)
         else:
             processed.append(task_id)
+            if isinstance(task_id, str):
+                processed_ids.add(task_id)
             accepted.append(collected)
         phase_record = collected.get("phase_record")
+        # Recovery perturbations are a training pool, not phase-diagram samples.
+        if result.get("perturbation_batch_id") and result.get("stage") == "relax_and_feature":
+            phase_record = None
         if phase_record and phase_record["record_id"] not in {
             row.get("record_id") for row in current["phase_records"]
         }:
@@ -225,19 +291,7 @@ def apply_scientific_feedback(
     selected_model = active_model_version or current.get("active_model_version")
     if selected_model is not None:
         current["active_model_version"] = selected_model
-    records_checksum = hashlib.sha256(
-        json.dumps(
-            sorted(
-                current.get("phase_records") or [],
-                key=lambda row: (
-                    str(row.get("record_id") or ""),
-                    str(row.get("structure_id") or ""),
-                ),
-            ),
-            sort_keys=True,
-            default=str,
-        ).encode()
-    ).hexdigest()
+    records_checksum = phase_records_checksum(current.get("phase_records"))
     if (
         current.get("phase_diagram_input_checksum") is None
         and current.get("phase_diagrams")
@@ -389,13 +443,15 @@ def _cost(value):
     return float(value or 0)
 
 
-def _record_cost_observation(state, result, manager, structure_id):
+def _record_cost_observation(state, result, manager, structure_id, *, task=None):
     raw_actual = result.get("actual_cost")
     actual = _cost(raw_actual) if raw_actual is not None else None
     estimated = result.get("estimated_cost")
-    task = next(
-        (row for row in state.get("tasks", []) if row.get("task_id") == result.get("task_id")), {}
-    )
+    if task is None:
+        task = next(
+            (row for row in state.get("tasks", []) if row.get("task_id") == result.get("task_id")),
+            {},
+        )
     planned = float(task.get("planned_relative_cost", 0) or 0)
     record = manager.data["structures"].get(structure_id) or {}
     atoms = (record.get("metadata") or {}).get("atom_count") or result.get("outputs", {}).get(

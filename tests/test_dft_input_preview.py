@@ -4,6 +4,7 @@ from phase_agent.configuration.defaults.default_dft_decision_config import (
 )
 from phase_agent.runtime.agent_api import format_workflow_reply
 import pytest
+from pathlib import Path
 
 
 def candidate(candidate_id):
@@ -21,14 +22,43 @@ def candidate(candidate_id):
     }
 
 
+def add_monitor_evidence(state, tmp_path):
+    import hashlib
+
+    state.setdefault("active_model_version", "m1")
+    for row in state["qbc_candidates"]:
+        if not row.get("structure_path"):
+            frame = tmp_path / (row["candidate_id"] + ".vasp")
+            frame.write_text(row["candidate_id"], encoding="utf8")
+            row["structure_path"] = str(frame)
+        digest = hashlib.sha256(Path(row["structure_path"]).read_bytes()).hexdigest()
+        row["structure_sha256"] = digest
+        state.setdefault("tasks", []).append(
+            {
+                "task_id": "monitor-" + row["candidate_id"],
+                "status": "completed",
+                "model_version": state["active_model_version"],
+                "outputs": {
+                    "structure_checksum": digest,
+                    "extrapolation_monitor": {
+                        "final_feature_difference": 0.2,
+                        "extrapolation_failure": False,
+                        "failures": [],
+                    },
+                },
+            }
+        )
+
+
 def test_empty_plan_cannot_be_approved():
     preview, error = preview_dft_inputs({"parameters": {"decisions": []}}, {}, {})
     assert preview is None and error
 
 
-def test_concrete_plan_has_nonzero_cost():
+def test_concrete_plan_has_nonzero_cost(tmp_path):
     config = {"qbc": default_dft_decision_config(), "dft": {"selection": {"max_relax_fraction": 1}}}
     state = {"confirmed_config_version": "v", "qbc_candidates": [candidate("s")]}
+    add_monitor_evidence(state, tmp_path)
     action = {
         "parameters": {
             "decisions": [{"candidate_id": "s", "action": "DFT_RELAX", "reason": "凸包基态"}]
@@ -42,7 +72,34 @@ def test_chat_names_input_generation(tmp_path):
     state = {
         "workspace_layout": {"workspace_root": str(tmp_path)},
         "confirmed_config_version": "v",
+        "analysis_output_directory": str(tmp_path / "analysis_outputs"),
+        "upload_layout": {"model_rounds": {"m1": 1}},
         "qbc_candidates": [candidate(f"s{i}") for i in range(3)],
+    }
+    from hashlib import sha256
+
+    state["active_model_version"] = "m1"
+    entries = [
+        {"composition": {"O": 2}, "eform_per_O2": 0, "phase": "O3", "is_stable": False},
+        {"composition": {"Na": 1, "O": 2}, "eform_per_O2": 0, "phase": "O3", "is_stable": False},
+    ]
+    for i, row in enumerate(state["qbc_candidates"]):
+        frame = tmp_path / (row["candidate_id"] + ".vasp")
+        frame.write_text(row["candidate_id"], encoding="utf8")
+        digest = sha256(frame.read_bytes()).hexdigest()
+        row.update(structure_path=str(frame), structure_sha256=digest)
+        entries.append(
+            {
+                "composition": {"Na": 0.5, "O": 2},
+                "eform_per_O2": -0.1 - i * 0.01,
+                "phase": "O3",
+                "is_stable": False,
+                "structure_sha256": digest,
+            }
+        )
+    add_monitor_evidence(state, tmp_path)
+    state["phase_diagrams"] = {
+        "mlip": {"status": "completed", "model_version": "m1", "version": "h1", "entries": entries}
     }
     action = {
         "tool": "select_dft_candidates",
@@ -94,7 +151,7 @@ def test_rejected_event_reason_reaches_chat():
     assert "10%" in text and "执行动作被拒绝" not in text
 
 
-def test_mixed_plan_preserves_single_point_first_policy():
+def test_mixed_plan_preserves_single_point_first_policy(tmp_path):
     config = {
         "qbc": default_dft_decision_config(),
         "dft": {"selection": {"max_relax_fraction": 0.1}},
@@ -103,6 +160,7 @@ def test_mixed_plan_preserves_single_point_first_policy():
         "confirmed_config_version": "v",
         "qbc_candidates": [candidate(f"s{i}") for i in range(10)],
     }
+    add_monitor_evidence(state, tmp_path)
     decisions = [
         {
             "candidate_id": f"s{i}",

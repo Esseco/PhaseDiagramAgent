@@ -185,7 +185,14 @@ def test_actual_chat_runs_team_once_and_approval_reuses_frozen_action(tmp_path):
     from phase_agent.tools.step_runner.file_protocol import read_json
 
     class ConversationTeam(FakeTeam):
+        supports_simulation = True
+
         def __call__(self, request):
+            if request.get("mode") == "simulation_plan":
+                from tests.test_simulation_agent import SimulationModel
+
+                self.calls.append(deepcopy(request))
+                return SimulationModel()(request)
             response = super().__call__(request)
             if request.get("mode") == "autonomous_search":
                 response.update(
@@ -198,6 +205,7 @@ def test_actual_chat_runs_team_once_and_approval_reuses_frozen_action(tmp_path):
             return response
 
     client = ConversationTeam()
+    client.expert_client = client
     executed = []
 
     def check(**kwargs):

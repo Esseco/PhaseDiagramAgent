@@ -3,38 +3,91 @@ import json
 from copy import deepcopy
 import pytest
 from phase_agent.evidence.training_result_evidence import training_result_evidence
-from phase_agent.evidence.round_budget_evidence import round_budget_evidence, budget_decision_outcomes
+from phase_agent.evidence.round_budget_evidence import (
+    round_budget_evidence,
+    budget_decision_outcomes,
+)
 from phase_agent.agents.strategic.round_budget_review import round_budget_review_errors
+
+
+def test_model_refresh_inputs_precede_downstream_budget_choice():
+    context = {"round_budget_evidence": {"required": True}}
+    refresh = {"tool": "prepare_local_batch_files", "parameters": {"mode": "model_refresh_inputs"}}
+    assert not round_budget_review_errors(refresh, context)
+    assert round_budget_review_errors({"tool": "select_dft_candidates"}, context)
+    assert round_budget_review_errors({"tool": "generate_branches"}, context)
+    assert round_budget_review_errors(
+        {"tool": "prepare_local_batch_files", "parameters": {"mode": "relax_mc_inputs"}}, context
+    )
+
+
 from phase_agent.agents.common.proposal_validation import proposal_errors
 from phase_agent.persistence.memory.collect_memory_candidates import collect_memory_candidates
 from phase_agent.persistence.memory.verify_evidence_refs import verify_evidence_refs
 
 
 def review(choice="supplement_dft"):
-    return {"choice": choice, "reason": "Compare remaining pool and exploration", "uncertainty": "Costs unknown",
-            "revisit_when": "New DFT labels arrive", "alternatives": [
-                {"path": path, "expected_benefit": "Potential hull or coverage improvement",
-                 "benefit_status": "hypothesis", "expected_relative_cost": None,
-                 "cost_basis": "Unknown downstream cost; request estimates"}
-                for path in ("supplement_dft", "new_search")]}
+    return {
+        "choice": choice,
+        "reason": "Compare remaining pool and exploration",
+        "uncertainty": "Costs unknown",
+        "revisit_when": "New DFT labels arrive",
+        "alternatives": [
+            {
+                "path": path,
+                "expected_benefit": "Potential hull or coverage improvement",
+                "benefit_status": "hypothesis",
+                "expected_relative_cost": None,
+                "cost_basis": "Unknown downstream cost; request estimates",
+            }
+            for path in ("supplement_dft", "new_search")
+        ],
+    }
 
 
 def report_job(tmp_path):
-    directory = tmp_path / "results"; directory.mkdir()
-    (directory / "training.finished.json").write_text(json.dumps({"status": "completed",
-        "original_model_version": "m1", "out_of_fold_structures": 27, "committee_count": 4}))
+    directory = tmp_path / "results"
+    directory.mkdir()
+    (directory / "training.finished.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "original_model_version": "m1",
+                "out_of_fold_structures": 27,
+                "committee_count": 4,
+            }
+        )
+    )
     (directory / "models.json").write_text(json.dumps([{"model_id": f"com_{i}"} for i in range(4)]))
-    fields = ["fold", "structures", "evaluation_type", "energy_MAE_meV_per_atom", "energy_RMSE_meV_per_atom",
-              "force_MAE_meV_per_A", "force_RMSE_meV_per_A"]
+    fields = [
+        "fold",
+        "structures",
+        "evaluation_type",
+        "energy_MAE_meV_per_atom",
+        "energy_RMSE_meV_per_atom",
+        "force_MAE_meV_per_A",
+        "force_RMSE_meV_per_A",
+    ]
     with (directory / "kfold_metrics.csv").open("w", newline="") as handle:
-        writer = csv.writer(handle); writer.writerow(fields)
+        writer = csv.writer(handle)
+        writer.writerow(fields)
         writer.writerow(["all_out_of_fold", 27, "grouped_cross_validation", 3.8, 6.2, 56, 90])
-    return {"active_model_version": "m1", "remote_finetune_jobs": {"J1": {
-        "directory": str(tmp_path), "original_model_version": "m1", "status": "inputs_prepared", "activated": False}}}
+    return {
+        "active_model_version": "m1",
+        "remote_finetune_jobs": {
+            "J1": {
+                "directory": str(tmp_path),
+                "original_model_version": "m1",
+                "status": "inputs_prepared",
+                "activated": False,
+            }
+        },
+    }
 
 
 def test_finished_report_visible_without_activating_or_rewriting_job(tmp_path):
-    state = report_job(tmp_path); before = deepcopy(state)
+    state = report_job(tmp_path)
+    before = deepcopy(state)
     facts = training_result_evidence(state)
     assert facts[0]["structures"] == 27 and facts[0]["model_files_verified"] is False
     assert round_budget_evidence(state)["required"] is True
@@ -44,7 +97,8 @@ def test_finished_report_visible_without_activating_or_rewriting_job(tmp_path):
 def test_invalid_report_never_claims_completed(tmp_path):
     state = report_job(tmp_path)
     path = tmp_path / "results" / "training.finished.json"
-    data = json.loads(path.read_text()); data["original_model_version"] = "other"
+    data = json.loads(path.read_text())
+    data["original_model_version"] = "other"
     path.write_text(json.dumps(data))
     assert training_result_evidence(state)[0]["status"] == "invalid_report"
     assert "report_id" not in training_result_evidence(state)[0]
@@ -78,10 +132,19 @@ def test_false_precision_and_invalid_cost_rejected(cost):
 
 
 def test_outcomes_use_explicit_links_and_do_not_invent_alternative_returns():
-    state = {"action_records": [{"record_id": "D1", "final_action": {"round_budget_review": review()}}],
-             "tasks": [{"task_id": "T1", "parent_decision_id": "D1", "status": "completed",
-                        "actual_cost": 5, "model_version": "m1"},
-                       {"task_id": "unrelated", "status": "completed", "actual_cost": 999}]}
+    state = {
+        "action_records": [{"record_id": "D1", "final_action": {"round_budget_review": review()}}],
+        "tasks": [
+            {
+                "task_id": "T1",
+                "parent_decision_id": "D1",
+                "status": "completed",
+                "actual_cost": 5,
+                "model_version": "m1",
+            },
+            {"task_id": "unrelated", "status": "completed", "actual_cost": 999},
+        ],
+    }
     outcome = budget_decision_outcomes(state)[0]
     assert outcome["actual_relative_cost"] == 5
     assert outcome["unselected_path_actual_benefit"] is None
@@ -92,8 +155,10 @@ def test_outcomes_use_explicit_links_and_do_not_invent_alternative_returns():
 
 
 def test_missing_links_remain_pending_and_old_versions_are_preserved():
-    state = {"active_model_version": "m2", "action_records": [{"record_id": "D1",
-             "final_action": {"round_budget_review": review()}}]}
+    state = {
+        "active_model_version": "m2",
+        "action_records": [{"record_id": "D1", "final_action": {"round_budget_review": review()}}],
+    }
     result = budget_decision_outcomes(state)[0]
     assert result["status"] == "awaiting_task_links" and result["model_version"] is None
     assert result["actual_relative_cost"] is None
@@ -110,10 +175,19 @@ def test_tool_must_match_budget_choice_and_expected_benefits_are_hypotheses():
 
 
 def test_completed_task_creates_budget_memory_candidate():
-    state = {"active_model_version": "m1", "action_records": [{"record_id": "D1",
-             "final_action": {"round_budget_review": review()}}],
-             "tasks": [{"task_id": "T1", "parent_decision_id": "D1", "status": "completed",
-                        "model_version": "m1", "actual_cost": {"value": 5, "unit": "relative_cost"}}]}
+    state = {
+        "active_model_version": "m1",
+        "action_records": [{"record_id": "D1", "final_action": {"round_budget_review": review()}}],
+        "tasks": [
+            {
+                "task_id": "T1",
+                "parent_decision_id": "D1",
+                "status": "completed",
+                "model_version": "m1",
+                "actual_cost": {"value": 5, "unit": "relative_cost"},
+            }
+        ],
+    }
     updated = collect_memory_candidates(state)
     row = next(row for row in updated["memory_candidates"] if row["kind"] == "round_budget_outcome")
     assert row["facts"]["actual_relative_cost"] == 5 and row["status"] == "candidate"
@@ -122,7 +196,10 @@ def test_completed_task_creates_budget_memory_candidate():
 
 def test_langgraph_validation_enforces_review_even_without_post_dft_assessment():
     action = {"tool": "pause_search", "parameters": {}, "budget": 0}
-    payload = {"allowed_tools": ["pause_search"], "decision_context": {"round_budget_evidence": {"required": True}}}
+    payload = {
+        "allowed_tools": ["pause_search"],
+        "decision_context": {"round_budget_evidence": {"required": True}},
+    }
     assert proposal_errors(action, payload)
     action["round_budget_review"] = review("stop")
     assert not proposal_errors(action, payload)
@@ -132,3 +209,10 @@ def test_large_error_is_not_a_new_search_gate():
     action = {"tool": "generate_branches", "round_budget_review": review("new_search")}
     context = {"round_budget_evidence": {"required": True, "energy_error": 1000, "coverage": 0.1}}
     assert round_budget_review_errors(action, context) == []
+
+
+def test_pending_mc_input_preparation_does_not_choose_the_next_round():
+    context = {"round_budget_evidence": {"required": True}}
+    action = {"tool": "prepare_local_batch_files", "parameters": {"mode": "mc_inputs"}}
+    assert not round_budget_review_errors(action, context)
+    assert round_budget_review_errors({"tool": "select_dft_candidates"}, context)

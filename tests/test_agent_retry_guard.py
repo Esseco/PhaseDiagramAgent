@@ -139,3 +139,14 @@ class AgentRetryGuardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_symmetry_batch_requires_unique_failed_dft_tasks():
+    session={'status':'confirmed','confirmed_snapshot':{'config_version':'config-1','config':{'agent':{'allowed_tools':['restart_failed_task']},'budgets':{'total_relative_cost':100},'frozen_parameters':[]}}}
+    state={'tasks':[{'task_id':f'D{i}','stage':'dft_single_point','status':'failed'} for i in range(3)]}
+    action={'tool':'restart_failed_task','task_key':'retry-batch','target_ids':['D0','D1','D2'],'parameters':{'repair_profile':'vasp_symmetry_single_gpu'},'budget':0}
+    registry={'restart_failed_task':{'handler':lambda **_:None}}
+    assert 'retry_target_not_failed_task' not in validate_tool_action(action,state,session,registry)['errors']
+    action['target_ids']=['D0','D0']; assert 'retry_target_not_failed_task' in validate_tool_action(action,state,session,registry)['errors']
+    action['target_ids']=['D0','D1']; state['tasks'][1]['status']='completed'
+    assert 'retry_target_not_failed_task' in validate_tool_action(action,state,session,registry)['errors']

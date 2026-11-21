@@ -1,0 +1,275 @@
+{
+  "python": "3.12.6 | packaged by conda-forge | (main, Sep 22 2024, 14:01:26) [MSC v.1941 64 bit (AMD64)]",
+  "fixture": "120 tasks; 120 x 4KiB events; 600 x 400-number memory candidates",
+  "baseline_reconstructed": false,
+  "cases": {
+    "cold_start": {
+      "runs": [
+        {
+          "seconds_median": 0.01841549999971903,
+          "seconds_samples": [
+            0.01957880000009027,
+            0.017789800000173273,
+            0.019585799999731535,
+            0.01841549999971903,
+            0.017219399999703455
+          ],
+          "python_peak_bytes": 6900319,
+          "process_peak_bytes": 187772928,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        },
+        {
+          "seconds_median": 0.019748900000195135,
+          "seconds_samples": [
+            0.021101700000144774,
+            0.020431400000234134,
+            0.019748900000195135,
+            0.01763790000040899,
+            0.017851599999630707
+          ],
+          "python_peak_bytes": 6900319,
+          "process_peak_bytes": 187789312,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        },
+        {
+          "seconds_median": 0.01968470000065281,
+          "seconds_samples": [
+            0.022140899999612884,
+            0.017958100000214472,
+            0.02801240000007965,
+            0.01968470000065281,
+            0.018555600000581762
+          ],
+          "python_peak_bytes": 6900319,
+          "process_peak_bytes": 187576320,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        }
+      ],
+      "seconds_median": 0.01968470000065281,
+      "python_peak_bytes": 6900319,
+      "process_peak_bytes": 187772928
+    },
+    "repeat_query": {
+      "runs": [
+        {
+          "seconds_median": 0.002624699999614677,
+          "seconds_samples": [
+            0.0030580999991798308,
+            0.0031498000007559313,
+            0.002624699999614677,
+            0.002582099999926868,
+            0.0025912000000971602
+          ],
+          "python_peak_bytes": 17446,
+          "process_peak_bytes": 177557504,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        },
+        {
+          "seconds_median": 0.0026857000002564746,
+          "seconds_samples": [
+            0.0026857000002564746,
+            0.002599499999632826,
+            0.003087900000537047,
+            0.0029714000002059038,
+            0.0025239000005967682
+          ],
+          "python_peak_bytes": 17446,
+          "process_peak_bytes": 177541120,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        },
+        {
+          "seconds_median": 0.0025420000001759036,
+          "seconds_samples": [
+            0.00246060000063153,
+            0.0025345000003653695,
+            0.0025420000001759036,
+            0.0026245999997627223,
+            0.0027513999993971083
+          ],
+          "python_peak_bytes": 17446,
+          "process_peak_bytes": 177598464,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        }
+      ],
+      "seconds_median": 0.002624699999614677,
+      "python_peak_bytes": 17446,
+      "process_peak_bytes": 177557504
+    },
+    "formal_decision": {
+      "runs": [
+        {
+          "seconds_median": 0.10249590000057651,
+          "seconds_samples": [
+            0.6933706999998321,
+            0.09936860000016168,
+            0.09934209999937593,
+            0.10249590000057651,
+            0.11044740000033926
+          ],
+          "python_peak_bytes": 6248023,
+          "process_peak_bytes": 214315008,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        },
+        {
+          "seconds_median": 0.09841750000032334,
+          "seconds_samples": [
+            0.5957763000005798,
+            0.09975560000020778,
+            0.09740400000009686,
+            0.09632679999958782,
+            0.09841750000032334
+          ],
+          "python_peak_bytes": 6248324,
+          "process_peak_bytes": 214409216,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        },
+        {
+          "seconds_median": 0.1035120000005918,
+          "seconds_samples": [
+            0.6706850000000486,
+            0.10158659999979136,
+            0.1035120000005918,
+            0.10235289999945962,
+            0.1041082000001552
+          ],
+          "python_peak_bytes": 6247113,
+          "process_peak_bytes": 213594112,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        }
+      ],
+      "seconds_median": 0.10249590000057651,
+      "python_peak_bytes": 6248023,
+      "process_peak_bytes": 214315008
+    },
+    "checkpoint_restore": {
+      "runs": [
+        {
+          "seconds_median": 0.022062999999434396,
+          "seconds_samples": [
+            0.022062999999434396,
+            0.0244353999996747,
+            0.021610300000247662,
+            0.023856499999965308,
+            0.02091480000035517
+          ],
+          "python_peak_bytes": 21371608,
+          "process_peak_bytes": 232943616,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        },
+        {
+          "seconds_median": 0.022832600000583625,
+          "seconds_samples": [
+            0.022832600000583625,
+            0.023288399999728426,
+            0.021883500000512868,
+            0.022731700000804267,
+            0.022935599999982514
+          ],
+          "python_peak_bytes": 21371423,
+          "process_peak_bytes": 232783872,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        },
+        {
+          "seconds_median": 0.023263199999746575,
+          "seconds_samples": [
+            0.023263199999746575,
+            0.023539799999525712,
+            0.023332200000368175,
+            0.023108999999749358,
+            0.02210789999935514
+          ],
+          "python_peak_bytes": 21371423,
+          "process_peak_bytes": 232529920,
+          "state_bytes": 1685917,
+          "field_bytes": {
+            "active_model_version": 4,
+            "tasks": 8050,
+            "event_history": 495860,
+            "memory_candidates": 1181890,
+            "pending_execution_policies": 2
+          }
+        }
+      ],
+      "seconds_median": 0.022832600000583625,
+      "python_peak_bytes": 21371423,
+      "process_peak_bytes": 232783872
+    }
+  }
+}

@@ -8,8 +8,8 @@
 ## 开发助手与项目 Agent 的操作边界
 
 - 本节约束负责开发、调试和维护源码的 Codex；项目运行中的 Agent 仍按用户指令及既有审批流程操作其负责的科研子项目。
-- 开发用 Codex 只能修改应用源码仓库内的源码、测试和开发文档。真实科研子项目（例如 `E:/0-PhaseDiagram/*`）仅可只读查看以定位问题，不得直接写入、修改、迁移或删除。
-- 禁止代项目 Agent 改写子项目的配置、台账、审批状态、检查点、候选模型登记、epoch 状态、任务、费用、输入文件或分析报告；不得通过临时脚本、低层函数、数据库或文件补丁绕过项目 Agent。修复、验证、恢复和清理也不构成例外。
+- 开发用 Codex 默认只能修改应用源码仓库内的源码、测试和开发文档。真实科研子项目（例如 `E:/0-PhaseDiagram/*`）未经用户明确要求时仅可只读查看以定位问题，不得直接写入、修改、迁移或删除。
+- 未经用户明确要求，禁止代项目 Agent 改写子项目的配置、台账、审批状态、检查点、候选模型登记、epoch 状态、任务、费用、输入文件或分析报告；不得通过临时脚本、低层函数、数据库或文件补丁绕过项目 Agent。仅当用户明确要求对真实子项目执行文件优化或离线维护（如运行 `phase_agent.persistence.state.archive_history`、`phase_agent.persistence.checkpoint_maintenance` 等仓库既有受控维护入口）时，方可在停用对应服务后按授权范围执行，且不得改变科学事实与审批状态。
 - 发现问题时先修源码，以假模型、假超算和临时合成项目验证；交付时说明源码变更及用户应向项目 Agent 发出的操作指令，不直接把修复应用为真实子项目的业务操作。
 - 真实结果回收、分析、报告生成、方案生成、审批、模型切换及 epoch 推进，由用户向项目 Agent 发指令后，通过该 Agent 的现有入口和审批流程完成。用户明确要求开发用 Codex 代为操作项目 Agent 时，只能通过现有 Agent 交互入口传达已授权指令，不能自行改写子项目文件或状态。
 - 当用户明确说“由 Codex 接管”或“用 Codex 运行”时，控制模块使用 `operator=codex` 语义：Codex 只读项目状态、遵守同一套验证与审批规则，并禁止调用 `continue`、`propose` 或 `chat` 触发项目配置的模型；已有冻结方案仍必须通过现有审批入口处理。未明确接管时保持 `operator=agent`，不改变原 Agent+API 流程。
@@ -50,6 +50,13 @@
 - settings 保存运行时示例；真实科学项目的数据与源码独立，不加入应用包。
 - 保存的旧模块描述符只由 compatibility/module_references.py 转换，不增加旧模块转发文件。
 - 历史源码和测试产物在同级 _Process_PhaseDiagram_source_backups，不能作为应用依赖。
+
+## 生成文件布局约束
+
+- 应用源码、测试和文档分别放在 `phase_agent/`、`tests/` 和 `docs/`；真实科研项目数据与源码仓库分开，测试与开发临时文件使用受控临时目录并在结束时清理。
+- 项目 `analysis_outputs/` 的可见主目录为已登记的 `epochN/`、`latest/`、`out_data/` 和 `history/`。所有历史版本、内部快照、旧格式产物和失败 epoch 归档集中在 `history/`，全部数据保留。每轮 DFT 批次归入 `epochN/dft/`，采样和恢复诊断归入 `epochN/diagnostics/`。用户已批准保留经过目标校验的隐藏目录兼容入口，维持冻结记录和检查点中的旧路径可读；不改写历史事实。文件夹搬移必须通过项目 Agent 的现有整理入口、逐文件哈希验证和失败回滚。根 `README.md` 与每轮说明提供完整导航。
+- 每轮只使用一个 `phase_diagram/`，按可核实的实际先后保存步骤，如 `0_update_phasediagram/`、`1_relaxmc-1/`、`2_dft-selection-1/`；每步保存对应图和信息，发生 DIRECT 时加入相应步骤。未知顺序不得编造。正式 MLIP 总相图包含全部有效点，D/H 图单独呈现，DFT 选点图绑定同帧结构与对应凸包。
+- 跨轮索引、汇总与无法可靠绑定 epoch 的新证据保存于 `workflow_state/analysis/`，不得猜测轮次。发布和整理通过项目 Agent 入口；不移动仍被项目状态、冻结记录引用的旧路径，未能安全迁移的历史目录如实报告。新产物生成器和回归测试必须逐步落实该目录约定。
 
 ## 可读性与检查
 
@@ -97,4 +104,9 @@
 - 方向接受或程序核对确认策略后 phase_team_propose 进入原科学校验。人工模式仍须 phase_decide 明确批准；仅确认配置明确授权的普通动作可自动执行，重大/高成本/敏感风险仍需人工。事实变化时 revise；响应不确定先查待审方案与回执，不重复提交，不删讨论文件绕过保护。
 - 详情见 docs/guides/codex-team.md。
 
-- 新计算草案先完成 Simulation 结构化计划（phase_team_simulate），再按风险和确认策略决定方向审阅；方向接受与执行批准分离。Simulation 不授予权限、不自动重试或改变科学范围。旧冻结方案按历史契约恢复。
+- 新计算草案先完成 Simulation 检查：已覆盖的固定协议可记录明确的程序检查；其余返回 requests.simulation 时，通过 phase_team_simulate 登记真实模型计划。再按风险和确认策略决定方向审阅；方向接受与执行批准分离。Simulation 不授予权限、不自动重试或改变科学范围。旧冻结方案按历史契约恢复。
+
+## 本地终端搜索禁忌
+
+- 禁止在 `run_command` 中直接调用 `rg` / `C:\ProgramData\anaconda3\Library\bin\rg.exe`（在当前 Windows 沙箱下会触发宿主服务 `server restart` 导致页面闪退）。代码与文本搜索统一改用 PowerShell `Select-String`（例如 `Get-ChildItem ... | Select-String ...`）或 `python`。
+

@@ -52,7 +52,7 @@ FIELD_COMMENTS = {
     "config.mlip.model_name": "本地MLIP模型预设或名称。",
     "config.mlip.local_repo_path": "本地MLIP代码仓库路径；只读加载依赖。",
     "config.budgets": "计算预算与限额。注意 relative_cost 是项目内部预算单位，不等同 GPU 小时。",
-    "config.budgets.total_relative_cost": "运行成本参考值；默认 advisory，超出仅提示，hard 才阻止继续。",
+    "config.budgets.total_relative_cost": "历史成本字段；计算费用不设上限，实际与估算费用仍记录。",
     "config.budgets.enforcement": "advisory：获得相图优先，成本超标提示但继续；hard：显式严格限制。",
     "config.workflow": "统一流程：branch_batch_size 为每批Branch总配额上限；finetune_min_new_dft 为微调所需有效新增DFT数；finetune_max_new_dft 为可选累积上限（null不限制）。",
     "config.dft.parameters": "DFT 设置入口；可填写 single_point/relax 的 user_incar_settings。采用 atomate 默认值时也需保留 parameter_source。",

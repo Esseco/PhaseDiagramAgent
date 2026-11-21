@@ -84,7 +84,7 @@ def test_old_history_migration_keeps_scientific_state_and_all_audit_records():
     ]
 
 
-def test_restoring_legacy_checkpoint_cannot_reintroduce_direct_state_copies():
+def test_restoring_legacy_checkpoint_preserves_embedded_historical_state():
     from phase_agent.graphs.business_checkpoint import restore_frame
 
     scientific = {"tasks": [{"task_id": "t", "energy": -1.5}], "cost_history": [{"gpu_hours": 2}]}
@@ -107,6 +107,5 @@ def test_restoring_legacy_checkpoint_cannot_reintroduce_direct_state_copies():
     for state in (restored["loaded_state"], restored["result"]["state"]):
         assert state["tasks"] == scientific["tasks"]
         assert state["cost_history"] == scientific["cost_history"]
-        assert state["event_history"] == [
-            {"execution_result": {"status": "completed", "approved": True}}
-        ]
+        assert state["event_history"] == legacy["event_history"]
+        assert state is not legacy

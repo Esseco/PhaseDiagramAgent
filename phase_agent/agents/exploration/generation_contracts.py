@@ -51,6 +51,7 @@ class GenerationRegion(BaseModel):
     """One explicit phase per adaptive region; phase selection stays with the agent."""
 
     model_config = ConfigDict(strict=True, extra="forbid")
+    sample_count: Annotated[int, Field(strict=True, ge=1, le=1000)]
     region_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     priority: Annotated[int, Field(strict=True, ge=1, le=12)]
     strategy: GenerationStrategy

@@ -322,6 +322,78 @@ class EditableConfigJsonTests(unittest.TestCase):
             self.assertNotIn("pending_config_patch", updated)
             self.assertFalse((root / "state.json").exists())
 
+    def test_confirm_config_syncs_edited_project_json_before_confirm(self):
+        from phase_agent.runtime.local_agent_control import LocalAgentControl
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ref_dir = root / "refs"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            poscar = (
+                "Na1 Co1 O2\n1.0\n"
+                "2.8 0.0 0.0\n-1.4 2.42 0.0\n0.0 0.0 5.2\n"
+                "Na Co O\n1 1 2\nDirect\n"
+                "0.0 0.0 0.0\n0.0 0.0 0.5\n0.333 0.667 0.69\n0.667 0.333 0.31\n"
+            )
+            o1 = ref_dir / "O1.vasp"
+            o3 = ref_dir / "O3.vasp"
+            o1.write_text(poscar, encoding="utf-8")
+            o3.write_text(poscar, encoding="utf-8")
+
+            draft_path = root / "parameters" / "search_config.project.json"
+            draft_path.parent.mkdir(parents=True, exist_ok=True)
+            create_project_config_json(draft_path)
+            document = json.loads(_strip_jsonc_comments(draft_path.read_text(encoding="utf-8")))
+            cfg = document["config"]
+            cfg["system"]["configuration_space"]["roles"]["T"] = "fixed"
+            cfg["system"]["configuration_space"]["fixed_T_source"] = "phase_reference"
+            cfg["system"]["phase_reference_directory"] = str(ref_dir)
+            cfg["system"]["phase_references"] = {"O1": str(o1), "O3": str(o3)}
+            cfg["system"]["boundary"] = {
+                "P": {"at_x": {"0": ["O1"], "1": ["O3"]}, "intermediate": ["O3"]},
+                "H": {
+                    "O1": [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]],
+                    "O3": [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]],
+                },
+                "TM_ratio": {"Co": 1},
+            }
+            cfg["system"]["H_generation"]["enabled"] = False
+            document["overrides"] = {
+                "system": {
+                    "constraints": {"TM_ratio": {"Co": 1}, "phases": ["O1", "O3"]},
+                    "occupancy_rules": {"substitutional_sites": "Co"},
+                    "species": {"substitutional": ["Co"]},
+                }
+            }
+            cfg["mlip"]["model_name"] = "mace-omat-0-medium"
+            cfg["mlip"]["model_path"] = "/remote/mlip/mace-omat-0-medium.model"
+            py_envs = cfg.setdefault("python_environments", {})
+            py_envs["remote_python"] = "python"
+            py_envs["remote_mlip"] = "mace"
+            cfg.setdefault("storage", {})["workspace_root"] = str(root)
+            draft_path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            initial_cfg = default_layered_search_config()
+            initial_cfg["mlip"]["model_path"] = None
+            session = create_config_draft(initial_cfg)
+            handler = ConfigurationChatHandler(
+                {
+                    "state_path": str(root / "state.json"),
+                    "config_session": session,
+                    "config_session_path": str(root / "session.json"),
+                },
+                config_session_path=root / "session.json",
+                base_directory=root,
+                editable_config_path=draft_path,
+            )
+            result = LocalAgentControl(handler).confirm_config(explicit=True)
+            self.assertEqual(result["status"], "confirmed", result)
+            confirmed_cfg = result["confirmed_snapshot"]["config"]
+            self.assertEqual(
+                confirmed_cfg["mlip"]["model_path"],
+                "/remote/mlip/mace-omat-0-medium.model",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,3 +1,4 @@
+from phase_agent.analysis.feedback.output_paths import analysis_metadata_directory
 import json
 from pathlib import Path
 from copy import deepcopy
@@ -51,7 +52,7 @@ def test_migration_keeps_science_and_frozen_configuration(tmp_path):
     assert ledger == {"energy": -12.3, "remote": "/remote/current/state.json"}
     session = json.loads((tmp_path / "config/config_session.json").read_text(encoding="utf-8"))
     assert session["config"] == old["confirmed_config"]
-    assert (tmp_path / "outputs/output_index.md").is_file()
+    assert (analysis_metadata_directory(tmp_path / "outputs") / "output_index.md").is_file()
     assert (tmp_path / "memory/decision_memory.json").is_file()
     assert Path(result["backup"]).is_dir()
     assert migrate_workspace_layout(tmp_path)["moves"] == []

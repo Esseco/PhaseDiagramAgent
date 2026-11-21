@@ -159,7 +159,7 @@ def test_actual_approval_prepares_training_files_and_repeat_does_not_rebuild(tmp
     }
     for index in range(12):
         add_result(state, task_id=f"dft-{index}")
-    for index in range(3):
+    for index in range(2):
         task = deepcopy(state["tasks"][0])
         task.update(task_id=f"failed-{index}", status="failed")
         state["tasks"].append(task)

@@ -1,5 +1,8 @@
 """Require explicit LLM trade-offs, without imposing scientific error thresholds."""
 
+from phase_agent.runtime.api_deadline import model_round_operation
+
+
 REVIEW_TOOLS = {
     "generate_branches": "search",
     "update_mlip": "finetune",
@@ -289,6 +292,7 @@ def _repair_stale_scientific_decision(tracked_client, payload, action, brief, co
     return corrected
 
 
+@model_round_operation
 def request_validated_action(agent_client, payload):
     context = payload.get("decision_context") or {}
     contracts = dict(payload.get("output_contracts") or {})
@@ -394,10 +398,16 @@ def request_validated_action(agent_client, payload):
 
     payload = attach_decision_contract(payload)
     usages = []
+    logical_calls = 0
 
     def tracked_client(request):
+        nonlocal logical_calls
+        from phase_agent.runtime.api_deadline import traced_model_call
+
+        repair = logical_calls > 0
+        logical_calls += 1
         try:
-            result = agent_client(request)
+            result = traced_model_call(agent_client, request, repair=repair)
         except Exception as error:
             if getattr(error, "llm_usage", None):
                 usages.append(error.llm_usage)
@@ -550,7 +560,7 @@ def review_output_instruction():
         "finetune_assessment must directly recommend finetuning or deferral with scientific "
         "reasons grounded in energy/force errors, representativeness and intended use; "
         "never substitute 'not enabled, needs assessment' for a recommendation. "
-        "If finetuning is scientifically needed and data adequate, choose update_mlip with parameters.prepare_inputs_only=true and parameters.action=RETRAIN_MLIP, regardless of mlip_finetune.enabled. Recommend finetuning with scientific reasons, then request approval to generate HPC submission inputs (committee, K-fold evaluation and full-data main model), not to enable configuration. Approval only prepares files, never runs local training, submits jobs or activates models. Use adjust_strategy only for other genuine configuration revisions. "
+        "If finetuning is scientifically needed and data adequate, choose update_mlip with parameters.prepare_inputs_only=true and parameters.action=RETRAIN_MLIP, regardless of mlip_finetune.enabled. Recommend finetuning with scientific reasons, then request approval to generate HPC submission inputs (committee, K-fold evaluation and full-data main model), not to enable configuration. The default post-training transition remains manual_activation; only when the reviewed action or confirmed activation config explicitly selects activate_then_refresh_approval may passed independent validation activate the candidate automatically, and that path still opens a separate refresh-file approval without preparing or submitting refresh jobs. Use adjust_strategy only for other genuine configuration revisions. "
         "If data inadequate, compare supplementing existing candidates with targeted new search and downstream DFT; select the higher expected value path. "
         "Search requires defer justified by scientific evidence; insufficient evidence requires "
         "a strategy revision rather than assuming search is preferable. "

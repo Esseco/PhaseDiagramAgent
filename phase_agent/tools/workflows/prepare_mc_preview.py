@@ -9,6 +9,16 @@ from phase_agent.agents.strategic.strategy.estimate_branch_mc_budget import (
 def prepare_mc_preview(action, state, context, config):
     if action.get("tool") != "allocate_mc_bohb":
         return action
+    from phase_agent.analysis.phase.energy_consistency import assert_snapshot_energy_consistency
+
+    from phase_agent.analysis.phase.mc_snapshot import mc_model_snapshot
+
+    version = (action.get("parameters") or {}).get("hull_reference_version") or state.get(
+        "current_branch_hull_version"
+    )
+    pool = (state.get("branch_hull_batches") or {}).get(version) or {}
+    diagram = mc_model_snapshot(state, pool.get("model_version"))
+    assert_snapshot_energy_consistency(state, diagram)
     manager = (context or {}).get("manager")
     if manager is None:
         raise ValueError("缺少MC分支台账，不能生成可审批分配方案")
@@ -29,23 +39,6 @@ def prepare_mc_preview(action, state, context, config):
         if set(ids) - set(source["branch_ids"]):
             raise ValueError("追加MC只能从上一段实际保留的分支中选择，请修正计划。")
         ids = [key for key in source["branch_ids"] if key in branches]
-    else:
-        from phase_agent.analysis.phase.branch_relax_hull import rank_relaxed_branches
-        from phase_agent.science.mc.continuation_policy import effective_mc_policy
-        from phase_agent.science.mc.schedule_tiered_mc import _hb_protected
-
-        ranked, _ = rank_relaxed_branches(
-            [{**row, "branch_id": key} for key, row in branches.items()],
-            pool,
-            uncertainty_weight=float((config.get("bohb") or {}).get("uncertainty_weight", 1)),
-            phase_diagram=(state.get("phase_diagrams") or {}).get("mlip") or {},
-        )
-        policy = effective_mc_policy(config)
-        ids += [
-            row["branch_id"]
-            for row in ranked
-            if row["branch_id"] not in original_ids and _hb_protected(row, policy)
-        ]
     steps = params.get("mc_budget")
     if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
         raise ValueError("MC总步数必须为正整数，相对成本不能作为步数使用")

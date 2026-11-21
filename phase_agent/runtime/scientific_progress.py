@@ -65,9 +65,24 @@ def project_progress(state, state_path, *, session=None):
 
     progress["result_recoveries"] = result_recovery_facts(state)
     progress["partial_recoveries"] = partial_recovery_facts(state)
+    from phase_agent.evidence.workflow_blockers import refresh_result_facts
+
+    refresh_facts = refresh_result_facts(state)
+    progress["refresh_result_facts"] = refresh_facts
     tasks = state.get("tasks") or []
     if isinstance(tasks, dict):
         tasks = list(tasks.values())
+    pending_ids = {row.get("task_id") for row in tasks if row.get("status") == "pending"}
+    prepared_batches = {
+        task_id: batch
+        for batch in (state.get("slurm_batches") or [])
+        for task_id in (batch.get("task_ids") or [])
+        if task_id in pending_ids
+    }
+    prepared_not_submitted = bool(prepared_batches) and all(
+        batch.get("status") == "prepared" and not batch.get("job_id")
+        for batch in prepared_batches.values()
+    )
     active = any(row.get("status") in {"pending", "running", "submitted"} for row in tasks)
     fallback = (
         "已有任务待执行或回收；下一步核对任务结果"
@@ -127,6 +142,27 @@ def project_progress(state, state_path, *, session=None):
             "partial_recovery",
             "结果部分回收",
             "可继续使用已回收成功结果，或只补全失败任务；不会整批重跑",
+        )
+    elif refresh_facts.get("status") == "waiting_results" and (
+        refresh_facts.get("status_counts", {}).get("failed", 0)
+        or refresh_facts.get("status_counts", {}).get("timeout", 0)
+        or refresh_facts.get("discarded_unconverged_count", 0)
+    ):
+        failed = sum(refresh_facts["status_counts"].get(k, 0) for k in ("failed", "timeout"))
+        discarded = refresh_facts["discarded_unconverged_count"]
+        suspect = refresh_facts["extrapolation_review"].get("suspected_count")
+        confirmed = refresh_facts["extrapolation_review"].get("failure_count")
+        evidence = (f"外推失败 {confirmed} 项" if confirmed is not None else
+                    f"疑似外推失败 {suspect} 项" if suspect is not None else "外推失败数量待核验")
+        status, label, action = (
+            "refresh_blocked", "模型刷新结果需审查",
+            f"已回收失败 {failed} 项，未收敛已排除 {discarded} 项，{evidence}；外推证据不完整，灾难性遗忘和微调需进一步判断。",
+        )
+    elif prepared_not_submitted:
+        status, label, action = (
+            "prepared_not_submitted",
+            "任务输入已准备但未确认提交",
+            "按登记的 input 目录提交原有脚本；提交后回复继续并回传对应 output，不要重复生成输入",
         )
     elif any(row.get("status") == "running" for row in tasks):
         status, label, action = (

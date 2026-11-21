@@ -52,9 +52,9 @@ def update_short_term_memory(state, snapshot, *, _owned=False):
     return updated
 
 
-def update_long_term_memory(state, updates, *, source):
+def update_long_term_memory(state, updates, *, source, _owned=False):
     """Explicitly revise durable knowledge; volatile observations are rejected."""
-    updated = deepcopy(state)
+    updated = state if _owned else deepcopy(state)
     if updates is None:
         return updated
     if not isinstance(updates, dict) or set(updates) - LONG_TERM_CATEGORIES:

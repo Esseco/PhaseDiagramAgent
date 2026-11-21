@@ -24,9 +24,9 @@ def relaxation_failure(result, *, require_optimizer=False):
     operation = (result.get("worker_job") or {}).get("operation") or (
         result.get("parameters") or {}
     ).get("model_refresh_operation")
-    if (operation == "predict" and "optimizer_converged" not in output) or (
-        output.get("single_point_completed") is True and "optimizer_converged" not in output
-    ):
+    if (operation == "predict" or output.get("single_point_completed") is True) and output.get(
+        "optimizer_converged"
+    ) is None:
         return None
     physical = output.get("optimizer_converged")
     if physical is False:

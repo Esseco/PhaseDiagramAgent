@@ -1,6 +1,6 @@
 """Bind existing read views without composing or migrating a scientific runtime."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from phase_agent.runtime.local_agent_control import LocalAgentControl
@@ -17,6 +17,7 @@ class SavedReadOnlyView(SavedAnalysisView):
     config_session_path: Path | None = None
     base_directory: Path | None = None
     editable_config_path: Path | None = None
+    workflow_kwargs: dict = field(default_factory=dict)
 
 
 class SavedReadOnlyProject:
@@ -39,6 +40,9 @@ class SavedReadOnlyProject:
                 config_session_path=_resolve_path(session, base) if session else None,
                 base_directory=base,
                 editable_config_path=_resolve_path(editable, base) if editable else None,
+                workflow_kwargs={"ledger_path": str(_resolve_path(settings["ledger_path"], base))}
+                if settings.get("ledger_path")
+                else {},
             )
         )
 

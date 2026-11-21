@@ -11,6 +11,7 @@ from tests.test_on_demand_branch import context, review
 def region():
     return {
         "region_id": "r",
+        "sample_count": 1,
         "priority": 1,
         "strategy": "coverage",
         "phase": "O3",
@@ -97,29 +98,41 @@ def test_imported_remote_diagnostic_is_not_presented_as_fresh_failure():
 
 def test_P2_is_valid_in_syntax_and_model_schema():
     from phase_agent.agents.exploration.generation_contracts import GenerationRegion
-    row={**region(), "phase":"P2"}
-    assert errors({"sampling_mode":"region_adaptive","regions":[row]}) == []
+
+    row = {**region(), "phase": "P2"}
+    assert errors({"sampling_mode": "region_adaptive", "regions": [row]}) == []
     assert GenerationRegion.model_validate(row).phase == "P2"
     assert "P2" in GenerationRegion.model_json_schema()["properties"]["phase"]["enum"]
 
 
 @pytest.mark.parametrize("allowed", [{"P2"}, {"O3"}])
-def test_P2_preview_still_obeys_project_phase_boundary(monkeypatch,allowed):
+def test_P2_preview_still_obeys_project_phase_boundary(monkeypatch, allowed):
     from types import SimpleNamespace
     from pymatgen.core import Lattice, Structure
     import phase_agent.science.structures.boundary_utils as utils
     from phase_agent.policies.region_sampling import preview
-    row={**region(),"phase":"P2","min_det_H":1,"max_det_H":1,"na_min":0.,"na_max":1.}
-    reference=Structure(Lattice.cubic(5),["Na","Fe","O","O"],[[0,0,0],[.5,.5,.5],[.2,.2,.2],[.8,.8,.8]])
-    monkeypatch.setattr(utils,"load_structure",lambda value:reference)
-    monkeypatch.setattr(utils,"allowed_phases",lambda value:allowed)
-    monkeypatch.setattr(utils,"allowed_phases_at_x",lambda p,x:allowed)
-    monkeypatch.setattr(utils,"allowed_supercells",lambda h,p:[[[1,0,0],[0,1,0],[0,0,1]]])
-    monkeypatch.setattr(Structure,"make_supercell",lambda *a,**k:pytest.fail("preview must not generate structures"))
-    manager=SimpleNamespace(data={"branches":{},"structures":{}},boundary={"P":{},"H":{}})
-    params={"sampling_mode":"region_adaptive","regions":[row]}
+
+    row = {**region(), "phase": "P2", "min_det_H": 1, "max_det_H": 1, "na_min": 0.0, "na_max": 1.0}
+    reference = Structure(
+        Lattice.cubic(5),
+        ["Na", "Fe", "O", "O"],
+        [[0, 0, 0], [0.5, 0.5, 0.5], [0.2, 0.2, 0.2], [0.8, 0.8, 0.8]],
+    )
+    monkeypatch.setattr(utils, "load_structure", lambda value: reference)
+    monkeypatch.setattr(utils, "allowed_phases", lambda value: allowed)
+    monkeypatch.setattr(utils, "allowed_phases_at_x", lambda p, x: allowed)
+    monkeypatch.setattr(
+        utils, "allowed_supercells", lambda h, p: [[[1, 0, 0], [0, 1, 0], [0, 0, 1]]]
+    )
+    monkeypatch.setattr(
+        Structure,
+        "make_supercell",
+        lambda *a, **k: pytest.fail("preview must not generate structures"),
+    )
+    manager = SimpleNamespace(data={"branches": {}, "structures": {}}, boundary={"P": {}, "H": {}})
+    params = {"sampling_mode": "region_adaptive", "regions": [row]}
     if "P2" in allowed:
-        assert preview(params,manager,{"P2":reference},{},{})["regions"][0]["legal_cells"] == 2
+        assert preview(params, manager, {"P2": reference}, {}, {})["regions"][0]["legal_cells"] == 2
     else:
-        with pytest.raises(ValueError,match="非法或禁用区域"):
-            preview(params,manager,{"P2":reference},{},{})
+        with pytest.raises(ValueError, match="非法或禁用区域"):
+            preview(params, manager, {"P2": reference}, {}, {})

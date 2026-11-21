@@ -4,7 +4,7 @@
 def default_budget_rules() -> dict:
     return {
         "enforcement": "advisory",
-        "total_relative_cost": 50_000.0,
+        "total_relative_cost": None,
         "cost_unit": "relative_cost",
         "cost_model": {
             "reference_atoms": 40.0,
@@ -23,11 +23,11 @@ def default_budget_rules() -> dict:
         "structure_limits": {"max_atoms": 500, "max_det_H": 64, "max_proxy_cost_per_task": None},
         "stage_limits": {
             # Overall priority: MLIP exploration > DFT single-point > DFT relaxation.
-            "simple_check": {"max_tasks": None, "max_cost": 300.0, "task_cost": 0.05},
-            "relax_and_feature": {"max_tasks": 10000, "max_cost": 9000.0, "task_cost": 1.0},
-            "deep_search": {"max_tasks": 300, "max_cost": 27000.0, "task_cost": 1.0},
-            "dft_single_point": {"max_tasks": 120, "max_cost": 7200.0, "task_cost": 30.0},
-            "dft_relax": {"max_tasks": 2, "max_cost": 2280.0, "task_cost": 900.0},
+            "simple_check": {"max_tasks": None, "max_cost": None, "task_cost": 0.05},
+            "relax_and_feature": {"max_tasks": 10000, "max_cost": None, "task_cost": 1.0},
+            "deep_search": {"max_tasks": 300, "max_cost": None, "task_cost": 1.0},
+            "dft_single_point": {"max_tasks": 120, "max_cost": None, "task_cost": 30.0},
+            "dft_relax": {"max_tasks": 2, "max_cost": None, "task_cost": 900.0},
         },
         "llm_limits": {
             "max_calls": 100,

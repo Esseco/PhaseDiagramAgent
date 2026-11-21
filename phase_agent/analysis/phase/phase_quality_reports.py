@@ -35,6 +35,24 @@ __all__ = [
 _REPORT_CACHE = OrderedDict()
 _REPORT_CACHE_LIMIT = 2
 
+# Only the owning read-only context may share a report inside one strongly
+# version-bound operation; never reuse this memo across writes or requests.
+from contextlib import contextmanager
+from contextvars import ContextVar
+_READ_REPORTS = ContextVar("phase_quality_operation_reports", default=None)
+
+
+@contextmanager
+def quality_report_read_scope():
+    token = _READ_REPORTS.set({})
+    try:
+        from phase_agent.analysis.phase.phase_quality import geometry_read_scope
+
+        with geometry_read_scope():
+            yield
+    finally:
+        _READ_REPORTS.reset(token)
+
 
 def _digest(value):
     return sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
@@ -81,6 +99,15 @@ def get_phase_quality_report(state, *, method="mlip", snapshot=None, policy=None
                 files.append((str(path), stat.st_size, stat.st_mtime_ns))
             except OSError:
                 files.append((str(path), None, None))
+    memo = _READ_REPORTS.get()
+    memo_key = None
+    if memo is not None and not write:
+        from phase_agent.runtime.codex.context import shared_codex_identity
+        identity = shared_codex_identity()
+        if identity is not None:
+            memo_key = (id(state), identity, method, _digest(snapshot), _digest(limits), tuple(files))
+            if memo_key in memo:
+                return deepcopy(memo[memo_key])
     fingerprint = _digest(
         {
             "rule": RULE_VERSION,
@@ -100,6 +127,8 @@ def get_phase_quality_report(state, *, method="mlip", snapshot=None, policy=None
     cached_memory = _REPORT_CACHE.get(fingerprint)
     if cached_memory is not None and not write:
         _REPORT_CACHE.move_to_end(fingerprint)
+        if memo_key is not None:
+            memo[memo_key] = cached_memory
         return deepcopy(cached_memory)
     stored = snapshot.get("csv_path") or snapshot.get("path")
     folder = Path(stored).resolve().parent if stored else None
@@ -116,6 +145,8 @@ def get_phase_quality_report(state, *, method="mlip", snapshot=None, policy=None
                 _REPORT_CACHE.move_to_end(fingerprint)
                 while len(_REPORT_CACHE) > _REPORT_CACHE_LIMIT:
                     _REPORT_CACHE.popitem(last=False)
+                if memo_key is not None:
+                    memo[memo_key] = deepcopy(cached)
                 return cached
         except (OSError, ValueError, TypeError, AttributeError):
             pass
@@ -128,6 +159,8 @@ def get_phase_quality_report(state, *, method="mlip", snapshot=None, policy=None
     _REPORT_CACHE.move_to_end(fingerprint)
     while len(_REPORT_CACHE) > _REPORT_CACHE_LIMIT:
         _REPORT_CACHE.popitem(last=False)
+    if memo_key is not None:
+        memo[memo_key] = deepcopy(report)
     return report
 
 
@@ -136,6 +169,8 @@ def quality_summary(state, *, method="mlip", snapshot=None, report=None, write=F
         report = report or get_phase_quality_report(
             state, method=method, snapshot=snapshot, write=write
         )
+        if report.get("status") == "diagnostic_unavailable":
+            raise ValueError(report["reason"])
         groups = review_groups(report)
         number_by_id = {rid: g["number"] for g in groups for rid in g["review_ids"]}
         return {
@@ -311,17 +346,20 @@ def candidate_quality_evidence(state, candidates, *, report=None):
     if report is None:
         try:
             report = get_phase_quality_report(state)
-        except (OSError, ValueError, TypeError, KeyError):
-            report = {}
+        except (OSError, ValueError, TypeError, KeyError, OverflowError) as error:
+            report = {"status": "diagnostic_unavailable", "reason": str(error)}
     rows = report.get("structures") or []
     from phase_agent.analysis.phase.phase_quality_disposition import filter_excluded_candidates
 
     result = deepcopy(filter_excluded_candidates(state, candidates))
     model = state.get("active_model_version")
     snapshot = (state.get("phase_diagrams") or {}).get("mlip") or {}
-    sampling, sampling_error = {}, None
-    if report.get("model_version") == model and report.get("hull_version") == snapshot.get(
-        "version"
+    unavailable = report.get("status") == "diagnostic_unavailable"
+    sampling, sampling_error = {}, report.get("reason") if unavailable else None
+    if (
+        not unavailable
+        and report.get("model_version") == model
+        and report.get("hull_version") == snapshot.get("version")
     ):
         from phase_agent.analysis.phase.phase_dft_sampling import fixed_snapshot_sampling_evidence
 
@@ -329,7 +367,17 @@ def candidate_quality_evidence(state, candidates, *, report=None):
             sampling = fixed_snapshot_sampling_evidence(snapshot, report)
         except (ValueError, TypeError, KeyError, IndexError) as error:
             sampling_error = str(error)
+    retained_sources = {
+        (row.get("structure_sha256"), row.get("source_version"))
+        for row in snapshot.get("entries") or []
+        if row.get("structure_sha256") and row.get("source_version")
+    } if snapshot.get("energy_policy") == "latest_valid_per_structure_v1" else set()
     for candidate in result:
+        source = candidate.get("energy_source_version")
+        retained = (
+            source and candidate.get("model_version") == source
+            and (candidate.get("structure_sha256"), source) in retained_sources
+        )
         candidate["phase_quality_signal"] = {"status": "unavailable", "decision_made": False}
         candidate["dft_sampling_evidence"] = {
             "status": "unavailable",
@@ -338,8 +386,9 @@ def candidate_quality_evidence(state, candidates, *, report=None):
         }
         current_hull = ((state.get("phase_diagrams") or {}).get("mlip") or {}).get("version")
         if (
-            report.get("model_version") != model
-            or candidate.get("model_version", model) != model
+            unavailable
+            or report.get("model_version") != model
+            or (candidate.get("model_version", model) != model and not retained)
             or report.get("hull_version") != current_hull
             or candidate.get("phase_diagram_version", current_hull) != current_hull
         ):
@@ -358,6 +407,8 @@ def candidate_quality_evidence(state, candidates, *, report=None):
                     structure_file_status="unavailable",
                 )
                 continue
+        if retained and raw_hash != candidate.get("structure_sha256"):
+            continue
         matches = [
             r
             for r in rows

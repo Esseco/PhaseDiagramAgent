@@ -125,10 +125,18 @@ def regenerate_finetune_inputs(state, config, approved):
         directory.rename(backup)
         moved = True
     try:
+        previous_job = current["remote_finetune_jobs"][approved["job_key"]]
+        previous_transition = deepcopy(previous_job.get("post_training_transition"))
         current["remote_finetune_jobs"][approved["job_key"]]["status"] = "abandoned"
         from phase_agent.tools.workflows.prepare_remote_finetune import prepare_remote_finetune
 
-        result = prepare_remote_finetune(current, config, replacement_directory=directory)
+        result = prepare_remote_finetune(
+            current,
+            config,
+            replacement_directory=directory,
+            transition_policy=(previous_transition or {}).get("mode"),
+            transition_approval_reason=(previous_transition or {}).get("approval_reason"),
+        )
         if result["status"] != "awaiting_remote_training":
             raise ValueError(result.get("reason", "微调输入未准备好"))
     except Exception:

@@ -199,17 +199,7 @@ def check_global_convergence(
             "feedback_cycles_counted": [row.get("cycle_id") for row in tail] if feedback else [],
             "config_version": state.get("confirmed_config_version"),
         }
-    from phase_agent.tools.budget.check_budget import budget_is_hard
-
-    if (
-        budget_is_hard(
-            state.get("budget_limits") or (state.get("confirmed_config") or {}).get("budgets")
-        )
-        and state.get("budget_remaining") is not None
-        and state["budget_remaining"] <= 0
-    ):
-        status, reason = "budget_exhausted", "budget_exhausted_before_convergence"
-    elif missing:
+    if missing:
         status, reason = "insufficient_evidence", "required_results_missing"
     else:
         status, reason = "continue", "numerical_checks_not_met"

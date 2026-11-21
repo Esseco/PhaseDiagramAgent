@@ -115,7 +115,7 @@ class BranchGenerationFlowTest(unittest.TestCase):
     def test_repeat_registration_reuses_ids(self):
         manager = PhaseDataManager(self.boundary)
         candidates = self.initialize()
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+        with tempfile.TemporaryDirectory() as directory:
             first = register_candidate_batch(
                 manager, candidates, structure_directory=directory
             )

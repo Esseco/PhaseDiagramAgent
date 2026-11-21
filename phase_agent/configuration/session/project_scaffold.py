@@ -6,17 +6,17 @@ import shutil
 import tempfile
 
 from phase_agent.configuration.runtime.project_template import (
-    DEFAULT_PROJECT_SETTINGS,
+    CLEAN_PROJECT_SETTINGS,
     write_project_entry,
 )
 
 
 def _build(root, staged, execution_mode):
     target = staged / "agent_runtime.json"
-    session_path = staged / DEFAULT_PROJECT_SETTINGS["config_session_path"]
-    draft_path = staged / DEFAULT_PROJECT_SETTINGS["editable_config_draft_path"]
+    session_path = staged / CLEAN_PROJECT_SETTINGS["config_session_path"]
+    draft_path = staged / CLEAN_PROJECT_SETTINGS["editable_config_draft_path"]
     settings = {
-        **DEFAULT_PROJECT_SETTINGS,
+        **CLEAN_PROJECT_SETTINGS,
         "execution_mode": execution_mode,
         "run_steps_per_click": 1,
     }
@@ -27,7 +27,10 @@ def _build(root, staged, execution_mode):
     from phase_agent.configuration.session.apply_config_revision import apply_config_revision
     from phase_agent.configuration.session.create_config_draft import create_config_draft
     from phase_agent.configuration.session.project_config_json import create_project_config_json
-    from phase_agent.configuration.session.resolve_workspace_paths import default_workspace_storage
+    from phase_agent.configuration.session.resolve_workspace_paths import (
+        CLEAN_WORKSPACE_PATHS,
+        default_workspace_storage,
+    )
     from phase_agent.configuration.session.save_config_session import save_config_session
     from phase_agent.configuration.runtime.project_template import BOOTSTRAP_HINTS
 
@@ -35,7 +38,9 @@ def _build(root, staged, execution_mode):
     # New projects must not inherit the previous chemistry or an HPC model path.
     config["mlip"]["model_path"] = None
     config["system"]["constraints"]["TM_ratio"] = {}
-    storage = default_workspace_storage(root)
+    storage = default_workspace_storage(
+        root, path_overrides=CLEAN_WORKSPACE_PATHS, base_directory=root
+    )
     session = create_config_draft(config, require_workspace_path=True)
     session["bootstrap_hints"] = BOOTSTRAP_HINTS
     create_project_config_json(
@@ -43,7 +48,7 @@ def _build(root, staged, execution_mode):
         config,
         bootstrap_hints={
             **BOOTSTRAP_HINTS,
-            "local_initial_structure_directory": str(root / "structures" / "reference_structures"),
+            "local_initial_structure_directory": str(root / "inputs" / "structures"),
         },
         workspace_defaults=storage,
     )
@@ -58,12 +63,18 @@ def _build(root, staged, execution_mode):
     )
     session["setup_stage"] = "json_ready"
     session["editable_config_json_path"] = str(
-        root / DEFAULT_PROJECT_SETTINGS["editable_config_draft_path"]
+        root / CLEAN_PROJECT_SETTINGS["editable_config_draft_path"]
     )
     save_config_session(session, session_path)
-    from phase_agent.analysis.feedback.workspace_guide import publish_workspace_guide
-
-    publish_workspace_guide(staged)
+    (staged / "README.md").write_text(
+        "# 项目工作区\n\n"
+        "- `inputs/`：母结构、参考结构与 `search_config.json`\n"
+        "- `outputs/`：每轮相图（PNG/CSV）、DFT 误差与全局 `Ehull` 结果\n"
+        "- `runs/`：上传与回传计算包\n"
+        "- `.phase/`：内部运行状态、台账与审批记录\n\n"
+        "检查入口：`python run_project.py --check`\n",
+        encoding="utf-8",
+    )
     write_project_entry(staged)
     # Use the real readers to verify the generated split documents before publication.
     from phase_agent.configuration.session.split_project_config import (
@@ -106,10 +117,11 @@ def create_project_scaffold(root, *, execution_mode="debug"):
                     created.append(target)
                     with source.open("rb") as incoming:
                         shutil.copyfileobj(incoming, output)
-            references = root / "structures/reference_structures"
-            if not references.resolve().is_relative_to(root):
-                raise ValueError("Reference directory escapes project workspace")
-            references.mkdir(parents=True, exist_ok=True)
+            for rel in ("inputs/structures", "inputs/references", "outputs/latest", "runs"):
+                dest = root / rel
+                if not dest.resolve().is_relative_to(root):
+                    raise ValueError("Workspace directory escapes project root")
+                dest.mkdir(parents=True, exist_ok=True)
     except BaseException:
         for path in reversed(created):
             path.unlink(missing_ok=True)

@@ -85,6 +85,9 @@ def replace_initial_pool(*, action, context, generate):
     old_count = len(manager.data["branches"])
     shadow.save(ledger)
     manager.data = shadow.data
+    manager._ledger_path = shadow._ledger_path
+    manager._ledger_identity = shadow._ledger_identity
+    manager._ledger_data_digest = shadow._ledger_data_digest
     current_paths = {
         Path(row[key]).resolve()
         for row in list(shadow.data["branches"].values()) + list(shadow.data["structures"].values())

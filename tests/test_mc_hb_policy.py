@@ -389,10 +389,16 @@ def test_mc_worker_leaves_library_default_stopping_threshold_untouched(
     from types import SimpleNamespace
     from phase_agent.science.mlip.mace_worker import run_mace_worker
 
+    monkeypatch.setattr(
+        "phase_agent.science.mlip.mace_worker._extrapolation_monitor_factory",
+        lambda: lambda atoms: object(),
+    )
     captured = {}
     sentinel = object()
 
     class FakeMC:
+        MC_ENERGY_BASIS = "main_model"
+
         def __init__(self, min_improvement=sentinel, **kwargs):
             captured.update(kwargs)
             captured["threshold"] = min_improvement
@@ -402,6 +408,13 @@ def test_mc_worker_leaves_library_default_stopping_threshold_untouched(
 
     monkeypatch.setitem(
         sys.modules, "Process_AL_MC", SimpleNamespace(LayeredOxide_MCOrderingClass=FakeMC)
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "Process_AL_MC.MC_sample",
+        SimpleNamespace(
+            InitialExtrapolationFailure=type("InitialExtrapolationFailure", (Exception,), {})
+        ),
     )
     run_mace_worker(
         {

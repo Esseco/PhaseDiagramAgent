@@ -271,11 +271,13 @@ def _refresh_graph_gate(frame):
     replay_record = frame["replay_record"]
     from phase_agent.tools.workflows.model_refresh_gate import run_model_refresh_gate
 
+    direct_scope = getattr(agent_client, "_explicit_direct_scope", None)
+    gate_context = {**(context or {}), "explicit_direct_scope": direct_scope}
     refresh_result = run_model_refresh_gate(
         current,
         session,
         registry=registry,
-        context=context or {},
+        context=gate_context,
         human_feedback=human_feedback,
         mode=mode,
         pending_key=invocation_id or "__single_interactive_action__",
@@ -401,6 +403,7 @@ def _prepare_tool_proposal(frame):
         current["pending_execution_policies"].pop(pending_key, None)
         stored = None
         human_feedback = None  # Old approval does not approve a freshly assessed choice.
+    pairing_block = None
     if (
         mode == "interactive"
         and closed_dft
@@ -422,7 +425,7 @@ def _prepare_tool_proposal(frame):
                 if row.get("reason") and row.get("task_id") in eligible_ids
             )
         )[:2]
-        return {
+        pairing_block = {
             "status": "not_configured",
             "state": current,
             "reason": "DFT 回收已结束；本轮原模型误差评估未完成 "
@@ -430,6 +433,17 @@ def _prepare_tool_proposal(frame):
             "请补齐超算同帧 MLIP 预测并回传 mlip_result.json 后继续；未重复派发 DFT、未训练。"
             + ("原因：" + "；".join(reasons) if reasons else ""),
         }
+        can_review_retry = any(
+            task.get("stage") in {"dft_single_point", "dft_relax"}
+            and task.get("status") in {"failed", "timeout"}
+            for task in current.get("tasks") or []
+        )
+        stored_retry = (
+            (previous.get("tool") or previous.get("action_type")) == "restart_failed_task"
+            and (previous.get("parameters") or {}).get("repair_profile") == "dft_recalculation"
+        )
+        if not can_review_retry or (stored and not stored_retry):
+            return pairing_block
     if (
         mode == "interactive"
         and stored
@@ -489,9 +503,9 @@ def _prepare_tool_proposal(frame):
             allowed_tools=allowed,
             user_message="继续",
         )
-        has_mc_results = any(
-            row.get("stage") == "deep_search" for row in current.get("tasks") or []
-        )
+        from phase_agent.science.mc.second_round_state import has_relevant_mc_tasks
+
+        has_mc_results = has_relevant_mc_tasks(current)
         next_mode = ((next_action or {}).get("parameters") or {}).get("mode")
         is_mc_next_step = (next_action or {}).get("tool") == "allocate_mc_bohb" or (
             (next_action or {}).get("tool") == "prepare_local_batch_files"
@@ -597,7 +611,9 @@ def _prepare_tool_proposal(frame):
             decision_state = agent_state_summary(current, manager=(context or {}).get("manager"))
     if mode == "interactive" and stored and not rejecting:
         prior_action = (stored.get("agent_proposal") or {}).get("raw_action") or {}
-        has_mc_tasks = any(row.get("stage") == "deep_search" for row in current.get("tasks") or [])
+        from phase_agent.science.mc.second_round_state import has_relevant_mc_tasks
+
+        has_mc_tasks = has_relevant_mc_tasks(current)
         if (
             has_mc_tasks
             and prior_action.get("tool") == "allocate_mc_bohb"
@@ -673,6 +689,14 @@ def _prepare_tool_proposal(frame):
             return selected
         current, decision_state = selected["current"], selected["decision_state"]
         proposal, record_id = selected["proposal"], selected["record_id"]
+
+    if pairing_block is not None:
+        candidate_action = proposal.get("raw_action") or {}
+        if not (
+            (candidate_action.get("tool") or candidate_action.get("action_type")) == "restart_failed_task"
+            and (candidate_action.get("parameters") or {}).get("repair_profile") == "dft_recalculation"
+        ):
+            return pairing_block
 
     if mode == "interactive" and proposal.get("recommended_action") == "select_dft_candidates":
         from phase_agent.tools.workflows.dft_template_review import gate_template
@@ -802,13 +826,29 @@ def _approval_graph_node(frame):
             estimated_cost=(proposal.get("estimated_cost") or {}).get("estimated_total_cost"),
         )
     )
+    from phase_agent.tools.workflows.perturbation_direct import (
+        previously_approved_direct,
+        previously_approved_recovery_action,
+    )
+
+    inherited_recovery = (
+        mode == "interactive"
+        and not stored
+        and human_feedback is None
+        and (
+            previously_approved_direct(current, proposal["raw_action"])
+            or previously_approved_recovery_action(current, proposal["raw_action"])
+        )
+    )
     policy = apply_execution_policy(
         proposal,
-        execution_mode="autonomous" if automatic else mode,
+        execution_mode="autonomous" if automatic or inherited_recovery else mode,
         human_feedback=human_feedback,
         replay_record=replay_record,
     )
-    if automatic:
+    if inherited_recovery:
+        policy["authorization_source"] = "approved_extrapolation_recovery"
+    elif automatic:
         policy["authorization_source"] = "confirmed_policy"
     # Reject malformed modifications before consuming the durable approval.
     if policy.get("final_action") is not None:
@@ -818,8 +858,14 @@ def _approval_graph_node(frame):
             policy["final_action"] = normalize_action(policy["final_action"])
             from phase_agent.agents.simulation.agent import validate_frozen_plan
 
-            if policy["final_action"].get("_simulation_plan"):
-                validate_frozen_plan(policy["final_action"])
+            if (policy["final_action"].get("parameters") or {}).get("repair_profile") == "dft_recalculation":
+                from phase_agent.agents.simulation.dft_recalculation import validate_action
+
+                validate_action(policy["final_action"], current)
+            if policy["final_action"].get("_simulation_plan") or policy["final_action"].get(
+                "_simulation_program"
+            ):
+                validate_frozen_plan(policy["final_action"], state=current)
         except (ValueError, TypeError) as error:
             return {
                 "status": "rejected",
@@ -952,7 +998,9 @@ def _simulation_plan_node(frame):
 def _simulation_check_node(frame):
     from phase_agent.agents.simulation.agent import inspect_execution
 
-    if frame.get("execution") is not None and frame["action"].get("_simulation_plan"):
+    if frame.get("execution") is not None and (
+        frame["action"].get("_simulation_plan") or frame["action"].get("_simulation_program")
+    ):
         report = inspect_execution(frame["action"], frame["execution"], frame.get("agent_client"))
         frame = {**frame, "simulation_report": report}
         if report.get("llm_usage"):
@@ -1101,12 +1149,16 @@ def _dispatch_graph_node(frame):
         _optimizations={
             "_owned": bool(
                 (frame.get("context") or {}).get("_event_state_owned")
-                and getattr(
-                    (registry.get(action.get("tool")) or {}).get("handler"),
-                    "_returns_owned_state",
-                    False,
+                and (
+                    getattr(
+                        (registry.get(action.get("tool")) or {}).get("handler"),
+                        "_returns_owned_state",
+                        False,
+                    ) is True
+                    or (action.get("tool") == "prepare_local_batch_files"
+                        and action.get("operation") == "prepare_mlip_relax"
+                        and (action.get("parameters") or {}).get("selection_scope") == "candidate_ids")
                 )
-                is True
             )
         },
     )

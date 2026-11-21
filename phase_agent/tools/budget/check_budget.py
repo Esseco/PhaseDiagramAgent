@@ -9,23 +9,18 @@ def budget_is_hard(limits):
 
 
 def check_budget(state: dict, request: dict, limits: dict) -> dict:
+    from math import isfinite
+
     usage = state.get("budget_usage", {})
     reasons = []
-    cost = float(request.get("relative_cost", 0.0))
+    value = request.get("relative_cost", 0.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value < 0:
+        reasons.append("invalid_relative_cost")
     active_reservations = [
         item
         for item in (state.get("budget_reservations") or {}).values()
         if item.get("status") in {"reserved", "submitted", "running"}
     ]
-    reserved_total = sum(
-        float(item.get("reserved_cost", item.get("relative_cost", 0)))
-        for item in active_reservations
-    )
-    if (
-        usage.get("total_relative_cost", 0.0) + reserved_total + cost
-        > limits["total_relative_cost"]
-    ):
-        reasons.append("total_cost_limit")
     stage = request.get("stage")
     if stage:
         stage_limit = limits.get("stage_limits", {}).get(stage)
@@ -35,21 +30,12 @@ def check_budget(state: dict, request: dict, limits: dict) -> dict:
             stage_usage = usage.get("stages", {}).get(stage, {})
             reserved_stage = [item for item in active_reservations if item.get("stage") == stage]
             if (
-                stage_limit.get("max_tasks") is not None
+                stage not in {"dft_single_point", "dft_relax"}
+                and stage_limit.get("max_tasks") is not None
                 and stage_usage.get("tasks", 0) + len(reserved_stage) + int(request.get("tasks", 1))
                 > stage_limit["max_tasks"]
             ):
                 reasons.append("stage_task_limit")
-            reserved_stage_cost = sum(
-                float(item.get("reserved_cost", item.get("relative_cost", 0)))
-                for item in reserved_stage
-            )
-            if (
-                stage_limit.get("max_cost") is not None
-                and stage_usage.get("cost", 0.0) + reserved_stage_cost + cost
-                > stage_limit["max_cost"]
-            ):
-                reasons.append("stage_cost_limit")
     llm = request.get("llm_usage")
     if llm:
         llm_usage = usage.get("llm", {})
@@ -70,7 +56,10 @@ def check_budget(state: dict, request: dict, limits: dict) -> dict:
         ):
             reasons.append("llm_iteration_call_limit")
     hard = budget_is_hard(limits)
-    errors = reasons if hard else [reason for reason in reasons if reason == "unknown_stage"]
+    mandatory = {"unknown_stage", "invalid_relative_cost"}
+    if stage not in {"dft_single_point", "dft_relax"}:
+        mandatory.add("stage_task_limit")
+    errors = reasons if hard else [reason for reason in reasons if reason in mandatory]
     return {
         "allowed": not errors,
         "reasons": errors,

@@ -15,6 +15,7 @@ APPEND_FIELDS = {
     "recovery_review_history",
     "action_records",
     "task_wait_cancellations",
+    "prepared_unsubmitted_evidence",
 }
 
 
@@ -23,11 +24,27 @@ def control_path(state_path):
     return path.with_name(path.name + ".control.json")
 
 
-def read_control(state_path):
+_NO_EXPECTED_DIGEST = object()
+
+
+def read_control(state_path, *, expected_digest=_NO_EXPECTED_DIGEST):
     path = control_path(state_path)
-    if not path.is_file():
-        return None
-    record = json.loads(path.read_text(encoding="utf-8"))
+    if expected_digest is _NO_EXPECTED_DIGEST:
+        if not path.is_file():
+            return None
+        record = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        from hashlib import sha256
+
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            if expected_digest is None:
+                return None
+            raise ValueError("workflow_control_digest_mismatch") from None
+        if sha256(data).hexdigest() != expected_digest:
+            raise ValueError("workflow_control_digest_mismatch")
+        record = json.loads(data.decode("utf-8"))
     if record.get("state_path") != str(Path(state_path).resolve()) or not record.get("revision"):
         raise ValueError("invalid_workflow_control_owner_or_revision")
     return record
@@ -184,6 +201,9 @@ def state_write_guard(state_path, state):
         if expected and state.get(FIELD) != expected:
             raise ValueError("stale_workflow_control_revision; reload state before saving")
         yield
+        from phase_agent.persistence.state.read_versions import read_identity, remember_read
+
+        remember_read(state_path, read_identity(state_path))
 
 
 def commit_control(
@@ -191,7 +211,7 @@ def commit_control(
 ):
     """Explicit administrative repair only; caller verifies evidence and user authorization."""
     from filelock import FileLock
-    from phase_agent.tools.step_runner.file_protocol import write_json
+    from phase_agent.tools.step_runner.file_protocol import _write_json, write_json
 
     path = Path(state_path)
     with FileLock(str(control_path(path)) + ".lock", timeout=10):
@@ -201,6 +221,7 @@ def commit_control(
         if not evidence:
             raise ValueError("workflow_control_requires_evidence")
         previous = read_control(path)
+        incoming_cancelled = deepcopy(patch.get("cancelled_waits") or {})
         if previous:
             patch = _merge_patch(previous["patch"], patch, state)
         record = {
@@ -231,7 +252,14 @@ def commit_control(
             raise ValueError("unsupported_workflow_control_field")
         from phase_agent.tools.state.task_wait_cancellation import restore_cancelled_waits
 
-        cancelled = patch.get("cancelled_waits") or {}
+        # Historical tombstones cannot be replayed when this revision explicitly
+        # forbids stale restoration. Preserve them, but validate new tombstones.
+        cancelled = (
+            incoming_cancelled
+            if previous and previous.get("restore_allowed") is False
+            and state.get(FIELD) == previous["revision"]
+            else patch.get("cancelled_waits") or {}
+        )
         restore_cancelled_waits(
             {
                 "tasks": [
@@ -241,12 +269,15 @@ def commit_control(
             cancelled,
         )
         write_json(control_path(path), record)
-    if desired_state is not None:
-        updated = deepcopy(desired_state)
-        updated[FIELD] = record["revision"]
-    else:
-        updated = restore_control(path, state)
-    write_json(path, updated)
+        if desired_state is not None:
+            updated = deepcopy(desired_state)
+            updated[FIELD] = record["revision"]
+        else:
+            updated = restore_control(path, state)
+        _write_json(path, updated)
+        from phase_agent.persistence.state.read_versions import read_identity, remember_read
+
+        remember_read(path, read_identity(path))
     return updated
 
 

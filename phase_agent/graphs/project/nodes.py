@@ -157,8 +157,25 @@ def create_lifecycle_nodes(
                 if context.stages.get("durable"):
                     from phase_agent.graphs.business_checkpoint import checkpoint_frame
 
-                    projected = checkpoint_frame(context.frame, state.get("business_frame") or {})
-                    if projected != (state.get("business_frame") or {}):
+                    prev_frame = state.get("business_frame") or {}
+                    projected = checkpoint_frame(
+                        context.frame,
+                        prev_frame,
+                        seal_lists=context.stages.get("seal_checkpoint_lists", False),
+                    )
+
+                    def same(left, right):
+                        # checkpoint_frame returns the previous object for unchanged
+                        # containers; scalars are cheap to compare by value.
+                        if left is right:
+                            return True
+                        if isinstance(left, (dict, list)) or isinstance(right, (dict, list)):
+                            return False
+                        return left == right
+
+                    if projected.keys() != prev_frame.keys() or not all(
+                        same(projected[k], prev_frame[k]) for k in projected
+                    ):
                         # Preserve the existing channel version for observation
                         # nodes that did not change durable business facts.
                         update["business_frame"] = projected

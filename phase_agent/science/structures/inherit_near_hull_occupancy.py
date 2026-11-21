@@ -52,6 +52,7 @@ def inherited_na_structures(branch, full_reference, boundary, references, limit,
     if len(parent_sites) > len(reference_sites):
         raise ValueError("near_hull_parent_na_site_mapping_failed")
     occupied_reference = set()
+    mapped_parent = {}
     if parent_sites:
         distances = np.array(
             [
@@ -63,10 +64,13 @@ def inherited_na_structures(branch, full_reference, boundary, references, limit,
         if len(left) != len(parent_sites) or np.any(distances[left, right] > 1.2):
             raise ValueError("near_hull_parent_na_site_mapping_failed")
         occupied_reference = set(int(index) for index in right)
+        mapped_parent = {
+            int(ref): parent_sites[int(src)] for src, ref in zip(left, right, strict=True)
+        }
     full = parent.copy()
+    full.remove_species(["Na"])
     for index, coords in enumerate(reference_sites):
-        if index not in occupied_reference:
-            full.append("Na", coords, coords_are_cartesian=False)
+        full.append("Na", mapped_parent.get(index, coords), coords_are_cartesian=False)
     na_indices = [
         i for i, site in enumerate(full) if site.is_ordered and site.specie.symbol == "Na"
     ]
@@ -79,12 +83,21 @@ def inherited_na_structures(branch, full_reference, boundary, references, limit,
     delta = target_count.numerator - occupied_count
     if abs(delta) != 1:
         raise ValueError("near_hull_neighbor_must_add_or_remove_one_na")
-    eligible = range(occupied_count) if delta < 0 else range(occupied_count, len(na_indices))
-    choices = list(eligible)
+    eligible = occupied_reference if delta < 0 else set(range(len(na_indices))) - occupied_reference
+    choices = sorted(eligible)
     random.Random(seed).shuffle(choices)
     output = []
-    for position in choices[:limit]:
-        occupied = set(range(occupied_count))
+    from phase_agent.science.structures.rank_na_orderings_by_electrostatics import (
+        _has_na_in_each_layer,
+        _na_layer_groups,
+    )
+
+    reference_na = [
+        i for i, site in enumerate(full_reference) if site.is_ordered and site.specie.symbol == "Na"
+    ]
+    layer_groups = _na_layer_groups(full_reference, reference_na) if target_count else []
+    for position in choices:
+        occupied = set(occupied_reference)
         if delta < 0:
             occupied.remove(position)
         else:
@@ -93,6 +106,12 @@ def inherited_na_structures(branch, full_reference, boundary, references, limit,
         structure.remove_sites(
             [index for pos, index in enumerate(na_indices) if pos not in occupied]
         )
+        if target_count and not _has_na_in_each_layer(
+            structure, layer_groups, full_reference, reference_na
+        ):
+            continue
         vector = [int(pos in occupied) for pos in range(len(na_indices))]
         output.append((structure, full.copy(), vector))
+        if len(output) >= limit:
+            break
     return output

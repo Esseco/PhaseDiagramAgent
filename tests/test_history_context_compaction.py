@@ -97,3 +97,12 @@ def test_legacy_history_compaction_covers_all_duplicate_receipt_collections():
     for saved in [*state["action_records"], *state["decisions"], *state["event_history"], *state["invocations"].values()]:
         assert "decision_context" not in saved["agent_proposal"]
         assert saved["agent_proposal"]["raw_action"]["tool"] == "check_convergence"
+
+
+def test_checkpoint_restore_preserves_legacy_history_details():
+    from phase_agent.graphs.business_checkpoint import restore_frame
+
+    original = {"action_records": [_record()], "invocations": {"i": _record()}}
+    restored = restore_frame({"loaded_state": {}}, {"loaded_state": original})
+    assert restored["loaded_state"] == original
+    assert restored["loaded_state"] is not original

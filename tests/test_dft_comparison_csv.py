@@ -57,12 +57,11 @@ def test_layout_reuses_model_and_upload_round_labels(tmp_path):
     original = phase.stat().st_mtime_ns
     export_dft_products(state, tmp_path)
     root = product_root(state)
-    assert root == tmp_path / "epoch0/Search-group-0001/DFT-round-0001_abcdef"
+    assert root == tmp_path / "epoch0/dft/Search-group-0001/DFT-round-0001_abcdef"
     assert set(p.name for p in root.rglob("*") if p.is_file()) == {
         "training.json", "dft_records.json", "mlip_dft_metrics.json",
         "energy_comparison.csv", "force_comparison.csv", "magnetic_moments.csv", "metrics.csv",
-        "energy_parity.png", "energy_parity.pdf", "energy_parity.svg",
-        "force_parity.png", "force_parity.pdf", "force_parity.svg", "parity_metrics.json"}
+        "energy_parity.png", "force_parity.png", "parity_metrics.json"}
     assert not (tmp_path / "dft_results").exists()
     assert phase.stat().st_mtime_ns == original
     assert len(read_csv(tmp_path / "epoch0/round_metrics.csv")) == 3
@@ -268,3 +267,80 @@ def test_same_numbered_rounds_in_different_search_groups_stay_separate(tmp_path)
     assert {Path(row["directory"]).parent.name for row in state["dft_result_exports"].values()} == {
         "Search-group-0001", "Search-group-0002"}
     assert len(read_csv(tmp_path / "epoch0/round_metrics.csv")) == 6
+
+
+def test_round_parity_index_distinguishes_verified_and_missing_predictions(tmp_path):
+    root = tmp_path / "analysis_outputs"
+    root.mkdir()
+    state = {}
+    add_result(state, task_id="paired", operation="abcdef", evaluator=True)
+    add_result(state, task_id="missing", operation="fedcba", evaluator=False)
+    export_dft_products(state, root)
+    index = (root / "round_dft_parity.md").read_text(encoding="utf8")
+    assert "K 折" in index and "最终帧" in index
+    assert "energy_parity.png" in index and "force_parity.png" in index
+    assert "未生成" in index
+    exports = list(state["dft_result_exports"].values())
+    assert {item["parity_plots"]["status"] for item in exports} == {"completed", "unavailable"}
+    paired = next(item for item in exports if item["parity_plots"]["status"] == "completed")
+    assert Path(paired["directory"], "comparisons", "plots", "energy_parity.png").is_file()
+
+
+def test_round_index_archives_previously_plotted_unavailable_round(tmp_path):
+    from phase_agent.analysis.feedback.export_dft_products import _write_round_parity_index
+    root = tmp_path / "analysis_outputs"
+    target = root / "epoch0/Round_Error/Search-group-0001/DFT-round-0001_abc"
+    target.mkdir(parents=True)
+    (target / "energy_parity.png").write_bytes(b"old")
+    state = {"upload_layout": {"model_rounds": {"m1": 1}}}
+    item = {"directory": str(root / "epoch0/dft/Search-group-0001/DFT-round-0001_abc"), "round_scope": {"model_version": "m1", "search_group_index": 1}, "parity_plots": {"status": "unavailable", "reason": "missing"}}
+    _write_round_parity_index(state, root, {"a": item})
+    assert not target.exists()
+    assert [p.read_bytes() for p in (root / "history/epoch0/round_error_unavailable").rglob("energy_parity.png")] == [b"old"]
+    assert "未生成" in (root / "round_dft_parity.md").read_text(encoding="utf8")
+
+
+def test_round_plots_filter_proven_failure_but_keep_raw_dft_records(tmp_path):
+    state = {}
+    add_result(state, task_id="bad")
+    add_result(state, task_id="good")
+    state["tasks"][0]["input_structure_sha256"] = "badsha"
+    state["tasks"].append({"task_id": "monitor", "model_version": "m1", "outputs": {
+        "structure_checksum": "badsha", "extrapolation_monitor": {"extrapolation_failure": True}}})
+    export_dft_products(state, tmp_path)
+    root = product_root(state)
+    energy = read_csv(dft_product_path(root, "energy_comparison.csv"))
+    assert [r["task_id"] for r in energy] == ["good"]
+    raw = json.loads(dft_product_path(root, "dft_records.json").read_text(encoding="utf8"))
+    assert {r["task_id"] for r in raw} == {"bad", "good"}
+    metrics = json.loads(dft_product_path(root, "mlip_dft_metrics.json").read_text(encoding="utf8"))
+    assert metrics["excluded_extrapolation_failed_task_ids"] == ["bad"]
+
+
+
+def test_reusable_metrics_reads_exact_verified_bytes_once(tmp_path, monkeypatch):
+    from phase_agent.analysis.feedback.dft_export_reuse import report_manifest, reusable_metrics
+
+    metrics = tmp_path / "metrics.json"
+    metrics.write_bytes(b'{"count":1}')
+    manifest = tmp_path / "manifest.json"
+    entry = {
+        "parity_plots": {"status": "blocked", "reason": "无完整同帧能量/受力配对，未绘图"},
+        "magnetic_plots": {"status": "blocked", "reason": "no_finite_transition_metal_moments"},
+    }
+    manifest.write_bytes(report_manifest(tmp_path, [metrics], entry, "v1"))
+    opened = []
+    real_open = Path.open
+
+    def track(path, *args, **kwargs):
+        if path == metrics:
+            opened.append(path)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", track)
+    assert reusable_metrics(tmp_path, [metrics], entry, "v1", manifest, metrics) == {"count": 1}
+    assert len(opened) == 1
+    assert reusable_metrics(tmp_path, [metrics], entry, "v2", manifest, metrics) is None
+    assert len(opened) == 1
+    metrics.write_bytes(b'{"count":2}')
+    assert reusable_metrics(tmp_path, [metrics], entry, "v1", manifest, metrics) is None

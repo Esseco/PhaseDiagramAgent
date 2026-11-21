@@ -97,7 +97,7 @@ def _finalize_workflow(frame):
         _save_runner_state(result["state"], state_path or effective_config.get("state_path"))
     manual_wait = (
         summarize_manual_upload_wait(result["state"], recovered_count=recovered_count)
-        if execution_mode == "interactive"
+        if execution_mode == "interactive" and result.get("status") != "handoff_preparation_failed"
         else None
     )
     if manual_wait is not None and collection_report is not None:
@@ -113,7 +113,43 @@ def _finalize_workflow(frame):
     from phase_agent.analysis.feedback.export_dft_products import export_dft_products
 
     export_dft_products(result["state"], effective_config.get("phase_diagram_directory"))
-    _save_runner_state(result["state"], state_path or effective_config.get("state_path"))
+    resolved_state_path = state_path or effective_config.get("state_path")
+    _save_runner_state(result["state"], resolved_state_path)
+    # Once the approved DIRECT action is durable, atomically quarantine its
+    # failed hull through the same publication entry used for manual recovery.
+    direct_receipts = []
+    for event in result.get("events") or []:
+        execution = event.get("execution") or {}
+        payload = execution.get("result")
+        if execution.get("status") == "completed" and isinstance(payload, dict):
+            receipt = payload.get("direct_sampling")
+            if isinstance(receipt, dict):
+                direct_receipts.append(receipt)
+    if direct_receipts:
+        try:
+            if len(direct_receipts) != 1 or not resolved_state_path:
+                raise ValueError("direct_quarantine_scope_ambiguous")
+            receipt = direct_receipts[0]
+            scope = receipt.get("scope_id")
+            saved = (result["state"].get("direct_sampling_results") or {}).get(scope)
+            if not scope or saved != receipt:
+                raise ValueError("direct_quarantine_receipt_mismatch")
+            from phase_agent.tools.workflows.quarantine_refresh_publication import quarantine_refresh_publication
+            from phase_agent.tools.step_runner.file_protocol import read_json
+
+            result["direct_quarantine"] = quarantine_refresh_publication(
+                result["state"], resolved_state_path, scope
+            )
+            persisted = read_json(resolved_state_path, {}) or {}
+            cycle = persisted.get("extrapolation_recovery_cycle") or {}
+            if (cycle.get("scope_id") != scope
+                or cycle.get("direct_source_digest") != receipt.get("source_digest")):
+                raise ValueError("direct_quarantine_state_not_persisted")
+            result["state"] = persisted
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            result["status"] = "not_configured"
+            result["reason"] = "DIRECT已保存，但失败轮相图隔离未完成：" + str(error)
+            result["direct_quarantine"] = {"status": "failed", "reason": str(error)}
     result.update(
         {
             "submitted": (result.get("batch") or {}).get("status") == "submitted"

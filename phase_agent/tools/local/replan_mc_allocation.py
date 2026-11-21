@@ -71,11 +71,6 @@ def replan_mc_allocation(state, manager, config):
         )
     if limits.get("max_tasks") is not None and len(preview["allocations"]) > limits["max_tasks"]:
         raise ValueError("完整 MC 超过任务数量上限；请先修订预算，不自动截断")
-    if (
-        limits.get("max_cost") is not None
-        and preview["estimated_relative_cost"] > limits["max_cost"]
-    ):
-        raise ValueError("完整 MC 超过成本上限；请先修订预算，不自动截断")
     # Freeze a finite, serializable budget; the legacy cost value is never reused as steps.
     preview.update(step_limit=steps, target_steps=steps, candidate_branch_ids=ids)
     return preview

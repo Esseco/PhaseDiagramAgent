@@ -120,7 +120,7 @@ def test_basic_check_avoids_distance_matrix(monkeypatch):
 def test_noncompetitive_small_energy_change_skips_framework(tmp_path, monkeypatch):
     runner = fake_runner(tmp_path / "run")
     runner._prepare_structure_check(runner.structure)
-    runner.current_eval = {"energy_mean_per_atom": -1.0}
+    runner.current_eval = {"energy_per_model_per_atom": [-1.0]}
     runner.pool_size = 1
     runner.pool = [{"energy": -2.0}]
     calls = []
@@ -131,11 +131,11 @@ def test_noncompetitive_small_energy_change_skips_framework(tmp_path, monkeypatc
 
     monkeypatch.setattr(runner._framework_reference, "inspect", inspect)
     assert (
-        runner._check_candidate(runner.structure, {"energy_mean_per_atom": -0.99})["scope"]
+        runner._check_candidate(runner.structure, {"energy_per_model_per_atom": [-0.99]})["scope"]
         == "basic"
     )
     assert not calls
-    assert runner._check_candidate(runner.structure, {"energy_mean_per_atom": -0.94})[
+    assert runner._check_candidate(runner.structure, {"energy_per_model_per_atom": [-0.94]})[
         "energy_jump_triggered"
     ]
     assert len(calls) == 1

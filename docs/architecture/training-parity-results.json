@@ -1,0 +1,560 @@
+[
+  {
+    "project": "O3-NaCo-3phase",
+    "report": {
+      "latest": {
+        "status": "completed",
+        "model_version": "remote-69bde2695b4fc94e-0d21179b060b",
+        "job_id": "69bde2695b4fc94e",
+        "source_epoch": "epoch0",
+        "fingerprint": "0d21179b060bd5cf3658956cd41431fbad760c52170d8a70881cfaf8c92f36eb",
+        "metrics": {
+          "energy": {
+            "mae": 5.010112961712548,
+            "rmse": 6.529575739166257,
+            "mae_unit": "meV/atom",
+            "rmse_unit": "meV/atom",
+            "points": 22,
+            "structures": 22,
+            "excluded_rows": 0
+          },
+          "force": {
+            "mae": 101.01252882263854,
+            "rmse": 160.16989380691885,
+            "mae_unit": "meV/Å",
+            "rmse_unit": "meV/Å",
+            "points": 5577,
+            "structures": 22,
+            "excluded_rows": 0
+          }
+        }
+      },
+      "jobs": [
+        {
+          "job_id": "69bde2695b4fc94e",
+          "source_epoch": "epoch0",
+          "status": "completed",
+          "model_version": "remote-69bde2695b4fc94e-0d21179b060b",
+          "fingerprint": "0d21179b060bd5cf3658956cd41431fbad760c52170d8a70881cfaf8c92f36eb",
+          "directory": "E:\\0-PhaseDiagram\\O3-NaCo-3phase\\analysis_outputs\\epoch0\\training\\69bde2695b4fc94e",
+          "metrics": {
+            "energy": {
+              "mae": 5.010112961712548,
+              "rmse": 6.529575739166257,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 22,
+              "structures": 22,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 101.01252882263854,
+              "rmse": 160.16989380691885,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 5577,
+              "structures": 22,
+              "excluded_rows": 0
+            }
+          }
+        }
+      ],
+      "interpretation": "K折折外预测；非最终模型的独立测试"
+    }
+  },
+  {
+    "project": "O3-1ele-NaCoO2",
+    "report": {
+      "latest": {
+        "status": "completed",
+        "model_version": "remote-94dca56f3378809f-8000f88ca5fd",
+        "job_id": "94dca56f3378809f",
+        "source_epoch": "epoch0",
+        "fingerprint": "8000f88ca5fde3d4ae263a6c073bc42af34aa8faf6a961393bcfd21fc29f8a38",
+        "metrics": {
+          "energy": {
+            "mae": 4.774964754381519,
+            "rmse": 6.834514598993605,
+            "mae_unit": "meV/atom",
+            "rmse_unit": "meV/atom",
+            "points": 30,
+            "structures": 30,
+            "excluded_rows": 0
+          },
+          "force": {
+            "mae": 70.50374592595873,
+            "rmse": 137.07122507532415,
+            "mae_unit": "meV/Å",
+            "rmse_unit": "meV/Å",
+            "points": 5142,
+            "structures": 30,
+            "excluded_rows": 0
+          }
+        }
+      },
+      "jobs": [
+        {
+          "job_id": "94dca56f3378809f",
+          "source_epoch": "epoch0",
+          "status": "completed",
+          "model_version": "remote-94dca56f3378809f-8000f88ca5fd",
+          "fingerprint": "8000f88ca5fde3d4ae263a6c073bc42af34aa8faf6a961393bcfd21fc29f8a38",
+          "directory": "E:\\0-PhaseDiagram\\O3-1ele-NaCoO2\\analysis_outputs\\epoch0\\training\\94dca56f3378809f",
+          "metrics": {
+            "energy": {
+              "mae": 4.774964754381519,
+              "rmse": 6.834514598993605,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 30,
+              "structures": 30,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 70.50374592595873,
+              "rmse": 137.07122507532415,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 5142,
+              "structures": 30,
+              "excluded_rows": 0
+            }
+          }
+        }
+      ],
+      "interpretation": "K折折外预测；非最终模型的独立测试"
+    }
+  },
+  {
+    "project": "O3-2ele-NaFeMn",
+    "report": {
+      "latest": {
+        "status": "completed",
+        "model_version": "remote-34cc25764bd5c42a-f05c82041330",
+        "job_id": "34cc25764bd5c42a",
+        "source_epoch": "epoch0",
+        "fingerprint": "f05c820413302712265f2aa7a1e60d2c407773213f775a6574af668081b793f6",
+        "metrics": {
+          "energy": {
+            "mae": 3.8058644991095343,
+            "rmse": 6.223363036543536,
+            "mae_unit": "meV/atom",
+            "rmse_unit": "meV/atom",
+            "points": 27,
+            "structures": 27,
+            "excluded_rows": 0
+          },
+          "force": {
+            "mae": 56.3323726426907,
+            "rmse": 89.98988399715365,
+            "mae_unit": "meV/Å",
+            "rmse_unit": "meV/Å",
+            "points": 4713,
+            "structures": 27,
+            "excluded_rows": 0
+          }
+        }
+      },
+      "jobs": [
+        {
+          "job_id": "34cc25764bd5c42a",
+          "source_epoch": "epoch0",
+          "status": "completed",
+          "model_version": "remote-34cc25764bd5c42a-f05c82041330",
+          "fingerprint": "f05c820413302712265f2aa7a1e60d2c407773213f775a6574af668081b793f6",
+          "directory": "E:\\0-PhaseDiagram\\O3-2ele-NaFeMn\\analysis_outputs\\epoch0\\training\\34cc25764bd5c42a",
+          "metrics": {
+            "energy": {
+              "mae": 3.8058644991095343,
+              "rmse": 6.223363036543536,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 27,
+              "structures": 27,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 56.3323726426907,
+              "rmse": 89.98988399715365,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 4713,
+              "structures": 27,
+              "excluded_rows": 0
+            }
+          }
+        },
+        {
+          "job_id": "6c2c5570d72325ee",
+          "source_epoch": "epoch0",
+          "status": "unavailable",
+          "reason": "训练结果未登记或未通过回收校验"
+        }
+      ],
+      "interpretation": "K折折外预测；非最终模型的独立测试"
+    }
+  },
+  {
+    "project": "O3-NiCo",
+    "report": {
+      "latest": {
+        "status": "completed",
+        "model_version": "remote-d7355a06580d0cdc-5a778ccedb11",
+        "job_id": "d7355a06580d0cdc",
+        "source_epoch": "epoch1",
+        "fingerprint": "5a778ccedb11075fa55f1a9b80803cb01970d673bb8a577d10625877d921bac4",
+        "metrics": {
+          "energy": {
+            "mae": 9.40530703708395,
+            "rmse": 17.756284984941328,
+            "mae_unit": "meV/atom",
+            "rmse_unit": "meV/atom",
+            "points": 105,
+            "structures": 105,
+            "excluded_rows": 0
+          },
+          "force": {
+            "mae": 125.08100118307756,
+            "rmse": 193.76626516042106,
+            "mae_unit": "meV/Å",
+            "rmse_unit": "meV/Å",
+            "points": 19167,
+            "structures": 105,
+            "excluded_rows": 0
+          }
+        }
+      },
+      "jobs": [
+        {
+          "job_id": "3fbdcd97521b62a4",
+          "source_epoch": "epoch0",
+          "status": "completed",
+          "model_version": "remote-3fbdcd97521b62a4-bebeac5b8ce6",
+          "fingerprint": "bebeac5b8ce64aa90dfb381cc74ca47f392e32d53071fafc0e0fc223453ec64a",
+          "directory": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch0\\training\\3fbdcd97521b62a4",
+          "metrics": {
+            "energy": {
+              "mae": 12.045266327318917,
+              "rmse": 25.432467557078827,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 27,
+              "structures": 27,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 119.52026421774055,
+              "rmse": 192.47446394684096,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 7662,
+              "structures": 27,
+              "excluded_rows": 0
+            }
+          }
+        },
+        {
+          "job_id": "d7355a06580d0cdc",
+          "source_epoch": "epoch1",
+          "status": "completed",
+          "model_version": "remote-d7355a06580d0cdc-5a778ccedb11",
+          "fingerprint": "5a778ccedb11075fa55f1a9b80803cb01970d673bb8a577d10625877d921bac4",
+          "directory": "E:\\0-PhaseDiagram\\O3-NiCo\\analysis_outputs\\epoch1\\training\\d7355a06580d0cdc",
+          "metrics": {
+            "energy": {
+              "mae": 9.40530703708395,
+              "rmse": 17.756284984941328,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 105,
+              "structures": 105,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 125.08100118307756,
+              "rmse": 193.76626516042106,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 19167,
+              "structures": 105,
+              "excluded_rows": 0
+            }
+          }
+        }
+      ],
+      "interpretation": "K折折外预测；非最终模型的独立测试"
+    }
+  },
+  {
+    "project": "NaNiO2-phase",
+    "report": {
+      "latest": {
+        "status": "completed",
+        "model_version": "remote-80d146c60b7d85af-95d5897fb9d3",
+        "job_id": "80d146c60b7d85af",
+        "source_epoch": "epoch2",
+        "fingerprint": "95d5897fb9d3d7e183237bff9bb4680f302e2bb717311cd69a1179bc5c2e2f68",
+        "metrics": {
+          "energy": {
+            "mae": 4.246388810779474,
+            "rmse": 6.626290502190944,
+            "mae_unit": "meV/atom",
+            "rmse_unit": "meV/atom",
+            "points": 99,
+            "structures": 99,
+            "excluded_rows": 0
+          },
+          "force": {
+            "mae": 50.0459897069289,
+            "rmse": 105.00253460103642,
+            "mae_unit": "meV/Å",
+            "rmse_unit": "meV/Å",
+            "points": 25113,
+            "structures": 99,
+            "excluded_rows": 0
+          }
+        }
+      },
+      "jobs": [
+        {
+          "job_id": "340f895066d07019",
+          "source_epoch": "epoch1",
+          "status": "completed",
+          "model_version": "remote-340f895066d07019-7143ace36643",
+          "fingerprint": "7143ace36643d87272fc852643945c668b8da82afa6f8d72994e64e72c763c23",
+          "directory": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch1\\training\\340f895066d07019",
+          "metrics": {
+            "energy": {
+              "mae": 4.7959494213922875,
+              "rmse": 7.290778385084354,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 39,
+              "structures": 39,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 54.172655739597616,
+              "rmse": 117.45202721278007,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 9108,
+              "structures": 39,
+              "excluded_rows": 0
+            }
+          }
+        },
+        {
+          "job_id": "439f3fff95de8bb4",
+          "source_epoch": "epoch0",
+          "status": "completed",
+          "model_version": "remote-439f3fff95de8bb4-56c0d6508023",
+          "fingerprint": "56c0d65080230a892fa125e8333fd664e6393d72eb4767239c7d6c3fded197b5",
+          "directory": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch0\\training\\439f3fff95de8bb4",
+          "metrics": {
+            "energy": {
+              "mae": 6.799957832564052,
+              "rmse": 10.443618461457033,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 22,
+              "structures": 22,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 48.688388836507315,
+              "rmse": 122.40238965164082,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 4773,
+              "structures": 22,
+              "excluded_rows": 0
+            }
+          }
+        },
+        {
+          "job_id": "80d146c60b7d85af",
+          "source_epoch": "epoch2",
+          "status": "completed",
+          "model_version": "remote-80d146c60b7d85af-95d5897fb9d3",
+          "fingerprint": "95d5897fb9d3d7e183237bff9bb4680f302e2bb717311cd69a1179bc5c2e2f68",
+          "directory": "E:\\0-PhaseDiagram\\NaNiO2-phase\\analysis_outputs\\epoch2\\training\\80d146c60b7d85af",
+          "metrics": {
+            "energy": {
+              "mae": 4.246388810779474,
+              "rmse": 6.626290502190944,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 99,
+              "structures": 99,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 50.0459897069289,
+              "rmse": 105.00253460103642,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 25113,
+              "structures": 99,
+              "excluded_rows": 0
+            }
+          }
+        }
+      ],
+      "interpretation": "K折折外预测；非最终模型的独立测试"
+    }
+  },
+  {
+    "project": "O3-1ele-NaCrO2",
+    "report": {
+      "latest": {
+        "status": "completed",
+        "model_version": "remote-ea60b19d96b33a7a-4b64fb8f9852",
+        "job_id": "ea60b19d96b33a7a",
+        "source_epoch": "epoch3",
+        "fingerprint": "4b64fb8f9852699db04681fd57533588d164fa264d2b4891e9cdd25a7b29e3b4",
+        "metrics": {
+          "energy": {
+            "mae": 4.994867459804641,
+            "rmse": 6.637945167108756,
+            "mae_unit": "meV/atom",
+            "rmse_unit": "meV/atom",
+            "points": 57,
+            "structures": 57,
+            "excluded_rows": 0
+          },
+          "force": {
+            "mae": 86.4828211783148,
+            "rmse": 166.6682444579077,
+            "mae_unit": "meV/Å",
+            "rmse_unit": "meV/Å",
+            "points": 14679,
+            "structures": 57,
+            "excluded_rows": 0
+          }
+        }
+      },
+      "jobs": [
+        {
+          "job_id": "38cdd585f6fa518e",
+          "source_epoch": "epoch3",
+          "status": "unavailable",
+          "reason": "训练结果未登记或未通过回收校验"
+        },
+        {
+          "job_id": "7022fe224f6e42b9",
+          "source_epoch": "epoch0",
+          "status": "completed",
+          "model_version": "remote-7022fe224f6e42b9-ea17d08ad0d2",
+          "fingerprint": "ea17d08ad0d2a40be7e131d416a0472a866035ffdc8c4726ed7c3ed999de3c24",
+          "directory": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch0\\training\\7022fe224f6e42b9",
+          "metrics": {
+            "energy": {
+              "mae": 2.8613782109699524,
+              "rmse": 3.5774235116986186,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 12,
+              "structures": 12,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 69.46215184740346,
+              "rmse": 155.63889016840676,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 2985,
+              "structures": 12,
+              "excluded_rows": 0
+            }
+          }
+        },
+        {
+          "job_id": "d6bd71f3a37f8bc2",
+          "source_epoch": "epoch1",
+          "status": "completed",
+          "model_version": "remote-d6bd71f3a37f8bc2-18d0354c36e1",
+          "fingerprint": "18d0354c36e103460006acdfd62fd816f5b5fdba4eee240e42c19584d6045d55",
+          "directory": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch1\\training\\d6bd71f3a37f8bc2",
+          "metrics": {
+            "energy": {
+              "mae": 9.701482377774239,
+              "rmse": 16.25244085057465,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 24,
+              "structures": 24,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 96.04407298160471,
+              "rmse": 214.09391081890118,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 5967,
+              "structures": 24,
+              "excluded_rows": 0
+            }
+          }
+        },
+        {
+          "job_id": "ea60b19d96b33a7a",
+          "source_epoch": "epoch3",
+          "status": "completed",
+          "model_version": "remote-ea60b19d96b33a7a-4b64fb8f9852",
+          "fingerprint": "4b64fb8f9852699db04681fd57533588d164fa264d2b4891e9cdd25a7b29e3b4",
+          "directory": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch3\\training\\ea60b19d96b33a7a",
+          "metrics": {
+            "energy": {
+              "mae": 4.994867459804641,
+              "rmse": 6.637945167108756,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 57,
+              "structures": 57,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 86.4828211783148,
+              "rmse": 166.6682444579077,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 14679,
+              "structures": 57,
+              "excluded_rows": 0
+            }
+          }
+        },
+        {
+          "job_id": "f9e375aa91ee7890",
+          "source_epoch": "epoch2",
+          "status": "completed",
+          "model_version": "remote-f9e375aa91ee7890-93c4b6c8e0e8",
+          "fingerprint": "93c4b6c8e0e825b5c785d14c65465d568db62d6d733db02de174339e0e19484d",
+          "directory": "E:\\0-PhaseDiagram\\O3-1ele-NaCrO2\\analysis_outputs\\epoch2\\training\\f9e375aa91ee7890",
+          "metrics": {
+            "energy": {
+              "mae": 4.947906585069117,
+              "rmse": 6.504841877408121,
+              "mae_unit": "meV/atom",
+              "rmse_unit": "meV/atom",
+              "points": 40,
+              "structures": 40,
+              "excluded_rows": 0
+            },
+            "force": {
+              "mae": 70.22813452378762,
+              "rmse": 140.42199136618888,
+              "mae_unit": "meV/Å",
+              "rmse_unit": "meV/Å",
+              "points": 9741,
+              "structures": 40,
+              "excluded_rows": 0
+            }
+          }
+        }
+      ],
+      "interpretation": "K折折外预测；非最终模型的独立测试"
+    }
+  }
+]

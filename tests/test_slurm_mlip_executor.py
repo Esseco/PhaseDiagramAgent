@@ -104,3 +104,25 @@ def test_committee_uses_first_member_as_main_without_python_path_setting(tmp_pat
     assert job["parameters"]["main_model_index"] == 0
     assert job["parameters"]["save_relax_traj"] is False
     assert "backend_python_paths" not in job
+
+
+def test_bound_mh1_worker_checks_model_bytes_before_running(tmp_path, monkeypatch):
+    import hashlib
+    import pytest
+    from phase_agent.science.mlip import slurm_executor
+    model = tmp_path / 'mh1.model'
+    model.write_bytes(b'model')
+    digest = hashlib.sha256(model.read_bytes()).hexdigest()
+    task = {'task_id': 'p', 'task_key': 'p', 'stage': 'relax_and_feature', 'structure_id': 's',
+            'model_sha256': digest, 'result_path': str(tmp_path / 'result.json'),
+            'worker_job': {'operation': 'relax', 'model_version': 'mace-mh-1',
+                           'model_path': str(model), 'structure_path': str(tmp_path / 'input.vasp')}}
+    called = []
+    monkeypatch.setattr(slurm_executor, 'run_mace_worker', lambda job: called.append(job) or
+                        {'status': 'completed', 'optimizer_converged': True})
+    result = slurm_executor.execute_mlip_task(task)
+    assert result['outputs']['verified_model_sha256'] == digest and len(called) == 1
+    model.write_bytes(b'changed')
+    with pytest.raises(ValueError, match='model_sha256_mismatch'):
+        slurm_executor.execute_mlip_task(task)
+    assert len(called) == 1

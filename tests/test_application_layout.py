@@ -85,3 +85,25 @@ def test_execution_stage_helper_moved_out_of_reliability_without_breaking_saved_
         assert import_saved_module(previous) is current
     assert not (ROOT / "phase_agent/agents/reliability/calculation").exists()
     assert current.decide_next_calculation({})["stage"] == "simple_check"
+
+
+def test_test_temporary_directories_do_not_target_checkout_or_fixed_drive():
+    """Scratch data must follow pytest's per-run temporary directory."""
+    for path in (ROOT / "tests").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not ((isinstance(func, ast.Name) and func.id == "TemporaryDirectory")
+                    or (isinstance(func, ast.Attribute) and func.attr == "TemporaryDirectory")):
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "dir":
+                    continue
+                value = keyword.value
+                fixed = isinstance(value, ast.Constant) and isinstance(value.value, str) and (
+                    value.value in {".", ".."} or bool(__import__("re").match(r"^[A-Za-z]:[\\/]", value.value))
+                )
+                cwd = isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and value.func.attr in {"cwd", "getcwd"}
+                assert not fixed and not cwd, f"Unisolated test temporary directory: {path}:{node.lineno}"

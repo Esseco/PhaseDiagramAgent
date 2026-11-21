@@ -20,7 +20,7 @@ from phase_agent.tools.remote.integrity import payload_checksum
 
 def feedback(state, results, manager, references, root, model_version):
     state = reconcile_task_results(state, results)["state"]
-    return apply_scientific_feedback(
+    state = apply_scientific_feedback(
         state,
         results,
         manager=manager,
@@ -29,11 +29,24 @@ def feedback(state, results, manager, references, root, model_version):
         phase_diagram_directory=Path(root) / "analysis",
         phase_identification_cache_path=Path(root) / "phase_identification.json",
     )["state"]
+    result_ids = {row.get("task_id") for row in results}
+    for task in state.get("tasks") or []:
+        if task.get("task_id") not in result_ids or task.get("status") != "completed":
+            continue
+        evidence = (task.get("outputs") or {}).get("phase_identification") or {}
+        if evidence.get("structure_sha256") and evidence.get("portable_classification_scope"):
+            evidence["origin"] = "remote_cpu"
+    return state
 
 
 def next_mc(state, manager, manifest, root, index):
     state = deepcopy(state)
     config, version = manifest["config"], manifest["model_version"]
+    from phase_agent.tools.relax_mc_batch.branch_limit import batch_reservation_limits
+
+    batch_limits = batch_reservation_limits(
+        config["budgets"], list(manifest["manager"]["branches"])
+    )
     task_map = {row["task_id"]: row for row in state["tasks"]}
     rows = []
     for record in state.get("phase_records") or []:
@@ -50,7 +63,13 @@ def next_mc(state, manager, manifest, root, index):
     pool = build_relax_hull(rows, model_version=version)
     state.setdefault("branch_hull_batches", {})[pool["version"]] = pool
     state["current_branch_hull_version"] = pool["version"]
-    diagram = (state.get("phase_diagrams") or {}).get("mlip") or {}
+    from phase_agent.analysis.phase.mc_snapshot import mc_model_snapshot
+    from phase_agent.science.mc.second_round_state import legacy_committee_task_keys
+
+    try:
+        diagram = mc_model_snapshot(state, version)
+    except ValueError:
+        diagram = {}
     if diagram.get("status") != "completed" or diagram.get("model_version") != version:
         return {
             "status": "phase_diagram_unavailable",
@@ -62,8 +81,8 @@ def next_mc(state, manager, manifest, root, index):
     candidates, missing = rank_relaxed_branches(
         list(manager.data["branches"].values()), pool, phase_diagram=diagram
     )
-    if index and state.get("tiered_mc_state"):
-        source = first_round_source(state, version)
+    source = first_round_source(state, version) if index else None
+    if source:
         candidates, missing = second_round_candidates(candidates, state, diagram, version)
     policy = deepcopy(config["mc_policy"])
     scheduled = schedule_tiered_mc(
@@ -76,6 +95,7 @@ def next_mc(state, manager, manifest, root, index):
         hull_reference_version=pool["version"],
         phase_diagram_version=diagram.get("version"),
         scope_by_model=True,
+        excluded_history_task_keys=legacy_committee_task_keys(state),
     )
     state["tiered_mc_state"] = scheduled["state"]
     atoms = {row["branch_id"]: row["atom_count"] for row in candidates}
@@ -91,7 +111,7 @@ def next_mc(state, manager, manifest, root, index):
             task_key=child["task_key"],
             stage="deep_search",
             amount=cost,
-            limits=config["budgets"],
+            limits=batch_limits,
             config_version=manifest["config_version"],
             model_version=version,
         )
@@ -115,7 +135,7 @@ def next_mc(state, manager, manifest, root, index):
     state["pending_tasks"] = [
         r for r in state["tasks"] if r.get("status") in {"pending", "running"}
     ]
-    if index and scheduled["actions"]:
+    if source and scheduled["actions"]:
         record = {
             "model_version": version,
             "source_checksum": source["checksum"],

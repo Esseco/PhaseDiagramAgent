@@ -14,10 +14,14 @@ ADVISORY_OPERATIONS = {
     "reliability": frozenset(
         {
             "select_dft_candidates",
+            "sample_direct_extrapolation",
+            "prepare_perturbation_recovery",
+            "prepare_parent_first_recovery",
             "prepare_dft_inputs",
             "prepare_mlip_training",
             "prepare_training_handoff",
             "prepare_model_refresh",
+            "prepare_mc_energy_repair",
         }
     ),
 }
@@ -113,3 +117,82 @@ def advisory_option_errors(role, option):
 
 def execution_role_allowed(role):
     return role == "simulation"
+
+
+def necessary_roles(action, *, state=None, context=None):
+    """Conservative floor for new scientific choices, never an action router."""
+    from phase_agent.configuration.schema.action_state_schema import normalize_action
+    from phase_agent.agents.simulation.program_checks import dft_input_record
+
+    action = normalize_action(action)
+    context = context or {}
+    tool, params = action["tool"], action.get("parameters") or {}
+    both = {
+        "exploration": "cross-stage or unknown scientific scope",
+        "reliability": "cross-stage or unknown scientific scope",
+    }
+    point = (action.get("scientific_decision") or {}).get("point")
+    if tool == "check_convergence" or action.get("post_dft_review") or point == "round_direction":
+        required = dict(both)
+    elif tool in {"generate_branches", "allocate_mc_bohb", "select_candidates"}:
+        required = {"exploration": "new exploration scope or sampling allocation"}
+    elif tool in {"select_dft_candidates", "update_mlip", "reevaluate_candidates"}:
+        required = {"reliability": "DFT selection, model update or reliability judgement"}
+    elif tool == "prepare_local_batch_files":
+        fixed_state = (
+            state
+            if (state or {}).get("tasks") is not None
+            else context.get("registered_dft_inputs") or {}
+        )
+        fixed = dft_input_record(action, fixed_state)
+        if fixed is not None and fixed["status"] == "passed":
+            required = {}
+        elif params.get("mode") in {
+            "parent_first_recovery_inputs",
+            "perturbation_recovery_inputs",
+            "direct_extrapolation",
+            "model_refresh_inputs",
+            "mc_energy_repair_inputs",
+            "training_handoff_inputs",
+            "dft_inputs",
+        }:
+            required = {"reliability": "recovery/model/input scope not proven fixed"}
+        elif params.get("mode") in {
+            "ordering_search_inputs",
+            "relax_mc_inputs",
+            "relax_inputs",
+            "mc_inputs",
+        }:
+            required = {"exploration": "exploration input scope not proven fixed"}
+        else:
+            required = both
+    elif tool == "pause_search":
+        required = {}
+    else:
+        required = both
+    domains = {
+        role
+        for step in (action.get("research_plan") or {}).get("steps") or []
+        for role in advisory_roles(step.get("operation"))
+    }
+    if domains == {"exploration", "reliability"}:
+        required.update(both)
+    rounds = (context.get("reliability_extrapolation_rounds") or {}).get("rounds") or []
+    if any(row.get("direct_sampling_required") is True for row in rounds):
+        required["reliability"] = "unresolved extrapolation recovery risk"
+    return required
+
+
+def missing_role_reasons(action, advice, *, snapshot_id, state=None, context=None):
+    required = necessary_roles(action, state=state, context=context)
+    for opinion in advice:
+        for role in opinion.get("handoff_roles") or []:
+            required.setdefault(role, "specialist requested cross-domain review")
+    answered = {
+        row["role"]
+        for row in advice
+        if snapshot_id
+        and row.get("snapshot_id") == snapshot_id
+        and row.get("recommendation") != "insufficient_evidence"
+    }
+    return {role: reason for role, reason in required.items() if role not in answered}

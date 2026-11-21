@@ -343,7 +343,7 @@ from phase_agent.runtime.runtime_config_io import (
 )
 
 
-def create_agent_runtime(config_path=None):
+def create_agent_runtime(config_path=None, *, operator="agent"):
     """Compatibility entry binding chat factories to runtime composition."""
     from phase_agent.runtime.runtime_composition import compose_runtime
 
@@ -352,6 +352,7 @@ def create_agent_runtime(config_path=None):
         chat_handler_factory=RunWorkflowChatHandler,
         model_switcher_factory=_make_deepseek_model_switcher,
         runtime_factory=create_agent_runtime,
+        operator=operator,
     )
 
 

@@ -139,3 +139,57 @@ def test_related_upper_reference_is_available_without_automatic_priority(tmp_pat
     reference = next(row for row in result if row["candidate_id"] == "s2")
     assert reference["candidate_origin"] == "D_reference"
     assert not reference["dft_sampling_evidence"]["quality_priority_eligible"]
+
+
+def test_initial_refresh_qbc_is_bound_to_exact_frame_and_model(tmp_path):
+    state = sample()
+    files(state, tmp_path)
+    entry = state["phase_diagrams"]["mlip"]["entries"][1]
+    digest = entry["structure_sha256"]
+    initial = {"status": "completed", "single_point_completed": True,
+               "structure_checksum": digest, "mlip_version": "m1",
+               "qbc": {"status": "completed", "energy_per_atom_std": 0.005, "member_count": 4}}
+    state["tasks"] = [{"task_id": "refresh", "model_version": "m1", "status": "completed",
+        "input_structure_sha256": digest, "outputs": {"structure_checksum": "other-frame",
+        "refresh_force_followup": {"input_structure_sha256": digest, "relaxed": True,
+                                   "initial_prediction": initial}}}]
+    result = phase_review_candidates(state, [])
+    row = next(row for row in result if row["candidate_id"] == entry["structure_id"])
+    assert row["qbc"]["energy_per_atom_std"] == 0.005
+    assert row["qbc_frame_sha256"] == digest and row["qbc_model_version"] == "m1"
+    assert row["source_task_id"] == "refresh"
+    from phase_agent.evidence.dft_extrapolation import candidate_extrapolation
+
+    assert candidate_extrapolation(row, state)["status"] == "unknown"
+    state["tasks"][0]["outputs"]["refresh_force_followup"]["initial_prediction"]["mlip_version"] = "other"
+    row = next(row for row in phase_review_candidates(state, []) if row["candidate_id"] == entry["structure_id"])
+    assert row["qbc"]["status"] == "not_available_exact_current_geometry"
+    state["tasks"][0]["outputs"]["refresh_force_followup"]["initial_prediction"]["mlip_version"] = "m1"
+    state["tasks"][0]["outputs"]["refresh_force_followup"]["input_structure_sha256"] = "wrong"
+    row = next(row for row in phase_review_candidates(state, []) if row["candidate_id"] == entry["structure_id"])
+    assert row["qbc"]["status"] == "not_available_exact_current_geometry"
+
+
+
+def test_saved_qbc_requires_current_task_and_exact_frame():
+    from phase_agent.analysis.phase.phase_dft_candidates import _verify_candidate_qbc
+
+    qbc = {"status": "completed", "member_count": 4, "energy_per_atom_std": 0.01}
+    rows = [
+        {"candidate_id": "a", "structure_sha256": "frame-a", "qbc": dict(qbc)},
+        {"candidate_id": "b", "structure_sha256": "frame-b", "qbc": dict(qbc)},
+        {"candidate_id": "c", "structure_sha256": "frame-c", "qbc": dict(qbc)},
+    ]
+    state = {"tasks": [
+        {"task_id": "good", "status": "completed", "model_version": "m1",
+         "outputs": {"structure_checksum": "frame-a", "qbc": dict(qbc)}},
+        {"task_id": "old", "status": "completed", "model_version": "m0",
+         "outputs": {"structure_checksum": "frame-b", "qbc": dict(qbc)}},
+        {"task_id": "different", "status": "completed", "model_version": "m1",
+         "outputs": {"structure_checksum": "frame-other", "qbc": dict(qbc)}},
+    ]}
+    _verify_candidate_qbc(state, rows, "m1")
+    assert rows[0]["qbc_source_task_id"] == "good"
+    assert rows[0]["qbc_frame_sha256"] == "frame-a"
+    assert rows[0]["qbc_model_version"] == "m1"
+    assert all(row["qbc"]["status"] == "not_available_exact_current_geometry" for row in rows[1:])

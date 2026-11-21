@@ -39,10 +39,10 @@ def publish_quality_comparison(state, report, *, directory, formats=("png",)):
             "formal_records_modified": False,
             "plot_paths": [],
         }
-    figure = Figure(figsize=(12, 5))
+    figure = Figure(figsize=(8.5, 5.5))
     FigureCanvasAgg(figure)
-    axes = figure.subplots(1, 2, sharey=True)
-    figure.subplots_adjust(left=0.075, right=0.83, bottom=0.20, top=0.81, wspace=0.10)
+    ax = figure.subplots()
+    figure.subplots_adjust(left=0.11, right=0.73, bottom=0.20, top=0.87)
     crossed = {}
     for tier in (1, 2):
         members = [r for r in selected if r["tier"] == tier]
@@ -53,88 +53,38 @@ def publish_quality_comparison(state, report, *, directory, formats=("png",)):
                 reference=right["endpoint_reference"],
             )
             crossed[tier] = {"x": [r["x"] for r in members], "eform": ys}
-    energies = (
-        left["plot_data"]["eform"]
-        + right["plot_data"]["eform"]
-        + [e for group in crossed.values() for e in group["eform"]]
-    )
+    energies = right["plot_data"]["eform"] + [
+        e for group in crossed.values() for e in group["eform"]
+    ]
     low, high = min(energies), max(energies)
     padding = max((high - low) * 0.08, 10)
-    handles = []
-    for index, (ax, data) in enumerate(zip(axes, [left, right])):
-        plot_phase_diagram(
-            **data["plot_data"],
-            phase_hulls=True,
-            unstable_alpha=0.65,
-            ax=ax,
-            legend=index == 0,
-            font_size=10,
-            ylabel="Formation energy (meV/O2)" if index == 0 else "",
-            ylim=(low - padding, high + padding),
-        )
-        if index == 0:
-            handles = ax.get_legend().legend_handles
-            labels = [t.get_text() for t in ax.get_legend().get_texts()]
-            ax.get_legend().remove()
-            before_counts = Counter(left["plot_data"]["phase"])
-            after_counts = Counter(right["plot_data"]["phase"])
-            for h, label in zip(handles, labels):
-                h.set_label(
-                    f"{label} (n={before_counts[label]}/{after_counts[label]})"
-                    if label in before_counts
-                    else label
-                )
-        else:
-            ax.tick_params(axis="y", labelleft=False)
-        ax.set_title(
-            ("All current structures" if index == 0 else "Hypothetical exclusion for review")
-            + f" | n={data['after_count']}",
-            fontsize=11,
-        )
+    plot_phase_diagram(
+        **right["plot_data"], phase_hulls=True, unstable_alpha=0.65,
+        ax=ax, font_size=10, ylabel="Formation energy (meV/O2)",
+        ylim=(low - padding, high + padding),
+    )
+    handles = list(ax.get_legend().legend_handles)
+    labels = [t.get_text() for t in ax.get_legend().get_texts()]
+    ax.get_legend().remove()
+    before_counts = Counter(left["plot_data"]["phase"])
+    after_counts = Counter(right["plot_data"]["phase"])
+    for handle, label in zip(handles, labels):
+        if label in before_counts:
+            handle.set_label(f"{label} (n={before_counts[label]}/{after_counts[label]})")
     for tier, color in [(1, "#B22222"), (2, "#9B6500")]:
         if tier in crossed:
-            axes[1].scatter(
-                crossed[tier]["x"],
-                crossed[tier]["eform"],
-                marker="x",
-                c=color,
-                s=30,
-                linewidths=1,
-                zorder=0.5,
-            )
-            handles.append(
-                Line2D(
-                    [],
-                    [],
-                    marker="x",
-                    linestyle="",
-                    color=color,
-                    label=f"Tier {tier}: " + ("automatic rule" if tier == 1 else "human review"),
-                )
-            )
-    figure.legend(
-        handles=handles, loc="center left", bbox_to_anchor=(0.84, 0.5), frameon=False, fontsize=9
-    )
-    figure.suptitle(
-        "Phase quality review | each panel relative to retained endpoints", fontsize=13, y=0.96
-    )
-    figure.text(
-        0.075,
-        0.085,
-        f"H>{report['screening_policy']['hull_shift_mev_per_O2']:g}, D>{report['screening_policy']['outlier_gap_mev_per_O2']:g}; direct H>{report['screening_policy']['direct_removal_mev_per_O2']:g} meV/O2. Fixed-reference H: {right['hull_lift_mev_per_O2']:.2f} meV/O2.",
-        fontsize=10,
-    )
-    figure.text(
-        0.075,
-        0.035,
-        "Crosses use the right-panel reference. H is not the vertical gap between panels. "
-        + (
-            "H/D chain converged."
-            if report["recursive_converged"]
-            else "INCOMPLETE: chain stopped before convergence."
-        ),
-        fontsize=9,
-    )
+            ax.scatter(crossed[tier]["x"], crossed[tier]["eform"], marker="x",
+                       c=color, s=30, linewidths=1, zorder=6)
+            handles.append(Line2D([], [], marker="x", linestyle="", color=color,
+                                  label=f"Tier {tier}: " + ("automatic rule" if tier == 1 else "human review")))
+    ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.02, 0.5),
+              frameon=False, fontsize=9)
+    ax.set_title(f"D/H hypothetical exclusion | n={right['after_count']}", fontsize=11)
+    figure.text(0.11, 0.085,
+        f"H>{report['screening_policy']['hull_shift_mev_per_O2']:g}, D>{report['screening_policy']['outlier_gap_mev_per_O2']:g}; direct H>{report['screening_policy']['direct_removal_mev_per_O2']:g} meV/O2. Fixed-reference H: {right['hull_lift_mev_per_O2']:.2f} meV/O2.", fontsize=9)
+    figure.text(0.11, 0.035,
+        "Crosses use retained-endpoint reference; exclusion is hypothetical. " +
+        ("H/D chain converged." if report["recursive_converged"] else "INCOMPLETE: chain stopped before convergence."), fontsize=9)
     folder = Path(directory)
     folder.mkdir(parents=True, exist_ok=True)
     token = sha256(

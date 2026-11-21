@@ -14,7 +14,7 @@ def default_round_strategy_config() -> dict:
         "generation_quota_total": 900,
         "minimum_exploration_fraction": 0.1,
         "maximum_mc_budget": 3000,
-        "maximum_dft_budget": 6000,
+        "maximum_dft_budget": None,
         "rule_default": {
             "focus_regions": [],
             "generation_quotas": {

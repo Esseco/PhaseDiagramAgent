@@ -435,3 +435,41 @@ def test_recovery_http_endpoint_auth_proposal_and_review(tmp_path):
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
+
+
+def test_recovery_proposal_rejects_concurrent_state_update(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    import phase_agent.tools.state.execution_reconciliation as module
+    from phase_agent.runtime.local_agent_control import LocalAgentControl
+
+    path, state = interrupted(tmp_path)
+    write_json(path, state)
+    original = module.propose_reconciliation
+
+    def competing(*args, **kwargs):
+        result = original(*args, **kwargs)
+        script = ("import sys; from phase_agent.tools.step_runner.file_protocol import read_json, write_json; "
+                  "p=sys.argv[1]; s=read_json(p); s['other_process_update']=True; write_json(p,s)")
+        subprocess.run([sys.executable, "-c", script, str(path)], check=True)
+        return result
+
+    monkeypatch.setattr(module, "propose_reconciliation", competing)
+    control = LocalAgentControl(SimpleNamespace(state_path=path, lock=RLock()))
+    with pytest.raises(ValueError, match="stale_state_file_version"):
+        control.propose_recovery(
+            {"invocation_id": "old", "resolution": "verified_no_effect", **ATTESTATION}
+        )
+    assert read_json(path)["other_process_update"] is True
+
+
+def test_stale_saved_recovery_summary_does_not_block_audited_reconciliation(tmp_path):
+    from phase_agent.graphs.project.runner import _business_state_is_clean_for_stale_checkpoint
+
+    path, state = interrupted(tmp_path)
+    state["execution_recovery_report"] = {"status": "reconciliation_required", "unsettled": [{"reason": "old", "identity": {"invocation_id": "old"}}]}
+    assert not _business_state_is_clean_for_stale_checkpoint(path, state=state)
+    proposed = propose_reconciliation(path, state, "old", "verified_no_effect", ATTESTATION)
+    result = apply_reconciliation(path, proposed["state"], proposed["plan_id"], "confirm_sensitive")
+    assert result["state"]["execution_recovery_report"]["status"] == "reconciliation_required"
+    assert _business_state_is_clean_for_stale_checkpoint(path, state=result["state"])

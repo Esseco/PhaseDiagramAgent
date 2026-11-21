@@ -94,3 +94,24 @@ def test_subgraph_retention_is_bounded_and_protects_old_interrupt(tmp_path):
         )
         assert interrupted.pending_writes[0][2] == "pending-approval"
         assert saver.get_tuple(root) is not None
+
+
+def test_read_only_session_skips_payload_scan_but_write_collects(tmp_path, monkeypatch):
+    from phase_agent.persistence import compact_checkpoints as module
+
+    path = str(tmp_path / "history.sqlite")
+    config = {"configurable": {"thread_id": "project", "checkpoint_ns": ""}}
+    with CompactSqliteSaver.from_conn_string(path) as saver:
+        saved = saver.put(config, checkpoint(1), {"source": "loop"}, {})
+    calls = []
+    original = module.collect_payloads
+    def count(*args):
+        calls.append(1)
+        return original(*args)
+    monkeypatch.setattr(module, "collect_payloads", count)
+    with CompactSqliteSaver.from_conn_string(path) as saver:
+        assert saver.get_tuple(saved).checkpoint == checkpoint(1)
+    assert calls == []
+    with CompactSqliteSaver.from_conn_string(path) as saver:
+        saver.put(saved, checkpoint(2), {"source": "loop"}, {})
+    assert calls == [1]

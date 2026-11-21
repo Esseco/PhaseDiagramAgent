@@ -18,7 +18,7 @@ def validate_round_strategy(strategy: dict, summary: dict, *, config: dict) -> d
         errors.append("unknown_focus_region")
     for field, maximum in (
         ("mc_budget", config.get("maximum_mc_budget")),
-        ("dft_budget", config.get("maximum_dft_budget")),
+        ("dft_budget", None),
     ):
         value = strategy.get(field)
         if (

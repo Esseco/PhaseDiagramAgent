@@ -192,3 +192,53 @@ def test_status_reports_the_missing_current_generation_stage():
     assert "本轮新branch已登记" in brief_chat_state(s)
     s["tasks"] = [{"status": "pending", "stage": "relax_and_feature", "model_version": "new"}]
     assert "等待按需搜索方案" not in brief_chat_state(s)
+
+
+def reopened_same_model():
+    state = generated()
+    prior = deepcopy(state["model_refresh"])
+    state["model_refresh"]["plan"]["checksum"] = "refresh2"
+    state["model_refresh"]["reopened_from_plan"] = "refresh1"
+    state["completed_refresh_replans"] = [{"prior_refresh": prior, "new_preview_checksum": "refresh2"}]
+    return state
+
+
+def test_same_model_reopen_preserves_registered_generation():
+    state = reopened_same_model()
+    facts = new_model_generation_facts(state)
+    assert facts["ready"] and facts["generated_branch_ids"] == ["b1"]
+    assert new_model_search_errors(state, dft=True) == []
+
+
+@pytest.mark.parametrize("case", ["missing_record", "wrong_parent", "wrong_model", "wrong_child", "not_completed"])
+def test_reopen_generation_requires_verified_same_model_lineage(case):
+    state = reopened_same_model()
+    if case == "missing_record":
+        state["completed_refresh_replans"] = []
+    elif case == "wrong_parent":
+        state["model_refresh"]["reopened_from_plan"] = "other"
+    elif case == "wrong_model":
+        state["completed_refresh_replans"][0]["prior_refresh"]["new_model_version"] = "other"
+    elif case == "wrong_child":
+        state["completed_refresh_replans"][0]["new_preview_checksum"] = "other"
+    else:
+        state["completed_refresh_replans"][0]["prior_refresh"]["status"] = "running"
+    assert not new_model_generation_facts(state)["ready"]
+    assert new_model_search_errors(state, dft=True) == ["new_model_branch_generation_required"]
+
+
+def test_repeated_same_model_reopens_follow_verified_chain():
+    state = reopened_same_model()
+    prior = deepcopy(state["model_refresh"])
+    state["model_refresh"]["plan"]["checksum"] = "refresh3"
+    state["model_refresh"]["reopened_from_plan"] = "refresh2"
+    state["completed_refresh_replans"].append({"prior_refresh": prior, "new_preview_checksum": "refresh3"})
+    assert new_model_generation_facts(state)["generated_branch_ids"] == ["b1"]
+    state["completed_refresh_replans"][0]["prior_refresh"]["new_model_version"] = "other"
+    assert not new_model_generation_facts(state)["ready"]
+
+
+def test_ambiguous_same_model_reopen_does_not_authorize_generation():
+    state = reopened_same_model()
+    state["completed_refresh_replans"].append(deepcopy(state["completed_refresh_replans"][0]))
+    assert not new_model_generation_facts(state)["ready"]

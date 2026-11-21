@@ -12,7 +12,10 @@ def refresh_result_facts(state):
         for t in rows
         if t.get("status") in {"failed", "timeout"}
     )
+    from phase_agent.evidence.extrapolation_review import extrapolation_review
+
     return {
+        "extrapolation_review": extrapolation_review(state),
         "status": refresh.get("status"),
         "task_count": len(ids),
         "registered_count": len(rows),

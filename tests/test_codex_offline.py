@@ -43,6 +43,7 @@ def test_decision_preserves_frozen_plan_bindings():
             expected_proposal_hash="h",
             comment="",
             conversation_id="codex-offline",
+            operator="codex",
         )
 
 
@@ -57,3 +58,35 @@ def test_saved_proposal_is_not_retried_when_pending_lookup_fails():
         assert result["reply"]["status"] == "awaiting_approval"
         assert result["pending_error"] == "OSError"
         control.propose_codex.assert_called_once()
+
+
+def test_recovery_returns_only_updated_magnetic_rounds(tmp_path, monkeypatch):
+    import json
+    from threading import RLock
+    from types import SimpleNamespace
+
+    state_path = tmp_path / "state.json"
+    old = {"round_scope": {"model_version": "m1"}, "magnetic_plots": {"status": "completed"}}
+    new = {
+        "round_scope": {"model_version": "m2"},
+        "magnetic_plots": {
+            "status": "completed",
+            "element_summaries": {"Fe_absolute": {"site_count": 2}},
+        },
+    }
+    state_path.write_text(json.dumps({"dft_result_exports": {"old": old}}), encoding="utf-8")
+    monkeypatch.setattr(
+        "phase_agent.tools.workflows.recover_saved_results.recover_saved_results",
+        lambda state, **kwargs: {**state, "dft_result_exports": {"old": old, "new": new}},
+    )
+    monkeypatch.setattr(
+        "phase_agent.tools.local.recover_remote_training.recover_remote_training",
+        lambda state: (state, []),
+    )
+    handler = SimpleNamespace(state_path=state_path, lock=RLock(), workflow_kwargs={})
+    with patch("phase_agent.runtime.codex.offline.LocalAgentControl", return_value=Mock()):
+        agent = CodexOffline("runtime.json", runtime_factory=lambda _: handler)
+        response = agent.recover()
+    assert response["dft_magnetic_analysis"] == [
+        {"round_scope": new["round_scope"], **new["magnetic_plots"]}
+    ]
