@@ -148,6 +148,7 @@ def run_parent_first_sampling(
         work.mkdir()
         candidate_paths, identities, relaxations, relaxed_parents = [], {}, [], []
         geometry_excluded = []
+        unconverged_excluded = []
         for index, parent in enumerate(parents):
             src = Path(parent["path"]).resolve()
             saved = checkpoint / ("parent_%04d" % index)
@@ -175,7 +176,7 @@ def run_parent_first_sampling(
                     "optimizer": "LBFGS",
                     "relax_cell": True,
                     "fmax": 0.05,
-                    "relax_steps": 500,
+                    "relax_steps": 1000,
                 }
                 if feature_threshold != 1.0:
                     relax_params["feature_difference_threshold"] = feature_threshold
@@ -199,7 +200,6 @@ def run_parent_first_sampling(
             checksum_match = final.is_file() and result.get("structure_checksum") == _sha(final)
             if (
                 result.get("status") != "completed"
-                or result.get("optimizer_converged") is not True
                 or monitor.get("extrapolation_failure") is not False
                 or monitor.get("failures") != []
                 or isinstance(score, bool)
@@ -207,6 +207,7 @@ def run_parent_first_sampling(
                 or not math.isfinite(score)
                 or not 0 <= score <= feature_threshold
                 or not checksum_match
+                or result.get("optimizer_converged") not in {True, False}
             ):
                 details = json.dumps(
                     {
@@ -224,15 +225,26 @@ def run_parent_first_sampling(
                 raise ValueError(
                     f"parent_first_relaxation_unverified:{parent['record_id']}:{details}"
                 )
-            if not tm_order_preserved(read(src), read(final)):
-                raise ValueError("parent_first_tm_order_changed:" + parent["record_id"])
             if not result_path.exists():
                 temporary_result = saved / "result.json.part"
                 temporary_result.write_text(
                     json.dumps(result, ensure_ascii=False, default=str), encoding="utf8"
                 )
                 temporary_result.replace(result_path)
+            if result.get("optimizer_converged") is False:
+                unconverged_excluded.append(
+                    {
+                        "record_id": parent["record_id"],
+                        "reason": "optimizer_not_converged",
+                        "final_feature_difference": float(score),
+                    }
+                )
+                continue
+            if not tm_order_preserved(read(src), read(final)):
+                raise ValueError("parent_first_tm_order_changed:" + parent["record_id"])
             relaxed_parents.append((parent, final, monitor))
+        if not relaxed_parents:
+            raise ValueError("parent_first_no_converged_parents")
         # All parents finish relaxation before any perturbation is generated.
         for index, (parent, final, monitor) in enumerate(relaxed_parents):
             dest = work / ("parent_%04d" % index)
@@ -505,6 +517,7 @@ def run_parent_first_sampling(
             "feature_model": feature_model,
             "references": references,
             "parent_relaxations": relaxations,
+            "unconverged_parents": unconverged_excluded,
             "candidate_count": candidate_count,
             "selected": rows,
             "direct_report": report,

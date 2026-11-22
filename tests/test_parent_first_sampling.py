@@ -286,3 +286,71 @@ def test_perturbation_feature_filter_applies_before_direct(tmp_path, bad):
     sources.clear()
     with pytest.raises(ValueError,match='insufficient_candidates_after_feature_filter'):
         run_parent_first_sampling(args[0],[],tmp_path/'out2',target=2,**kw)
+
+
+def test_skips_unconverged_parent_and_uses_1000_relax_steps(tmp_path):
+    from ase.build import bulk
+
+    p1 = tmp_path / 'p1.vasp'
+    p2 = tmp_path / 'p2.vasp'
+    model = tmp_path / 'm.model'
+    write(p1, bulk('Cu', 'fcc', a=3.6).repeat((2, 2, 2)), format='vasp')
+    write(p2, bulk('Cu', 'fcc', a=3.62).repeat((2, 2, 2)), format='vasp')
+    model.write_bytes(b'm')
+    steps_seen = []
+
+    def relax(job):
+        steps_seen.append(job['parameters']['relax_steps'])
+        final = Path(job['output_directory']) / 'initial_relaxed.vasp'
+        final.parent.mkdir()
+        write(final, read(job['structure_path']), format='vasp')
+        converged = Path(job['structure_path']).name == 'p2.vasp'
+        return {
+            'status': 'completed',
+            'optimizer_converged': converged,
+            'structure_path': str(final),
+            'structure_checksum': sha(final),
+            'extrapolation_monitor': {
+                'extrapolation_failure': False,
+                'failures': [],
+                'final_feature_difference': 0.2,
+            },
+        }
+
+    sources = []
+
+    def extract(inputs, encoder, cache):
+        sources[:] = inputs
+        _fake_features(inputs, cache)
+
+    def sample(cache, output, target, reference_count):
+        output.mkdir()
+        (output / 'selected_indices.json').write_text(
+            json.dumps([{'source': sources[-1], 'frame': 0}])
+        )
+        return {'n_samples': 1}
+
+    out = tmp_path / 'out_skip'
+    res = run_parent_first_sampling(
+        [
+            {'record_id': 'r1', 'path': str(p1), 'sha256': sha(p1)},
+            {'record_id': 'r2', 'path': str(p2), 'sha256': sha(p2)},
+        ],
+        [],
+        out,
+        model_path=model,
+        model_sha256=sha(model),
+        feature_model_path='unused',
+        target=1,
+        frames_per_parent=2,
+        relax_fn=relax,
+        encoder_factory=lambda _: None,
+        extract_fn=extract,
+        sample_fn=sample,
+    )
+    assert res['status'] == 'completed'
+    assert steps_seen == [1000, 1000]
+    saved = json.loads((out / 'result.json').read_text())
+    assert saved['unconverged_parents'] == [
+        {'record_id': 'r1', 'reason': 'optimizer_not_converged', 'final_feature_difference': 0.2}
+    ]
